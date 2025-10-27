@@ -13,6 +13,10 @@
 !Documentation/
 !Documentation/**
 
+# Except: LAN Server project
+!LAN_Server/
+!LAN_Server/**
+
 # Gitignore itself must be tracked
 !.gitignore
 
