@@ -1,0 +1,165 @@
+.class Lcom/outlinegames/unibill/UniBill$4$1;
+.super Ljava/lang/Object;
+.source "UniBill.java"
+
+# interfaces
+.implements Lcom/outlinegames/unibill/IabHelper$QueryInventoryFinishedListener;
+
+
+# annotations
+.annotation system Ldalvik/annotation/EnclosingMethod;
+    value = Lcom/outlinegames/unibill/UniBill$4;->run()V
+.end annotation
+
+.annotation system Ldalvik/annotation/InnerClass;
+    accessFlags = 0x0
+    name = null
+.end annotation
+
+
+# instance fields
+.field final synthetic this$1:Lcom/outlinegames/unibill/UniBill$4;
+
+
+# direct methods
+.method constructor <init>(Lcom/outlinegames/unibill/UniBill$4;)V
+    .locals 0
+
+    .prologue
+    .line 1
+    iput-object p1, p0, Lcom/outlinegames/unibill/UniBill$4$1;->this$1:Lcom/outlinegames/unibill/UniBill$4;
+
+    .line 187
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    return-void
+.end method
+
+
+# virtual methods
+.method public onQueryInventoryFinished(Lcom/outlinegames/unibill/IabResult;Lcom/outlinegames/unibill/Inventory;)V
+    .locals 6
+    .param p1, "result"    # Lcom/outlinegames/unibill/IabResult;
+    .param p2, "inv"    # Lcom/outlinegames/unibill/Inventory;
+    .annotation system Ldalvik/annotation/Throws;
+        value = {
+            Ljava/lang/Exception;
+        }
+    .end annotation
+
+    .prologue
+    .line 192
+    invoke-virtual {p1}, Lcom/outlinegames/unibill/IabResult;->isSuccess()Z
+
+    move-result v2
+
+    if-eqz v2, :cond_2
+
+    .line 193
+    invoke-virtual {p2}, Lcom/outlinegames/unibill/Inventory;->getAllOwnedSkus()Ljava/util/List;
+
+    move-result-object v2
+
+    invoke-interface {v2}, Ljava/util/List;->iterator()Ljava/util/Iterator;
+
+    move-result-object v2
+
+    :goto_0
+    invoke-interface {v2}, Ljava/util/Iterator;->hasNext()Z
+
+    move-result v3
+
+    if-nez v3, :cond_0
+
+    .line 202
+    iget-object v2, p0, Lcom/outlinegames/unibill/UniBill$4$1;->this$1:Lcom/outlinegames/unibill/UniBill$4;
+
+    invoke-static {v2}, Lcom/outlinegames/unibill/UniBill$4;->access$0(Lcom/outlinegames/unibill/UniBill$4;)Lcom/outlinegames/unibill/UniBill;
+
+    move-result-object v2
+
+    const-string v3, "onTransactionsRestored"
+
+    const-string v4, "true"
+
+    invoke-virtual {v2, v3, v4}, Lcom/outlinegames/unibill/UniBill;->sendMessageToUnityUnibillManager(Ljava/lang/String;Ljava/lang/String;)V
+
+    .line 206
+    :goto_1
+    return-void
+
+    .line 193
+    :cond_0
+    invoke-interface {v2}, Ljava/util/Iterator;->next()Ljava/lang/Object;
+
+    move-result-object v1
+
+    check-cast v1, Ljava/lang/String;
+
+    .line 194
+    .local v1, "sku":Ljava/lang/String;
+    invoke-virtual {p2, v1}, Lcom/outlinegames/unibill/Inventory;->getPurchase(Ljava/lang/String;)Lcom/outlinegames/unibill/Purchase;
+
+    move-result-object v0
+
+    .line 195
+    .local v0, "purchase":Lcom/outlinegames/unibill/Purchase;
+    iget-object v3, p0, Lcom/outlinegames/unibill/UniBill$4$1;->this$1:Lcom/outlinegames/unibill/UniBill$4;
+
+    invoke-static {v3}, Lcom/outlinegames/unibill/UniBill$4;->access$0(Lcom/outlinegames/unibill/UniBill$4;)Lcom/outlinegames/unibill/UniBill;
+
+    move-result-object v3
+
+    invoke-static {v3}, Lcom/outlinegames/unibill/UniBill;->access$3(Lcom/outlinegames/unibill/UniBill;)Ljava/util/Set;
+
+    move-result-object v3
+
+    invoke-interface {v3, v1}, Ljava/util/Set;->contains(Ljava/lang/Object;)Z
+
+    move-result v3
+
+    if-eqz v3, :cond_1
+
+    .line 196
+    iget-object v3, p0, Lcom/outlinegames/unibill/UniBill$4$1;->this$1:Lcom/outlinegames/unibill/UniBill$4;
+
+    invoke-static {v3}, Lcom/outlinegames/unibill/UniBill$4;->access$0(Lcom/outlinegames/unibill/UniBill$4;)Lcom/outlinegames/unibill/UniBill;
+
+    move-result-object v3
+
+    const-wide/16 v4, 0x0
+
+    invoke-static {v3, v0, v4, v5}, Lcom/outlinegames/unibill/UniBill;->access$4(Lcom/outlinegames/unibill/UniBill;Lcom/outlinegames/unibill/Purchase;J)V
+
+    goto :goto_0
+
+    .line 198
+    :cond_1
+    iget-object v3, p0, Lcom/outlinegames/unibill/UniBill$4$1;->this$1:Lcom/outlinegames/unibill/UniBill$4;
+
+    invoke-static {v3}, Lcom/outlinegames/unibill/UniBill$4;->access$0(Lcom/outlinegames/unibill/UniBill$4;)Lcom/outlinegames/unibill/UniBill;
+
+    move-result-object v3
+
+    invoke-static {v3, v0}, Lcom/outlinegames/unibill/UniBill;->access$5(Lcom/outlinegames/unibill/UniBill;Lcom/outlinegames/unibill/Purchase;)V
+
+    goto :goto_0
+
+    .line 204
+    .end local v0    # "purchase":Lcom/outlinegames/unibill/Purchase;
+    .end local v1    # "sku":Ljava/lang/String;
+    :cond_2
+    iget-object v2, p0, Lcom/outlinegames/unibill/UniBill$4$1;->this$1:Lcom/outlinegames/unibill/UniBill$4;
+
+    invoke-static {v2}, Lcom/outlinegames/unibill/UniBill$4;->access$0(Lcom/outlinegames/unibill/UniBill$4;)Lcom/outlinegames/unibill/UniBill;
+
+    move-result-object v2
+
+    const-string v3, "onTransactionsRestored"
+
+    const-string v4, "false"
+
+    invoke-virtual {v2, v3, v4}, Lcom/outlinegames/unibill/UniBill;->sendMessageToUnityUnibillManager(Ljava/lang/String;Ljava/lang/String;)V
+
+    goto :goto_1
+.end method
