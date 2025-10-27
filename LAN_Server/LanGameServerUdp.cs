@@ -16,6 +16,8 @@ namespace CopsNRobbers.LanServer
         private UdpClient? _udpServer;
         private readonly GameServerState _gameState;
         private OperationHandler? _operationHandler;
+        private readonly GameRoomManager _roomManager;
+        private readonly PlayerManager _playerManager;
         private CancellationTokenSource? _cancellationTokenSource;
         private Task? _receiveTask;
         private readonly Dictionary<string, RemoteClient> _connectedClients; // IP:Port -> client info
@@ -44,6 +46,8 @@ namespace CopsNRobbers.LanServer
         {
             Port = port;
             _gameState = new GameServerState();
+            _roomManager = new GameRoomManager();
+            _playerManager = new PlayerManager();
             _connectedClients = new Dictionary<string, RemoteClient>();
         }
 
@@ -56,7 +60,7 @@ namespace CopsNRobbers.LanServer
             {
                 _udpServer = new UdpClient(0, AddressFamily.InterNetwork);
                 _udpServer.Client.Bind(new IPEndPoint(IPAddress.Any, Port));
-                _operationHandler = new OperationHandler(_gameState, this);
+                _operationHandler = new OperationHandler(_gameState, this, _roomManager, _playerManager);
                 _cancellationTokenSource = new CancellationTokenSource();
 
                 // Start receive loop in background
@@ -226,5 +230,9 @@ namespace CopsNRobbers.LanServer
         }
 
         public int ConnectedPeerCount => _connectedClients.Count;
+
+        // Accessors for managers
+        public GameRoomManager RoomManager => _roomManager;
+        public PlayerManager PlayerManager => _playerManager;
     }
 }

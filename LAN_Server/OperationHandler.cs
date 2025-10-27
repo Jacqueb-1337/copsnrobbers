@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 
 namespace CopsNRobbers.LanServer
@@ -12,12 +13,16 @@ namespace CopsNRobbers.LanServer
     public class OperationHandler
     {
         private readonly GameServerState _gameState;
-        private readonly object _server; // Can be LanGameServer (LiteNetLib) or LanGameServerUdp
+        private readonly LanGameServerUdp _server;
+        private readonly GameRoomManager _roomManager;
+        private readonly PlayerManager _playerManager;
 
-        public OperationHandler(GameServerState gameState, object server)
+        public OperationHandler(GameServerState gameState, LanGameServerUdp server, GameRoomManager roomManager, PlayerManager playerManager)
         {
             _gameState = gameState;
             _server = server;
+            _roomManager = roomManager;
+            _playerManager = playerManager;
         }
 
         /// <summary>
@@ -87,21 +92,48 @@ namespace CopsNRobbers.LanServer
             
             Console.WriteLine("    AppID: {0}, Version: {1}, UserID: {2}", appId, version, userId);
 
-            // TODO: Validate and send AppStats response
+            // Create player record
+            var player = _playerManager.GetOrCreatePlayer(endPoint, userId ?? "Guest");
+            
+            // Send AppStats response
+            var state = new GameServerState
+            {
+                Rooms = _roomManager.GetAllRooms().ToDictionary(r => r.RoomName, r => r),
+                AllPlayers = _playerManager.GetAllPlayers().ToDictionary(p => p.PeerId, p => p)
+            };
+            var statsResponse = PhotonMessageSerializer.CreateAppStatsResponse(state);
+            _server.SendToClient(endPoint, statsResponse);
         }
 
         private void HandleJoinLobby(PhotonMessage message, IPEndPoint endPoint)
         {
             Console.WriteLine("  🏛️  Join Lobby from {0}", endPoint);
             
-            // TODO: Send current game list to peer
+            // Get player
+            var player = _playerManager.GetPlayer(endPoint);
+            if (player == null)
+            {
+                Console.WriteLine("    ⚠️  Player not authenticated");
+                return;
+            }
+
+            // Send game list
+            var visibleRooms = _roomManager.GetVisibleRooms().ToList();
+            var state = new GameServerState
+            {
+                Rooms = visibleRooms.ToDictionary(r => r.RoomName, r => r)
+            };
+            var gameListResponse = PhotonMessageSerializer.CreateGameListResponse(state);
+            _server.SendToClient(endPoint, gameListResponse);
+
+            Console.WriteLine("    ✅ Sent game list ({0} rooms)", visibleRooms.Count);
         }
 
         private void HandleLeaveLobby(PhotonMessage message, IPEndPoint endPoint)
         {
             Console.WriteLine("  🏛️  Leave Lobby from {0}", endPoint);
             
-            // TODO: Clean up lobby state for peer
+            // Cleanup is automatic - player remains in memory but not in lobby state
         }
 
         private void HandleCreateGame(PhotonMessage message, IPEndPoint endPoint)
@@ -109,9 +141,42 @@ namespace CopsNRobbers.LanServer
             Console.WriteLine("  🎮 Create Game from {0}", endPoint);
             
             string? roomName = message.GetString(PhotonProtocol.ParameterCode.RoomName);
-            Console.WriteLine("    Room: {0}", roomName);
+            if (string.IsNullOrEmpty(roomName))
+            {
+                Console.WriteLine("    ⚠️  No room name provided");
+                return;
+            }
 
-            // TODO: Create room and add player
+            // Get player
+            var player = _playerManager.GetPlayer(endPoint);
+            if (player == null)
+            {
+                Console.WriteLine("    ⚠️  Player not authenticated");
+                return;
+            }
+
+            // Create room
+            var room = _roomManager.CreateGame(roomName);
+            if (room == null)
+            {
+                Console.WriteLine("    ⚠️  Failed to create room");
+                return;
+            }
+
+            // Add player to room
+            if (_roomManager.JoinGame(roomName, player))
+            {
+                _playerManager.PlayerJoinedRoom(player, roomName);
+                var roomAfterJoin = _roomManager.GetRoom(roomName);
+                if (roomAfterJoin != null)
+                {
+                    Console.WriteLine("    ✅ Room created and player added as master");
+                    
+                    // Notify player of join
+                    var joinEvent = PhotonMessageSerializer.CreateJoinEvent(roomAfterJoin, player);
+                    _server.SendToClient(endPoint, joinEvent);
+                }
+            }
         }
 
         private void HandleJoinGame(PhotonMessage message, IPEndPoint endPoint)
@@ -119,23 +184,101 @@ namespace CopsNRobbers.LanServer
             Console.WriteLine("  🎮 Join Game from {0}", endPoint);
             
             string? roomName = message.GetString(PhotonProtocol.ParameterCode.RoomName);
-            Console.WriteLine("    Room: {0}", roomName);
+            if (string.IsNullOrEmpty(roomName))
+            {
+                Console.WriteLine("    ⚠️  No room name provided");
+                return;
+            }
 
-            // TODO: Add player to existing room
+            // Get player
+            var player = _playerManager.GetPlayer(endPoint);
+            if (player == null)
+            {
+                Console.WriteLine("    ⚠️  Player not authenticated");
+                return;
+            }
+
+            // Add player to room
+            if (_roomManager.JoinGame(roomName, player))
+            {
+                _playerManager.PlayerJoinedRoom(player, roomName);
+                Console.WriteLine("    ✅ Player added to room as Actor {0}", player.ActorNumber);
+                
+                var room = _roomManager.GetRoom(roomName);
+                if (room != null)
+                {
+                    // Notify player of join
+                    var joinEvent = PhotonMessageSerializer.CreateJoinEvent(room, player);
+                    _server.SendToClient(endPoint, joinEvent);
+
+                    // Broadcast to other players in room
+                    BroadcastToRoom(roomName, joinEvent, excludePeer: endPoint);
+                }
+            }
         }
 
         private void HandleJoinRandomGame(PhotonMessage message, IPEndPoint endPoint)
         {
             Console.WriteLine("  🎲 Join Random Game from {0}", endPoint);
             
-            // TODO: Find random room and add player
+            // Get player
+            var player = _playerManager.GetPlayer(endPoint);
+            if (player == null)
+            {
+                Console.WriteLine("    ⚠️  Player not authenticated");
+                return;
+            }
+
+            // Find available room
+            var room = _roomManager.FindAvailableRoom();
+            if (room == null)
+            {
+                Console.WriteLine("    ⚠️  No available rooms");
+                return;
+            }
+
+            // Join that room
+            if (_roomManager.JoinGame(room.RoomName, player))
+            {
+                _playerManager.PlayerJoinedRoom(player, room.RoomName);
+                Console.WriteLine("    ✅ Player joined random room '{0}'", room.RoomName);
+                
+                var joinEvent = PhotonMessageSerializer.CreateJoinEvent(room, player);
+                _server.SendToClient(endPoint, joinEvent);
+                
+                BroadcastToRoom(room.RoomName, joinEvent, excludePeer: endPoint);
+            }
         }
 
         private void HandleLeave(PhotonMessage message, IPEndPoint endPoint)
         {
             Console.WriteLine("  🚪 Leave from {0}", endPoint);
             
-            // TODO: Remove player from room
+            // Get player
+            var player = _playerManager.GetPlayer(endPoint);
+            if (player == null)
+            {
+                Console.WriteLine("    ⚠️  Player not found");
+                return;
+            }
+
+            // Get player's room
+            string? roomName = _playerManager.GetPlayerRoom(player);
+            if (string.IsNullOrEmpty(roomName))
+            {
+                Console.WriteLine("    ⚠️  Player not in a room");
+                return;
+            }
+
+            // Remove from room
+            if (_roomManager.LeaveGame(roomName, player.ActorNumber))
+            {
+                Console.WriteLine("    ✅ Player removed from room");
+                
+                // Broadcast leave event to others in room
+                var leaveEvent = PhotonMessageSerializer.CreateLeaveEvent(player.ActorNumber);
+                BroadcastToRoom(roomName, leaveEvent);
+            }
         }
 
         private void HandleRaiseEvent(PhotonMessage message, IPEndPoint endPoint)
@@ -174,7 +317,58 @@ namespace CopsNRobbers.LanServer
         {
             Console.WriteLine("  ⚙️  Get Properties from {0}", endPoint);
             
-            // TODO: Send current properties to peer
+            // Get player's room
+            var player = _playerManager.GetPlayer(endPoint);
+            if (player == null)
+                return;
+
+            string? roomName = _playerManager.GetPlayerRoom(player);
+            if (string.IsNullOrEmpty(roomName))
+                return;
+
+            var room = _roomManager.GetRoom(roomName);
+            if (room == null)
+                return;
+
+            // TODO: Send room properties to peer
+        }
+
+        // ===== Helper Methods =====
+
+        private void BroadcastToRoom(string roomName, byte[] messageData, IPEndPoint? excludePeer = null)
+        {
+            var room = _roomManager.GetRoom(roomName);
+            if (room == null)
+                return;
+
+            foreach (var player in room.Players.Values)
+            {
+                var endPoint = new IPEndPoint(
+                    System.Net.IPAddress.Parse(player.IpAddress),
+                    player.Port
+                );
+
+                if (excludePeer != null && endPoint.Equals(excludePeer))
+                    continue;
+
+                _server.SendToClient(endPoint, messageData);
+            }
+        }
+
+        private void BroadcastToAll(byte[] messageData, IPEndPoint? excludePeer = null)
+        {
+            foreach (var player in _playerManager.GetAllPlayers())
+            {
+                var endPoint = new IPEndPoint(
+                    System.Net.IPAddress.Parse(player.IpAddress),
+                    player.Port
+                );
+
+                if (excludePeer != null && endPoint.Equals(excludePeer))
+                    continue;
+
+                _server.SendToClient(endPoint, messageData);
+            }
         }
     }
 }

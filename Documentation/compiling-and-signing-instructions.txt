@@ -1,0 +1,22 @@
+Looking at our conversation history, here's exactly what we did to compile and install after making changes:
+
+Compilation & Installation Process
+1. Modified the Smali (Android Bytecode)
+We patched Cnr 309/smali/org/fmod/FMODAudioDevice.smali to disable FMOD audio methods.
+
+2. Rebuilt the APK with APKTool
+apktool b "Cnr 309" -o cnr_309_noaudio.apk --use-aapt1
+(We tried --use-aapt2 first but it failed, so we switched to --use-aapt1)
+
+3. Created a Debug Keystore
+keytool -genkey -v -keystore debug.keystore -alias debugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Debug,O=Test,C=US" -storepass android -keypass android
+4. Signed the APK
+jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 -keystore debug.keystore -storepass android -keypass android cnr_309_noaudio.apk debugkey
+5. Uninstalled Old Version & Installed New One
+adb uninstall com.joydo.minestrikenew
+adb install cnr_309_noaudio.apk
+Key Points to Avoid Signature Issues
+✅ Used the same debug keystore for all APK signings (so successive installs work without uninstalling)
+✅ Used --use-aapt1 instead of --use-aapt2 (the latter wasn't recognized)
+✅ Uninstalled first before installing with a different signature
+✅ Used simple SHA1 digest (worked despite warnings about security)

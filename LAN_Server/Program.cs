@@ -119,28 +119,27 @@ namespace CopsNRobbers.LanServer
             Console.WriteLine("  SERVER STATUS");
             Console.WriteLine("═══════════════════════════════════════");
             Console.WriteLine("  Running: {0}", _server.IsRunning ? "✅ YES" : "❌ NO");
+            Console.WriteLine("  Port: {0}", GameConstants.GameServerPort);
+            Console.WriteLine("  Rooms: {0}", _server.RoomManager.RoomCount);
+            Console.WriteLine("  Players: {0}", _server.PlayerManager.PlayerCount);
             Console.WriteLine("  Uptime: {0}", DateTime.UtcNow);
             Console.WriteLine();
         }
 
         static void ShowRooms()
         {
-            Console.WriteLine();
-            Console.WriteLine("═══════════════════════════════════════");
-            Console.WriteLine("  GAME ROOMS");
-            Console.WriteLine("═══════════════════════════════════════");
-            Console.WriteLine("  (TODO: Implement)");
-            Console.WriteLine();
+            if (_server == null)
+                return;
+
+            _server.RoomManager.PrintRoomList();
         }
 
         static void ShowPlayers()
         {
-            Console.WriteLine();
-            Console.WriteLine("═══════════════════════════════════════");
-            Console.WriteLine("  PLAYERS");
-            Console.WriteLine("═══════════════════════════════════════");
-            Console.WriteLine("  (TODO: Implement)");
-            Console.WriteLine();
+            if (_server == null)
+                return;
+
+            _server.PlayerManager.PrintPlayerList();
         }
 
         static void OnProcessExit(object? sender, EventArgs e)
