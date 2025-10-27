@@ -18,6 +18,13 @@ namespace CopsNRobbers.LanServer
             Console.WriteLine("╚════════════════════════════════════════════════════╝");
             Console.WriteLine();
 
+            // Run tests if requested
+            if (args.Length > 0 && args[0] == "--test")
+            {
+                ProtocolTester.RunTests();
+                return;
+            }
+
             // Create server
             _server = new LanGameServer(GameConstants.GameServerPort);
 
@@ -44,6 +51,7 @@ namespace CopsNRobbers.LanServer
             Console.WriteLine("  's' - Show status");
             Console.WriteLine("  'r' - Show rooms");
             Console.WriteLine("  'p' - Show players");
+            Console.WriteLine("  't' - Run protocol tests");
             Console.WriteLine();
 
             // Main loop
@@ -82,6 +90,9 @@ namespace CopsNRobbers.LanServer
                             break;
                         case 'p':
                             ShowPlayers();
+                            break;
+                        case 't':
+                            ProtocolTester.RunTests();
                             break;
                     }
                 }

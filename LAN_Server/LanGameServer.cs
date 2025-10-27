@@ -12,6 +12,7 @@ namespace CopsNRobbers.LanServer
     {
         private NetManager? _netManager;
         private readonly GameServerState _gameState;
+        private OperationHandler? _operationHandler;
         private int _nextActorNumber = 1;
 
         public bool IsRunning { get; private set; }
@@ -31,6 +32,8 @@ namespace CopsNRobbers.LanServer
             try
             {
                 _netManager = new NetManager(this);
+                _operationHandler = new OperationHandler(_gameState, this);
+                
                 if (!_netManager.Start(GameConstants.GameServerPort))
                 {
                     Console.WriteLine("❌ Failed to start NetManager on port {0}", GameConstants.GameServerPort);
@@ -110,9 +113,20 @@ namespace CopsNRobbers.LanServer
 
         public void OnNetworkReceive(NetPeer peer, NetPacketReader reader, byte channelNumber, DeliveryMethod deliveryMethod)
         {
-            Console.WriteLine("📨 Received {0} bytes from {1}", reader.AvailableBytes, peer.EndPoint);
+            byte[] buffer = reader.GetRemainingBytes();
+            Console.WriteLine("📨 Received {0} bytes from {1}", buffer.Length, peer.EndPoint);
             
-            // TODO: Parse message and route to appropriate handler
+            // Parse the message
+            var message = PhotonMessageParser.ParseMessage(buffer, buffer.Length);
+            if (message != null && _operationHandler != null)
+            {
+                _operationHandler.HandleOperation(message, peer);
+            }
+            else
+            {
+                Console.WriteLine("⚠️  Failed to parse message from {0}", peer.EndPoint);
+            }
+            
             reader.Recycle();
         }
 
