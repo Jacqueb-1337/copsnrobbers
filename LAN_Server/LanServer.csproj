@@ -3,7 +3,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>CopsNRobbers.LanServer</RootNamespace>
@@ -12,8 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- LiteNetLib for UDP networking -->
-    <PackageReference Include="LiteNetLib" Version="1.7.0" />
+    <!-- Removed LiteNetLib - using raw UDP instead for maximum compatibility -->
   </ItemGroup>
 
 </Project>

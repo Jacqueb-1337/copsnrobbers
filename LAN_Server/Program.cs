@@ -5,16 +5,17 @@ namespace CopsNRobbers.LanServer
 {
     /// <summary>
     /// Main program - Console application entry point
+    /// UDP-based server with no external dependencies
     /// </summary>
     class Program
     {
-        static LanGameServer? _server;
+        static LanGameServerUdp? _server;
 
         static void Main(string[] args)
         {
             Console.WriteLine("╔════════════════════════════════════════════════════╗");
             Console.WriteLine("║   Cops n Robbers - LAN Server v1.0                ║");
-            Console.WriteLine("║   LiteNetLib + Custom Photon Protocol             ║");
+            Console.WriteLine("║   Pure UDP + Custom Photon Protocol              ║");
             Console.WriteLine("╚════════════════════════════════════════════════════╝");
             Console.WriteLine();
 
@@ -26,7 +27,7 @@ namespace CopsNRobbers.LanServer
             }
 
             // Create server
-            _server = new LanGameServer(GameConstants.GameServerPort);
+            _server = new LanGameServerUdp(GameConstants.GameServerPort);
 
             // Setup exit handlers
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
