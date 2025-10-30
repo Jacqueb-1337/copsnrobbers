@@ -17,6 +17,9 @@
 !LAN_Server/
 !LAN_Server/**
 
+# Ignore: zerotier decompiled APK (temporary working directory)
+cops_robbers_zerotier/
+
 # Gitignore itself must be tracked
 !.gitignore
 
