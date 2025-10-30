@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 
@@ -34,6 +35,10 @@ namespace CopsNRobbers.LanServer
 
             switch (message.OperationCode)
             {
+                case PhotonProtocol.OperationCode.Ping:
+                    HandlePing(message, endPoint);
+                    break;
+
                 case PhotonProtocol.OperationCode.Authenticate:
                     HandleAuthenticate(message, endPoint);
                     break;
@@ -81,6 +86,61 @@ namespace CopsNRobbers.LanServer
         }
 
         // ===== Operation Handlers =====
+
+        private void HandlePing(PhotonMessage message, IPEndPoint endPoint)
+        {
+            // Ping is just a heartbeat - acknowledge it and update player's last activity
+            string clientKey = $"{endPoint.Address}:{endPoint.Port}";
+            
+            // Get or create player - GetOrCreatePlayer returns existing player if they already registered
+            var player = _playerManager.GetOrCreatePlayer(endPoint, $"Player_{endPoint.Port}");
+            
+            // Detect if this is a newly created player by checking if JoinedTime is very recent (within last 100ms)
+            var timeSinceJoined = DateTime.UtcNow - player.JoinedTime;
+            bool isNewPeer = timeSinceJoined.TotalMilliseconds < 100;
+            
+            if (isNewPeer)
+            {
+                Console.WriteLine("  🆕 NEW CONNECTION from {0}", clientKey);
+                
+                try
+                {
+                    // Send the simplest possible "connection OK" response
+                    // Send back the exact same frame structure the client sent
+                    // This should trigger the Photon SDK to recognize the connection
+                    var pingResponse = new byte[] { 0x01 };
+                    var framedPing = PhotonMessageSerializer.WrapInPhotonFrame(pingResponse);
+                    _server.SendToClient(endPoint, framedPing);
+                    Console.WriteLine("    ↔️  Sent Ping Echo - waiting for SDK state transition");
+                    
+                    // Also send an immediate GameList response to populate rooms (using proper format)
+                    var visibleRooms = _roomManager.GetVisibleRooms().ToList();
+                    var gameListState = new GameServerState
+                    {
+                        Rooms = visibleRooms.ToDictionary(r => r.RoomName, r => r)
+                    };
+                    var gameListResponse = PhotonMessageSerializer.CreateGameListResponse(gameListState);
+                    var framedGameList = PhotonMessageSerializer.WrapInPhotonFrame(gameListResponse);
+                    _server.SendToClient(endPoint, framedGameList);
+                    Console.WriteLine("    📡 Sent GameList Response ({0} room(s))", gameListState.Rooms.Count);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("    ❌ Handshake error: {0}", ex.Message);
+                }
+            }
+            else
+            {
+                // Subsequent pings - just echo and update heartbeat
+                _playerManager.UpdatePlayerHeartbeat(endPoint);
+                Console.WriteLine("  💓 Heartbeat from {0} ({1})", clientKey, player.PlayerName);
+                
+                // Echo the ping
+                var pingResponse = new byte[] { 0x01 };
+                var framedPing = PhotonMessageSerializer.WrapInPhotonFrame(pingResponse);
+                _server.SendToClient(endPoint, framedPing);
+            }
+        }
 
         private void HandleAuthenticate(PhotonMessage message, IPEndPoint endPoint)
         {

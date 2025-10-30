@@ -12,6 +12,33 @@ namespace CopsNRobbers.LanServer
     /// </summary>
     public class PhotonMessageSerializer
     {
+        private static ushort _frameIdCounter = 0;
+
+        /// <summary>
+        /// Wrap a Photon operation in the UDP frame header
+        /// </summary>
+        public static byte[] WrapInPhotonFrame(byte[] operationData)
+        {
+            using (var ms = new MemoryStream())
+            using (var writer = new BinaryWriter(ms))
+            {
+                // Photon UDP frame header
+                writer.Write((byte)0xFF);                    // Marker
+                writer.Write((byte)0xFF);                    // Marker
+                writer.Write((ushort)_frameIdCounter++);     // Frame ID
+                writer.Write((uint)operationData.Length);    // Payload length
+                writer.Write((ushort)0);                     // Timestamp
+                writer.Write((ushort)0);                     // Sequence
+                writer.Write((byte)0);                       // Flags
+                writer.Write((byte)0xFF);                    // Unknown marker (from client packets)
+                
+                // Append the actual operation data
+                writer.Write(operationData);
+
+                return ms.ToArray();
+            }
+        }
+
         /// <summary>
         /// Serialize an event to send to clients
         /// </summary>
@@ -100,6 +127,16 @@ namespace CopsNRobbers.LanServer
                 case Dictionary<object, object> dict:
                     writer.Write(PhotonProtocol.TypeCode.Dictionary);
                     WriteDictionary(writer, dict);
+                    break;
+
+                case object[] arr:
+                    // Write arrays as count + individual items (Photon format)
+                    writer.Write((byte)0x00); // Use custom marker for array
+                    writer.Write((uint)arr.Length);
+                    foreach (var item in arr)
+                    {
+                        WriteValue(writer, item);
+                    }
                     break;
 
                 default:
@@ -258,6 +295,55 @@ namespace CopsNRobbers.LanServer
                 { "GameMode", room.GameMode },
                 { "MapName", room.MapName }
             };
+        }
+
+        /// <summary>
+        /// Create AppStats event to signal server is ready
+        /// </summary>
+        public static byte[] CreateAppStatsEvent(GameServerState state)
+        {
+            var parameters = new Dictionary<byte, object>
+            {
+                { (byte)224, "CopsNRobbers" },              // ApplicationId
+                { (byte)228, (int)state.Rooms.Count },      // GameCount
+                { (byte)229, 1 },                           // PeerCount (1 = this peer connected)
+                { (byte)227, 1 }                            // MasterPeerCount
+            };
+
+            return SerializeEvent(PhotonProtocol.EventCode.AppStats, parameters);
+        }
+
+        /// <summary>
+        /// Create GameList event to send available rooms to client
+        /// </summary>
+        public static byte[] CreateGameListEvent(GameServerState state)
+        {
+            using (var ms = new MemoryStream())
+            using (var writer = new BinaryWriter(ms))
+            {
+                // Event code for GameList (0xE6 = 230 in Photon protocol)
+                writer.Write((byte)0xE6); // GameList event code
+
+                // Write number of rooms
+                writer.Write((byte)state.Rooms.Count);
+
+                // Write each room's data
+                foreach (var room in state.Rooms.Values)
+                {
+                    // Room name
+                    byte[] nameBytes = Encoding.UTF8.GetBytes(room.RoomName);
+                    writer.Write((ushort)nameBytes.Length);
+                    writer.Write(nameBytes);
+
+                    // Room properties
+                    writer.Write((byte)room.Players.Count);      // Current players
+                    writer.Write((byte)room.MaxPlayers);         // Max players
+                    writer.Write(room.IsOpen ? (byte)1 : (byte)0); // Is open
+                    writer.Write(room.IsVisible ? (byte)1 : (byte)0); // Is visible
+                }
+
+                return ms.ToArray();
+            }
         }
     }
 }

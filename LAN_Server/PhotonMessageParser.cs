@@ -14,6 +14,7 @@ namespace CopsNRobbers.LanServer
     {
         /// <summary>
         /// Parses a raw byte buffer into a Photon message
+        /// Handles Photon UDP frame headers (FF-FF prefix)
         /// </summary>
         public static PhotonMessage? ParseMessage(byte[] buffer, int length)
         {
@@ -24,7 +25,31 @@ namespace CopsNRobbers.LanServer
             {
                 using (var reader = new BinaryReader(new MemoryStream(buffer, 0, length)))
                 {
+                    int startPos = 0;
+                    
+                    // Check for Photon UDP frame header (FF-FF)
+                    if (buffer[0] == 0xFF && length > 1 && buffer[1] == 0xFF)
+                    {
+                        // Skip Photon UDP frame header structure:
+                        // 0-1: FF FF (frame marker)
+                        // 2-3: Frame ID (ushort)
+                        // 4-7: Payload length (uint)
+                        // 8-9: Timestamp (ushort)
+                        // 10-11: Sequence (ushort)
+                        // 12: Flags/Reliability
+                        // 13: ??? (FF seems to be a marker)
+                        // 14+: Actual operation/parameters
+                        
+                        if (length < 15)
+                            return null; // Frame header incomplete
+                        
+                        startPos = 14;
+                        reader.BaseStream.Seek(startPos, SeekOrigin.Begin);
+                        Console.WriteLine("   📋 Frame header detected, skipping to byte 14");
+                    }
+                    
                     byte opCode = reader.ReadByte();
+                    Console.WriteLine("   📋 OpCode at position {0}: 0x{1:X2}", startPos, opCode);
                     
                     var message = new PhotonMessage { OperationCode = opCode };
 

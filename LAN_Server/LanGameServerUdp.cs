@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -58,13 +59,15 @@ namespace CopsNRobbers.LanServer
         {
             try
             {
-                _udpServer = new UdpClient(0, AddressFamily.InterNetwork);
-                _udpServer.Client.Bind(new IPEndPoint(IPAddress.Any, Port));
+                _udpServer = new UdpClient(new IPEndPoint(IPAddress.Any, Port));
                 _operationHandler = new OperationHandler(_gameState, this, _roomManager, _playerManager);
                 _cancellationTokenSource = new CancellationTokenSource();
 
                 // Start receive loop in background
                 _receiveTask = Task.Run(() => ReceiveLoop(_cancellationTokenSource.Token));
+
+                // Start periodic GameList broadcast task
+                Task.Run(() => PeriodicGameListBroadcast(_cancellationTokenSource.Token));
 
                 IsRunning = true;
                 Console.WriteLine("✅ LAN Server started on port {0}", Port);
@@ -120,6 +123,11 @@ namespace CopsNRobbers.LanServer
                     // Log receipt
                     string clientKey = $"{remoteEndPoint.Address}:{remoteEndPoint.Port}";
                     Console.WriteLine("📨 Received {0} bytes from {1}", buffer.Length, clientKey);
+                    
+                    // Debug: log hex dump of first 20 bytes
+                    int dumpLen = Math.Min(20, buffer.Length);
+                    string hexDump = BitConverter.ToString(buffer, 0, dumpLen);
+                    Console.WriteLine("   Hex: {0}", hexDump);
 
                     // Track client
                     if (!_connectedClients.ContainsKey(clientKey))
@@ -170,6 +178,15 @@ namespace CopsNRobbers.LanServer
                 if (_udpServer != null)
                 {
                     _udpServer.Send(data, data.Length, endPoint);
+                    
+                    // Log what we sent
+                    string hexData = BitConverter.ToString(data).Replace("-", "");
+                    if (data.Length > 0)
+                    {
+                        Console.WriteLine("📤 Sending {0} bytes to {1}", data.Length, endPoint);
+                        if (data.Length <= 50)
+                            Console.WriteLine("   Hex: {0}", hexData);
+                    }
                 }
             }
             catch (Exception ex)
@@ -234,5 +251,47 @@ namespace CopsNRobbers.LanServer
         // Accessors for managers
         public GameRoomManager RoomManager => _roomManager;
         public PlayerManager PlayerManager => _playerManager;
+
+        /// <summary>
+        /// Periodically broadcast GameList to all connected clients
+        /// Ensures SDK receives room data even if it misses initial response
+        /// </summary>
+        private async Task PeriodicGameListBroadcast(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested && IsRunning)
+            {
+                try
+                {
+                    await Task.Delay(2000, cancellationToken); // Broadcast every 2 seconds
+
+                    if (!IsRunning || _connectedClients.Count == 0)
+                        continue;
+
+                    // Create GameList response
+                    var visibleRooms = _roomManager.GetVisibleRooms().ToList();
+                    var gameListState = new GameServerState
+                    {
+                        Rooms = visibleRooms.ToDictionary(r => r.RoomName, r => r)
+                    };
+                    var gameListResponse = PhotonMessageSerializer.CreateGameListResponse(gameListState);
+                    var framedGameList = PhotonMessageSerializer.WrapInPhotonFrame(gameListResponse);
+
+                    // Send to all connected clients
+                    foreach (var client in _connectedClients.Values)
+                    {
+                        SendToClient(client.EndPoint, framedGameList);
+                    }
+
+                    Console.WriteLine("📡 Broadcast GameList to {0} client(s)", _connectedClients.Count);
+                }
+                catch (Exception ex)
+                {
+                    if (IsRunning)
+                    {
+                        Console.WriteLine("⚠️  Error in GameList broadcast: {0}", ex.Message);
+                    }
+                }
+            }
+        }
     }
 }

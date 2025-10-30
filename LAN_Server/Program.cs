@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace CopsNRobbers.LanServer
 {
@@ -47,6 +49,15 @@ namespace CopsNRobbers.LanServer
             Console.WriteLine("  State Update Rate: {0} Hz", GameConstants.StateUpdateFrequencyHz);
             Console.WriteLine("  Broadcast Port: {0}", GameConstants.BroadcastPort);
             Console.WriteLine();
+            
+            // Create a test room for clients to join
+            var testRoom = _server.RoomManager.CreateGame("TestRoom", 4);
+            Console.WriteLine("✅ Test room 'TestRoom' created (ready for players)");
+            Console.WriteLine();
+            
+            // Start test broadcast task
+            Task.Run(() => BroadcastTestBytesLoop());
+            
             Console.WriteLine("Commands:");
             Console.WriteLine("  'q' or Ctrl+C - Quit");
             Console.WriteLine("  's' - Show status");
@@ -151,6 +162,54 @@ namespace CopsNRobbers.LanServer
         {
             e.Cancel = true;
             _server?.Stop();
+        }
+
+        static void BroadcastTestBytesLoop()
+        {
+            try
+            {
+                byte testCounter = 0;
+                using (var tcpListener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, 5057))
+                {
+                    tcpListener.Start();
+                    Console.WriteLine("[TEST] TCP Test Server started on port 5057");
+                    
+                    while (_server != null && _server.IsRunning)
+                    {
+                        try
+                        {
+                            // Check if there's a pending connection
+                            if (tcpListener.Pending())
+                            {
+                                var client = tcpListener.AcceptTcpClient();
+                                Console.WriteLine("[TEST] Client connected from {0}", client.Client.RemoteEndPoint);
+                                
+                                // Send test bytes to this client
+                                var stream = client.GetStream();
+                                byte[] testBytes = new byte[] { 0xFF, 0xAA, 0xBB, testCounter };
+                                stream.Write(testBytes, 0, testBytes.Length);
+                                stream.Flush();
+                                Console.WriteLine("[TEST] Sent test bytes to client: FF AA BB {0:X2}", testCounter);
+                                
+                                client.Close();
+                            }
+                            
+                            testCounter++;
+                            System.Threading.Thread.Sleep(5000);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("[TEST] Error: {0}", ex.Message);
+                        }
+                    }
+                    
+                    tcpListener.Stop();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error in test server: {0}", ex.Message);
+            }
         }
     }
 }

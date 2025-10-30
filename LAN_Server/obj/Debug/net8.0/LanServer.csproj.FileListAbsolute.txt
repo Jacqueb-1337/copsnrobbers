@@ -1,0 +1,15 @@
+D:\Projects\copsnrobbers\LAN_Server\bin\Debug\net8.0\CopsNRobbersLanServer.exe
+D:\Projects\copsnrobbers\LAN_Server\bin\Debug\net8.0\CopsNRobbersLanServer.deps.json
+D:\Projects\copsnrobbers\LAN_Server\bin\Debug\net8.0\CopsNRobbersLanServer.runtimeconfig.json
+D:\Projects\copsnrobbers\LAN_Server\bin\Debug\net8.0\CopsNRobbersLanServer.dll
+D:\Projects\copsnrobbers\LAN_Server\bin\Debug\net8.0\CopsNRobbersLanServer.pdb
+D:\Projects\copsnrobbers\LAN_Server\obj\Debug\net8.0\LanServer.GeneratedMSBuildEditorConfig.editorconfig
+D:\Projects\copsnrobbers\LAN_Server\obj\Debug\net8.0\LanServer.AssemblyInfoInputs.cache
+D:\Projects\copsnrobbers\LAN_Server\obj\Debug\net8.0\LanServer.AssemblyInfo.cs
+D:\Projects\copsnrobbers\LAN_Server\obj\Debug\net8.0\LanServer.csproj.CoreCompileInputs.cache
+D:\Projects\copsnrobbers\LAN_Server\obj\Debug\net8.0\LanServer.sourcelink.json
+D:\Projects\copsnrobbers\LAN_Server\obj\Debug\net8.0\CopsNRobbersLanServer.dll
+D:\Projects\copsnrobbers\LAN_Server\obj\Debug\net8.0\refint\CopsNRobbersLanServer.dll
+D:\Projects\copsnrobbers\LAN_Server\obj\Debug\net8.0\CopsNRobbersLanServer.pdb
+D:\Projects\copsnrobbers\LAN_Server\obj\Debug\net8.0\LanServer.genruntimeconfig.cache
+D:\Projects\copsnrobbers\LAN_Server\obj\Debug\net8.0\ref\CopsNRobbersLanServer.dll

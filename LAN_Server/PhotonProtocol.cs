@@ -12,6 +12,7 @@ namespace CopsNRobbers.LanServer
         // ===== Operation Codes (Client → Server) =====
         public static class OperationCode
         {
+            public const byte Ping = 1;                 // 0x01 (Heartbeat/keepalive)
             public const byte Authenticate = 230;       // 0xE6
             public const byte JoinLobby = 229;          // 0xE5
             public const byte LeaveLobby = 228;         // 0xE4
