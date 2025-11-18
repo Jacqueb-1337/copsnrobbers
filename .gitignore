@@ -17,6 +17,10 @@
 !LAN_Server/
 !LAN_Server/**
 
+# Except: tools directory (ILSpy and other tools)
+!tools/
+!tools/**
+
 # Ignore: zerotier decompiled APK (temporary working directory)
 cops_robbers_zerotier/
 
