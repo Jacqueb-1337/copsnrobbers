@@ -156,11 +156,24 @@ namespace CopsNRobbers.LanServer
                     // Timeout is expected - just continue
                     continue;
                 }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset || 
+                                                  ex.SocketErrorCode == SocketError.ConnectionAborted ||
+                                                  ex.SocketErrorCode == SocketError.Shutdown)
+                {
+                    // Connection forcibly closed by remote host - this is normal when client disconnects
+                    // Just continue listening for other clients
+                    continue;
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Server was stopped, exit gracefully
+                    break;
+                }
                 catch (Exception ex)
                 {
                     if (IsRunning)
                     {
-                        Console.WriteLine("❌ Error in receive loop: {0}", ex.Message);
+                        Console.WriteLine("⚠️  Non-critical error in receive loop: {0}", ex.Message);
                     }
                 }
 
