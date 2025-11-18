@@ -21,6 +21,10 @@
 !tools/
 !tools/**
 
+# Except: decompiled directory (reference decompiled C# files)
+!decompiled/
+!decompiled/**
+
 # Ignore: zerotier decompiled APK (temporary working directory)
 cops_robbers_zerotier/
 
