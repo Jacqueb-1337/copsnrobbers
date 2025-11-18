@@ -32,4 +32,11 @@ cops_robbers_zerotier/
 !.gitignore
 
 # README if we add one later
+# README if we add one later
 !README.md
+
+# Except: Comprehensive documentation files
+!CLASS_DOCUMENTATION.md
+!EXECUTION_MAPPINGS.md
+
+```
