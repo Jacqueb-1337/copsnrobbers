@@ -1,0 +1,124 @@
+.class public Lcom/kamcord/a/a/f/KC_d;
+.super Ljava/lang/Object;
+
+
+# direct methods
+.method public constructor <init>()V
+    .locals 0
+
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+
+    return-void
+.end method
+
+
+# virtual methods
+.method public a()Ljava/lang/String;
+    .locals 1
+
+    const-string v0, "HMAC-SHA1"
+
+    return-object v0
+.end method
+
+.method public a(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+    .locals 3
+
+    :try_start_0
+    const-string v0, "Base string cant be null or empty string"
+
+    invoke-static {p1, v0}, Lcom/kamcord/a/a/g/KC_b;->a(Ljava/lang/String;Ljava/lang/String;)V
+
+    const-string v0, "Api secret cant be null or empty string"
+
+    invoke-static {p2, v0}, Lcom/kamcord/a/a/g/KC_b;->a(Ljava/lang/String;Ljava/lang/String;)V
+
+    new-instance v0, Ljava/lang/StringBuilder;
+
+    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
+
+    invoke-static {p2}, Lcom/kamcord/a/a/g/KC_a;->a(Ljava/lang/String;)Ljava/lang/String;
+
+    move-result-object v1
+
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    move-result-object v0
+
+    const/16 v1, 0x26
+
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(C)Ljava/lang/StringBuilder;
+
+    move-result-object v0
+
+    invoke-static {p3}, Lcom/kamcord/a/a/g/KC_a;->a(Ljava/lang/String;)Ljava/lang/String;
+
+    move-result-object v1
+
+    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
+    move-result-object v0
+
+    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+
+    move-result-object v0
+
+    new-instance v1, Ljavax/crypto/spec/SecretKeySpec;
+
+    const-string v2, "UTF-8"
+
+    invoke-virtual {v0, v2}, Ljava/lang/String;->getBytes(Ljava/lang/String;)[B
+
+    move-result-object v0
+
+    const-string v2, "HmacSHA1"
+
+    invoke-direct {v1, v0, v2}, Ljavax/crypto/spec/SecretKeySpec;-><init>([BLjava/lang/String;)V
+
+    const-string v0, "HmacSHA1"
+
+    invoke-static {v0}, Ljavax/crypto/Mac;->getInstance(Ljava/lang/String;)Ljavax/crypto/Mac;
+
+    move-result-object v0
+
+    invoke-virtual {v0, v1}, Ljavax/crypto/Mac;->init(Ljava/security/Key;)V
+
+    const-string v1, "UTF-8"
+
+    invoke-virtual {p1, v1}, Ljava/lang/String;->getBytes(Ljava/lang/String;)[B
+
+    move-result-object v1
+
+    invoke-virtual {v0, v1}, Ljavax/crypto/Mac;->doFinal([B)[B
+
+    move-result-object v0
+
+    invoke-static {}, Lcom/kamcord/a/a/f/KC_a;->a()Lcom/kamcord/a/a/f/KC_a;
+
+    move-result-object v1
+
+    invoke-virtual {v1, v0}, Lcom/kamcord/a/a/f/KC_a;->a([B)Ljava/lang/String;
+
+    move-result-object v0
+
+    const-string v1, "\r\n"
+
+    const-string v2, ""
+
+    invoke-virtual {v0, v1, v2}, Ljava/lang/String;->replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;
+    :try_end_0
+    .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0
+
+    move-result-object v0
+
+    return-object v0
+
+    :catch_0
+    move-exception v0
+
+    new-instance v1, Lcom/kamcord/a/a/b/KC_d;
+
+    invoke-direct {v1, p1, v0}, Lcom/kamcord/a/a/b/KC_d;-><init>(Ljava/lang/String;Ljava/lang/Exception;)V
+
+    throw v1
+.end method

@@ -1,0 +1,1736 @@
+Manifest-Version: 1.0
+Created-By: 1.0 (Android)
+
+Name: assets/bin/Data/1370f12626ad83449ba03c8905b23efa
+SHA1-Digest: YLVMUbmio3icnmgtHK/CYInJjUk=
+
+Name: assets/bin/Data/sharedassets16.assets.split3
+SHA1-Digest: OuQHsuPrTtjLR9WCptjLR4WnLjY=
+
+Name: assets/bin/Data/Managed/Assembly-UnityScript-firstpass.dll
+SHA1-Digest: jmeJPZdxH/bX5Bm7qbkA1wgS5io=
+
+Name: assets/bin/Data/sharedassets16.assets.split1
+SHA1-Digest: hK5bRv17rc5xlPecWdu34QdLSiU=
+
+Name: res/drawable-mdpi-v4/kamcord_back_icon.png
+SHA1-Digest: sX8mLcO9IrsOlr2yHykX6lS2hTg=
+
+Name: assets/bin/Data/9f39f1d1f2f3ee04bb793082eee05819
+SHA1-Digest: 4ikj0IWaD3qKKIWWE3QU7zyxSSg=
+
+Name: assets/bin/Data/sharedassets16.assets.split2
+SHA1-Digest: 069o+L3iGQB/HJbHf+zCPbMTxiQ=
+
+Name: assets/bin/Data/94d9d678763d84c64b6ba9d85c873d95
+SHA1-Digest: WpmijxwpYV/sJdTDiTxtnVGwQL4=
+
+Name: assets/bin/Data/sharedassets16.assets.split0
+SHA1-Digest: WqQ3MqVUnFG9MrJHVZkRIADUJ00=
+
+Name: assets/bin/Data/351a6e5f5c93a42a6ad9f176a78f0b0b
+SHA1-Digest: cAHWHPoUriWsdor3Iht5oR8vEyc=
+
+Name: assets/bin/Data/level8
+SHA1-Digest: sJLspPnTgeYZz0cralFBwY4+pJc=
+
+Name: assets/bin/Data/level7
+SHA1-Digest: 9p8b0kwsk65zPlTvWeRcmFaBWi4=
+
+Name: assets/bin/Data/6824ef0c18ccc482cab52e3ff472249e
+SHA1-Digest: y0DHrpFul4cbuOXKVqOwClr0ozo=
+
+Name: assets/bin/Data/level9
+SHA1-Digest: IFc7OU6QqbSunOfl90p4hPntwoI=
+
+Name: assets/bin/Data/level4
+SHA1-Digest: 8LboweVSRSTnCSVYPqRBSMuGFEk=
+
+Name: assets/bin/Data/48322ed6a7a7d40939b8af814fb61fba
+SHA1-Digest: FMhd03NCsXnBiAulXXPNfPTprfI=
+
+Name: assets/bin/Data/94cae18aa596c4679a120963eb5fbde7
+SHA1-Digest: fgYhfvngQ+1obAvO77ezxlafrhI=
+
+Name: assets/bin/Data/level3
+SHA1-Digest: IU2wTXQQ982c+oDEYH6x4SmUNpw=
+
+Name: assets/bin/Data/level6
+SHA1-Digest: eVyNqri54pME92AzntZmrGS2c44=
+
+Name: assets/bin/Data/a2cccaeaac5cd4f95a7918ac24eceb4b
+SHA1-Digest: w59p6SKWuNqf4pwoOjo9+9TTOFA=
+
+Name: assets/bin/Data/level5
+SHA1-Digest: hpV8LGoPe4i9nmutHjNCQPvfwBM=
+
+Name: assets/bin/Data/6afb434a05206a8498be9dcdde17038e
+SHA1-Digest: y/xAIRWtABYIIUo+gIZOBX9spc4=
+
+Name: res/drawable-ldpi-v4/app_icon.png
+SHA1-Digest: vR87hMHkFIhWGgrYJFU69xZbgcc=
+
+Name: assets/bin/Data/a6977cf7a11b245d2a976494f98c1a6d
+SHA1-Digest: mpZ893bXQWu5TOM19MQOlcdtVqk=
+
+Name: assets/bin/Data/sharedassets9.assets.split4
+SHA1-Digest: 85Jk8zNkcsmsmRpie27vX4KWyyQ=
+
+Name: assets/bin/Data/sharedassets9.assets.split3
+SHA1-Digest: Roic6qR3MOmlHyRaem7sMZj8dSw=
+
+Name: assets/bin/Data/sharedassets9.assets.split2
+SHA1-Digest: LE6L3zFoplW648smiDhDd3+y57s=
+
+Name: res/drawable-hdpi-v4/kamcord_back_icon.png
+SHA1-Digest: eQqZ5c41u6IAX1Teu4iTeYW//ps=
+
+Name: assets/bin/Data/Managed/UnityScript.Lang.dll
+SHA1-Digest: jBePk+4QPtfb6cwCLudCfw4nnpA=
+
+Name: assets/bin/Data/sharedassets9.assets.split1
+SHA1-Digest: htnWKLGqHQQ9vIAF8p0Nip4n5ZE=
+
+Name: assets/bin/Data/sharedassets9.assets.split0
+SHA1-Digest: VnXGel5SOph288m5dAtDMLpCf0Y=
+
+Name: res/raw/proximanova_regular.otf
+SHA1-Digest: KNBOuTjAW1FYpppwloLU8FF6Was=
+
+Name: res/drawable-xhdpi-v4/kamcord_profile_icon_inactive.png
+SHA1-Digest: zaV3+09gGNCuuaIB8w3vYZxu70Y=
+
+Name: res/drawable-mdpi-v4/kamcord_play_overlay.png
+SHA1-Digest: ZGcaXc4XPwKA3+qoFg9rBYgPBnQ=
+
+Name: resources.arsc
+SHA1-Digest: yr95aFnAy9DOF1mGHE1UGpp6Rn0=
+
+Name: assets/bin/Data/4ee4ce4185dbdf74388603b854eeee93
+SHA1-Digest: Q16tp5a9mvjyYWHUk9pY8X0q/KI=
+
+Name: assets/bin/Data/f3fd145b191cf4040ac6b55cda352a53
+SHA1-Digest: AxnKs551Z6spGvoVNxs5hP9MOZU=
+
+Name: assets/bin/Data/c2557bac1251fb84aa9cfb8484770b19
+SHA1-Digest: ZX7Ap55PwRiH/QD0zUYDGdJbdPg=
+
+Name: assets/bin/Data/e33477b0d11a440d1b56f607eb209b76
+SHA1-Digest: 0azAfFPfKSZkE9G1FD7WLcFBxjc=
+
+Name: assets/bin/Data/ebe3726cdb2e54ffeab782fe15b254f5
+SHA1-Digest: cpu1a3O7Ef3bHAomMl0ngaK5Tkk=
+
+Name: res/drawable/kamcord_rounded_bottom_right_selector.xml
+SHA1-Digest: +sz14rkIQOK04qqtsidnavEnsz0=
+
+Name: assets/bin/Data/1f14df9776c92da47adc8ad28b7426b1
+SHA1-Digest: UBzuRgnB9zktsR/8ILQL+4mMcdY=
+
+Name: res/drawable-xxhdpi-v4/kamcord_watch_icon_active.png
+SHA1-Digest: Cllt8k++Fn/H3XCHzgl8Pk2OrMc=
+
+Name: res/drawable/kamcord_player_fullscreen_icon.png
+SHA1-Digest: OGwP2IOSOimRCEsyxjOJH0+IUJ4=
+
+Name: res/drawable-mdpi-v4/kamcord_twitter_gray.png
+SHA1-Digest: mTn4vZdEQbTvWMNUUilGyoFm7WY=
+
+Name: lib/armeabi-v7a/libmain.so
+SHA1-Digest: luhJ5RFrV966X0awZ6i5O99kPG8=
+
+Name: res/drawable-mdpi-v4/kamcord_facebook_gray.png
+SHA1-Digest: ElYy01JrsqSdz7D7KKWhTfCulpA=
+
+Name: assets/bin/Data/d1788b97e53514ffb81ed275a3baad28
+SHA1-Digest: 6E9ejJ3ZB8FzbjU9qwYbsQLpMOI=
+
+Name: res/drawable/kamcord_share_edit_background.xml
+SHA1-Digest: 5kxxeJ4qxffM6Y5EIZZe+JWRZYE=
+
+Name: assets/bin/Data/Managed/UnityEngine.dll
+SHA1-Digest: wLbGpp+etXKkOuI6kylvDycDvj0=
+
+Name: res/layout/z_kamcord_fragment_edit_profile.xml
+SHA1-Digest: 6V3GnmPToZnHhRF13FD8DAr13VU=
+
+Name: res/drawable-mdpi-v4/kamcord_youtube_gray.png
+SHA1-Digest: zJe9Mm1cZuCcoQfryHqTPxs7VJU=
+
+Name: assets/bin/Data/sharedassets14.assets
+SHA1-Digest: iO448PCKohMdNoY7h+/r5z3iFQM=
+
+Name: assets/bin/Data/level15
+SHA1-Digest: NBnOBYQ5KEb/qk0P8pYurkQ66OY=
+
+Name: assets/bin/Data/level14
+SHA1-Digest: +CrdF7jtwnMZ/2rXKhoBIPRkAtU=
+
+Name: assets/bin/Data/level13
+SHA1-Digest: S1tKkFtp6XZspPQxGyYX5w60wlU=
+
+Name: assets/bin/Data/level12
+SHA1-Digest: TOdsOrCRxGY/sb+yINZro4yYG3s=
+
+Name: assets/bin/Data/6e51271f0dba7a0499de8b79f8bdb882
+SHA1-Digest: WgKf1MqJJYguRtJnSvEd3MzJo9w=
+
+Name: assets/bin/Data/level11
+SHA1-Digest: rWfUnIHRSzjJ0esUaoe4NbR8udM=
+
+Name: res/drawable/app_icon.png
+SHA1-Digest: 27P2Ht8M6EHR79ReBP1fuCyqpYE=
+
+Name: lib/armeabi-v7a/libkamcordcore.so
+SHA1-Digest: DMMWLgL6GHPtfF/+pnpnqopN64o=
+
+Name: assets/bin/Data/level10
+SHA1-Digest: z0wp4BQp6u2y56t7LoiftPqBpdo=
+
+Name: assets/bin/Data/779ebfced233f4421afbed55ac42cc74
+SHA1-Digest: 5e5MJypanYz2FsWAi5rtB6LW930=
+
+Name: assets/bin/Data/d71097ab754ec4befa58fc2c25dd917d
+SHA1-Digest: z2tTlLUGhzUKKtp2fK3dQc2SHrs=
+
+Name: res/drawable-xxhdpi-v4/kamcord_mic.png
+SHA1-Digest: yi2K7EJN9VfwrEoOTAuHLtvOHhA=
+
+Name: assets/bin/Data/level19
+SHA1-Digest: nC5nSQ6mLPGAFFFQXYB/KYwBoFo=
+
+Name: assets/bin/Data/level18
+SHA1-Digest: zXfd/tmQsIsUjxE+EsUw+i5mdN0=
+
+Name: assets/bin/Data/3f21c51d36eed214682950784e00f775
+SHA1-Digest: qQY8/HniVyBJWbC4bcxsdDmjdJs=
+
+Name: assets/bin/Data/level17
+SHA1-Digest: iTE/fa86vQ/8/zwgfk6sS4Nkcmo=
+
+Name: res/drawable-mdpi-v4/kamcord_profile_icon_active.png
+SHA1-Digest: bOlf1mRTxIIV7P4gb1/2u8gkyiI=
+
+Name: assets/bin/Data/level16
+SHA1-Digest: D26djxeY+Y7sxN6oRowrGXcwT5I=
+
+Name: res/drawable/kamcord_seekbar_progress_style.xml
+SHA1-Digest: mSgjvBoaJmEldYmmStdghY+w5B8=
+
+Name: res/layout/z_kamcord_fragment_profile_settings.xml
+SHA1-Digest: 1cP6DDK81WSmtnZVwO3P3MiZARI=
+
+Name: assets/bin/Data/574fe5a43da17e04898f591478a39a66
+SHA1-Digest: 3dZJstGfu5KR3hxFeqcivPF4IvI=
+
+Name: assets/bin/Data/a9da1796c8118498ab13442996614f90
+SHA1-Digest: r2+j8GgEz3RNN9s1Dsc9KZKH1r4=
+
+Name: assets/bin/Data/sharedassets24.assets.split3
+SHA1-Digest: tf1c+aKCMJf0Gdwf9oLeR3slVME=
+
+Name: assets/bin/Data/sharedassets24.assets.split2
+SHA1-Digest: 9StqOgWSOB3cy3ep1SluJXul/wo=
+
+Name: assets/bin/Data/2cc69ca8026b249c9a371f55fa09e97b
+SHA1-Digest: vrB8xVSBS4+b7H/UvRuPgm15mB0=
+
+Name: assets/bin/Data/a0c47fc85893ef14ba58042e359d3e08
+SHA1-Digest: tdQv+UqpTxnEgPJp4uJY+7+GB5k=
+
+Name: assets/bin/Data/bdc65b86adc8f4cda9395c7de6708710
+SHA1-Digest: eBQO6py6bayn415zi9WqgcHpTQA=
+
+Name: assets/bin/Data/sharedassets24.assets.split4
+SHA1-Digest: bX8LRD0tF6j1qT6Hf3HL0C0a/9s=
+
+Name: assets/bin/Data/level22
+SHA1-Digest: RgNTLBvYSdFVh4hAJ9B9H2pgBnQ=
+
+Name: assets/bin/Data/sharedassets1.assets.split14
+SHA1-Digest: HfGzqFgeN9+OcRNYcammnSZ3YuM=
+
+Name: res/drawable-xxhdpi-v4/kamcord_facebook_gray.png
+SHA1-Digest: ANHL2bAqgvoHg+IciAXBG0LbXtM=
+
+Name: assets/bin/Data/level21
+SHA1-Digest: kKdm9nJbWtQx2oZJyjai9whR/8M=
+
+Name: assets/bin/Data/sharedassets1.assets.split15
+SHA1-Digest: 7Na3RYwErqczxEaWlk2XgJnC8KM=
+
+Name: res/drawable-mdpi-v4/kamcord_mic.png
+SHA1-Digest: vBgAEtiBHxI01NwIBv0pB35O5A8=
+
+Name: assets/bin/Data/level20
+SHA1-Digest: PouJMeR9DooV0hQM8pDLcfTjwi0=
+
+Name: assets/bin/Data/sharedassets1.assets.split10
+SHA1-Digest: N1nbGMMCf8fwEGHFEGSUsigMVbU=
+
+Name: assets/bin/Data/a3d1929e9642a4d58be61cf19e7bfba2
+SHA1-Digest: jKwq+yUkVhohD/5WJLrJUu5Q3Yw=
+
+Name: assets/bin/Data/sharedassets1.assets.split11
+SHA1-Digest: RyiJDPHTsLDFBjFM75+iJZf4bI0=
+
+Name: assets/bin/Data/sharedassets1.assets.split12
+SHA1-Digest: E3oJioRPrEExmdhKSo1CzKdAfPU=
+
+Name: assets/bin/Data/sharedassets1.assets.split13
+SHA1-Digest: p5rpUCr3OBB289A4R9fvLIx5fY4=
+
+Name: assets/bin/Data/level29
+SHA1-Digest: ZEVH2y98HXPocV9ZJpsJ1iyTa+U=
+
+Name: res/drawable-xxhdpi-v4/kamcord_play_overlay.png
+SHA1-Digest: 8b2wdD0dnhOsc+6oqEOzd8mwxc4=
+
+Name: assets/bin/Data/182695e850938314fa6675a8926ad9ee
+SHA1-Digest: LXTTjAf0nBYLYlDe2PF5bANZYUE=
+
+Name: res/drawable/kamcord_toggle_selector.xml
+SHA1-Digest: TwtnTgriwjronDymn75ckq3IoEE=
+
+Name: assets/bin/Data/sharedassets8.assets.split1
+SHA1-Digest: wPrv7Ju4m97xBZFqUTRDm4+quR4=
+
+Name: assets/bin/Data/sharedassets8.assets.split0
+SHA1-Digest: PabtPr4UuSm7k94np9+oGR5B8f4=
+
+Name: assets/bin/Data/Managed/Boo.Lang.dll
+SHA1-Digest: GQyLV53BmHxQNfirHAD8yg6xQ6Q=
+
+Name: assets/bin/Data/sharedassets24.assets.split1
+SHA1-Digest: txR+cnLs5+4tWxfoiKwQP9Der9k=
+
+Name: assets/bin/Data/sharedassets24.assets.split0
+SHA1-Digest: 0riW6i6k3qkmhgNKyyVXnlWYCYk=
+
+Name: assets/bin/Data/a8b67144074f2490b8301b826683b75e
+SHA1-Digest: Ep18jKI8b2Q1xE0kkttfgiVhv2c=
+
+Name: assets/bin/Data/5e11c7d26ad764fc3a7e96c7ad8e9f43
+SHA1-Digest: vZ/6ZrJ5RCROS3MMrB6j/xaTcBA=
+
+Name: assets/bin/Data/4b988911421c0ef4fbaf5b63976f971b
+SHA1-Digest: 1Mp251AAIexljPTwlXHwx0EosFQ=
+
+Name: assets/bin/Data/c12c7c5ce0728403bbf47f5b5af01244
+SHA1-Digest: /vjWZG4N5x8xhBN4DU9qYyaw39M=
+
+Name: assets/bin/Data/17bebed5db516436382984bfc9053c9f
+SHA1-Digest: ZW+Kp27wcmsMQuMwy7di7juYI8M=
+
+Name: assets/bin/Data/3e699158b93c7433d97bcde9896cf63c
+SHA1-Digest: uTqidCUTxh+YiyOU2Q+xubSjTVk=
+
+Name: assets/bin/Data/splash.png
+SHA1-Digest: CNOSOfW26h7mWDTjAT1UWAFOwVc=
+
+Name: assets/bin/Data/sharedassets27.assets.split2
+SHA1-Digest: gZFhdMp2ryrQRpu0rVNhd/YFKVo=
+
+Name: assets/bin/Data/Managed/Photon3Unity3D.dll
+SHA1-Digest: 99XlBZpTJzf6VDES3zsxTKrYLvY=
+
+Name: assets/bin/Data/sharedassets27.assets.split1
+SHA1-Digest: A+4BgWzJUEyVo539TU3gzj2cpNA=
+
+Name: assets/bin/Data/sharedassets27.assets.split0
+SHA1-Digest: L9kIxFkGndi074nJwTHEe3LYAbw=
+
+Name: assets/bin/Data/sharedassets27.assets.split5
+SHA1-Digest: LxHLuJ6mVTYqst1m6slTzFbI8nA=
+
+Name: assets/bin/Data/sharedassets27.assets.split4
+SHA1-Digest: SF6rt+ZbU9LTVAYpMYvxlehMkDQ=
+
+Name: assets/bin/Data/sharedassets27.assets.split3
+SHA1-Digest: HHGaP+9bseaTOfTisvGFELrcews=
+
+Name: assets/bin/Data/sharedassets7.assets
+SHA1-Digest: G1o0ifmYjpJrEyBH38fM0oob73Q=
+
+Name: assets/bin/Data/level28.split0
+SHA1-Digest: iDVJ3bELh88TtQ0dgECteoRjirY=
+
+Name: lib/x86/libmain.so
+SHA1-Digest: a6qzwO7Iq/4iQswgudjUqoQ2xpY=
+
+Name: assets/bin/Data/level28.split1
+SHA1-Digest: J6OgOdbClDHIb45kR4Y/ulCUpeo=
+
+Name: res/drawable-xxhdpi-v4/kamcord_profile_icon_active.png
+SHA1-Digest: /PguEiCN1W+YLz2tfmzVQ/Km9Dg=
+
+Name: assets/bin/Data/d598a796601d3944b982b7866745f459
+SHA1-Digest: 8xRB4XTn2SwlOi/UNyotJTWuhXM=
+
+Name: assets/bin/Data/level28.split2
+SHA1-Digest: d4gpfcReji2CLp8BqRV3BAqK2zc=
+
+Name: assets/bin/Data/level28.split3
+SHA1-Digest: rSowdTXwEX2MrPhJsooC6yEdzs4=
+
+Name: assets/bin/Data/level28.split4
+SHA1-Digest: xGcpREsXH7vqx5SBPbZ8+UCuPQU=
+
+Name: assets/bin/Data/691d8fa803e694102b7d19c90f724f0d
+SHA1-Digest: cYnkhbz0i5oO5etfOWfChV/KFSk=
+
+Name: assets/bin/Data/Managed/System.Core.dll
+SHA1-Digest: Bt5VezXT5/K/34e0K6vEamWognk=
+
+Name: assets/bin/Data/17d406f36e1fbd44582ba4eb574642f1
+SHA1-Digest: rQaOawpB4iNcUGfffcstGl7+L9I=
+
+Name: res/drawable-mdpi-v4/kamcord_facebook.png
+SHA1-Digest: imMAcUkmN6Rg3sHC2MYLSGFREIU=
+
+Name: res/drawable/kamcord_player_play_icon.png
+SHA1-Digest: GQ80bXbuL9xwf/0fgA6EOD2J82g=
+
+Name: res/drawable/kamcord_share_grid_background.xml
+SHA1-Digest: llKtK6AiieI+vYMRkIWHN1Sg+Co=
+
+Name: assets/bin/Data/sharedassets26.assets.split8
+SHA1-Digest: jCLRHhaTnShDk7z38O++1BOgJmY=
+
+Name: lib/armeabi/libkamcord.so
+SHA1-Digest: d9Fye4V0rCwKrzaKtKwkE4kTyts=
+
+Name: assets/bin/Data/sharedassets26.assets.split9
+SHA1-Digest: 3OMKqbWBKNhoSjvQT9zXC5VSP+Q=
+
+Name: assets/bin/Data/sharedassets26.assets.split0
+SHA1-Digest: FekINStV0epdQ7oy8zgiOGhJIsc=
+
+Name: lib/x86/libunity.so
+SHA1-Digest: WpAPlxiztOEAO7lFimzIJ37JQ/I=
+
+Name: assets/bin/Data/sharedassets26.assets.split1
+SHA1-Digest: E8wbnyQqPQ0rbWj35UH4t0Qcu9Q=
+
+Name: assets/bin/Data/sharedassets26.assets.split2
+SHA1-Digest: vd4+ViggetqBOYa9zeq2dkVEyKk=
+
+Name: assets/bin/Data/sharedassets26.assets.split3
+SHA1-Digest: ImC3D1pXL/LA+nRfFl+DbTofaTE=
+
+Name: assets/bin/Data/sharedassets26.assets.split4
+SHA1-Digest: JIweAt71frDMLjGrK2TbhZUTvEI=
+
+Name: assets/bin/Data/sharedassets26.assets.split5
+SHA1-Digest: AaIl2wOF05kQ7TrNmkuS60N6zGI=
+
+Name: assets/bin/Data/8705eb83ab801c74b8876f4b901d4587
+SHA1-Digest: 92LYJz23hHdBI9S/F5gw2GuyRaQ=
+
+Name: assets/bin/Data/sharedassets26.assets.split6
+SHA1-Digest: 0DFH/m0kkdKY0sQdHJfVEGPN604=
+
+Name: assets/bin/Data/sharedassets15.assets
+SHA1-Digest: yEqILz5NVWlj0jMdKA+r3ifLZlM=
+
+Name: assets/bin/Data/sharedassets26.assets.split7
+SHA1-Digest: 6vtLPnY7Cb8O8FJIjJ8mE2Dj9Mk=
+
+Name: assets/bin/Data/level0
+SHA1-Digest: +A+9hmmhkp6LdgF//oVy8+sbEt0=
+
+Name: assets/bin/Data/level2
+SHA1-Digest: 2YIE/IHcYp4Erp4kc5vk2oj0Ntw=
+
+Name: assets/bin/Data/level25.split0
+SHA1-Digest: p6WFor+sTjKZ12hngTkhUH41lR4=
+
+Name: assets/bin/Data/level25.split1
+SHA1-Digest: Mg4YcJLhLRuZsP2N4El1lo+n+SE=
+
+Name: assets/bin/Data/sharedassets25.assets.split0
+SHA1-Digest: JevZuCRPRvB4u1XLwpGR2tLBRqA=
+
+Name: res/drawable/tw_widget_progressbar_effect_holo_light.png
+SHA1-Digest: JkhSS7v7PeNan+dwICRYzen/dW4=
+
+Name: assets/bin/Data/bc8b0d37815a6e246a29ec8c87c0b086
+SHA1-Digest: N8NoeOXOBYz0EJREZFWZzTMlIA0=
+
+Name: res/drawable/dialog_full_holo_light.9.png
+SHA1-Digest: 1jqAkwBEUfpu5btuB/7S08gCarE=
+
+Name: assets/bin/Data/Managed/Mono.Security.dll
+SHA1-Digest: 2WPfBVJ4XGuExbIXF5YhAW2T7bo=
+
+Name: assets/bin/Data/04ef4c2dfa8adfe40abc3b61c710b7c3
+SHA1-Digest: k55/yCj4sqw7KHzjfmOCT9asJEg=
+
+Name: assets/bin/Data/fd5a2390b16e64719a4290aaa8b1f316
+SHA1-Digest: mCjlwafIiSeeqGlIsYuRMQA7AqA=
+
+Name: assets/bin/Data/sharedassets25.assets.split5
+SHA1-Digest: UF6D0ThPn9HHSszry5+zyUQsuJ4=
+
+Name: assets/bin/Data/23672048bfcda4b13a1cba7257b6cee3
+SHA1-Digest: neoBxn6HyaAxu5DsffcV3g3MGg8=
+
+Name: assets/bin/Data/sharedassets25.assets.split6
+SHA1-Digest: yG5U6PcxG8fEJSWygD7vL+qAdAA=
+
+Name: assets/bin/Data/sharedassets25.assets.split7
+SHA1-Digest: uy7Q+gM66ZHbchgeROIdwb4pvy4=
+
+Name: assets/bin/Data/sharedassets25.assets.split1
+SHA1-Digest: HhkbWnM85eoEWxpk6Tz6iROKbbQ=
+
+Name: assets/bin/Data/sharedassets25.assets.split2
+SHA1-Digest: sp+9Bx8ulpFEsZWo6oOh8iS+BY4=
+
+Name: assets/bin/Data/sharedassets25.assets.split3
+SHA1-Digest: N4lI206WUFhUeqLG0dE4jDRUS38=
+
+Name: assets/bin/Data/sharedassets25.assets.split4
+SHA1-Digest: 7lIuU/Ogf7fdkknFpdlefRbE/Po=
+
+Name: res/drawable-mdpi-v4/tw_widget_progressbar_holo_light.png
+SHA1-Digest: F0s1AhgRvHgSL8MlR7Vli3yUSCk=
+
+Name: res/drawable-hdpi-v4/kamcord_facebook_gray.png
+SHA1-Digest: dzJLkR4lfEsI9dEww2ZwA5qj+4g=
+
+Name: assets/bin/Data/sharedassets26.assets.split10
+SHA1-Digest: LTn+koI1c7/dHh8jR50XknDnyzM=
+
+Name: assets/bin/Data/cc84718d3f9ee7545b345ca055d02633
+SHA1-Digest: +CSWSDHunAmOHPEauKe1q5nFaJ8=
+
+Name: res/drawable-mdpi-v4/kamcord_youtube.png
+SHA1-Digest: MP06o2L3ZZGPiJgy+42ETMbSuvk=
+
+Name: assets/bin/Data/cfc8b7c7468b742509e7971b9077e57a
+SHA1-Digest: 3dZJstGfu5KR3hxFeqcivPF4IvI=
+
+Name: res/layout/z_kamcord_activity_login.xml
+SHA1-Digest: W/JDDqSzqdHG3Vi75IhwzZ/FU1I=
+
+Name: res/drawable-hdpi-v4/kamcord_share_icon_active.png
+SHA1-Digest: 4WPDqnZ5E4oox4vKuAaW6LUL7KU=
+
+Name: assets/bin/Data/c3039104e048a455caf71e625993658f
+SHA1-Digest: ced+UwbLls9ujwrOknypqzQW5gY=
+
+Name: assets/bin/Data/15fe1822b85804947b5f049b534a9a85
+SHA1-Digest: c9W+Qb8ddFVz7QDzHCexM1UAFIw=
+
+Name: assets/bin/Data/sharedassets28.assets.split8
+SHA1-Digest: /37IRQ3EB8R4+O5Uz/bL4mKF6vo=
+
+Name: res/drawable-mdpi-v4/tw_widget_progressbar_effect_holo_light.png
+SHA1-Digest: JkhSS7v7PeNan+dwICRYzen/dW4=
+
+Name: assets/bin/Data/9db427310839bef4ba1520022ab32a81
+SHA1-Digest: kF1J12GdS6U/QUgXXxUOFYpR738=
+
+Name: assets/bin/Data/sharedassets28.assets.split9
+SHA1-Digest: Rh/0wNNH21xHrt8dLFrjy9JJBb4=
+
+Name: assets/bin/Data/sharedassets28.assets.split6
+SHA1-Digest: cUShoL/aJE/QOi08IfBVvk8q728=
+
+Name: assets/bin/Data/sharedassets28.assets.split7
+SHA1-Digest: OZR1I0D0S2qtSd9kgud7ls5xbVI=
+
+Name: res/drawable/kamcord_background_gradient.xml
+SHA1-Digest: lS+EMv+SKeROxPWqZVNvWSz3JiA=
+
+Name: assets/bin/Data/sharedassets28.assets.split4
+SHA1-Digest: CaaPAB/xYdaGZ+rFDhWsGhQSGlM=
+
+Name: assets/bin/Data/sharedassets28.assets.split5
+SHA1-Digest: NyBtsuZDRQ8ocImz+ppREzl9gts=
+
+Name: assets/bin/Data/sharedassets28.assets.split2
+SHA1-Digest: jMLZ8M80fV5xZCe1JWbKveeMjs0=
+
+Name: assets/bin/Data/0b6833b49cd409048a06708c3f39d806
+SHA1-Digest: abj3qq5OSLxyRJKe3SSoAAWvTjo=
+
+Name: assets/bin/Data/sharedassets28.assets.split3
+SHA1-Digest: wZGyj6oEv226Xi0vmZoUq7hpmtU=
+
+Name: assets/bin/Data/sharedassets28.assets.split0
+SHA1-Digest: KlTJXWyYSfmEgmf7VLO9Y1M7wis=
+
+Name: assets/bin/Data/sharedassets28.assets.split1
+SHA1-Digest: zs3j1w21chlHaLv8/d2RXBzxc8s=
+
+Name: assets/bin/Data/7f2b0be4b7b2244a8bedd96f736bb31b
+SHA1-Digest: qnBpyb2CRTZgfhG+4GWlFh5TK10=
+
+Name: assets/bin/Data/9127a5f88036a490291a0e676d34ad97
+SHA1-Digest: l9/EdIAR/o+TAkiEuRM5zoewM18=
+
+Name: res/drawable/kamcord_rounded_top_right_selector.xml
+SHA1-Digest: L4DfrsaoAhooo/juO7DZ+BoD91c=
+
+Name: assets/bin/Data/1317a6f726d1943dd9dd47eb4df72198
+SHA1-Digest: cX8/fuJqF9lRPN67jgxRfZlCf4c=
+
+Name: assets/bin/Data/97eae260bcd9a654290b75c24c875fe6
+SHA1-Digest: aE2N3CW1FS6SwGu586JZPVLLcRI=
+
+Name: assets/bin/Data/sharedassets26.assets.split11
+SHA1-Digest: HlOC0MmuESF4LHQBWc4uH9s2g00=
+
+Name: assets/bin/Data/3f316f60da2ff4e10b566306c3ad1d5f
+SHA1-Digest: mbB20N6g6BYo3eppE+7pdwreIZY=
+
+Name: assets/bin/Data/3c89934adfb7a4955ab77e73b4d106aa
+SHA1-Digest: 6Q8TEBqRXop9QXwJuduzNJ3lKhg=
+
+Name: res/drawable/kamcord_rounded_top_left_selector.xml
+SHA1-Digest: e4ZAuaMJ8cZkxjFwraI1pjq94Bw=
+
+Name: assets/bin/Data/5b1110bf028d44e4d9c072944c297a0f
+SHA1-Digest: kMGVsf+I/74KoyNXOF1XUiQZe8g=
+
+Name: assets/bin/Data/sharedassets6.assets.split0
+SHA1-Digest: oWoFlqjfyLwW63QkgAPLeWchdzY=
+
+Name: assets/bin/Data/sharedassets6.assets.split1
+SHA1-Digest: GF2RuF3BBzzsxbNFmrFLUnZ1Peo=
+
+Name: assets/bin/Data/sharedassets6.assets.split2
+SHA1-Digest: vd7zCf7eaMTzl45cMm4kr17aUvY=
+
+Name: assets/bin/Data/sharedassets6.assets.split3
+SHA1-Digest: aaF1SAMbUck4uXJhV4zxivbDkTg=
+
+Name: assets/bin/Data/0116e799c8f4dc14a8a8b352845455d1
+SHA1-Digest: WJ6+jbJROjJDoXAlnS2Iulfn8kA=
+
+Name: res/layout/z_kamcord_fragment_player.xml
+SHA1-Digest: X8IFMsgSI+//IZ09m2aS04s8sTU=
+
+Name: res/drawable/progressbar_middle.xml
+SHA1-Digest: vGdSAOT3G8NL2FQlVX3yNLGp9m8=
+
+Name: assets/bin/Data/Resources/unity_builtin_extra
+SHA1-Digest: lqHkdDmGuHjMJ5zeYzG5DjC7jRM=
+
+Name: assets/bin/Data/67abfa04b040b12459bd6fa64b7ff1fa
+SHA1-Digest: Bebl/bHjKpts54Okq+5NElmn3S8=
+
+Name: lib/armeabi/libkamcordaudio.so
+SHA1-Digest: z+/OkhenbB7m24elHul190yNRNQ=
+
+Name: assets/bin/Data/e2243eb9e406943baad7cfc004214f5b
+SHA1-Digest: eVyhdQglF6y1ykhuzRXYk/u7Dxc=
+
+Name: res/drawable/kamcord_button_background.xml
+SHA1-Digest: RujQ8WTJ6fVCF+3saYLOPvks6ts=
+
+Name: assets/bin/Data/ed5591596df551e4c8f4b05ce88a7a07
+SHA1-Digest: xw416TvyRyd6QRzhagY81NXzOCo=
+
+Name: res/drawable-xxhdpi-v4/kamcord_profile_icon_inactive.png
+SHA1-Digest: ldT5zCwTSi1YoRsYk1afZLx3K6M=
+
+Name: assets/bin/Data/sharedassets17.assets
+SHA1-Digest: uNDntPzz7DJTxM/cQ8HKpYU02dU=
+
+Name: assets/bin/Data/a25581c87c7ae4ed68b14af661a06f4e
+SHA1-Digest: IKXZsu0JQ0DFb0G/QWpQHdCYBlI=
+
+Name: assets/bin/Data/9c436d67fac37854ba0477a76f2b2489
+SHA1-Digest: VDlRdr0xsCJQh2DiCqwpjcyJpMs=
+
+Name: res/layout-sw600dp-v13/z_kamcord_activity_login.xml
+SHA1-Digest: DTALAVG62ApwM8ZvNi+Kzscf9B8=
+
+Name: res/drawable-xxhdpi-v4/kamcord_facebook.png
+SHA1-Digest: bQza+fwjMqcR7dIsKrg2f9Q1CkU=
+
+Name: assets/bin/Data/623a02d3806e8824f9b8ac8297a04ad9
+SHA1-Digest: pWLoMErs0/TP0A8orBUHMhZZxQY=
+
+Name: assets/bin/Data/a33cb394358c5814ab9a2a098384df3b
+SHA1-Digest: DXcC2estS36IJG6uMIXwXIqh/VE=
+
+Name: assets/bin/Data/a676e14b647b34cb2aa5c359c749eabe
+SHA1-Digest: cci2jRqSrZ8qH8i/yYWQaq1c9R0=
+
+Name: res/layout-land/z_kamcord_fragment_share.xml
+SHA1-Digest: k0ZgiRIa02Zg3IX/fzkClEsV2TE=
+
+Name: res/drawable/kamcord_seekbar_background.xml
+SHA1-Digest: 7pwpE4yR7ALsQRSum2iwDjaJ6mU=
+
+Name: assets/bin/Data/Managed/System.dll
+SHA1-Digest: Baeg+0Mp7yjG++tHwpnPOj6bKUI=
+
+Name: assets/bin/Data/d4e3f10704579d34b8ad52738be03257
+SHA1-Digest: +HOUv0Dla77yBGudWUDSR04kV/g=
+
+Name: res/drawable-xhdpi-v4/kamcord_watch_icon_inactive.png
+SHA1-Digest: ESwinYN3gqyLKh0Q9QvaMdZLf58=
+
+Name: lib/x86/libmono.so
+SHA1-Digest: 9xsoAUs4LJNHaXz6gOMgkgwSO/M=
+
+Name: res/drawable/kamcord_tabbar_back_arrow.png
+SHA1-Digest: 57jUL6Zd/6JyGjndxauA3y0FO8g=
+
+Name: assets/bin/Data/45f79ebe49dc67a47a3196bf1ef60163
+SHA1-Digest: rTVZz6mX9Zt2/9+rhoIMKBRMhc4=
+
+Name: assets/bin/Data/21650bfc3cb28412ea7d6b2ebc5a87dc
+SHA1-Digest: 74XbOHexsL20BW0nKqt2ZIZafBc=
+
+Name: res/drawable-hdpi-v4/kamcord_facebook.png
+SHA1-Digest: CuF3Ykgrys9v87Q3jrZUDsJMl48=
+
+Name: res/drawable-xxxhdpi-v4/app_icon.png
+SHA1-Digest: PBNGHpBjMQu9lt6l+AnUzz08h80=
+
+Name: lib/armeabi/libkamcordcore.so
+SHA1-Digest: Ll9dBzAgeB8eMQ65uffOQpFnvDE=
+
+Name: assets/bin/Data/c39baea736d734637a67cf642d7a2d7d
+SHA1-Digest: nmDWgce/pVIb+dKm9quBFt6touw=
+
+Name: assets/bin/Data/sharedassets22.assets
+SHA1-Digest: culoFod4/ZDcTcon8Ww8PnhqszQ=
+
+Name: res/drawable/kamcord_player_unfullscreen_icon.png
+SHA1-Digest: COMX+5teJn2YPcFaiaUi2EMRJOo=
+
+Name: assets/bin/Data/8d37fae230946e844bed3eb844a6c29c
+SHA1-Digest: gUZucw+RosB+i8u/Wqh6J/1LOwg=
+
+Name: assets/bin/Data/level26.split1
+SHA1-Digest: q6xF2hS/XDfO/fxjyUi4nT6VUic=
+
+Name: assets/bin/Data/sharedassets0.assets.split6
+SHA1-Digest: GFSpdU2VDKdluQHhJb87AwKCgXI=
+
+Name: assets/bin/Data/level26.split2
+SHA1-Digest: YRibS8BJwbFLcXg/bIs83qyXV/k=
+
+Name: assets/bin/Data/sharedassets0.assets.split7
+SHA1-Digest: RGRFMwceARRddb7aD/F9omJ/hW4=
+
+Name: assets/bin/Data/sharedassets0.assets.split8
+SHA1-Digest: 41bA9FV8GlaVYgxed6k9N9Le30E=
+
+Name: assets/bin/Data/level26.split0
+SHA1-Digest: g5Vdq86SRn6My1zrOHTwc0aRyzQ=
+
+Name: assets/bin/Data/sharedassets0.assets.split9
+SHA1-Digest: hm1fa3mJboWRTY3nRPt3zPSNuWI=
+
+Name: assets/bin/Data/ffe329ad2318345c289fa55a7423d86d
+SHA1-Digest: BKdRSzqFYAKJ/7Amur632dfN2kE=
+
+Name: assets/bin/Data/sharedassets5.assets.split2
+SHA1-Digest: qbONPZDL8sjQbXEA56YlJS5H1NA=
+
+Name: assets/bin/Data/ab846a10e93d6a241b9187e79f659155
+SHA1-Digest: 9fIdDfOTcAAWJRUY4eCU/63Tius=
+
+Name: assets/bin/Data/ec3a996cc9e05db4584755fe65c1c9e3
+SHA1-Digest: ZgH6FPxcOXJK/cqbQQNimMg9Vnw=
+
+Name: assets/bin/Data/sharedassets5.assets.split1
+SHA1-Digest: aCsKiId6tV1SnNOPUgqBiOGV2w0=
+
+Name: res/layout/progress_dialog.xml
+SHA1-Digest: TqwZ92EozAjlwBAP1rAmyhE3G3Q=
+
+Name: res/drawable-mdpi-v4/kamcord.png
+SHA1-Digest: N1dPKY1GIrBgjRU+6zNmSBBZMgU=
+
+Name: res/drawable/kamcord_share_gradient.xml
+SHA1-Digest: /J/G7AkqPtP9hM+xSLMzjCa5vAE=
+
+Name: assets/bin/Data/sharedassets5.assets.split0
+SHA1-Digest: 7ZzD1XWWAlYRxGWdQMDHMt1KJNQ=
+
+Name: assets/bin/Data/62dba8679a3ff44c58357e344f5f4187
+SHA1-Digest: esGuM2wZOP+Wao1vy6gOvud1KeU=
+
+Name: res/drawable-xhdpi-v4/kamcord_youtube.png
+SHA1-Digest: 5yv2j9AQP5pgKCotNuZ4FWL7s+M=
+
+Name: assets/bin/Data/Managed/mscorlib.dll
+SHA1-Digest: gU4a1QwNqNH8ruxoH64AzlhJ9/8=
+
+Name: assets/bin/Data/df0e8739ef1244de0a4977e3ce7ab3e8
+SHA1-Digest: s5HSqsuxAhbfWHfFPOEmqDblupI=
+
+Name: assets/bin/Data/sharedassets0.assets.split0
+SHA1-Digest: 3maBVC2o1tDH905DLpNjdw6K+2g=
+
+Name: res/drawable-hdpi-v4/kamcord_share_icon_inactive.png
+SHA1-Digest: WQi2G5OcjLIgU3EHDapb9WJFtUQ=
+
+Name: assets/bin/Data/sharedassets0.assets.split1
+SHA1-Digest: CRnNqKuALDpDKGBjfNq/YEfVU4o=
+
+Name: assets/bin/Data/sharedassets0.assets.split2
+SHA1-Digest: /lpEadKVjvvGy0JdEp/0CP2xNxM=
+
+Name: assets/bin/Data/sharedassets0.assets.split3
+SHA1-Digest: 7jyBT9HnLj5S3au2JoT/GPOkOy4=
+
+Name: assets/bin/Data/level26.split3
+SHA1-Digest: o10lE8Va+Qm9nB38eh81m6Y6sxc=
+
+Name: assets/bin/Data/sharedassets0.assets.split4
+SHA1-Digest: NaE/87MOc7SZYK8oZTrvom5qAwI=
+
+Name: assets/bin/Data/sharedassets0.assets.split5
+SHA1-Digest: nB18wuXqUYYqkaZ67tVvDw2RlxE=
+
+Name: res/drawable/kamcord_player_pause_icon.png
+SHA1-Digest: wz849cFY//A72pw0GeEU3SumSnw=
+
+Name: assets/bin/Data/sharedassets1.assets.split0
+SHA1-Digest: XxUIqP6Nkx+D9kLq6F8qUaYyIkM=
+
+Name: res/drawable-xhdpi-v4/kamcord_back_icon.png
+SHA1-Digest: xXwBYC6oUV9u8KE7zF4F269uCug=
+
+Name: assets/bin/Data/sharedassets1.assets.split4
+SHA1-Digest: JcbL0yOKwHVcPPY7gkDzzW5ABgA=
+
+Name: assets/bin/Data/sharedassets1.assets.split3
+SHA1-Digest: krNFHnaklK22iHF5fThlz3y32Uk=
+
+Name: assets/bin/Data/sharedassets1.assets.split2
+SHA1-Digest: yaNr6kZaUvkr86LmglNih/STy2o=
+
+Name: assets/bin/Data/sharedassets1.assets.split1
+SHA1-Digest: w2hyI2X9fpvTy6oM/jwjVavBf0A=
+
+Name: res/drawable/kamcord_player_prev_icon.png
+SHA1-Digest: UyQYi02ojVBWb4nrok9UYbgmqj0=
+
+Name: assets/bin/Data/963297aa694494388bb060e8bd688450
+SHA1-Digest: n8fIR0FKL7tfCHW6rdjLW1Zn5O8=
+
+Name: lib/armeabi-v7a/libunity.so
+SHA1-Digest: DdeNXYw61DE+cKgg1PXq10Jw7Do=
+
+Name: assets/bin/Data/0579e4ff34be2432398abd39cc73778e
+SHA1-Digest: ewntCqr3H9Nt+A/Jpj/cMJ+ROyw=
+
+Name: res/drawable/kamcord_mail_gray.png
+SHA1-Digest: pP23QpMtYlXTngjzgNzbQTzMMG8=
+
+Name: assets/bin/Data/4f3e6975c30ce4c7aa02e02c4382850e
+SHA1-Digest: 3PEIVKIT1tr6YPOJcMhiULwDDbo=
+
+Name: assets/bin/Data/a5395bc59fbd2a64386ce4b155e34bee
+SHA1-Digest: 5Jfkk61fFFFQTcKoaqMLVjZofkw=
+
+Name: assets/bin/Data/sharedassets0.assets.split15
+SHA1-Digest: hhZ9PIbIgT6099BNb9IywkqOzHw=
+
+Name: assets/bin/Data/36a7a0722c40c364bbbfdefe0069dca5
+SHA1-Digest: pwfzHXgfV1UIPJrNYZ5hqbEaobY=
+
+Name: assets/bin/Data/sharedassets0.assets.split16
+SHA1-Digest: y7Nc1cwH1+6eIX6sAYraw0A+inM=
+
+Name: assets/bin/Data/sharedassets0.assets.split13
+SHA1-Digest: WXCTcwgVjjtDtsTbAzYo8Gi1RU4=
+
+Name: res/layout-sw600dp-v13/z_kamcord_activity.xml
+SHA1-Digest: ht47rq23J+efCUHbC5PgkukmIko=
+
+Name: assets/bin/Data/sharedassets0.assets.split14
+SHA1-Digest: G3wnUey6EcCNGa0QbJIkVWHyoOk=
+
+Name: assets/bin/Data/sharedassets0.assets.split19
+SHA1-Digest: BMcC6dpOuM5BY7VWhFoiq0MjSWo=
+
+Name: res/drawable-xhdpi-v4/kamcord_twitter_gray.png
+SHA1-Digest: 54iT+jEmPT5OYANPH2oqRVJqbYM=
+
+Name: res/drawable-xxhdpi-v4/kamcord_youtube_gray.png
+SHA1-Digest: ssHwag2VEcEvCMd/oEXXAabIrEg=
+
+Name: assets/bin/Data/sharedassets0.assets.split17
+SHA1-Digest: a7USC+IfpRWVQmyDC+Lunwjxh00=
+
+Name: res/drawable-xxhdpi-v4/app_icon.png
+SHA1-Digest: Kyt8slQO3U4hRYpJx3qSufjQQj8=
+
+Name: assets/bin/Data/sharedassets0.assets.split18
+SHA1-Digest: gRfEqvJZjqaWdDbzce4ZJZ3V3O4=
+
+Name: assets/bin/Data/0000000000000000f000000000000000
+SHA1-Digest: 3JJtBY54GedjRx8gGOnqVZcFGI4=
+
+Name: assets/bin/Data/sharedassets1.assets.split8
+SHA1-Digest: WtXKHL8bCWCSIDhP/JPLrWQu+Eo=
+
+Name: assets/bin/Data/sharedassets18.assets.split2
+SHA1-Digest: d1Psa3FJ+2y6epFM/p40P05AP+k=
+
+Name: assets/bin/Data/sharedassets1.assets.split7
+SHA1-Digest: l9WQrAUjzwThxV2mh+YeT3qT+zY=
+
+Name: assets/bin/Data/sharedassets18.assets.split1
+SHA1-Digest: xNBoLljPmUjUmYxqdHhKm7nBnPc=
+
+Name: assets/bin/Data/Managed/JsonFx.Json.dll
+SHA1-Digest: NxjYgjYml3FciiB46aeUrtFlPuQ=
+
+Name: assets/bin/Data/sharedassets1.assets.split6
+SHA1-Digest: 2MxZFuE4NVXxsCnYCE9VaA70BgQ=
+
+Name: assets/bin/Data/sharedassets1.assets.split5
+SHA1-Digest: QDRcAmUWYNUk2GJcIwV+cwHYlwk=
+
+Name: assets/bin/Data/sharedassets18.assets.split3
+SHA1-Digest: Lk7r8i44G7bRUudUmyXC/KNL+uY=
+
+Name: assets/bin/Data/sharedassets0.assets.split11
+SHA1-Digest: M4KfTeud00CM9HeQvrVNlDiZUs4=
+
+Name: lib/x86/libkamcord.so
+SHA1-Digest: jS++u0kE97Z6ErsOCdZLRQV7Zqg=
+
+Name: assets/bin/Data/sharedassets0.assets.split12
+SHA1-Digest: h4fcB6vmKIOu543YYWXAD7MTU18=
+
+Name: assets/bin/Data/PlayerConnectionConfigFile
+SHA1-Digest: KsacjRGTk3TXoyoIkvvWoV9EOTk=
+
+Name: assets/bin/Data/sharedassets11.assets
+SHA1-Digest: BR2JWaBw4qdm+wJ9TERrjUgje9U=
+
+Name: assets/bin/Data/sharedassets18.assets.split0
+SHA1-Digest: VVdUpMQTpj7Q1kFmoJDgTX+m1C8=
+
+Name: assets/bin/Data/b1f4b562d0ebea24299650435eec3efb
+SHA1-Digest: 0O+I9siLyboRy+7NaSvY8LsOX0o=
+
+Name: assets/bin/Data/sharedassets0.assets.split10
+SHA1-Digest: 4QJkIEBALhBBYZNKEP/psDFgXRc=
+
+Name: assets/bin/Data/sharedassets1.assets.split9
+SHA1-Digest: tvHmQ4YlVtKCLmPZNeSUtBIk2K0=
+
+Name: assets/bin/Data/7f3a8846a6c4146039f7aa3ff44890ee
+SHA1-Digest: NcWQ6uGdbwEWqkkmUQYDuh/xk0o=
+
+Name: assets/bin/Data/9f1e7257033e95447b95a7e2265fe95b
+SHA1-Digest: OdB1GRsD4ykOaj8kJjNa0an1pNc=
+
+Name: assets/bin/Data/0e880fb1b7f36084ea9dffaad2e5fff5
+SHA1-Digest: PTJF96HWjBEzQOUXPkfVHvyFx7M=
+
+Name: assets/bin/Data/sharedassets2.assets.split3
+SHA1-Digest: 18ICwzQTzMgkTsSRaI33EI7DOPk=
+
+Name: assets/bin/Data/sharedassets2.assets.split2
+SHA1-Digest: adpCfgsu4s2Ciz15axHFD+dKhlI=
+
+Name: assets/bin/Data/sharedassets2.assets.split1
+SHA1-Digest: s5riIIlOMaNWFOw0z0KF/8sp0bo=
+
+Name: assets/bin/Data/sharedassets2.assets.split0
+SHA1-Digest: keXOfbleAX74U+5XuiCaLv3rUBs=
+
+Name: res/drawable-hdpi-v4/kamcord_youtube_gray.png
+SHA1-Digest: LlhgIH8dYA8zsXjG41UTTZU63PE=
+
+Name: assets/bin/Data/sharedassets0.assets.split26
+SHA1-Digest: 8Fk12b96h7At1wRgV2sL34iMdT8=
+
+Name: assets/bin/Data/sharedassets19.assets.split4
+SHA1-Digest: St4H3JXbW7yfKoc/nGHJaVU/4uU=
+
+Name: assets/bin/Data/1487dcb9db87e4d11ae15da6cd1d5dc2
+SHA1-Digest: B1jd/Nkk8fiCz8Sdskzz4DQIiEM=
+
+Name: assets/bin/Data/sharedassets0.assets.split27
+SHA1-Digest: IX+FGzQkD0RdHO9SSBn1vFEvKRw=
+
+Name: assets/bin/Data/sharedassets19.assets.split5
+SHA1-Digest: wcJv4tmehfb2pbVnTigPc396gNs=
+
+Name: assets/bin/Data/sharedassets0.assets.split24
+SHA1-Digest: cTFp7ORNT8r693nxaUNW52mACR0=
+
+Name: assets/bin/Data/sharedassets19.assets.split6
+SHA1-Digest: bOtL2KJbH74St1k1iQP3CMdMxkY=
+
+Name: assets/bin/Data/sharedassets2.assets.split9
+SHA1-Digest: l/UDZ7SGbP3E+y1lgmRqwB82sZ0=
+
+Name: assets/bin/Data/sharedassets0.assets.split25
+SHA1-Digest: dEs/4c9TUopCodCYGQAtyFP5VnQ=
+
+Name: assets/bin/Data/sharedassets19.assets.split7
+SHA1-Digest: rEO3j8NArS6+DE3kiFwZCpx1xe8=
+
+Name: assets/bin/Data/sharedassets2.assets.split8
+SHA1-Digest: RdsP+4TGa6CRPMZ7eopRnVc4Bkc=
+
+Name: assets/bin/Data/sharedassets2.assets.split7
+SHA1-Digest: Egpy9VR423gsUuyfT+M4Vjhcjyw=
+
+Name: assets/bin/Data/sharedassets2.assets.split6
+SHA1-Digest: l7LZmGp/RLqwQ86svPHvG/blips=
+
+Name: assets/bin/Data/sharedassets0.assets.split28
+SHA1-Digest: S/pgX5k454f0QLPzHV404aHZAbs=
+
+Name: assets/bin/Data/sharedassets2.assets.split5
+SHA1-Digest: ZOQh+f8bn3J/bog8VbHcQiWvSu4=
+
+Name: res/drawable-xxhdpi-v4/tw_widget_progressbar_holo_light.png
+SHA1-Digest: m8l83Y8Huti7AR399rmWCkgKaU4=
+
+Name: assets/bin/Data/sharedassets2.assets.split4
+SHA1-Digest: EkhfyA6z8cTSz2cIJW0meeNM0ow=
+
+Name: assets/bin/Data/Managed/Assembly-CSharp.dll
+SHA1-Digest: VONkUjPwE8ach+mhX2J4BuI/8h8=
+
+Name: res/drawable/kamcord_profile_icon.xml
+SHA1-Digest: A8HV78InQWgiCfX/x1L0Q17I4qc=
+
+Name: assets/bin/Data/sharedassets0.assets.split22
+SHA1-Digest: lklB95dmGABVPBEdQ8yC37PynAY=
+
+Name: assets/bin/Data/sharedassets19.assets.split0
+SHA1-Digest: cufIaMttHAj+9vkfoRSWAheqXvE=
+
+Name: assets/bin/Data/sharedassets0.assets.split23
+SHA1-Digest: e6Oawx+0CN4x/hc/dg2WrAxqof8=
+
+Name: assets/bin/Data/sharedassets19.assets.split1
+SHA1-Digest: AoZY+rEkC9d7eK2HKBREGKAqK/o=
+
+Name: assets/bin/Data/sharedassets0.assets.split20
+SHA1-Digest: O3H0P/MPSxW1zYXdnpXrx+hOtaM=
+
+Name: assets/bin/Data/sharedassets19.assets.split2
+SHA1-Digest: bAe75kvoJmRxKZIYoh1GPv1M0AI=
+
+Name: assets/bin/Data/sharedassets0.assets.split21
+SHA1-Digest: O3H0P/MPSxW1zYXdnpXrx+hOtaM=
+
+Name: assets/bin/Data/sharedassets19.assets.split3
+SHA1-Digest: HsII7BZiOHZEKVzv/bJCgePMLXQ=
+
+Name: assets/bin/Data/7823d137d845b426d85f894d75c6c799
+SHA1-Digest: LCujA7C+0xB41wkiq3SPUim3FQI=
+
+Name: assets/bin/Data/39969807ed3a447148a848b8f509fc45
+SHA1-Digest: nMdqOIpqHvfRx5ZOys/VFwWhSQE=
+
+Name: assets/bin/Data/Managed/P31RestKit.dll
+SHA1-Digest: vLR6/cCuq3/kOJLDlLgTYdcR2Ik=
+
+Name: res/drawable-xxhdpi-v4/kamcord_watch_icon_inactive.png
+SHA1-Digest: ZLOeMoN3kV+gk5xRH5QzEfJmZ7U=
+
+Name: assets/bin/Data/52d0dc7186ec84780b995251c7f0a8a7
+SHA1-Digest: /BjPRm/vpOIlhVcxjsLY/+rtZh0=
+
+Name: assets/bin/Data/b188f2597c4e6d845becfdd5b89e9c83
+SHA1-Digest: rwMKXME9HtrrxpUZ4O3JkFYPXzs=
+
+Name: assets/bin/Data/6aa43f6292c1ca54e8f28c16c0b1e8e0
+SHA1-Digest: 1pzW704UCYG9EJ/mLToFHvvao/I=
+
+Name: lib/armeabi-v7a/libkamcord.so
+SHA1-Digest: i+xiMNUshqeeceDegQyIS3WodnM=
+
+Name: res/drawable-hdpi-v4/tw_widget_progressbar_effect_holo_light.png
+SHA1-Digest: JkhSS7v7PeNan+dwICRYzen/dW4=
+
+Name: assets/bin/Data/e3dbf8b99142c4dbc9c1bae3fcd72639
+SHA1-Digest: tvy1AIEHkqwGieCCqwZMI8SjxNs=
+
+Name: res/drawable-xxhdpi-v4/kamcord_share_icon_inactive.png
+SHA1-Digest: 6yQNIMMKgIn6t0VeKEjqlgbMb+A=
+
+Name: assets/bin/Data/e116f7a1a97344807a024042d3340b9b
+SHA1-Digest: X7mK1nFoLSUnj+GgHIRXr/zXAfY=
+
+Name: assets/bin/Data/f33da52514d8e5a49987553a06cb1603
+SHA1-Digest: 2QEyzmbdbC3nZkPs50w4R715iHc=
+
+Name: assets/bin/Data/settings.xml
+SHA1-Digest: xhp7F93cnmRBQyQr/MFu2dCcOCc=
+
+Name: res/layout/z_kamcord_fragment_sign_in.xml
+SHA1-Digest: ugZMx2uHcglDjsS/INaJOrrPUQY=
+
+Name: res/drawable-xhdpi-v4/kamcord.png
+SHA1-Digest: 5zXzrP0Tmvd23hdMLPEMXnZpOic=
+
+Name: assets/bin/Data/213f05c06070641999c38142bfea4835
+SHA1-Digest: 25C0/1W6iABf7wuHBXa8rWBR2Eg=
+
+Name: assets/bin/Data/408ecf166d57f45b1adc46da5b09d4b7
+SHA1-Digest: BADifdGjV1VFSF6iOGDX8pWy+j8=
+
+Name: AndroidManifest.xml
+SHA1-Digest: AHNUL5ahO/TsgFpCRH5cKXAxmcw=
+
+Name: assets/bin/Data/Managed/UnityEngine.UI.dll
+SHA1-Digest: LkBdamt9OSxi1mGnA9dT/Q3iYQI=
+
+Name: res/layout/z_kamcord_fragment_create_profile.xml
+SHA1-Digest: FUMcAd+07O012a2hVRMDaaPQuh0=
+
+Name: res/drawable-hdpi-v4/kamcord_youtube.png
+SHA1-Digest: Y89Fizxggup8s6UaqiPSXKjyJf0=
+
+Name: assets/bin/Data/bf802e08f8de94fd596d0922869ecad4
+SHA1-Digest: 9DN+B6Fo8txrSXgB0ymRU+cReKc=
+
+Name: res/drawable-hdpi-v4/kamcord_profile_icon_inactive.png
+SHA1-Digest: NEK3wHWlgglu8URJ4DcEAJPWeog=
+
+Name: assets/bin/Data/26c133c732e06489dbaa4089d4c2a1a7
+SHA1-Digest: qIeZJZt8C4lMRSK+GHUbNVwJWNQ=
+
+Name: assets/bin/Data/2a6221eb1b1c50a4cb69a62e2f264e58
+SHA1-Digest: hwKLa/jrdJ4G73Q/JqsquLk1S0I=
+
+Name: assets/bin/Data/b8f6dcac2ef004eb69c7170e88f0077f
+SHA1-Digest: IYy69b48wO+OIv/BiTCY3VGjM/w=
+
+Name: assets/bin/Data/140c74726b2cf42a1972e03c0e5be79a
+SHA1-Digest: I0MPqklSTaRnXKFJDK7oQyIzFp0=
+
+Name: assets/bin/Data/level27.split3
+SHA1-Digest: JuRrgs68uOhVzpit08lyKXCUl+U=
+
+Name: res/drawable-xhdpi-v4/kamcord_watch_icon_active.png
+SHA1-Digest: HXql6LEcmC30mJzLLsOMPb1/kYU=
+
+Name: assets/bin/Data/level27.split2
+SHA1-Digest: KjsqAO31oi5dFQ7vZsfTiOc4SYs=
+
+Name: assets/bin/Data/8afc97940d4ff8c4da00a7e8f3188784
+SHA1-Digest: VXdW0pDLSELnaCuzdwuxbxcR5sA=
+
+Name: assets/bin/Data/level27.split1
+SHA1-Digest: CHZcBtANByHm/gW13oGNZAmhJe4=
+
+Name: res/raw/proximanova_light.otf
+SHA1-Digest: 6m1YCGIOf4rNxEnQC1VIrqma78I=
+
+Name: assets/bin/Data/level27.split0
+SHA1-Digest: DYRBrPDL6/WHtM1yFqdM4MNJzLw=
+
+Name: assets/bin/Data/Managed/Assembly-CSharp-firstpass.dll
+SHA1-Digest: FiuPGmhQ42lkesMKJ66/WdXpMAE=
+
+Name: assets/bin/Data/sharedassets20.assets.split1
+SHA1-Digest: U8UxfuRJVgDlWCvTkS92g7CR8Jc=
+
+Name: assets/bin/Data/sharedassets20.assets.split0
+SHA1-Digest: 2D0/bKS4d9jiGVmTAwTmkR30u08=
+
+Name: res/drawable/kamcord_player_replay_icon.png
+SHA1-Digest: 9HwGxjtwFIrnbyjqkkGWnUhC9Ug=
+
+Name: assets/bin/Data/7ace3619af08a49799a74b9853952532
+SHA1-Digest: cp7mQqRlWhCYq6/ZW04ZIFbBw8I=
+
+Name: assets/bin/Data/Managed/Assembly-UnityScript.dll
+SHA1-Digest: 4kYtRoYeS/z1n0V5WIr8HpAEN98=
+
+Name: assets/bin/Data/Managed/Ionic.Zip.Reduced.dll
+SHA1-Digest: 2kOj+Fj5X0fcfnl1VrTtlOzk6PM=
+
+Name: assets/bin/Data/sharedassets21.assets.split5
+SHA1-Digest: O3H0P/MPSxW1zYXdnpXrx+hOtaM=
+
+Name: assets/bin/Data/da10a4a7a39abfd498ac6182f291ce6a
+SHA1-Digest: a0gcWtdD8VgvLCUQwHBAKxvbhoY=
+
+Name: assets/bin/Data/sharedassets20.assets.split2
+SHA1-Digest: xTrwy0wWi0f0Tx6VAyD6Hxc+yg4=
+
+Name: assets/bin/Data/sharedassets21.assets.split6
+SHA1-Digest: pgV3j33ZXJ/qidgkOaI9/LU4jZk=
+
+Name: assets/bin/Data/sharedassets21.assets.split3
+SHA1-Digest: LKUWgB3ZnIkwI40kRx4F359F/vE=
+
+Name: assets/bin/Data/sharedassets21.assets.split4
+SHA1-Digest: 13E7GgYPbEtfLOQO7ohnSaZVFUg=
+
+Name: assets/bin/Data/sharedassets21.assets.split1
+SHA1-Digest: 3qIuKiKHj3x3pvcEj0rQjRt+pDc=
+
+Name: assets/bin/Data/mainData
+SHA1-Digest: i+cYPTlP/XzDR0lhNdP+M2Xwzq0=
+
+Name: assets/bin/Data/sharedassets21.assets.split2
+SHA1-Digest: kQJXnqF/rktfrArVNB6OyJGw1Ls=
+
+Name: assets/bin/Data/sharedassets21.assets.split0
+SHA1-Digest: AA6yPWrJ+Y+KNkVSINz/AX8tnvY=
+
+Name: assets/bin/Data/f87a334af8e67e949a5c535b18b81108
+SHA1-Digest: uofBmHBpj0I6sOWdsDOJebFuMIM=
+
+Name: assets/bin/Data/54f3e4a75b131ab4db56a3d6cf788b00
+SHA1-Digest: YSpb5/Y2kfHJKyUzD/NKj9c/HqE=
+
+Name: assets/bin/Data/c5de15445059e4bf2bad16d38763b73f
+SHA1-Digest: mVKAfyiKJYIw1I1C+uW5vxJZQbE=
+
+Name: assets/bin/Data/level23.split0
+SHA1-Digest: jCmWfPCckEiqyIEJebg2GUFUk2c=
+
+Name: assets/bin/Data/14ad1d2e194edae4a832ab596261ca59
+SHA1-Digest: VEFlFLT/xTDTsl+3/xGsx1Zx+c8=
+
+Name: assets/bin/Data/level23.split1
+SHA1-Digest: GEs/mRQlWkpq1G/BCOf39POAnLE=
+
+Name: assets/bin/Data/level27.split4
+SHA1-Digest: gHJQ04N6CVTD09VlRSpEO6Uemys=
+
+Name: assets/bin/Data/sharedassets29.assets.split5
+SHA1-Digest: Ewuer54zwryF7iiCyvkO+ZjFWrw=
+
+Name: assets/bin/Data/d5ad98bd673334d34a76bcb855a7ddaf
+SHA1-Digest: 7Cef02TpqT48mEXARLnxdS7BvBA=
+
+Name: assets/bin/Data/cdefa7429f6b94b35a8286d3681625ed
+SHA1-Digest: 2P48ZS8Zr1GaQU/r6+hMQGwij/A=
+
+Name: assets/bin/Data/Managed/Qubicle.Unite.dll
+SHA1-Digest: pOp2A0vnfZyEo0k10l2SPATPEp0=
+
+Name: res/drawable-hdpi-v4/kamcord_twitter.png
+SHA1-Digest: MlqG4xVkd1H9ZO3gVzErsVqyMnM=
+
+Name: assets/bin/Data/sharedassets29.assets.split0
+SHA1-Digest: q01IYHFxQECynE3nsSAQzwCX7c4=
+
+Name: res/raw/proximanova_semibold.otf
+SHA1-Digest: dKaZud0/Bajk0hZIvGDvde15G9Q=
+
+Name: assets/bin/Data/sharedassets29.assets.split3
+SHA1-Digest: W9SrBpBE10hjzB7Q2frDjxkqB9c=
+
+Name: assets/bin/Data/sharedassets29.assets.split4
+SHA1-Digest: /L9K1U7AH4G4gabeetcEUjoQ9B0=
+
+Name: assets/bin/Data/sharedassets29.assets.split1
+SHA1-Digest: klI9WpL9pyFcJu9ZfZgErqsm9EQ=
+
+Name: assets/bin/Data/sharedassets29.assets.split2
+SHA1-Digest: 5t1DNjPmwnZBV+zIGq+gGy0Hd0w=
+
+Name: res/drawable-xhdpi-v4/kamcord_profile_icon_active.png
+SHA1-Digest: JZ2Doh0kG/x/iOEYLGbrdkRWEGY=
+
+Name: assets/bin/Data/fb6b86f095bdd40dbbe9142e6fa348c5
+SHA1-Digest: jXq8k3f/si96BFOObd2MSDZd/0I=
+
+Name: assets/bin/Data/23561ec5be8a82641b1610baad12344b
+SHA1-Digest: lg6lmvHz0Jg0Lq4/H1Zh9NSnP1Y=
+
+Name: res/drawable-mdpi-v4/kamcord_profile_icon_inactive.png
+SHA1-Digest: yrfUm1fmeRa5vEafYZ6XpuNPPIs=
+
+Name: res/drawable/kamcord_tabbar_back_selector.xml
+SHA1-Digest: tsKV7evrkRo3J+lUG1jKWHUjyWo=
+
+Name: assets/bin/Data/53c959499f98f416d966495753e0e136
+SHA1-Digest: vW8NVCXdh3EOjzVF9nC6ytYz8sk=
+
+Name: assets/bin/Data/2ce8795e3d133e549b77469562e23c9b
+SHA1-Digest: W2+niL1svxG8W7pZ925xJoUbePE=
+
+Name: assets/bin/Data/93c84009f8f004b4f84697c8cb12dd63
+SHA1-Digest: uZp5oXinv2qB/DmxdjcxyxmSACQ=
+
+Name: assets/bin/Data/bbd7b2305396b624da6158e154fdd484
+SHA1-Digest: +Q5jGfykuh4b6dNy6VZL6qeBvCI=
+
+Name: assets/bin/Data/70e35e6320ce98943a4464c18a7c8c32
+SHA1-Digest: UjVbWkfwLB7GAPsUNdkOb9g1xFo=
+
+Name: assets/bin/Data/Managed/unibill.dll
+SHA1-Digest: 3cjW0OKJ3uGuyCMRlDVoMisjSEM=
+
+Name: res/drawable-xxhdpi-v4/kamcord_share_icon_active.png
+SHA1-Digest: yyeWNQszGEQIpXenD99X9sS8eGI=
+
+Name: res/layout/z_kamcord_fragment_share.xml
+SHA1-Digest: 5FkKcPMHegnCV+shm3lLfro+8AM=
+
+Name: assets/bin/Data/d2df94df339fa4e7ab1bd52558a733c2
+SHA1-Digest: XY2gWlN/luoDvY41RRwJf/l23pY=
+
+Name: assets/bin/Data/aae6de171e19c4598a4f8a460ceda574
+SHA1-Digest: GJdoeT8iTVdkwNH21Og/laj/TX0=
+
+Name: assets/bin/Data/c9d621f817a4b40f4a4076574587e1da
+SHA1-Digest: t3ZwfdsUzYFXkHto4ua0ckAfTY0=
+
+Name: assets/bin/Data/b7460a00d2f78cc48a5f7acbafe163e8
+SHA1-Digest: DsNOG5Izn+wOzET6HoN8Ckydn6s=
+
+Name: assets/bin/Data/16fb61da60311f442aa7a2e8555773ea
+SHA1-Digest: vdSRZvlSgxczKd1ddu2LtNoMBW0=
+
+Name: res/layout/z_kamcord_fragment_forgot_password.xml
+SHA1-Digest: DOSs7eM7jJ+asian3AMPzi4oR1A=
+
+Name: assets/bin/Data/786b2c678b63640be99e5c9195fd4545
+SHA1-Digest: SBiwO1iD2HINsVMSdh8fuJ8PBf0=
+
+Name: res/drawable-mdpi-v4/kamcord_watch_icon_inactive.png
+SHA1-Digest: ZieTtX5LZ/AwR3Jn2Gx5Jt+7WOU=
+
+Name: assets/bin/Data/581d364e1899e41beabf63873f70914d
+SHA1-Digest: BAEA9BgrTBfM480BHcxurJJ+ebg=
+
+Name: assets/bin/Data/sharedassets12.assets
+SHA1-Digest: mnCbviZRh3eQ59m2jst4nEiHIOM=
+
+Name: lib/armeabi-v7a/libmono.so
+SHA1-Digest: G6FS770EFZu45r1uj629Xugrvm4=
+
+Name: res/drawable-xhdpi-v4/app_icon.png
+SHA1-Digest: DUkFt26i495elrmPVlSIIvNkl6c=
+
+Name: assets/bin/Data/sharedassets28.assets.split10
+SHA1-Digest: 5x60Vp9Z3c+DnKiKiQalxHdTQB0=
+
+Name: assets/bin/Data/951f3f708a981d14cbf4e09776f1b41c
+SHA1-Digest: V9gGPvwizNZsVb1NAgExZEqqWGM=
+
+Name: assets/bin/Data/sharedassets28.assets.split12
+SHA1-Digest: yyPRdZ/Js+fdBujhY7SpqNiNh1E=
+
+Name: res/layout/z_kamcord_fragment_change_creds.xml
+SHA1-Digest: r/F4VBhGf5x6rGXsy7vaLn3hDDk=
+
+Name: assets/bin/Data/sharedassets28.assets.split11
+SHA1-Digest: XWQjcnGuZDONuXp29wusigBc7jU=
+
+Name: assets/bin/Data/c2242e9fdd2ff43aea6186ccd375b9e1
+SHA1-Digest: +kqMpvtdCF2I8bTX82jJRvQZN/k=
+
+Name: assets/bin/Data/065e02ce5c5ec66429de34a0eabdf3f1
+SHA1-Digest: xI1DR4ohzwrhgeHqeiJhLl8YjAw=
+
+Name: res/drawable-mdpi-v4/kamcord_share_icon_active.png
+SHA1-Digest: 2BdLvoyD5zE6LmBP1pBkEo5z0ZY=
+
+Name: assets/bin/Data/e07c4f51dc05f4fa0ae31a30cecec168
+SHA1-Digest: NFQg/oIHehNN39wMO9BRJtREvtw=
+
+Name: assets/bin/Data/a968a8e17bac3e2458d5092f7a7205c4
+SHA1-Digest: N7lq7NmVU+50D5EssUSCmPfiDHU=
+
+Name: res/drawable-mdpi-v4/kamcord_twitter.png
+SHA1-Digest: /TYZy7w+2PnTJFNfbG9oL7B1Fag=
+
+Name: res/drawable-hdpi-v4/kamcord_play_overlay.png
+SHA1-Digest: Gputer2dJVEOmqnNnDp47fzga6g=
+
+Name: assets/bin/Data/c732fab12bc2a4c3b825b5cb84169a64
+SHA1-Digest: THuHwsq6/LKEpM2PCLLhho9aGho=
+
+Name: assets/bin/Data/fdfd17f44c2ba794f8d068b833958b81
+SHA1-Digest: mNW5CP6eCRc/nYd0JCcOx2OVLj8=
+
+Name: res/drawable-mdpi-v4/kamcord_share_icon_inactive.png
+SHA1-Digest: LN9EfuwNRX+ROkzXg5HWdBPIKsE=
+
+Name: assets/bin/Data/sharedassets4.assets
+SHA1-Digest: SORUWqkDUfvq7VEkfPO1cqA8rTQ=
+
+Name: assets/bin/Data/ba35d7e7da6804958953f59948ff7a00
+SHA1-Digest: Y4fmhFuWNMmhk9SVRQFJumPwWsM=
+
+Name: assets/bin/Data/sharedassets10.assets.split0
+SHA1-Digest: B1uSo/Jiy0xzcAizDHxK7JRsgp8=
+
+Name: res/drawable-xhdpi-v4/kamcord_play_overlay.png
+SHA1-Digest: 083+OT+S4TG9bIwPH9UV4r1X8z4=
+
+Name: assets/bin/Data/sharedassets10.assets.split2
+SHA1-Digest: n4wnayAjfLzzECldAlY1g3Utnow=
+
+Name: assets/bin/Data/sharedassets10.assets.split1
+SHA1-Digest: 4nUAhqh1WStArJ7YlLj+doTOMSs=
+
+Name: assets/bin/Data/sharedassets10.assets.split3
+SHA1-Digest: AaQmMlBvdiPn8I/qozh4BffnKxw=
+
+Name: res/drawable-xhdpi-v4/kamcord_share_icon_active.png
+SHA1-Digest: JSzpSFSDP+N4Y8OwgMCgmISlnhg=
+
+Name: assets/bin/Data/1da6f8367fbe7454ebb850836a5ed0b0
+SHA1-Digest: 7Z/dKF/jRoyJ3+Vp5JU9Ff+kBto=
+
+Name: assets/bin/Data/c84dc08ce173e48d7ae85c43ad9abaed
+SHA1-Digest: l/7joBERepAHym1B8dbmPQ0AgUg=
+
+Name: assets/bin/Data/75917338bc1724546bb30138e18ef991
+SHA1-Digest: +wbyhiOODbeIyLh+g7jHr7MGdpw=
+
+Name: res/drawable-hdpi-v4/kamcord.png
+SHA1-Digest: dTix23bOfOVIqdu1UBXvaTg+cDw=
+
+Name: assets/bin/Data/60e1d0a96221932478bd7120d0e366c9
+SHA1-Digest: jqclYy/vr5QsWU6BYw4A6+iK3vk=
+
+Name: assets/bin/Data/12aeba5979544df46943fcd477740529
+SHA1-Digest: MLdZmgFvimvHE7n4J2nA3A1UfMs=
+
+Name: res/drawable-mdpi-v4/kamcord_watch_icon_active.png
+SHA1-Digest: d5zND/jqhyOjTseD8mB2q86HLhU=
+
+Name: assets/bin/Data/7244c528d78e34dad9f03906bbe55e9f
+SHA1-Digest: uLDIZFkokWsZBGyY//jIZtnxImc=
+
+Name: res/layout-land/z_kamcord_activity.xml
+SHA1-Digest: rjKThriedjOPjPsXyA4y2UcnEa0=
+
+Name: res/drawable-xhdpi-v4/kamcord_twitter.png
+SHA1-Digest: 5Dvidcy5M5Rfp23PxtChhDKafBk=
+
+Name: assets/bin/Data/ec07002c4d4cf6c4ca39b7466321fdee
+SHA1-Digest: GEpmB0pIL9DaUPDXpFt6nI/es0s=
+
+Name: res/drawable-xxhdpi-v4/kamcord_twitter.png
+SHA1-Digest: u4FfQ49oO803gtaY6W3c3QY930o=
+
+Name: res/drawable/kamcord_rounded_bottom_left_selector.xml
+SHA1-Digest: 5h2m8g2oUW+K+B1DMoBYWVBBf3E=
+
+Name: res/drawable/kamcord_tab_background_selector.xml
+SHA1-Digest: l2UaUmip3EffMCEoiL2kqB1CNVI=
+
+Name: assets/bin/Data/sharedassets23.assets.split8
+SHA1-Digest: 8BTpSXBA7+CcMBHRLUs9i0qkjXc=
+
+Name: assets/bin/Data/sharedassets23.assets.split7
+SHA1-Digest: X8CAyrYO3tq8vOXuhU13zIsZPKo=
+
+Name: assets/bin/Data/sharedassets23.assets.split4
+SHA1-Digest: jTmunWftK8B7hGVw3Ae8/cIKeDc=
+
+Name: assets/bin/Data/sharedassets23.assets.split3
+SHA1-Digest: lV+yjZbTlnDGbdeRY3K67Xx0d1Y=
+
+Name: assets/bin/Data/6194bba6405b6354b92566b9209e1551
+SHA1-Digest: bzM+SmGBeIY56OdzqdhLaFFR/oo=
+
+Name: assets/bin/Data/sharedassets23.assets.split6
+SHA1-Digest: qopjeXJjLJFpkifYz6NVXK2Uc3A=
+
+Name: assets/bin/Data/88da5970299a24e00854e89a9f4d826e
+SHA1-Digest: nOHmd05aRJYuuhzK8jQixh8U60w=
+
+Name: assets/bin/Data/sharedassets23.assets.split5
+SHA1-Digest: rSZDQImiBJX5F4Wo0rSudxBj0kA=
+
+Name: assets/bin/Data/unity default resources
+SHA1-Digest: VlzbmUMs5w/zV607TEuFppBHZtk=
+
+Name: res/drawable-hdpi-v4/app_icon.png
+SHA1-Digest: u/KjU5JADbb699UUVNZ0ffFY6pQ=
+
+Name: assets/bin/Data/6ea566fce16b54730b6bdc309821413f
+SHA1-Digest: FfTOdbgikLLlgetl+x8fRO1eSuc=
+
+Name: assets/bin/Data/a493af9deba8c4da7a4412d9ceb001e8
+SHA1-Digest: 3KzKB3CZ1miiWF6WI+06i8D4MVc=
+
+Name: assets/bin/Data/0d40f0c724d3a4d948fa5112211962b9
+SHA1-Digest: DJXT0evhR3WM4Z01Er2Z48f7mDc=
+
+Name: assets/bin/Data/c9c1a6cb96e3e4efa915415088b59381
+SHA1-Digest: YbLKF3qtFJMA6jcnOaZBSqZnxWQ=
+
+Name: res/drawable-hdpi-v4/kamcord_profile_icon_active.png
+SHA1-Digest: clCxNgc0v2uMqmxi08zSTeA14xs=
+
+Name: res/drawable/kamcord_seekbar_thumb_style.xml
+SHA1-Digest: an9yKWEqYTvgtmMNp3hhs7P7HRU=
+
+Name: assets/bin/Data/sharedassets23.assets.split0
+SHA1-Digest: 9iHGF2P3GpqeMyQ4eDkV3zd6UYE=
+
+Name: assets/bin/Data/3746cfd63bf3249fdac68b664bea770f
+SHA1-Digest: 0QXHqwDF4K34a9/bX+GsHkPjBPQ=
+
+Name: assets/bin/Data/sharedassets23.assets.split2
+SHA1-Digest: l0O8p3A86BZMBlAOGd3KEL1guXE=
+
+Name: assets/bin/Data/9b5fc5c520d2c4efa89dc9e39c792b7a
+SHA1-Digest: sl3b3NgH8fE3rtr6l+j9h6gy37s=
+
+Name: assets/bin/Data/sharedassets23.assets.split1
+SHA1-Digest: tEPfAZLrSggACgBugsFK/e2RvZY=
+
+Name: res/drawable-xhdpi-v4/tw_widget_progressbar_effect_holo_light.pn
+ g
+SHA1-Digest: EJJbqEtdd/7ZXxiEk6OuT1liDCw=
+
+Name: res/drawable-xxhdpi-v4/kamcord_youtube.png
+SHA1-Digest: xEHdQZWqQtDIdXSvWjKTKo98eVs=
+
+Name: res/drawable/kamcord_title_gradient.xml
+SHA1-Digest: A5zk8Bk4ueOxdJRG2buA21OPvu0=
+
+Name: res/drawable-hdpi-v4/tw_widget_progressbar_holo_light.png
+SHA1-Digest: F0s1AhgRvHgSL8MlR7Vli3yUSCk=
+
+Name: assets/bin/Data/a959d20208b1a69489e9b147f982a983
+SHA1-Digest: pPCmTk4MfvoKPir76AvwH4r9X4A=
+
+Name: assets/bin/Data/f78ca542a02b24c46a4b5cde337f9f45
+SHA1-Digest: GHiWD7VUmkIfURw34b+p06ydFws=
+
+Name: assets/bin/Data/1792989a5a33779428d2dbe9a9430605
+SHA1-Digest: q6qSVp2x0h6WUxe31Z23aIJoUK4=
+
+Name: assets/bin/Data/d1ebcd00c1d17d441abe69a60007327e
+SHA1-Digest: sGnU6N71nvTTIgMfP+KcUxDrXB0=
+
+Name: assets/bin/Data/6f500b76ea8fc48e59b9bad21d1ec0e4
+SHA1-Digest: bTn3OehPoGndWz1tDlwEosi62MQ=
+
+Name: assets/bin/Data/level1.split0
+SHA1-Digest: 7rIdp6rL3LhlYHf+rb3A6hOqwss=
+
+Name: res/drawable/kamcord_share_icon.xml
+SHA1-Digest: hf6nxwMfxO5iZrvaAF2lu5sw7Po=
+
+Name: assets/bin/Data/level1.split1
+SHA1-Digest: Fe92nT9cy4NXnzXQuH3mCcwTCLY=
+
+Name: assets/bin/Data/7c3a7b8d8dea44e3ebee143bfc829dbd
+SHA1-Digest: G8rqnjLZAbqm0HEBkbbQ/4I+TeM=
+
+Name: assets/bin/Data/sharedassets13.assets
+SHA1-Digest: 8aNJaOY8GcGXcYzwrpf9zSDgrww=
+
+Name: assets/bin/Data/d398fdf1c959649c7acd7aaed3d0ad8d
+SHA1-Digest: cPYUynTPPpEBfEc+ZO/i0LEplgg=
+
+Name: assets/bin/Data/d26795ca0b0b74b0b9f3989686ae76ef
+SHA1-Digest: CC7HwIowyfHRGFl9ANhmcVm/NKA=
+
+Name: assets/bin/Data/c4fad746102294a488b137249e1935e6
+SHA1-Digest: tikhJMbVhKlBvtEs3TNeuebDsmE=
+
+Name: assets/bin/Data/348abc2e88fe945dca0fbf4f85002470
+SHA1-Digest: zp+4Zv9sZW/x/l2Zc1i0f/M80LA=
+
+Name: assets/bin/Data/86e0b16f852854a6785f534de7eaefe9
+SHA1-Digest: PNOnlqXK9M1jlvala8tzPaVKEZA=
+
+Name: res/drawable-xhdpi-v4/kamcord_share_icon_inactive.png
+SHA1-Digest: 9RZXLk2vLGjQqQKMC02p2OeAjJg=
+
+Name: res/drawable/kamcord_player_next_icon.png
+SHA1-Digest: aeaEfjUO9cIzFmU5UufCT0SvI44=
+
+Name: assets/bin/Data/47214062d7df2441682742ea89ed1f73
+SHA1-Digest: FxIoFJakXXwC+hwpAaQ7JEA5DXg=
+
+Name: res/drawable-xhdpi-v4/kamcord_facebook.png
+SHA1-Digest: DzCrmnd78IaR5r0btJNwzlygYZY=
+
+Name: assets/bin/Data/eaa1beaec054742b58b5422eaaf023f1
+SHA1-Digest: QWf6yHuQYPNKvZ8+3T0mmjwZZro=
+
+Name: res/drawable-hdpi-v4/kamcord_mic.png
+SHA1-Digest: 57iDRZyk6kOI+J5LOyCYxvJCM9o=
+
+Name: assets/bin/Data/871253f1232e249f1bd1ba085b342175
+SHA1-Digest: mL9WlSZ4BBkCxt28OgD3GikSscE=
+
+Name: res/drawable-xxhdpi-v4/tw_widget_progressbar_effect_holo_light.p
+ ng
+SHA1-Digest: M16tkWBoPLN/UfaenbgxCzzwayU=
+
+Name: res/drawable-xxhdpi-v4/kamcord.png
+SHA1-Digest: p4qL59IlOTKjxrrPuM9+AkY3mYA=
+
+Name: assets/bin/Data/c59961a2e6eff4cc1b58aeb2c4e7d5e1
+SHA1-Digest: GIu/4wfJ4L3Hmittaw10qs+knlg=
+
+Name: assets/bin/Data/sharedassets3.assets
+SHA1-Digest: ajh5zopBNzeBb/Yz6qsFLIYOOu8=
+
+Name: assets/bin/Data/a2915b7e192061f44b5ee719230fd542
+SHA1-Digest: 4jOGZkszYW7y5hfiwumVH6s9+iM=
+
+Name: assets/bin/Data/3626a25d5b8a84c7088c82ab64cc7c3a
+SHA1-Digest: EL9uA8V/mHShFrWGY+Q1NCkdPes=
+
+Name: res/drawable/kamcord_seekbar_progress.xml
+SHA1-Digest: nNn0UrOrxCEu4jOUofv+tL4BR28=
+
+Name: res/drawable-xxhdpi-v4/kamcord_back_icon.png
+SHA1-Digest: Sg4Pwdi6ArUr4WnrT47V37WcNg4=
+
+Name: res/layout/z_kamcord_merge_platform.xml
+SHA1-Digest: syAZWI5MQT5S6FUFlVLpMuDgMV8=
+
+Name: res/drawable-hdpi-v4/kamcord_watch_icon_inactive.png
+SHA1-Digest: zDSDLyb+lh+IFdvLkWHF07oAtRI=
+
+Name: res/drawable-xhdpi-v4/tw_widget_progressbar_holo_light.png
+SHA1-Digest: 12iNWDMnNd03QaXDN1+N8LbGEhc=
+
+Name: res/drawable/tw_widget_progressbar_holo_light.png
+SHA1-Digest: F0s1AhgRvHgSL8MlR7Vli3yUSCk=
+
+Name: assets/bin/Data/2b8635c21954d4f5c81b469d2b001c6b
+SHA1-Digest: tcvX1uT6IbjBU57N+/BfZ2uvdAA=
+
+Name: assets/bin/Data/1e151393df889e545a0c0e295799dd39
+SHA1-Digest: fRKxw99nkeRYCDdrWNxOS25ofOM=
+
+Name: res/layout/z_kamcord_media_controller.xml
+SHA1-Digest: BYYSA5MgFxEofr9NT3j0BWWmGYI=
+
+Name: assets/bin/Data/Managed/ICSharpCode.SharpZipLib.dll
+SHA1-Digest: ep35wl1JaQtqPEUWB9MRqGaxMfQ=
+
+Name: assets/bin/Data/level24.split0
+SHA1-Digest: IWDZ98S727RwFp7KVCnpVVg1LxI=
+
+Name: lib/armeabi-v7a/libkamcordaudio.so
+SHA1-Digest: n3QDgD4ZkQHyLqU/YiVNlmOm2NA=
+
+Name: res/layout/z_kamcord_fragment_web.xml
+SHA1-Digest: KJ24znQpWOKvUCTsye7QbmC9juo=
+
+Name: assets/bin/Data/a5f3e728341b84afc870d98b9091abd0
+SHA1-Digest: 1UzJ6UI0fLziFKfIXy+zgrVcVs8=
+
+Name: assets/bin/Data/e3cf7fba96c9348ce8f687256e77be37
+SHA1-Digest: 1k4MTgZBxp4q4yJvuHpS/TkBOi4=
+
+Name: assets/bin/Data/f9585a629f3ca7a41863121f0b99af20
+SHA1-Digest: CORcl8Pdws0UPM8cyKgcygBtdm0=
+
+Name: assets/bin/Data/960303777ae4a0b4aad66a1895d6d8cd
+SHA1-Digest: gYf4JYZTn88FfyEySteO5bddqTQ=
+
+Name: assets/bin/Data/bcc881012ce9b1a44a003cb95f5ac882
+SHA1-Digest: 01/jxMcLiLK+LG29AjnkW+hjWxM=
+
+Name: assets/bin/Data/db9a4f4af6fb249f7a332c8c483198c0
+SHA1-Digest: mPmHlD9eKveMHrxJO4kI+R76uVc=
+
+Name: assets/bin/Data/level24.split1
+SHA1-Digest: AAZcrJkPnhEiClxMxiHLEsRcOeg=
+
+Name: res/drawable-xhdpi-v4/kamcord_facebook_gray.png
+SHA1-Digest: DFOZvSx5+UyyXrVuez+7lzIi6AM=
+
+Name: assets/bin/Data/e520bfe782a484e4fab867180ad7d2f1
+SHA1-Digest: fe65ZehhPG1H5n9GVKse4I0IfJM=
+
+Name: assets/bin/Data/453698b11548f45698d583a907bb3a53
+SHA1-Digest: KmBxE70NqQsL3odJvzltiOhQfYw=
+
+Name: res/drawable-hdpi-v4/kamcord_twitter_gray.png
+SHA1-Digest: nZAr+nRps9NEys+ZDKMvbpQnLFM=
+
+Name: assets/bin/Data/c4557baaffd77491e92c92a04214f8d7
+SHA1-Digest: iaVHz1FymFjO/yAj08qdQBHgnF0=
+
+Name: assets/bin/Data/349b29094eddd4a99a2bccb561c2b19d
+SHA1-Digest: b+2DhmCQirwjhlqqPbn8PYmuvI4=
+
+Name: res/layout/z_kamcord_activity.xml
+SHA1-Digest: jTN9fhnqw2Lxrx3oi+iku8Qf4Uc=
+
+Name: assets/bin/Data/561cc688e3f96fc44a8ce88df6a2ed7b
+SHA1-Digest: gPC3/V0MrM2yAmRDRCR+ZxWM0Fk=
+
+Name: assets/bin/Data/d94134510d01f4724bee7260fa07a285
+SHA1-Digest: ixCVgtNmQL+MEZxnwOws5FN74PI=
+
+Name: res/drawable-xxhdpi-v4/kamcord_twitter_gray.png
+SHA1-Digest: GQEj0xL/o96nRlsd5VtFp018lWs=
+
+Name: res/drawable/kamcord_watch_icon.xml
+SHA1-Digest: YdQvX2hRdDTTAzoisTIKpTTVU3E=
+
+Name: assets/bin/Data/acbaa8e0a2def8a4f8979ce9b0397d6a
+SHA1-Digest: WM7SP9Vv1y6nR/Gbd3ER8a3DJvY=
+
+Name: res/color/kamcord_share_widget_text.xml
+SHA1-Digest: DrhqBtzk3MqOB1KwBRJ2u6mOQKU=
+
+Name: assets/bin/Data/sharedassets30.assets.split0
+SHA1-Digest: oVYw6pE9GxBnT17lj7q94Amsq14=
+
+Name: res/drawable-hdpi-v4/kamcord_watch_icon_active.png
+SHA1-Digest: I/IEYkcXq7Ji85qGtSMwF6o7/dM=
+
+Name: assets/bin/Data/110e067658ce148bf962855d7dba2e31
+SHA1-Digest: +LS1ayR3DNrl9nBSt+GtbN/bS84=
+
+Name: assets/bin/Data/sharedassets30.assets.split1
+SHA1-Digest: x8+ZCM3JstlopDNIePnSkcJ9pfo=
+
+Name: res/layout-sw600dp-v13/z_kamcord_fragment_share.xml
+SHA1-Digest: jrWyvXWGipdOjF+Wcrlmoxn9W+M=
+
+Name: res/drawable-xhdpi-v4/kamcord_youtube_gray.png
+SHA1-Digest: 7tWDnS/dtC+HUqt5bKZmd8n9++E=
+
+Name: assets/bin/Data/1e96d01379f364d5cb17d206205deb57
+SHA1-Digest: UbpyYFjJCuxTmaDk8EAIQ88PGuA=
+
+Name: assets/bin/Data/7c0bf1070b50242f89d233b15fd495f0
+SHA1-Digest: qYeq6xev+A7a2SkSDSWOpzHYbao=
+
+Name: assets/bin/Data/7b0cf302cd9f9431389b3de0e9e7eb00
+SHA1-Digest: fL4h9rizhBUi4o7ezO66hMK384w=
+
+Name: assets/bin/Data/a3f8a363ac12842b680c0c2653076af4
+SHA1-Digest: J200ScfxpNYU0r5PVsPAYBuQgnY=
+
+Name: res/drawable/kamcord_mail.png
+SHA1-Digest: a/m8ezhOxnPHppW0k8xj39GfGW8=
+
+Name: classes.dex
+SHA1-Digest: ex64WEYg1EWNV40QXc5mu9yTObg=
+
+Name: assets/bin/Data/5e4f5945c634c4261985dc9a1204b410
+SHA1-Digest: mKMFwwmWoz/jej9yeT6M2Av3jy8=
+
+Name: res/drawable-xhdpi-v4/kamcord_mic.png
+SHA1-Digest: MlewZnGKdPRT7UL8CSmThYAMvWQ=
+
+Name: res/drawable/kamcord_seekbar_buffer.xml
+SHA1-Digest: Yj9lQkhUjd7yuLL9XkeNUWgNdAQ=
+
+Name: res/drawable/kamcord_seekbar_thumb.xml
+SHA1-Digest: S/1g8pXMfGDwkfaoYxRruQbSuko=
+
