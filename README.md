@@ -27,9 +27,46 @@ Archive/              Old backups, earlier attempts, docs
 ```csharp
 static Extensions()
 {
-    // creates /storage/emulated/0/CNRMods/ if missing
-    // scans every *.dll in that folder
-    // for each DLL: loads it and calls CNRMods.ModEntry.Load()
+    try
+    {
+        Debug.Log("[CNRModLoader] Initializing mod system (from Extensions static constructor)...");
+        string text = "/storage/emulated/0/CNRMods";
+        if (!Directory.Exists(text))
+        {
+            Debug.Log("[CNRModLoader] Creating mod directory: " + text);
+            Directory.CreateDirectory(text);
+        }
+        try
+        {
+            string[] files = Directory.GetFiles(text, "*.dll");
+            Debug.Log("[CNRModLoader] Found " + files.Length + " mod DLLs");
+            foreach (string path in files)
+            {
+                try
+                {
+                    Debug.Log("[CNRModLoader] Loading mod: " + Path.GetFileName(path));
+                    Assembly.Load(File.ReadAllBytes(path))
+                        .GetType("CNRMods.ModEntry")
+                        ?.GetMethod("Load", BindingFlags.Static | BindingFlags.Public)
+                        ?.Invoke(null, null);
+                    Debug.Log("[CNRModLoader] Successfully loaded: " + Path.GetFileName(path));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError("[CNRModLoader] Failed to load " + Path.GetFileName(path) + ": " + ex.Message);
+                }
+            }
+        }
+        catch (Exception ex2)
+        {
+            Debug.LogError("[CNRModLoader] Error scanning mod directory: " + ex2.Message);
+        }
+        Debug.Log("[CNRModLoader] Mod system initialization complete");
+    }
+    catch (Exception ex3)
+    {
+        Debug.LogError("[CNRModLoader] Critical error in mod loader: " + ex3.Message);
+    }
 }
 ```
 
@@ -171,8 +208,7 @@ namespace CNRMods          // must match for static-ctor loader
 | IP redirect (Photon → custom server) | ✅ Done |
 | Discovery / room listing (custom server) | ✅ Done |
 | HUD editor + settings overlay | ✅ Done |
-| Photon ↔ custom UDP packet translation | 🔄 In progress |
-| Room loading / joining | ⬜ Todo |
-| Full handshake + live matches | ⬜ Todo |
-| Automated tests, CI | ⬜ Todo |
-| Packaging, signing, public release | ⬜ Todo |
+| Protocol (Photon forced into TCP mode — no UDP translation needed) | ✅ Done |
+| Room loading / joining | ✅ Done |
+| Full handshake + live matches | ✅ Done |
+| Packaging, signing, public release | ✅ Done |
