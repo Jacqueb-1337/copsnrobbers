@@ -39,8 +39,42 @@ namespace CNRMods
                 Log("Load() exception: " + ex);
             }
 
-            // Initialise additional mods bundled into this DLL
             CustomMapsEntry.Initialize();
+            LoadExternalMods();
+        }
+
+        // Scan /sdcard/CNRMods/ for any .dll other than IPRedirectMod.dll, load it, and call
+        // the first public static Load() method found — that is the convention for separate mods.
+        private static void LoadExternalMods()
+        {
+            const string dir = "/storage/emulated/0/CNRMods";
+            try
+            {
+                string[] files = System.IO.Directory.GetFiles(dir, "*.dll");
+                foreach (string path in files)
+                {
+                    string name = System.IO.Path.GetFileName(path);
+                    if (name.Equals("IPRedirectMod.dll", StringComparison.OrdinalIgnoreCase)) continue;
+                    try
+                    {
+                        Log("LoadExternalMods: loading " + name);
+                        byte[] data = System.IO.File.ReadAllBytes(path);
+                        System.Reflection.Assembly asm = System.Reflection.Assembly.Load(data);
+                        bool found = false;
+                        foreach (Type t in asm.GetTypes())
+                        {
+                            System.Reflection.MethodInfo m = t.GetMethod("Load",
+                                System.Reflection.BindingFlags.Public |
+                                System.Reflection.BindingFlags.Static,
+                                null, Type.EmptyTypes, null);
+                            if (m != null) { m.Invoke(null, null); found = true; break; }
+                        }
+                        if (!found) Log("LoadExternalMods: no Load() entry point in " + name);
+                    }
+                    catch (Exception ex) { Log("LoadExternalMods: error loading " + name + ": " + ex.Message); }
+                }
+            }
+            catch (Exception ex) { Log("LoadExternalMods: " + ex.Message); }
         }
 
         private static string ReadServerIp()
@@ -84,12 +118,32 @@ namespace CNRMods
         private DateTime _lastUpdateLog = DateTime.MinValue;
         private int _updateLogCount = 0;
 
+        private static readonly string[] ConnectScenes = { "MultiplayerSelect", "CNRConnectMenu" };
+        private bool _connected = false;
+
         private void Start()
         {
             Application.runInBackground = true;
             _lastUpdateLog = DateTime.Now;
-            ModEntry.Log("Start() called — starting RedirectCoroutine");
-            StartCoroutine(RedirectCoroutine());
+            ModEntry.Log("Start() — scene=" + Application.loadedLevelName);
+        }
+
+        private void OnLevelWasLoaded(int level)
+        {
+            string scene = Application.loadedLevelName;
+            ModEntry.Log("OnLevelWasLoaded: scene=" + scene + " level=" + level);
+
+            bool isConnectScene = System.Array.IndexOf(ConnectScenes, scene) >= 0;
+            if (isConnectScene)
+            {
+                ModEntry.Log("Entered connect scene — starting LAN connection");
+                _connected = false;
+                StartCoroutine(RedirectCoroutine());
+            }
+            else if (scene != "MainMenu")
+            {
+                ModEntry.Log("Scene '" + scene + "' is not a connect scene and not MainMenu — leaving connection untouched");
+            }
         }
 
         private void Update()
