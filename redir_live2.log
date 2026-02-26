@@ -1,0 +1,145 @@
+
+[18:53:25] === IPRedirectMod Load() ===
+[18:53:25] Creating redirect MonoBehaviour for IP: 172.28.48.1
+[18:53:25] Start(): launching service thread
+[18:53:25] Start(): service thread IsAlive=True
+[18:53:25]   ServerAddress = 172.28.48.1
+[18:53:25]   ServerPort = 5055
+[18:53:25]   AppID = CNRLan
+[18:53:25]   HostType = SelfHosted
+[18:53:25] Override applied → 172.28.48.1:5055  AppID=CNRLan
+[18:53:25] Disconnect() called
+[18:53:25] Photon disconnected, swapping to TCP then reconnecting
+[18:53:25] SwapToTcp: current peerBase is EnetPeer
+[18:53:25] SwapToTcp: usedProtocol = Tcp
+[18:53:25] SwapToTcp: peerBase swapped to TPeer - client will connect via TCP
+[18:53:25] requestSecurity = false → will use direct OpAuthenticate (no DH)
+[18:53:25] About to call ConnectUsingSettings...
+[18:53:25] ConnectUsingSettings() returned OK → connecting to 172.28.48.1:5055
+[18:53:25] Monitoring connection state (30s timeout)...
+[18:53:25] connState=1  detailState=2  (0.0s elapsed)
+[18:53:25] [heartbeat] connState=1  detailState=2  (0.0s elapsed)
+[18:57:06] === IPRedirectMod Load() ===
+[18:57:06] Creating redirect MonoBehaviour for IP: 172.28.48.1
+[18:57:06] Start(): launching service thread
+[18:57:06] Start(): service thread IsAlive=True
+[18:57:06]   ServerAddress = 172.28.48.1
+[18:57:06]   ServerPort = 5055
+[18:57:06]   AppID = CNRLan
+[18:57:06]   HostType = SelfHosted
+[18:57:06] Override applied → 172.28.48.1:5055  AppID=CNRLan
+[18:57:06] Disconnect() called
+[18:57:06] Photon disconnected, swapping to TCP then reconnecting
+[18:57:06] SwapToTcp: current peerBase is EnetPeer
+[18:57:06] SwapToTcp: usedProtocol = Tcp
+[18:57:06] SwapToTcp: peerBase swapped to TPeer - client will connect via TCP
+[18:57:06] requestSecurity = false → will use direct OpAuthenticate (no DH)
+[18:57:06] About to call ConnectUsingSettings...
+[18:57:06] ConnectUsingSettings() returned OK → connecting to 172.28.48.1:5055
+[18:57:06] Monitoring connection state (30s timeout)...
+[18:57:06] connState=1  detailState=2  (0.0s elapsed)
+[18:57:06] [heartbeat] connState=1  detailState=2  (0.0s elapsed)
+[18:59:50] === IPRedirectMod Load() ===
+[18:59:50] Creating redirect MonoBehaviour for IP: 172.28.48.1
+[18:59:50] Start(): launching service thread
+[18:59:50] Start(): service thread IsAlive=True
+[18:59:50]   ServerAddress = 172.28.48.1
+[18:59:50]   ServerPort = 5055
+[18:59:50]   AppID = CNRLan
+[18:59:50]   HostType = SelfHosted
+[18:59:50] Override applied → 172.28.48.1:5055  AppID=CNRLan
+[18:59:50] Disconnect() called
+[18:59:50] Photon disconnected, swapping to TCP then reconnecting
+[18:59:50] SwapToTcp: current peerBase is EnetPeer
+[18:59:50] SwapToTcp: usedProtocol = Tcp
+[18:59:50] SwapToTcp: peerBase swapped to TPeer - client will connect via TCP
+[18:59:50] requestSecurity = false → will use direct OpAuthenticate (no DH)
+[18:59:50] About to call ConnectUsingSettings...
+[18:59:50] ConnectUsingSettings() returned OK → connecting to 172.28.48.1:5055
+[18:59:50] Monitoring connection state (30s timeout)...
+[18:59:50] connState=1  detailState=2  (0.0s elapsed)
+[18:59:50] [heartbeat] connState=1  detailState=2  (0.0s elapsed)
+[19:03:37] === IPRedirectMod Load() ===
+[19:03:37] Creating redirect MonoBehaviour for IP: 172.28.48.1
+[19:03:37] Start(): launching service thread
+[19:03:37] Start(): timer created
+[19:03:37]   ServerAddress = 172.28.48.1
+[19:03:37]   ServerPort = 5055
+[19:03:37]   AppID = CNRLan
+[19:03:37]   HostType = SelfHosted
+[19:03:37] Override applied → 172.28.48.1:5055  AppID=CNRLan
+[19:03:37] Disconnect() called
+[19:03:37] Photon disconnected, swapping to TCP then reconnecting
+[19:03:37] SwapToTcp: current peerBase is EnetPeer
+[19:03:37] SwapToTcp: usedProtocol = Tcp
+[19:03:37] SwapToTcp: peerBase swapped to TPeer - client will connect via TCP
+[19:03:37] requestSecurity = false → will use direct OpAuthenticate (no DH)
+[19:03:37] About to call ConnectUsingSettings...
+[19:03:37] ConnectUsingSettings() returned OK → connecting to 172.28.48.1:5055
+[19:03:37] Monitoring connection state (30s timeout)...
+[19:03:37] connState=1  detailState=2  (0.0s elapsed)
+[19:03:37] [heartbeat] connState=1  detailState=2  (0.0s elapsed)
+[19:05:52] === IPRedirectMod Load() ===
+[19:05:52] Creating redirect MonoBehaviour for IP: 172.28.48.1
+[19:05:52] Start(): launching service thread
+[19:05:52] Start(): timer created
+[19:05:52]   ServerAddress = 172.28.48.1
+[19:05:52]   ServerPort = 5055
+[19:05:52]   AppID = CNRLan
+[19:05:52]   HostType = SelfHosted
+[19:05:52] Override applied → 172.28.48.1:5055  AppID=CNRLan
+[19:05:52] Disconnect() called
+[19:05:52] Photon disconnected, swapping to TCP then reconnecting
+[19:05:52] SwapToTcp: current peerBase is EnetPeer
+[19:05:52] SwapToTcp: usedProtocol = Tcp
+[19:05:52] SwapToTcp: peerBase swapped to TPeer - client will connect via TCP
+[19:05:52] requestSecurity = false → will use direct OpAuthenticate (no DH)
+[19:05:52] About to call ConnectUsingSettings...
+[19:05:52] ConnectUsingSettings() returned OK → connecting to 172.28.48.1:5055
+[19:05:52] Monitoring connection state (30s timeout)...
+[19:05:52] connState=1  detailState=2  (0.0s elapsed)
+[19:05:52] [heartbeat] connState=1  detailState=2  (0.0s elapsed)
+[19:23:11] === IPRedirectMod Load() ===
+[19:23:11] Creating redirect MonoBehaviour for IP: 172.28.48.1
+[19:23:11] Start(): setting up service mechanism
+[19:23:11] Start(): timer created
+[19:23:11] Start(): loopback socket ready on port 45745
+[19:23:11] Start(): service thread IsAlive=True
+[19:23:11]   ServerAddress = 172.28.48.1
+[19:23:11]   ServerPort = 5055
+[19:23:11]   AppID = CNRLan
+[19:23:11]   HostType = SelfHosted
+[19:23:11] Override applied → 172.28.48.1:5055  AppID=CNRLan
+[19:23:11] Disconnect() called
+[19:23:11] Photon disconnected, swapping to TCP then reconnecting
+[19:23:11] SwapToTcp: current peerBase is EnetPeer
+[19:23:11] SwapToTcp: usedProtocol = Tcp
+[19:23:11] SwapToTcp: peerBase swapped to TPeer - client will connect via TCP
+[19:23:11] requestSecurity = false → will use direct OpAuthenticate (no DH)
+[19:23:11] About to call ConnectUsingSettings...
+[19:23:11] ConnectUsingSettings() returned OK → connecting to 172.28.48.1:5055
+[19:23:11] Monitoring connection state (30s timeout)...
+[19:23:11] connState=1  detailState=2  (0.0s elapsed)
+[19:23:11] [heartbeat] connState=1  detailState=2  (0.0s elapsed)
+[19:29:37] === IPRedirectMod Load() ===
+[19:29:37] Creating redirect MonoBehaviour for IP: 172.28.48.1
+[19:29:37] Start(): setting up service mechanism
+[19:29:37] Start(): timer created
+[19:29:37] Start(): loopback socket ready on port 39623
+[19:29:37] Start(): service thread IsAlive=True
+[19:29:37]   ServerAddress = 172.28.48.1
+[19:29:37]   ServerPort = 5055
+[19:29:37]   AppID = CNRLan
+[19:29:37]   HostType = SelfHosted
+[19:29:37] Override applied → 172.28.48.1:5055  AppID=CNRLan
+[19:29:37] Disconnect() called
+[19:29:37] Photon disconnected, swapping to TCP then reconnecting
+[19:29:37] SwapToTcp: current peerBase is EnetPeer
+[19:29:37] SwapToTcp: usedProtocol = Tcp
+[19:29:37] SwapToTcp: peerBase swapped to TPeer - client will connect via TCP
+[19:29:37] requestSecurity = false → will use direct OpAuthenticate (no DH)
+[19:29:37] About to call ConnectUsingSettings...
+[19:29:37] ConnectUsingSettings() returned OK → connecting to 172.28.48.1:5055
+[19:29:37] Monitoring connection state (30s timeout)...
+[19:29:37] connState=1  detailState=2  (0.0s elapsed)  runInBg=True
+[19:29:37] [heartbeat] connState=1  detailState=2  (0.0s elapsed)  runInBg=True

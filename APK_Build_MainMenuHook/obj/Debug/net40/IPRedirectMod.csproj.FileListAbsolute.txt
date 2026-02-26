@@ -1,0 +1,6 @@
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\net40\IPRedirectMod.csproj.AssemblyReference.cache
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\net40\IPRedirectMod.GeneratedMSBuildEditorConfig.editorconfig
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\net40\IPRedirectMod.AssemblyInfoInputs.cache
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\net40\IPRedirectMod.AssemblyInfo.cs
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\net40\IPRedirectMod.csproj.CoreCompileInputs.cache
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\net40\IPRedirectMod.sourcelink.json

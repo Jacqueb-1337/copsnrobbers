@@ -1,0 +1,66 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "CNR LAN Server (WSA 172.28.48.1)",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "dotnet",
+            "args": ["run", "--project", "D:\\Projects\\copsnrobbers\\LAN_Server_OptionB", "-c", "Release", "--", "172.28.48.1"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "CNR LAN Server (WiFi 192.168.18.8)",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "dotnet",
+            "args": ["run", "--project", "D:\\Projects\\copsnrobbers\\LAN_Server_OptionB", "-c", "Release", "--", "192.168.18.8"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "CNR LAN Server (WSA + Phone)",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "dotnet",
+            "args": ["run", "--project", "D:\\Projects\\copsnrobbers\\LAN_Server_OptionB", "-c", "Release", "--", "172.28.48.1", "192.168.18.8"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "CNR LAN Server (ZeroTier)",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "dotnet",
+            // pass the ZeroTier IPv4 to both lanIp and advertisedIp so the master advertises it
+            "args": ["run", "--project", "D:\\Projects\\copsnrobbers\\LAN_Server_OptionB", "-c", "Release", "--", "172.29.99.63", "172.29.99.63"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Node CNR Server (WSA + ZeroTier)",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/node_server/index.js",
+            // 172.28.48.1  = WSA virtual adapter  (Android apps running on Windows)
+            // 172.29.99.63 = ZeroTier adapter      (physical phone on ZeroTier)
+            // The master server auto-picks the right address per connecting client.
+            "args": ["172.28.48.1", "172.29.99.63"],
+            "cwd": "${workspaceFolder}/node_server",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Node CNR Server (auto-detect all IPs)",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/node_server/index.js",
+            "args": [],
+            "cwd": "${workspaceFolder}/node_server",
+            "console": "integratedTerminal"
+        }
+    ]
+}
