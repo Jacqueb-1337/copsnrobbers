@@ -1,0 +1,12 @@
+Microsoft (R) Visual C# Compiler version 4.8.9232.0
+for C# 5
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+This compiler is provided as part of the Microsoft (R) .NET Framework, but only supports language versions up to C# 5, which is no longer the latest version. For compilers that support newer versions of the C# programming language, see http://go.microsoft.com/fwlink/?LinkID=533240
+
+c:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.dll: error CS1703: An assembly with the same identity 'System, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089' has already been imported. Try removing one of the duplicate references.
+apk_source\assets\bin\Data\Managed\System.dll: (Location of symbol related to previous error)
+c:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Core.dll: error CS1703: An assembly with the same identity 'System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089' has already been imported. Try removing one of the duplicate references.
+apk_source\assets\bin\Data\Managed\System.Core.dll: (Location of symbol related to previous error)
+apk_source\assets\bin\Data\Managed\mscorlib.dll: error CS1703: An assembly with the same identity 'mscorlib, Version=2.0.5.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e' has already been imported. Try removing one of the duplicate references.
+c:\Windows\Microsoft.NET\Framework64\v4.0.30319\mscorlib.dll: (Location of symbol related to previous error)

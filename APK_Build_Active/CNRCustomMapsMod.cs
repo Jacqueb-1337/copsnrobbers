@@ -56,7 +56,9 @@ namespace CNRMods
             "FreeRun12_1",  // mWWMapTexture[9]  "Christmas Town"
         };
 
-        // ── Extra scene slots to unlock — add more here as needed ──
+        // ── Extra scene slots — display name + which real scene to actually load ──
+        // FreeRun13_1+ exist in the APK but lack multiplayer game controller scripts,
+        // so we keep the custom name for the UI/room-list while loading a working base scene.
         static readonly string[] CUSTOM_MAPS =
         {
             "FreeRun13_1",
@@ -64,12 +66,21 @@ namespace CNRMods
             "FreeRun15_1",
         };
 
-        // ── Display names shown in the orange overlay while on a custom map ──
+        // Display names shown in the orange overlay
         static readonly Dictionary<string, string> CUSTOM_NAMES = new Dictionary<string, string>
         {
-            { "FreeRun13_1", "[MOD] Arena" },
-            { "FreeRun14_1", "[MOD] Open Field" },
-            { "FreeRun15_1", "[MOD] Rooftop" },
+            { "FreeRun13_1", "[MOD] Map 11" },
+            { "FreeRun14_1", "[MOD] Map 12" },
+            { "FreeRun15_1", "[MOD] Map 13" },
+        };
+
+        // Which real (working) scene to actually LoadLevel for each custom slot.
+        // Until proper scene injection is implemented, reuse existing multiplayer scenes.
+        static readonly Dictionary<string, string> CUSTOM_SCENE_LOAD = new Dictionary<string, string>
+        {
+            { "FreeRun13_1", "FreeRun3_1"  },
+            { "FreeRun14_1", "FreeRun5_1"  },
+            { "FreeRun15_1", "FreeRun8_1"  },
         };
 
         // combined, built in Awake
@@ -77,6 +88,8 @@ namespace CNRMods
 
         // Track whether we've hooked the buttons in the current scene load
         bool _hooked = false;
+        MSD_SubSceneInWorldWide _lastSubScene = (MSD_SubSceneInWorldWide)(-1);
+        int _virtualIdx = 0; // tracks position in _allMaps independently of mCurWWMapSelect
 
         // ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -90,58 +103,137 @@ namespace CNRMods
         void OnLevelWasLoaded(int level)
         {
             _hooked = false;
-            if (Application.loadedLevelName == "MultiplayerSelect")
-                StartCoroutine(HookButtons());
+            _lastSubScene = (MSD_SubSceneInWorldWide)(-1);
+        }
+
+        void Update()
+        {
+            if (_hooked) return;
+            if (Application.loadedLevelName != "MultiplayerSelect") return;
+
+            var msd = MultiplayerSelectDirector.mInstance;
+            if (msd == null) return;
+
+            if (msd.mCurWWSubScene != _lastSubScene)
+            {
+                ModEntry.Log("CustomMaps Update: mCurWWSubScene=" + msd.mCurWWSubScene);
+                _lastSubScene = msd.mCurWWSubScene;
+            }
+
+            if (msd.mCurWWSubScene != MSD_SubSceneInWorldWide.RoomCreate) return;
+
+            StartCoroutine(HookButtons());
+            _hooked = true;
         }
 
         IEnumerator HookButtons()
         {
-            // Give NGUI a moment to finish initialising before we iterate components
-            yield return new WaitForSeconds(0.25f);
+            yield return new WaitForSeconds(0.1f);
 
-            var allMsgs = (UIButtonMessage[])GameObject.FindObjectsOfType(typeof(UIButtonMessage));
+            // Resources.FindObjectsOfTypeAll includes inactive GameObjects (NGUI hides sub-panels)
+            var allBehaviours = (MonoBehaviour[])Resources.FindObjectsOfTypeAll(typeof(MonoBehaviour));
+            ModEntry.Log("HookButtons: scanning " + allBehaviours.Length + " behaviours (incl. inactive)");
             int hooked = 0;
-            foreach (var msg in allMsgs)
+            foreach (var comp in allBehaviours)
             {
-                if (msg.functionName == "ToWWNextMap" || msg.functionName == "ToWWPreMap")
+                if (comp.GetType().Name != "MapSelectButtonEvent") continue;
+
+                System.Reflection.FieldInfo btnField = comp.GetType().GetField("buttonName",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic);
+                if (btnField == null) continue;
+
+                string btnName = btnField.GetValue(comp).ToString();
+                ModEntry.Log("  MapSelectButtonEvent: " + btnName + " on " + comp.gameObject.name);
+
+                if (btnName == "WWMapNext" || btnName == "WWMapPre")
                 {
-                    msg.target = ((Component)this).gameObject;
+                    // Silence the original handler
+                    object nilVal = System.Enum.Parse(btnField.FieldType, "Nil");
+                    btnField.SetValue(comp, nilVal);
+
+                    // Add our handler
+                    var nav = comp.gameObject.AddComponent<MapNavButton>();
+                    nav.isNext = (btnName == "WWMapNext");
+                    nav.hook   = this;
                     hooked++;
-                    ModEntry.Log("Hooked UIButtonMessage: " + msg.functionName +
-                                 " on " + ((Component)msg).gameObject.name);
+                    ModEntry.Log("  -> HOOKED as " + (nav.isNext ? "Next" : "Pre"));
                 }
             }
             _hooked = hooked > 0;
+            // Sync virtual index to match current game-selected map
+            if (_hooked)
+            {
+                var msd = MultiplayerSelectDirector.mInstance;
+                if (msd != null)
+                {
+                    int existingIdx = Array.IndexOf(STANDARD_MAPS, msd.mCurWWMapSelect);
+                    if (existingIdx >= 0) _virtualIdx = existingIdx;
+                }
+            }
             ModEntry.Log("Button hook complete — hooked " + hooked + " button(s)");
         }
 
-        // ── Navigation handlers (called by NGUI via SendMessage) ──────────────────
+        // ── Photon callbacks ──────────────────────────────────────────────────
 
-        /// <summary>Called when the player taps the right-arrow on the map selector.</summary>
-        public void ToWWNextMap()
+        /// <summary>
+        /// Photon calls OnJoinedRoom on all MonoBehaviours via SendMessage.
+        /// We use this to log the scene that's about to load, and apply any redirect
+        /// if the custom scene turns out not to exist in this APK build.
+        /// </summary>
+        void OnJoinedRoom()
         {
             var msd = MultiplayerSelectDirector.mInstance;
             if (msd == null) return;
 
-            int idx = Array.IndexOf(_allMaps, msd.mCurWWMapSelect);
-            if (idx < 0)                     idx = 0;                       // unknown → first
-            else if (idx >= _allMaps.Length - 1) idx = 0;                   // last → wrap to first
-            else                             idx++;
+            string scene = msd.mCurWWMapSelect;
+            ModEntry.Log("OnJoinedRoom: mCurWWMapSelect=" + scene);
 
-            ApplyMap(msd, idx);
+            if (CUSTOM_NAMES.ContainsKey(scene))
+            {
+                ModEntry.Log("Custom map room joined — LoadLevel(" + scene + ") about to fire");
+                // Start a watchdog: if scene hasn't changed in 5s, the level doesn't exist — redirect
+                StartCoroutine(LoadLevelWatchdog(scene));
+            }
         }
 
-        /// <summary>Called when the player taps the left-arrow on the map selector.</summary>
-        public void ToWWPreMap()
+        IEnumerator LoadLevelWatchdog(string expectedScene)
+        {
+            yield return new WaitForSeconds(5f);
+            // If we're still in MultiplayerSelect, the LoadLevel either failed or didn't run
+            if (Application.loadedLevelName == "MultiplayerSelect")
+            {
+                ModEntry.Log("WATCHDOG: still on MultiplayerSelect after 5s — '" + expectedScene + "' may not exist in this APK build. Redirecting to FreeRun3_1");
+                var msd = MultiplayerSelectDirector.mInstance;
+                if (msd != null)
+                {
+                    msd.mCurWWMapSelect = "FreeRun3_1";
+                    Application.LoadLevel("FreeRun3_1");
+                }
+            }
+        }
+
+        // ── Navigation handlers ───────────────────────────────────────────────
+
+        /// <summary>Called by MapNavButton when the player taps the right-arrow on the map selector.</summary>
+        public void OnNextMap()
         {
             var msd = MultiplayerSelectDirector.mInstance;
             if (msd == null) return;
 
-            int idx = Array.IndexOf(_allMaps, msd.mCurWWMapSelect);
-            if (idx <= 0) idx = _allMaps.Length - 1;   // first/unknown → wrap to last
-            else          idx--;
+            _virtualIdx = (_virtualIdx >= _allMaps.Length - 1) ? 0 : _virtualIdx + 1;
+            ApplyMap(msd, _virtualIdx);
+        }
 
-            ApplyMap(msd, idx);
+        /// <summary>Called by MapNavButton when the player taps the left-arrow on the map selector.</summary>
+        public void OnPreMap()
+        {
+            var msd = MultiplayerSelectDirector.mInstance;
+            if (msd == null) return;
+
+            _virtualIdx = (_virtualIdx <= 0) ? _allMaps.Length - 1 : _virtualIdx - 1;
+            ApplyMap(msd, _virtualIdx);
         }
 
         // ── Internal helpers ──────────────────────────────────────────────────────
@@ -149,33 +241,37 @@ namespace CNRMods
         void ApplyMap(MultiplayerSelectDirector msd, int idx)
         {
             string scene = _allMaps[idx];
-            msd.mCurWWMapSelect = scene;
 
             int stdIdx = Array.IndexOf(STANDARD_MAPS, scene);
             if (stdIdx >= 0)
             {
-                // Standard map — use its own preview texture and let the game's
-                // mode-checkbox logic run normally.
+                // Standard map — set normally and let game handle it
+                PlayerPrefs.SetString("CNRMod_CustomMapName", "");
+                msd.mCurWWMapSelect = scene;
                 msd.mWWMapUITexture.mainTexture = (Texture)(object)msd.mWWMapTexture[stdIdx];
                 msd.mWWMapUITexture.MarkAsChanged();
                 msd.WWResetModeCheckBox();
             }
             else
             {
-                // Custom map — borrow the last standard texture as a placeholder,
-                // then manually set checkboxes (TDM + KC = yes, Stronghold = no).
+                // Custom map — use a working base scene for LoadLevel but keep display name
+                string loadScene = CUSTOM_SCENE_LOAD.ContainsKey(scene) ? CUSTOM_SCENE_LOAD[scene] : "FreeRun3_1";
+                msd.mCurWWMapSelect = loadScene;
+
+                // Show the last standard texture as placeholder preview
                 msd.mWWMapUITexture.mainTexture = (Texture)(object)msd.mWWMapTexture[STANDARD_MAPS.Length - 1];
                 msd.mWWMapUITexture.MarkAsChanged();
 
                 msd.mModeCheckBoxSH.SetActive(false);
                 msd.mModeCheckBoxTDM.SetActive(true);
-
-                // Switch away from Stronghold unconditionally — it's not supported on
-                // custom maps and the SH checkbox is now hidden, so TDM is the safe default.
                 msd.SwitchToMode(GrowthGameModeTag.tTeamDeathMatch);
+
+                // Store the custom display name in PlayerPrefs so OnGUI can show it
+                // even after mCurWWMapSelect is overwritten with the real scene name
+                PlayerPrefs.SetString("CNRMod_CustomMapName", CUSTOM_NAMES[scene]);
             }
 
-            ModEntry.Log("Map changed to: " + scene);
+            ModEntry.Log("Map changed to: " + scene + " (loads: " + msd.mCurWWMapSelect + ")");
         }
 
         // ── HUD overlay ──────────────────────────────────────────────────────────
@@ -190,10 +286,10 @@ namespace CNRMods
             if (msd == null) return;
             if (msd.mCurWWSubScene != MSD_SubSceneInWorldWide.RoomCreate) return;
 
-            string scene = msd.mCurWWMapSelect;
-            if (!CUSTOM_NAMES.ContainsKey(scene)) return;   // standard map — nothing to overlay
-
-            string displayName = CUSTOM_NAMES[scene];
+            // Show custom map name overlay when a custom slot is active
+            // (mCurWWMapSelect holds the real scene now, so we use the cached pref)
+            string displayName = PlayerPrefs.GetString("CNRMod_CustomMapName", "");
+            if (string.IsNullOrEmpty(displayName)) return;
 
             // ── Map name ──
             var nameStyle = new GUIStyle(GUI.skin.label)
@@ -221,6 +317,20 @@ namespace CNRMods
             GUI.Label(new Rect(bx, by + bh, bw, 28f), "Requires mod on all clients", noteStyle);
 
             GUI.color = Color.white;
+        }
+    }
+
+    /// <summary>Attached to the map arrow button GameObjects to intercept clicks.</summary>
+    public class MapNavButton : MonoBehaviour
+    {
+        public bool isNext;
+        public CustomMapsHook hook;
+
+        void OnClick()
+        {
+            if (hook == null) return;
+            if (isNext) hook.OnNextMap();
+            else        hook.OnPreMap();
         }
     }
 }
