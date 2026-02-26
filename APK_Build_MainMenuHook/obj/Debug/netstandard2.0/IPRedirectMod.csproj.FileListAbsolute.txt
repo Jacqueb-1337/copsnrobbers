@@ -1,0 +1,11 @@
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\bin\Debug\netstandard2.0\IPRedirectMod.deps.json
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\bin\Debug\netstandard2.0\IPRedirectMod.dll
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\bin\Debug\netstandard2.0\IPRedirectMod.pdb
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\netstandard2.0\IPRedirectMod.csproj.AssemblyReference.cache
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\netstandard2.0\IPRedirectMod.GeneratedMSBuildEditorConfig.editorconfig
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\netstandard2.0\IPRedirectMod.AssemblyInfoInputs.cache
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\netstandard2.0\IPRedirectMod.AssemblyInfo.cs
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\netstandard2.0\IPRedirectMod.csproj.CoreCompileInputs.cache
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\netstandard2.0\IPRedirectMod.sourcelink.json
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\netstandard2.0\IPRedirectMod.dll
+D:\Projects\copsnrobbers\APK_Build_MainMenuHook\obj\Debug\netstandard2.0\IPRedirectMod.pdb

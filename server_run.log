@@ -1,0 +1,20 @@
+╔══════════════════════════════════════════════╗
+║      CNR LAN Server — Option B               ║
+║  Custom TCP Photon-protocol implementation   ║
+╚══════════════════════════════════════════════╝
+
+  LAN IP           : 172.28.48.1
+  Master server    : 172.28.48.1:5055
+  Game server      : 172.28.48.1:5056
+
+  Put the following in /storage/emulated/0/CNRMods/server.cfg on the Android device:
+    SERVER_IP=172.28.48.1
+    SERVER_PORT=5055
+
+[*] Starting servers... Press Ctrl+C to stop.
+
+[Master] Listening on port 5055  →  redirecting to game server at 172.28.48.1:5056
+[Game]   Listening on port 5056
+
+[*] Shutting down...
+[*] Servers stopped.
