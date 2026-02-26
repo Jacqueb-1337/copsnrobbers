@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>IPRedirectMod</AssemblyName>
+    <RootNamespace>CNRMods</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Don't try to reference any framework assemblies that conflict with Unity's Mono -->
+    <NoStdLib>false</NoStdLib>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="IPRedirectMod.cs" />
+    <Compile Include="CNRCustomMapsMod.cs" />
+  </ItemGroup>
+
+  <!-- Reference Unity and game DLLs from the APK's Managed folder -->
+  <ItemGroup>
+    <Reference Include="UnityEngine">
+      <HintPath>apk_source\assets\bin\Data\Managed\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>apk_source\assets\bin\Data\Managed\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

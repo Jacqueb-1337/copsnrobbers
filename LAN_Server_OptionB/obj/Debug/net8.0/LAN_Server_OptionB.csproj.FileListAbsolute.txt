@@ -1,0 +1,15 @@
+D:\Projects\copsnrobbers\LAN_Server_OptionB\bin\Debug\net8.0\CNRLanServer.exe
+D:\Projects\copsnrobbers\LAN_Server_OptionB\bin\Debug\net8.0\CNRLanServer.deps.json
+D:\Projects\copsnrobbers\LAN_Server_OptionB\bin\Debug\net8.0\CNRLanServer.runtimeconfig.json
+D:\Projects\copsnrobbers\LAN_Server_OptionB\bin\Debug\net8.0\CNRLanServer.dll
+D:\Projects\copsnrobbers\LAN_Server_OptionB\bin\Debug\net8.0\CNRLanServer.pdb
+D:\Projects\copsnrobbers\LAN_Server_OptionB\obj\Debug\net8.0\LAN_Server_OptionB.GeneratedMSBuildEditorConfig.editorconfig
+D:\Projects\copsnrobbers\LAN_Server_OptionB\obj\Debug\net8.0\LAN_Server_OptionB.AssemblyInfoInputs.cache
+D:\Projects\copsnrobbers\LAN_Server_OptionB\obj\Debug\net8.0\LAN_Server_OptionB.AssemblyInfo.cs
+D:\Projects\copsnrobbers\LAN_Server_OptionB\obj\Debug\net8.0\LAN_Server_OptionB.csproj.CoreCompileInputs.cache
+D:\Projects\copsnrobbers\LAN_Server_OptionB\obj\Debug\net8.0\LAN_Server_OptionB.sourcelink.json
+D:\Projects\copsnrobbers\LAN_Server_OptionB\obj\Debug\net8.0\CNRLanServer.dll
+D:\Projects\copsnrobbers\LAN_Server_OptionB\obj\Debug\net8.0\refint\CNRLanServer.dll
+D:\Projects\copsnrobbers\LAN_Server_OptionB\obj\Debug\net8.0\CNRLanServer.pdb
+D:\Projects\copsnrobbers\LAN_Server_OptionB\obj\Debug\net8.0\LAN_Server_OptionB.genruntimeconfig.cache
+D:\Projects\copsnrobbers\LAN_Server_OptionB\obj\Debug\net8.0\ref\CNRLanServer.dll

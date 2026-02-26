@@ -1,0 +1,12 @@
+{
+  "name": "cnr-lan-server-node",
+  "version": "0.1.0",
+  "description": "Node.js reimplementation of the CNR LAN Server Option B (Photon-like TCP protocol)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {}
+}

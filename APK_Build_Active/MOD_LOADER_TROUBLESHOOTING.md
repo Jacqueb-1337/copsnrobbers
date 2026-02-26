@@ -50,9 +50,54 @@ We need to:
 2. Add error logging to Directory.GetFiles() call in Awake() to catch exceptions
 3. Determine if file permissions are blocking access
 
+## Code Structure Verified
+
+✓ **ModEntry class exists** in TestModIPHook.cs (line 615)  
+✓ **ModEntry.Load() method exists** - calls TestModIPHook.Initialize()  
+✓ **Directory.CreateDirectory()** is included in Awake()  
+✓ **Directory.GetFiles()** is called with "*.dll" filter  
+✓ **Exception handling** wraps all code with outer try-catch  
+
+## Critical Finding
+
+Logcat shows:
+```
+[CNRModLoader] Initializing mod loader in CNRConnectMenu.Awake()
+```
+
+But does **NOT** show:
+```
+[CNRModLoader] Mods directory ready at /storage/emulated/0/CNRMods/
+```
+
+**This means execution stops between these two lines.** Either:
+1. `Directory.CreateDirectory()` is failing silently
+2. The path cannot be written to due to permissions
+
+## Immediate Action Required
+
+### 1. Check if DLL exists on device
+```powershell
+adb shell "ls -la /storage/emulated/0/CNRMods/"
+```
+
+### 2. Verify TestModIPHook.dll is compiled
+The file must exist at: `d:\Projects\copsnrobbers\APK_Build_Active\TestModIPHook.dll`
+
+### 3. If missing, compile it
+Use the mod compiler to build TestModIPHook.cs
+
+### 4. Push to device
+```powershell
+adb push "path\to\TestModIPHook.dll" /storage/emulated/0/CNRMods/
+```
+
+### 5. Re-launch game and check logcat
+Look for full loading sequence with `[CNRModLoader]` prefix
+
 ## Reference Code Files
 
 - **Mod Manager**: `d:\Projects\copsnrobbers\APK_Build_Active\mod_loader\CNRModLoader.cs`
-- **Test Mod**: `d:\Projects\copsnrobbers\APK_Build_Active\TestModIPHook.cs`
-- **Compiled DLL**: `d:\Projects\copsnrobbers\APK_Build_Active\Assembly-CSharp.dll.backup`
+- **Test Mod**: `d:\Projects\copsnrobbers\APK_Build_Active\TestModIPHook.cs` (has ModEntry.Load at line 615)
+- **Compiled DLL Backup**: `d:\Projects\copsnrobbers\APK_Build_Active\Assembly-CSharp.dll.backup`
 - **APK Source**: `d:\Projects\copsnrobbers\APK_Build_Active\apk_source/`
