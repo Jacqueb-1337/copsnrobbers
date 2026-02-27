@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("IPRedirectMod")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+cd35bb1854f41898ccf896c1f80546e3b3b225eb")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0efca51f948c1cd9db89efed047b9339ad5d3c71")]
 [assembly: System.Reflection.AssemblyProductAttribute("IPRedirectMod")]
 [assembly: System.Reflection.AssemblyTitleAttribute("IPRedirectMod")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
