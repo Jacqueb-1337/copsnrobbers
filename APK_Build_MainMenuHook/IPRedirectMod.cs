@@ -128,6 +128,22 @@ namespace CNRMods
                 url = "http://" + url.Substring(8);
             return url;
         }
+
+        public static string ParseJsonStringValue(string json, string key)
+        {
+            try
+            {
+                string k = "\"" + key + "\":";
+                int ki = json.IndexOf(k);
+                if (ki < 0) return null;
+                int vi = json.IndexOf('"', ki + k.Length);
+                if (vi < 0) return null;
+                int ei = json.IndexOf('"', vi + 1);
+                if (ei < 0) return null;
+                return json.Substring(vi + 1, ei - vi - 1).Replace("\\n", "").Replace("\\/", "/");
+            }
+            catch { return null; }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -293,29 +309,13 @@ namespace CNRMods
             var www = new WWW(fetchUrl);
             yield return www;
             if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("FetchRoom error: " + www.error); yield break; }
-            string mapUrl = ParseJsonStringValue(www.text, "mapUrl");
+            string mapUrl = ModEntry.ParseJsonStringValue(www.text, "mapUrl");
             if (string.IsNullOrEmpty(mapUrl)) { ModEntry.Log("FetchRoom: no mapUrl in: " + www.text); yield break; }
             ModEntry.Log("Client: got mapUrl=" + mapUrl);
             PlayerPrefs.SetString("CNRMod_ActiveMapURL", mapUrl);
             PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
             PlayerPrefs.Save();
             StartCoroutine(DownloadMap(mapUrl));
-        }
-
-        private static string ParseJsonStringValue(string json, string key)
-        {
-            try
-            {
-                string k = "\"" + key + "\":";
-                int ki = json.IndexOf(k);
-                if (ki < 0) return null;
-                int vi = json.IndexOf('"', ki + k.Length);
-                if (vi < 0) return null;
-                int ei = json.IndexOf('"', vi + 1);
-                if (ei < 0) return null;
-                return json.Substring(vi + 1, ei - vi - 1).Replace("\\n", "").Replace("\\/", "/");
-            }
-            catch { return null; }
         }
 
         private static string EscapeJson(string s)
@@ -939,6 +939,7 @@ namespace CNRMods
                 PlayerPrefs.SetString("CNRMod_CustomMapName", "");
                 PlayerPrefs.SetString("CNRMod_ActiveMapURL",  "");
                 PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
+                PlayerPrefs.DeleteKey("CNRMod_DonorScene");
                 _activeSlot = "";
                 _urlInput   = "";
                 msd.mCurWWMapSelect = scene;
@@ -948,7 +949,10 @@ namespace CNRMods
             }
             else
             {
-                string loadScene = CUSTOM_SCENE_LOAD.ContainsKey(scene) ? CUSTOM_SCENE_LOAD[scene] : "FreeRun3_1";
+                string[] validDonors = new string[]{"FreeRun3_1","FreeRun5_1","FreeRun8_1"};
+                string donorPref = PlayerPrefs.GetString("CNRMod_DonorScene", "");
+                string loadScene = (Array.IndexOf(validDonors, donorPref) >= 0) ? donorPref
+                    : (CUSTOM_SCENE_LOAD.ContainsKey(scene) ? CUSTOM_SCENE_LOAD[scene] : "FreeRun3_1");
                 msd.mCurWWMapSelect = loadScene;
                 msd.mWWMapUITexture.mainTexture = (Texture)(object)msd.mWWMapTexture[STANDARD_MAPS.Length - 1];
                 msd.mWWMapUITexture.MarkAsChanged();
@@ -964,6 +968,26 @@ namespace CNRMods
                 PlayerPrefs.Save();
             }
             ModEntry.Log("Map -> " + scene + " (loads: " + msd.mCurWWMapSelect + ")");
+        }
+
+        IEnumerator FetchDonor(string url)
+        {
+            if (string.IsNullOrEmpty(url)) yield break;
+            url = ModEntry.SanitizeUrl(url);
+            var www = new WWW(url);
+            yield return www;
+            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("FetchDonor error: " + www.error); yield break; }
+            string donor = ModEntry.ParseJsonStringValue(www.text, "donor");
+            if (!string.IsNullOrEmpty(donor))
+            {
+                PlayerPrefs.SetString("CNRMod_DonorScene", donor);
+                PlayerPrefs.Save();
+                ModEntry.Log("FetchDonor: donor scene set to " + donor);
+            }
+            else
+            {
+                ModEntry.Log("FetchDonor: no 'donor' field in response");
+            }
         }
 
         void OnGUI()
@@ -1014,6 +1038,7 @@ namespace CNRMods
                     PlayerPrefs.SetString("CNRMod_ActiveMapURL", newUrl);
                     PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");  // force re-download on next room load
                     PlayerPrefs.Save();
+                    StartCoroutine(FetchDonor(newUrl));
                 }
             }
 
@@ -1141,7 +1166,28 @@ namespace CNRMods
             {
                 string json = File.ReadAllText(CachePath);
                 ModEntry.Log("MapLoader: parsing " + json.Length + " bytes");
-                MapObjData[] items = JsonReader.Deserialize<MapObjData[]>(json);
+                string trimmedJson = json.Trim();
+                MapObjData[] items;
+                if (trimmedJson.StartsWith("{"))
+                {
+                    // Wrapper format: {"donor":"FreeRun8_1","objects":[...]}
+                    string donor = ModEntry.ParseJsonStringValue(trimmedJson, "donor");
+                    if (!string.IsNullOrEmpty(donor)) ModEntry.Log("MapLoader: donor=" + donor);
+                    int arrStart = trimmedJson.IndexOf("\"objects\"");
+                    arrStart = arrStart >= 0 ? trimmedJson.IndexOf('[', arrStart) : -1;
+                    if (arrStart < 0) { ModEntry.Log("MapLoader: no objects array in wrapper"); yield break; }
+                    int depth = 0, arrEnd = arrStart;
+                    for (int ci = arrStart; ci < trimmedJson.Length; ci++)
+                    {
+                        if (trimmedJson[ci] == '[') depth++;
+                        else if (trimmedJson[ci] == ']') { depth--; if (depth == 0) { arrEnd = ci; break; } }
+                    }
+                    items = JsonReader.Deserialize<MapObjData[]>(trimmedJson.Substring(arrStart, arrEnd - arrStart + 1));
+                }
+                else
+                {
+                    items = JsonReader.Deserialize<MapObjData[]>(trimmedJson);
+                }
                 if (items == null || items.Length == 0)
                 {
                     ModEntry.Log("MapLoader: JSON parse failed or empty");
@@ -1159,27 +1205,7 @@ namespace CNRMods
                         sceneMatCache[mn] = sr.sharedMaterial;
                 }
 
-                // Scan all scene_dump texture folders on device for PNG files
-                var texFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                string dumpsBase = "/storage/emulated/0/CNRMods/scene_dumps";
-                try
-                {
-                    if (Directory.Exists(dumpsBase))
-                    {
-                        foreach (string sceneDir in Directory.GetDirectories(dumpsBase))
-                        {
-                            string texDir = sceneDir + "/textures";
-                            if (!Directory.Exists(texDir)) continue;
-                            foreach (string f in Directory.GetFiles(texDir, "*.png"))
-                            {
-                                string matName = Path.GetFileNameWithoutExtension(f);
-                                if (!texFiles.ContainsKey(matName)) texFiles[matName] = f;
-                            }
-                        }
-                    }
-                }
-                catch (Exception texEx) { ModEntry.Log("tex scan err: " + texEx.Message); }
-                ModEntry.Log("MapLoader: " + sceneMatCache.Count + " scene mats, " + texFiles.Count + " disk textures");
+                ModEntry.Log("MapLoader: " + sceneMatCache.Count + " scene materials loaded");
 
                 // Hide original scene geometry before placing custom objects
                 ClearBaseScene();
@@ -1216,17 +1242,6 @@ namespace CNRMods
                         if (mat != null)
                         {
                             renderer.material = mat;
-                        }
-                        else if (!string.IsNullOrEmpty(obj.mat) && texFiles.ContainsKey(obj.mat))
-                        {
-                            try
-                            {
-                                byte[] bytes = File.ReadAllBytes(texFiles[obj.mat]);
-                                Texture2D tex = new Texture2D(2, 2);
-                                if (tex.LoadImage(bytes))
-                                    renderer.material.mainTexture = tex;
-                            }
-                            catch { /* leave default */ }
                         }
                         else if (obj.color != null && obj.color.Length >= 3)
                         {
