@@ -104,30 +104,30 @@ namespace CNRSettingsMod
                 parentName     = "Panel(Control)",
                 nameCandidates = new string[]{ "Image Button(Aim)" },
                 prefPX = "CNRMod_PX_Aim",    prefPY = "CNRMod_PY_Aim",    prefSZ = "CNRMod_SZ_Aim"    },
-            // 5 -- top-level panels / misc
+            // 5 -- top-level panels / misc (game owns their scale -- no prefSZ)
             new HudDragItem {
                 displayName    = "Toolbar",
                 parentName     = null,
                 nameCandidates = new string[]{ "Panel(ToolBar)" },
-                prefPX = "CNRMod_PX_ToolBar", prefPY = "CNRMod_PY_ToolBar", prefSZ = "CNRMod_SZ_ToolBar" },
+                prefPX = "CNRMod_PX_ToolBar", prefPY = "CNRMod_PY_ToolBar", prefSZ = null },
             // 6
             new HudDragItem {
                 displayName    = "Chat bar",
                 parentName     = null,
                 nameCandidates = new string[]{ "Panel(ChatBar)" },
-                prefPX = "CNRMod_PX_ChatBar", prefPY = "CNRMod_PY_ChatBar", prefSZ = "CNRMod_SZ_ChatBar" },
+                prefPX = "CNRMod_PX_ChatBar", prefPY = "CNRMod_PY_ChatBar", prefSZ = null },
             // 7 -- Panel(LeftMenu): contains HP blood display, health pack btn, player list btn
             new HudDragItem {
                 displayName    = "HP panel",
                 parentName     = null,
                 nameCandidates = new string[]{ "Panel(LeftMenu)" },
-                prefPX = "CNRMod_PX_HP",  prefPY = "CNRMod_PY_HP",  prefSZ = "CNRMod_SZ_HP"  },
+                prefPX = "CNRMod_PX_HP",  prefPY = "CNRMod_PY_HP",  prefSZ = null },
             // 8 -- Panel(Top): whole top bar (cop+robber resource/objective bars, team head icons, schedule)
             new HudDragItem {
                 displayName    = "Top panel",
                 parentName     = null,
                 nameCandidates = new string[]{ "Panel(Top)" },
-                prefPX = "CNRMod_PX_TS1", prefPY = "CNRMod_PY_TS1", prefSZ = "CNRMod_SZ_TS1" },
+                prefPX = "CNRMod_PX_TS1", prefPY = "CNRMod_PY_TS1", prefSZ = null },
             // 9 -- Gun icon / switch button (moves only the gun sprite, not arrows or ammo)
             new HudDragItem {
                 displayName    = "Gun icon",
@@ -183,45 +183,42 @@ namespace CNRSettingsMod
         private Vector3[]    _dragOrigScale = new Vector3[DRAG_COUNT];
 
         // -- Scene state -------------------------------------------------------
-        private bool _inGameScene  = false;
-        private bool _showSettings = false;
-        private bool _btnPatched   = false;
+        private bool   _inGameScene  = false;
+        private string _sceneName    = "";
+        private bool   _showSettings = false;
+        private bool   _btnPatched   = false;
 
         // -- Sliderotate reflection cache --------------------------------------
         private MonoBehaviour _sliderotate;
         private FieldInfo _fiSensX, _fiSensY;
-        private FieldInfo _fiRotX,  _fiRotY;
-        private FieldInfo _fiMinY,  _fiMaxY;
-        private FieldInfo _fiCamT;
-        private float _prevRotX, _prevRotY;
-
-        // Scoped weapon type int values: STW_25=3 M87T=4 AWP=7 ChristmasSniper=16 FRF2=25
-        private static readonly int[] SCOPED_WEAPONS = { 3, 4, 7, 16, 25 };
 
         // -- Settings values ---------------------------------------------------
         private float _sensNormal = 3.2f;
-        private float _sensScoped = 0.4f;
-        private bool  _noAccel    = false;
-        private float _maxDelta   = 15f;
+        private float _sensAimed  = 1.5f;  // direct sensitivity when ADS is active
+        private bool  _isAiming   = false;
 
         // -- IMGUI state -------------------------------------------------------
         private Rect    _winRect;
         private Vector2 _scroll;
         private const float REF_W = 600f;
-        // Touch scroll tracking for settings panel
-        private int   _scrollTouchId   = -1;
-        private float _scrollTouchLastY = 0f;
 
         // -- HUD drag editor ---------------------------------------------------
         private bool    _hudEditMode    = false;
-        private int     _draggingIdx    = -1;    // index being dragged (-1 = none)
+        private int     _draggingIdx    = -1;
         private Vector2 _dragOffset     = Vector2.zero;
-        private int     _resizingIdx    = -1;    // index being resized (-1 = none)
-        private float   _resizeStartDist = 0f;   // screen-pixel dist from center when resize began
-        private Vector3 _resizeStartScale = Vector3.one;
-        private bool    _suppressSaveIdx = false; // don't save on next touch-up (after reset)
+        private int     _resizingIdx    = -1;
+        private Vector2 _resizeTouchStart = Vector2.zero;
+        private float   _resizeStartRatio = 1f;
+        private bool    _suppressSaveIdx = false;
         private int     _suppressSaveFor = -1;
         private Camera  _nguiCam        = null;
+        private UICamera _nguiUICam      = null;
+        private bool    _editResizeMode = false;  // false=drag  true=resize; double-tap to toggle
+        private float   _lastTapTime    = 0f;
+        private int     _lastTapIdx     = -1;
+        private const float DOUBLE_TAP_THRESH = 0.35f;
+        // Enforced scales applied every LateUpdate to prevent game resets
+        private float[] _savedScales = new float[DRAG_COUNT];
 
         // -- Pause panel polling -----------------------------------------------
         private GameObject _pausePanelRef;
@@ -244,6 +241,7 @@ namespace CNRSettingsMod
 
         private void UpdateScene(string scene)
         {
+            _sceneName        = scene ?? "";
             _inGameScene      = IsGameScene(scene);
             _btnPatched       = false;
             _showSettings     = false;
@@ -252,12 +250,14 @@ namespace CNRSettingsMod
             _resizingIdx      = -1;
             _suppressSaveIdx  = false;
             _suppressSaveFor  = -1;
+            _isAiming         = false;
             _sliderotate      = null;
+            if (_nguiUICam != null) { _nguiUICam.enabled = true; _nguiUICam = null; }
             _nguiCam          = null;
             _pausePanelRef    = null;
             _pauseUIPanel     = null;
             _wasPauseVisible  = false;
-            for (int i = 0; i < DRAG_COUNT; i++) { _dragGOs[i] = null; _dragOrigPos[i] = Vector3.zero; _dragOrigScale[i] = Vector3.zero; }
+            for (int i = 0; i < DRAG_COUNT; i++) { _dragGOs[i] = null; _dragOrigPos[i] = Vector3.zero; /* keep _dragOrigScale so captured baseline survives multiple ApplyHUDOnLoad runs */ }
             for (int i = 0; i < _visGOs.Length;  i++) _visGOs[i]  = null;
             LoadPrefs();
             if (_inGameScene) StartCoroutine(ApplyHUDOnLoad());
@@ -265,9 +265,16 @@ namespace CNRSettingsMod
 
         private IEnumerator ApplyHUDOnLoad()
         {
-            yield return null; yield return null;
+            // Wait long enough for the game's NGUI auto-scaler to run and settle
+            // before we snapshot baseline scales and apply our ratios.
+            for (int f = 0; f < 20; f++) yield return null;
             ReCacheHUD();
             CacheNguiCam();
+        }
+
+        private void OnApplicationPause(bool paused)
+        {
+            if (paused) PlayerPrefs.Save();
         }
 
         // =====================================================================
@@ -304,38 +311,9 @@ namespace CNRSettingsMod
             }
 
             if (_hudEditMode) HandleHudDrag();
-            if (_showSettings && !_hudEditMode) HandleSettingsScroll();
-        }
-
-        private void HandleSettingsScroll()
-        {
-            if (Input.touchCount == 0) { _scrollTouchId = -1; return; }
-            float scale = Screen.width / REF_W;
-            for (int ti = 0; ti < Input.touchCount; ti++)
-            {
-                Touch t = Input.GetTouch(ti);
-                // Convert screen pos to scaled GUI space (Y flipped)
-                Vector2 guiPos = new Vector2(t.position.x / scale, (Screen.height - t.position.y) / scale);
-                if (t.phase == TouchPhase.Began)
-                {
-                    // Start tracking only if touch is inside the settings window
-                    if (_winRect.Contains(guiPos))
-                    {
-                        _scrollTouchId    = t.fingerId;
-                        _scrollTouchLastY = t.position.y;
-                    }
-                }
-                else if (t.fingerId == _scrollTouchId &&
-                         (t.phase == TouchPhase.Moved || t.phase == TouchPhase.Stationary))
-                {
-                    float delta = _scrollTouchLastY - t.position.y; // positive = scroll down
-                    _scroll.y      = Mathf.Max(0f, _scroll.y + delta);
-                    _scrollTouchLastY = t.position.y;
-                }
-                else if (t.fingerId == _scrollTouchId &&
-                         (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled))
-                    _scrollTouchId = -1;
-            }
+            // Write desired scales here so UIPanel.LateUpdate (runs after Update) sees the transform change.
+            // LateUpdate will also write to beat UIRoot, but UIPanel has already processed by then.
+            EnforceScales();
         }
 
         private IEnumerator PatchAfterFrame()
@@ -399,16 +377,81 @@ namespace CNRSettingsMod
         public void OpenSettings()
         {
             _showSettings = !_showSettings;
-            if (_showSettings) { ReCacheHUD(); CacheNguiCam(); }
+            if (_showSettings)
+            {
+                ReCacheHUD(); CacheNguiCam();
+                // Block NGUI from processing touches while settings are open
+                if (_nguiUICam == null && _nguiCam != null) _nguiUICam = _nguiCam.GetComponent<UICamera>();
+                if (_nguiUICam == null) { UICamera[] cams = (UICamera[])FindObjectsOfType(typeof(UICamera)); if (cams.Length > 0) _nguiUICam = cams[0]; }
+                if (_nguiUICam != null) _nguiUICam.enabled = false;
+            }
+            else
+            {
+                if (_nguiUICam != null) _nguiUICam.enabled = true;
+            }
         }
 
         // =====================================================================
         // Camera / sensitivity
         // =====================================================================
+        private void EnforceScales()
+        {
+            if (!_inGameScene) return;
+            for (int i = 0; i < DRAG_COUNT; i++)
+            {
+                if (_dragGOs[i] == null || _savedScales[i] < 0f) continue;
+                if (_dragOrigScale[i] == Vector3.zero) continue;
+                float tx = _dragOrigScale[i].x * _savedScales[i];
+                float ty = _dragOrigScale[i].y * _savedScales[i];
+                Vector3 cur = _dragGOs[i].transform.localScale;
+                if (Mathf.Abs(cur.x / tx - 1f) > 0.0001f || Mathf.Abs(cur.y / ty - 1f) > 0.0001f)
+                {
+                    _dragGOs[i].transform.localScale = new Vector3(tx, ty, cur.z);
+                    if (_hudEditMode) ForceNGUIRebuild(i);
+                }
+            }
+        }
+
+        private static FieldInfo _fiWidgetPanel   = null;
+        private static FieldInfo _fiRebuildAll    = null;
+
+        private static UIPanel GetWidgetPanel(UIWidget w)
+        {
+            if (_fiWidgetPanel == null)
+                _fiWidgetPanel = typeof(UIWidget).GetField("mPanel", BindingFlags.Instance | BindingFlags.NonPublic);
+            return (_fiWidgetPanel != null) ? (UIPanel)_fiWidgetPanel.GetValue(w) : null;
+        }
+
+        private static void SetRebuildAll(UIPanel p)
+        {
+            if (_fiRebuildAll == null)
+                _fiRebuildAll = typeof(UIPanel).GetField("mRebuildAll", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (_fiRebuildAll != null) _fiRebuildAll.SetValue(p, true);
+        }
+
+        private void ForceNGUIRebuild(int i)
+        {
+            if (_dragGOs[i] == null) return;
+            UIWidget[] ws = _dragGOs[i].GetComponentsInChildren<UIWidget>(true);
+            UIPanel fallback = NGUITools.FindInParents<UIPanel>(_dragGOs[i].gameObject);
+            System.Collections.Generic.HashSet<UIPanel> panels = new System.Collections.Generic.HashSet<UIPanel>();
+            for (int j = 0; j < ws.Length; j++)
+            {
+                ws[j].MarkAsChangedLite();
+                UIPanel wp = GetWidgetPanel(ws[j]);
+                if (wp == null) wp = fallback;
+                if (wp != null) panels.Add(wp);
+            }
+            foreach (UIPanel p in panels) { SetRebuildAll(p); if (ws.Length > 0) p.AddWidget(ws[0]); }
+            if (panels.Count == 0 && fallback != null) { SetRebuildAll(fallback); if (ws.Length > 0) fallback.AddWidget(ws[0]); }
+        }
+
         private void LateUpdate()
         {
-            // Lock camera while in HUD edit mode
-            if (!_inGameScene || _hudEditMode) return;
+            if (!_inGameScene) return;
+            // Beat UIRoot (which also runs in LateUpdate and resets scales).
+            EnforceScales();
+            if (_hudEditMode) return;
             ApplySensitivity();
         }
 
@@ -416,45 +459,15 @@ namespace CNRSettingsMod
         {
             if (_sliderotate == null) CacheSliderotate();
             if (_sliderotate == null || _fiSensX == null) return;
-
-            float eff = IsCurrentWeaponScoped() ? _sensNormal * _sensScoped : _sensNormal;
+            float eff = _isAiming ? _sensAimed : _sensNormal;
             if (Mathf.Abs((float)_fiSensX.GetValue(_sliderotate) - eff) > 0.02f)
             {
                 _fiSensX.SetValue(_sliderotate, eff);
                 _fiSensY.SetValue(_sliderotate, eff);
             }
-
-            if (_noAccel && _fiRotX != null && _fiRotY != null)
-            {
-                float rotX = (float)_fiRotX.GetValue(_sliderotate);
-                float rotY = (float)_fiRotY.GetValue(_sliderotate);
-                float dx = Mathf.DeltaAngle(_prevRotX, rotX);
-                float dy = rotY - _prevRotY;
-                bool clamped = false;
-                if (Mathf.Abs(dx) > _maxDelta) { rotX = _prevRotX + Mathf.Sign(dx) * _maxDelta; clamped = true; }
-                if (Mathf.Abs(dy) > _maxDelta)
-                {
-                    float mn = _fiMinY != null ? (float)_fiMinY.GetValue(_sliderotate) : -35f;
-                    float mx = _fiMaxY != null ? (float)_fiMaxY.GetValue(_sliderotate) :  35f;
-                    rotY = Mathf.Clamp(_prevRotY + Mathf.Sign(dy) * _maxDelta, mn, mx);
-                    clamped = true;
-                }
-                if (clamped)
-                {
-                    _fiRotX.SetValue(_sliderotate, rotX);
-                    _fiRotY.SetValue(_sliderotate, rotY);
-                    (_sliderotate as Component).transform.localEulerAngles = new Vector3(0f, rotX, 0f);
-                    if (_fiCamT != null)
-                    {
-                        Transform ct = (Transform)_fiCamT.GetValue(_sliderotate);
-                        if (ct != null) ct.localEulerAngles = new Vector3(-rotY, 0f, 0f);
-                    }
-                    rotX = (float)_fiRotX.GetValue(_sliderotate);
-                    rotY = (float)_fiRotY.GetValue(_sliderotate);
-                }
-                _prevRotX = rotX; _prevRotY = rotY;
-            }
         }
+
+        public void ToggleAiming() { _isAiming = !_isAiming; }
 
         private void CacheSliderotate()
         {
@@ -465,15 +478,8 @@ namespace CNRSettingsMod
                 if (mb == null || mb.GetType().Name != "Sliderotate" || !mb.gameObject.activeInHierarchy) continue;
                 _sliderotate = mb;
                 Type t = mb.GetType();
-                _fiSensX = t.GetField("sensitivityX",    BindingFlags.Instance | BindingFlags.NonPublic);
-                _fiSensY = t.GetField("sensitivityY",    BindingFlags.Instance | BindingFlags.NonPublic);
-                _fiRotX  = t.GetField("rotationX",       BindingFlags.Instance | BindingFlags.NonPublic);
-                _fiRotY  = t.GetField("rotationY",       BindingFlags.Instance | BindingFlags.NonPublic);
-                _fiMinY  = t.GetField("minimumY",        BindingFlags.Instance | BindingFlags.NonPublic);
-                _fiMaxY  = t.GetField("maximumY",        BindingFlags.Instance | BindingFlags.NonPublic);
-                _fiCamT  = t.GetField("cameratransform", BindingFlags.Instance | BindingFlags.NonPublic);
-                if (_fiRotX != null) _prevRotX = (float)_fiRotX.GetValue(_sliderotate);
-                if (_fiRotY != null) _prevRotY = (float)_fiRotY.GetValue(_sliderotate);
+                _fiSensX = t.GetField("sensitivityX", BindingFlags.Instance | BindingFlags.NonPublic);
+                _fiSensY = t.GetField("sensitivityY", BindingFlags.Instance | BindingFlags.NonPublic);
                 break;
             }
         }
@@ -520,6 +526,8 @@ namespace CNRSettingsMod
             if (_pausePanelRef != null) _pausePanelRef.SetActive(true);
             // Restore camera
             if (_sliderotate != null) ((Behaviour)_sliderotate).enabled = true;
+            // Re-enable UICamera (was disabled when settings opened before entering edit mode)
+            if (_nguiUICam != null) { _nguiUICam.enabled = true; _nguiUICam = null; }
             // Re-enable touch control buttons
             SetControlPanelButtonsEnabled(true);
         }
@@ -542,6 +550,42 @@ namespace CNRSettingsMod
         // - 2 frames so the "Edit Layout" tap doesn't bleed through to NGUI below
         // - extra frames so any slide/tween animations have finished and all panels
         //   are at their final on-screen positions before we snapshot _dragOrigPos
+        private IEnumerator ResetHUDViaEditMode()
+        {
+            // Close settings and wait for input to clear before entering edit mode
+            _showSettings = false;
+            yield return null;
+            yield return null;
+            yield return null;
+            yield return null;
+            yield return null;
+            // Enter edit mode — this calls ReCacheHUD and populates _dragGOs
+            EnterHudEditMode();
+            yield return null;
+            // Apply factory reset to all live items
+            for (int i = 0; i < DRAG_COUNT; i++)
+            {
+                PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefPX);
+                PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefPY);
+                if (DRAG_ITEMS[i].prefSZ != null) PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefSZ);
+                _savedScales[i] = -1f;
+                if (_dragGOs[i] != null)
+                {
+                    if (_dragOrigPos[i] != Vector3.zero)
+                        _dragGOs[i].transform.position = _dragOrigPos[i];
+                    _dragGOs[i].transform.localScale =
+                        (_dragOrigScale[i] != Vector3.zero) ? _dragOrigScale[i] : Vector3.one;
+                }
+                _dragOrigScale[i] = Vector3.zero; // force fresh recapture on next scene load
+            }
+            PlayerPrefs.Save();
+            // Let NGUI process the repositioned transforms for one frame before re-enabling buttons
+            yield return null;
+            yield return null;
+            // Exit edit mode so the game returns to normal play
+            ExitHudEditMode();
+        }
+
         private IEnumerator EnterEditModeNextFrame()
         {
             yield return null;
@@ -581,27 +625,37 @@ namespace CNRSettingsMod
 
             if (down)
             {
-                // Check each item -- edge zone = resize, inner zone = drag
                 for (int i = 0; i < DRAG_COUNT; i++)
                 {
                     if (_dragGOs[i] == null) continue;
-                    Rect full  = GetHandleRect(i);
-                    Rect inner = ShrinkRect(full, 0.30f); // inner 70% = drag zone
+                    Rect full = GetHandleRect(i);
                     if (!full.Contains(guiPos)) continue;
-                    if (inner.Contains(guiPos))
+
+                    // Double-tap on same handle toggles move / resize mode globally
+                    if (_lastTapIdx == i && (Time.time - _lastTapTime) < DOUBLE_TAP_THRESH)
                     {
-                        // Start drag from center zone
-                        _draggingIdx = i;
-                        _resizingIdx = -1;
-                        _dragOffset  = guiPos - new Vector2(full.x, full.y);
+                        _editResizeMode = !_editResizeMode;
+                        _lastTapIdx = -1;
                     }
                     else
                     {
-                        // Start resize from edge zone
+                        _lastTapIdx  = i;
+                        _lastTapTime = Time.time;
+                    }
+
+                    if (_editResizeMode)
+                    {
                         _resizingIdx      = i;
                         _draggingIdx      = -1;
-                        _resizeStartDist  = Vector2.Distance(guiPos, RectCenter(full));
-                        _resizeStartScale = _dragGOs[i].transform.localScale;
+                        _resizeTouchStart = guiPos;
+                        _resizeStartRatio = (_savedScales[i] >= 0f) ? _savedScales[i] : 1f;
+                    }
+                    else
+                    {
+                        _draggingIdx = i;
+                        _resizingIdx = -1;
+                        // Store offset from the item's CENTER so the item stays under the finger
+                        _dragOffset  = guiPos - RectCenter(full);
                     }
                     break;
                 }
@@ -610,25 +664,17 @@ namespace CNRSettingsMod
             {
                 if (_draggingIdx >= 0)
                     MoveDragItem(_draggingIdx, guiPos - _dragOffset);
-                else if (_resizingIdx >= 0 && _resizeStartDist > 1f)
+                else if (_resizingIdx >= 0)
                 {
-                    Rect full  = GetHandleRect(_resizingIdx);
-                    float dist = Vector2.Distance(guiPos, RectCenter(full));
-                    float ratio = dist / _resizeStartDist;
-                    // Clamp to minimum: scale can't drop below 0.25 of original
-                    ratio = Mathf.Max(ratio, 0.25f);
-                    Vector3 ns = _resizeStartScale * ratio;
-                    // Also enforce absolute minimum handle of ~50px screen width
-                    if (_nguiCam != null)
-                    {
-                        // Estimate resulting screen size via world-unit size
-                        float origSz = _dragGOs[_resizingIdx].transform.localScale.magnitude;
-                        if (origSz < 0.001f) origSz = 1f;
-                        float minRatio = 50f / (Screen.width * 0.15f);
-                        ratio = Mathf.Max(ratio, minRatio);
-                        ns = _resizeStartScale * ratio;
-                    }
-                    _dragGOs[_resizingIdx].transform.localScale = ns;
+                    // Update _savedScales directly; LateUpdate applies origScale*ratio.
+                    // This beats NGUI UIRoot which also runs in LateUpdate after us.
+                    float refDist = Mathf.Max(56f, Screen.width * 0.08f);
+                    float delta = (guiPos.x - _resizeTouchStart.x)
+                                - (guiPos.y - _resizeTouchStart.y); // guiPos Y flipped: up = negative, so subtract
+                    float dragRatio = 1f + delta / refDist;
+                    // clamp so button can't go below 15% of original
+                    dragRatio = Mathf.Max(dragRatio, 0.15f);
+                    _savedScales[_resizingIdx] = _resizeStartRatio * dragRatio;
                 }
             }
             else if (up)
@@ -642,7 +688,8 @@ namespace CNRSettingsMod
                 if (_resizingIdx >= 0)
                 {
                     SaveDragScale(_resizingIdx);
-                    _resizingIdx = -1;
+                    PlayerPrefs.Save();
+                    _resizingIdx  = -1;
                 }
                 _suppressSaveIdx = false;
                 _suppressSaveFor = -1;
@@ -663,7 +710,11 @@ namespace CNRSettingsMod
         private Rect GetHandleRect(int i)
         {
             if (_dragGOs[i] == null) return new Rect(-9999, -9999, 1, 1);
-            float sz = Mathf.Max(80f, Screen.width * 0.12f);
+            float baseSz = Mathf.Max(56f, Screen.width * 0.08f);
+            // Scale the handle to reflect the current saved ratio so user sees live size feedback.
+            float ratio = (_savedScales[i] > 0f && DRAG_ITEMS[i].prefSZ != null) ? _savedScales[i] : 1f;
+            // Clamp so handle stays usable even if ratio is extreme
+            float sz = Mathf.Clamp(baseSz * ratio, 24f, Screen.width * 0.7f);
             if (_nguiCam != null)
             {
                 Vector3 sp = _nguiCam.WorldToScreenPoint(_dragGOs[i].transform.position);
@@ -674,14 +725,12 @@ namespace CNRSettingsMod
             return new Rect(x, y, sz, sz);
         }
 
-        private void MoveDragItem(int i, Vector2 guiTopLeft)
+        private void MoveDragItem(int i, Vector2 guiCenter)
         {
             if (_dragGOs[i] == null || _nguiCam == null) return;
-            float sz = Mathf.Max(80f, Screen.width * 0.12f);
-            float gcx = guiTopLeft.x + sz * 0.5f;
-            float gcy = guiTopLeft.y + sz * 0.5f;
+            // guiCenter is the desired center in GUI coords (Y=0 at top)
             float depth = _nguiCam.WorldToScreenPoint(_dragGOs[i].transform.position).z;
-            Vector3 world = _nguiCam.ScreenToWorldPoint(new Vector3(gcx, Screen.height - gcy, depth));
+            Vector3 world = _nguiCam.ScreenToWorldPoint(new Vector3(guiCenter.x, Screen.height - guiCenter.y, depth));
             _dragGOs[i].transform.position = new Vector3(world.x, world.y, _dragGOs[i].transform.position.z);
         }
 
@@ -704,18 +753,24 @@ namespace CNRSettingsMod
 
         private void SaveDragScale(int i)
         {
-            if (_dragGOs[i] == null || DRAG_ITEMS[i].prefSZ == null) return;
-            PlayerPrefs.SetFloat(DRAG_ITEMS[i].prefSZ, _dragGOs[i].transform.localScale.x);
+            if (DRAG_ITEMS[i].prefSZ == null) return;
+            if (_savedScales[i] < 0f) return;
+            PlayerPrefs.SetFloat(DRAG_ITEMS[i].prefSZ, _savedScales[i]);
+            SettingsModEntry.Log("SAVE ratio[" + i + "] " + DRAG_ITEMS[i].displayName + " = " + _savedScales[i].ToString("F4") + " (base x=" + _dragOrigScale[i].x.ToString("F5") + " y=" + _dragOrigScale[i].y.ToString("F5") + ")");
         }
 
         private void LoadDragScale(int i)
         {
             if (_dragGOs[i] == null || DRAG_ITEMS[i].prefSZ == null) return;
             if (!PlayerPrefs.HasKey(DRAG_ITEMS[i].prefSZ)) return;
-            float s = PlayerPrefs.GetFloat(DRAG_ITEMS[i].prefSZ);
-            if (s < 0.01f) return;
+            if (_dragOrigScale[i] == Vector3.zero) return;
+            float ratio = PlayerPrefs.GetFloat(DRAG_ITEMS[i].prefSZ);
+            float tx = _dragOrigScale[i].x * ratio;
+            float ty = _dragOrigScale[i].y * ratio;
             Vector3 orig = _dragGOs[i].transform.localScale;
-            _dragGOs[i].transform.localScale = new Vector3(s, s, orig.z);
+            _dragGOs[i].transform.localScale = new Vector3(tx, ty, orig.z);
+            _savedScales[i] = ratio;
+            SettingsModEntry.Log("LOAD ratio[" + i + "] " + DRAG_ITEMS[i].displayName + " ratio=" + ratio.ToString("F4") + " target=(" + tx.ToString("F5") + "," + ty.ToString("F5") + ")");
         }
 
         // =====================================================================
@@ -723,7 +778,19 @@ namespace CNRSettingsMod
         // =====================================================================
         private void OnGUI()
         {
-            if (!_inGameScene) return;
+            if (_sceneName == "MainMenu" && !_showSettings && !_hudEditMode)
+            {
+                // Main menu overlay -- reload button (bottom-right)
+                float sc = Screen.width / REF_W;
+                GUIUtility.ScaleAroundPivot(new Vector2(sc, sc), Vector2.zero);
+                float vh2 = Screen.height / sc;
+                GUIStyle rb = new GUIStyle(GUI.skin.button);
+                rb.fontSize = 14; rb.fontStyle = FontStyle.Bold;
+                rb.normal.textColor = new Color(0.4f, 1f, 0.6f);
+                if (GUI.Button(new Rect(REF_W - 10f - 160f, vh2 - 44f, 160f, 34f), "Reload Mods", rb))
+                    ReloadExternalMods();
+                return;
+            }
             if (!_showSettings && !_hudEditMode) return;
 
             float scale = Screen.width / REF_W;
@@ -765,7 +832,9 @@ namespace CNRSettingsMod
         private void DrawSettingsWindow(int id)
         {
             float pw = _winRect.width - 28f;
-            _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.Width(_winRect.width - 4f));
+            GUIStyle vScroll = new GUIStyle(GUI.skin.verticalScrollbar); vScroll.fixedWidth = 30f;
+            _scroll = GUILayout.BeginScrollView(_scroll, false, true, GUIStyle.none, vScroll,
+                GUILayout.Width(_winRect.width - 4f));
             GUILayout.Space(6f);
 
             // ---- Sensitivity ------------------------------------------------
@@ -789,34 +858,15 @@ namespace CNRSettingsMod
             GUILayout.Space(6f);
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Scoped  [x" + _sensScoped.ToString("F2") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newScope = GUILayout.HorizontalSlider(_sensScoped, 0.05f, 1.5f, GUILayout.Height(36f));
+            GUILayout.Label("Aimed   [" + _sensAimed.ToString("F1") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newAimed = GUILayout.HorizontalSlider(_sensAimed, 0.5f, 7f, GUILayout.Height(36f));
             GUILayout.EndHorizontal();
-            if (Mathf.Abs(newScope - _sensScoped) > 0.005f)
+            if (Mathf.Abs(newAimed - _sensAimed) > 0.05f)
             {
-                _sensScoped = Mathf.Round(newScope * 100f) / 100f;
-                PlayerPrefs.SetFloat("CNRMod_ScopeSens", _sensScoped);
+                _sensAimed = Mathf.Round(newAimed * 10f) / 10f;
+                PlayerPrefs.SetFloat("CNRMod_AimedSens", _sensAimed);
             }
-            GUILayout.Label("  Multiplier when holding AWP / M87T / STW-25 / FRF2", HintStyle());
-            GUILayout.Space(14f);
-
-            // ---- Camera -----------------------------------------------------
-            SectionHeader("Camera");
-            GUILayout.Space(4f);
-
-            bool newNoAccel = GUILayout.Toggle(_noAccel, " Disable swipe acceleration  (cap rotation per frame)", ToggleStyle());
-            if (newNoAccel != _noAccel) { _noAccel = newNoAccel; PlayerPrefs.SetInt("CNRMod_NoAccel", _noAccel ? 1 : 0); }
-
-            if (_noAccel)
-            {
-                GUILayout.Space(4f);
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("  Max deg/frame  [" + _maxDelta.ToString("F0") + "]", LabelStyle(), GUILayout.Width(pw * 0.44f));
-                float newDelta = GUILayout.HorizontalSlider(_maxDelta, 2f, 50f, GUILayout.Height(36f));
-                GUILayout.EndHorizontal();
-                if (Mathf.Abs(newDelta - _maxDelta) > 0.5f) { _maxDelta = Mathf.Round(newDelta); PlayerPrefs.SetFloat("CNRMod_MaxDeltaDeg", _maxDelta); }
-                GUILayout.Label("  10-20 is comfortable for touch.", HintStyle());
-            }
+            GUILayout.Label("  Sensitivity while ADS/aim is toggled on (any weapon)", HintStyle());
             GUILayout.Space(14f);
 
             // ---- HUD Visibility ---------------------------------------------
@@ -856,18 +906,21 @@ namespace CNRSettingsMod
             resetAllBtn.normal.textColor = new Color(1f, 0.45f, 0.45f);
             if (GUILayout.Button("Reset All HUD to Defaults", resetAllBtn))
             {
-                for (int i = 0; i < DRAG_COUNT; i++)
+                if (_inGameScene)
+                    StartCoroutine(ResetHUDViaEditMode());
+                else
                 {
-                    PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefPX);
-                    PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefPY);
-                    if (DRAG_ITEMS[i].prefSZ != null) PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefSZ);
-                    if (_dragGOs[i] != null)
+                    // Not in game scene yet — just wipe prefs; defaults load on next scene entry
+                    for (int i = 0; i < DRAG_COUNT; i++)
                     {
-                        if (_dragOrigPos[i]   != Vector3.zero) _dragGOs[i].transform.position   = _dragOrigPos[i];
-                        if (_dragOrigScale[i] != Vector3.zero) _dragGOs[i].transform.localScale  = _dragOrigScale[i];
+                        PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefPX);
+                        PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefPY);
+                        if (DRAG_ITEMS[i].prefSZ != null) PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefSZ);
+                        _savedScales[i]   = -1f;
+                        _dragOrigScale[i] = Vector3.zero;
                     }
+                    PlayerPrefs.Save();
                 }
-                PlayerPrefs.Save();
             }
             GUILayout.Space(6f);
 
@@ -875,7 +928,12 @@ namespace CNRSettingsMod
             GUIStyle closeBtn = new GUIStyle(GUI.skin.button);
             closeBtn.fontSize    = 22;
             closeBtn.fixedHeight = 52f;
-            if (GUILayout.Button("  Close & Save  ", closeBtn)) { _showSettings = false; PlayerPrefs.Save(); }
+            if (GUILayout.Button("  Close & Save  ", closeBtn))
+            {
+                _showSettings = false;
+                if (_nguiUICam != null) _nguiUICam.enabled = true;
+                PlayerPrefs.Save();
+            }
 
             GUILayout.Space(8f);
             GUILayout.EndScrollView();
@@ -893,7 +951,8 @@ namespace CNRSettingsMod
             banner.fontStyle = FontStyle.Bold;
             banner.alignment = TextAnchor.MiddleLeft;
             banner.normal.textColor = new Color(1f, 0.9f, 0.2f);
-            GUI.Label(new Rect(12f, 8f, vw - 170f, 48f), "HUD Layout Edit  --  center=drag  edge=resize  R=reset", banner);
+            string modeLabel = _editResizeMode ? "[RESIZE]  double-tap handle to switch" : "[MOVE]  double-tap handle to switch";
+            GUI.Label(new Rect(12f, 8f, vw - 170f, 48f), "HUD Edit  --  " + modeLabel, banner);
 
             // Finish button (top-right)
             GUIStyle finBtn = new GUIStyle(GUI.skin.button);
@@ -906,21 +965,21 @@ namespace CNRSettingsMod
             // Per-item tint colours -- alpha kept low so actual buttons are visible
             Color[] colours = new Color[]
             {
-                new Color(1f,   0.3f, 0.3f, 0.28f),   // 0  fire     red
-                new Color(0.3f, 0.85f,1f,   0.28f),   // 1  jump     cyan
-                new Color(1f,   0.70f,0.1f, 0.28f),   // 2  reload   orange
-                new Color(0.85f,0.3f, 1f,   0.28f),   // 3  record   purple
-                new Color(0.5f, 0.9f, 1f,   0.28f),   // 4  aim      sky
-                new Color(0.35f,1f,   0.35f,0.28f),   // 5  toolbar  green
-                new Color(1f,   0.5f, 0.9f, 0.28f),   // 6  chatbar  pink
-                new Color(1f,   1f,   0.3f, 0.28f),   // 7  healthbar yellow
-                new Color(0.3f, 0.6f, 1f,   0.28f),   // 8  team1    blue
-                new Color(1f,   0.4f, 0.4f, 0.28f),   // 9  team2    red2
-                new Color(0.8f, 0.8f, 0.8f, 0.28f),   // 10 pause    grey
-                new Color(0.4f, 1f,   0.8f, 0.28f),   // 11 plist    teal
-                new Color(0.6f, 1f,   0.4f, 0.28f),   // 12 hpack    lime
-                new Color(1f,   0.7f, 0.2f, 0.28f),   // 13 ammo     amber
-                new Color(0.9f, 0.5f, 1f,   0.28f),   // 14 hudhide  violet
+                new Color(1f,   0.3f, 0.3f, 0.09f),   // 0  fire     red
+                new Color(0.3f, 0.85f,1f,   0.09f),   // 1  jump     cyan
+                new Color(1f,   0.70f,0.1f, 0.09f),   // 2  reload   orange
+                new Color(0.85f,0.3f, 1f,   0.09f),   // 3  record   purple
+                new Color(0.5f, 0.9f, 1f,   0.09f),   // 4  aim      sky
+                new Color(0.35f,1f,   0.35f,0.09f),   // 5  toolbar  green
+                new Color(1f,   0.5f, 0.9f, 0.09f),   // 6  chatbar  pink
+                new Color(1f,   1f,   0.3f, 0.09f),   // 7  healthbar yellow
+                new Color(0.3f, 0.6f, 1f,   0.09f),   // 8  team1    blue
+                new Color(1f,   0.4f, 0.4f, 0.09f),   // 9  team2    red2
+                new Color(0.8f, 0.8f, 0.8f, 0.09f),   // 10 pause    grey
+                new Color(0.4f, 1f,   0.8f, 0.09f),   // 11 plist    teal
+                new Color(0.6f, 1f,   0.4f, 0.09f),   // 12 hpack    lime
+                new Color(1f,   0.7f, 0.2f, 0.09f),   // 13 ammo     amber
+                new Color(0.9f, 0.5f, 1f,   0.09f),   // 14 hudhide  violet
             };
             // Bright border colours (opaque) matching tint hue
             Color[] borders = new Color[]
@@ -990,21 +1049,22 @@ namespace CNRSettingsMod
                 GUI.Label(new Rect(vRect.x, vRect.y, vRect.width, vRect.height - 24f), DRAG_ITEMS[i].displayName, hs);
 
                 // Reset button -- bottom-right corner; suppresses drag-save on this frame
-                Rect rr = new Rect(vRect.xMax - 36f, vRect.yMax - 26f, 36f, 26f);
+                Rect rr = new Rect(vRect.xMax - 24f, vRect.yMax - 16f, 24f, 16f);
                 GUIStyle rs = new GUIStyle(GUI.skin.button);
-                rs.fontSize = 12;
+                rs.fontSize = 9;
                 rs.fontStyle = FontStyle.Bold;
                 rs.normal.textColor = new Color(1f, 0.3f, 0.3f);
                 if (GUI.Button(rr, "RST", rs))
                 {
                     if (_dragGOs[i] != null)
                     {
-                        if (_dragOrigPos[i]   != Vector3.zero) _dragGOs[i].transform.position   = _dragOrigPos[i];
-                        if (_dragOrigScale[i] != Vector3.zero) _dragGOs[i].transform.localScale  = _dragOrigScale[i];
+                        _dragGOs[i].transform.position   = _dragOrigPos[i];
+                        _dragGOs[i].transform.localScale = (_dragOrigScale[i] != Vector3.zero) ? _dragOrigScale[i] : Vector3.one;
+                        _savedScales[i] = -1f;  // disable scale enforcement; let game auto-scaler own it
                         PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefPX);
                         PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefPY);
                         if (DRAG_ITEMS[i].prefSZ != null) PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefSZ);
-                        // Suppress the drag-save that will fire on touch-up this same frame
+                        PlayerPrefs.Save();
                         _suppressSaveIdx = true;
                         _suppressSaveFor = i;
                         _draggingIdx     = -1;
@@ -1108,13 +1168,22 @@ namespace CNRSettingsMod
                 if (found != null)
                 {
                     if (_dragOrigPos[i]   == Vector3.zero) _dragOrigPos[i]   = found.transform.position;
-                    if (_dragOrigScale[i] == Vector3.zero) _dragOrigScale[i] = found.transform.localScale;
+                    if (_dragOrigScale[i] == Vector3.zero)
+                        _dragOrigScale[i] = found.transform.localScale;
                     LoadDragPos(i);
                     LoadDragScale(i);
                     SettingsModEntry.Log("DRAG[" + i + "] " + item.displayName + " -> " + found.name);
                 }
                 else
                     SettingsModEntry.Log("DRAG[" + i + "] " + item.displayName + " NOT FOUND");
+            }
+
+            // Attach ADS state tracker to Aim button (DRAG index 4)
+            if (_dragGOs[4] != null)
+            {
+                AimBtnProxy abp = _dragGOs[4].GetComponent<AimBtnProxy>();
+                if (abp == null) abp = _dragGOs[4].AddComponent<AimBtnProxy>();
+                abp.hook = this;
             }
         }
 
@@ -1155,23 +1224,73 @@ namespace CNRSettingsMod
         // =====================================================================
         private void LoadPrefs()
         {
-            _sensNormal = PlayerPrefs.GetFloat("Sensitivity",        3.2f);
-            _sensScoped = PlayerPrefs.GetFloat("CNRMod_ScopeSens",   0.4f);
-            _noAccel    = PlayerPrefs.GetInt  ("CNRMod_NoAccel",     0) == 1;
-            _maxDelta   = PlayerPrefs.GetFloat("CNRMod_MaxDeltaDeg", 15f);
+            _sensNormal = PlayerPrefs.GetFloat("Sensitivity",      3.2f);
+            _sensAimed  = PlayerPrefs.GetFloat("CNRMod_AimedSens",  1.5f);
             for (int i = 0; i < VIS_ITEMS.Length; i++)
                 _visOn[i] = PlayerPrefs.GetInt(VIS_ITEMS[i].prefKey, 1) == 1;
+            // Pre-populate _savedScales so LateUpdate can enforce them immediately.
+            // Use -1f as sentinel for "no saved scale" since valid scales can be tiny (< 0.01).
+            // Also nuke any stale scale prefs for game-owned panels (prefSZ == null items).
+            string[] stalePanelKeys = new string[]{ "CNRMod_SZ_ToolBar", "CNRMod_SZ_ChatBar", "CNRMod_SZ_HP", "CNRMod_SZ_TS1" };
+            foreach (string k in stalePanelKeys) PlayerPrefs.DeleteKey(k);
+            // Migration: if scale version key absent, wipe all saved scales (clears stale data from old code).
+            if (!PlayerPrefs.HasKey("CNRMod_ScaleVer") || PlayerPrefs.GetInt("CNRMod_ScaleVer") < 3)
+            {
+                SettingsModEntry.Log("LoadPrefs: migrating scale prefs to ratio-based (v3)");
+                for (int i = 0; i < DRAG_COUNT; i++)
+                    if (DRAG_ITEMS[i].prefSZ != null) PlayerPrefs.DeleteKey(DRAG_ITEMS[i].prefSZ);
+                PlayerPrefs.SetInt("CNRMod_ScaleVer", 3);
+                PlayerPrefs.Save();
+            }
+            for (int i = 0; i < DRAG_COUNT; i++)
+            {
+                if (DRAG_ITEMS[i].prefSZ != null && PlayerPrefs.HasKey(DRAG_ITEMS[i].prefSZ))
+                {
+                    _savedScales[i] = PlayerPrefs.GetFloat(DRAG_ITEMS[i].prefSZ);
+                    SettingsModEntry.Log("PREFS ratio[" + i + "] " + DRAG_ITEMS[i].displayName + " = " + _savedScales[i].ToString("F4"));
+                }
+                else
+                    _savedScales[i] = -1f;
+            }
         }
 
         // =====================================================================
         // Misc helpers
         // =====================================================================
-        private bool IsCurrentWeaponScoped()
+        private void ReloadExternalMods()
         {
-            if ((object)PlayerLogic.mInstance == null) return false;
-            int wt = (int)PlayerLogic.mInstance.mWeaponType;
-            foreach (int s in SCOPED_WEAPONS) if (s == wt) return true;
-            return false;
+            SettingsModEntry.Log("ReloadExternalMods: triggered from button");
+            const string dir = "/storage/emulated/0/CNRMods";
+            try
+            {
+                string[] files = System.IO.Directory.GetFiles(dir, "*.dll");
+                foreach (string path in files)
+                {
+                    try
+                    {
+                        string name = System.IO.Path.GetFileName(path);
+                        if (name.Equals("IPRedirectMod.dll", StringComparison.OrdinalIgnoreCase)) continue;
+                        SettingsModEntry.Log("ReloadExternalMods: loading " + name);
+                        // Destroy any existing instances of this mod first
+                        foreach (GameObject existing in GameObject.FindObjectsOfType(typeof(GameObject)))
+                            if (existing.name == "CNRSettingsMod" && existing != this.gameObject)
+                                Destroy(existing);
+                        byte[] data = System.IO.File.ReadAllBytes(path);
+                        Assembly asm = Assembly.Load(data);
+                        bool found = false;
+                        foreach (Type t in asm.GetTypes())
+                        {
+                            MethodInfo m = t.GetMethod("Load",
+                                BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+                            if (m != null) { m.Invoke(null, null); found = true; break; }
+                        }
+                        if (!found) SettingsModEntry.Log("ReloadExternalMods: no Load() in " + name);
+                        else SettingsModEntry.Log("ReloadExternalMods: reloaded " + name);
+                    }
+                    catch (Exception ex) { SettingsModEntry.Log("ReloadExternalMods err: " + ex.Message); }
+                }
+            }
+            catch (Exception ex) { SettingsModEntry.Log("ReloadExternalMods dir err: " + ex.Message); }
         }
 
         private static bool IsGameScene(string scene)
@@ -1186,5 +1305,12 @@ namespace CNRSettingsMod
     {
         public SettingsModHook hook;
         private void OnClick() { if (hook != null) hook.OpenSettings(); }
+    }
+
+    // Proxy on the ADS/Aim button -- toggles _isAiming so sensitivity switches
+    public class AimBtnProxy : MonoBehaviour
+    {
+        public SettingsModHook hook;
+        private void OnClick() { if (hook != null) hook.ToggleAiming(); }
     }
 }

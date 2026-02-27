@@ -1,0 +1,4 @@
+[
+  {"path":"_UIDrawCall [Font Material]","mesh":"Mesh1 for Font Material","mat":"Font Material","color":[255,255,255],"pos":[-0.07,0.03,0.00],"size":[3.72,1.72,0.00]},
+  {"path":"_UIDrawCall [MenuSystem]","mesh":"Mesh1 for MenuSystem","mat":"MenuSystem","color":[0,0,0],"pos":[0.00,0.01,0.00],"size":[4.59,2.03,0.00]}
+]
