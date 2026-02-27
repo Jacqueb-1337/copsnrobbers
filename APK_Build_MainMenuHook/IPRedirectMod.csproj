@@ -1,18 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net40</TargetFramework>
+    <TargetFramework>netstandard2.0</TargetFramework>
     <AssemblyName>IPRedirectMod</AssemblyName>
     <RootNamespace>CNRMods</RootNamespace>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Don't try to reference any framework assemblies that conflict with Unity's Mono -->
+    <NoStdLib>false</NoStdLib>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <!-- Suppress "targeting an older framework" warning -->
-    <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="IPRedirectMod.cs" />
+    <Compile Include="CNRCustomMapsMod.cs" />
   </ItemGroup>
 
   <!-- Reference Unity and game DLLs from the APK's Managed folder -->
