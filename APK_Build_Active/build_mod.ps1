@@ -4,7 +4,7 @@ param(
 
     [string]$OutName = "",     # output DLL name; defaults to source file basename
 
-    [string]$Device = "10.182.18.201:42355",  # adb device serial
+    [string]$Device = "10.182.18.201:39573",  # adb device serial
 
     [switch]$NoDeploy          # pass -NoDeploy to skip adb push
 )
@@ -46,6 +46,7 @@ Write-Host "Building $OutName from $([System.IO.Path]::GetFileName($ModFile)) ..
     "/reference:$ManagedDir\System.dll" `
     "/reference:$ManagedDir\System.Core.dll" `
     "/reference:$ManagedDir\UnityEngine.dll" `
+    "/reference:$ManagedDir\JsonFx.Json.dll" `
     "/reference:$ManagedDir\Assembly-CSharp.dll" `
     "$ModFile" 2>&1 | Where-Object { $_ -notmatch "go.microsoft.com|only supports language" }
 
@@ -64,7 +65,7 @@ if ($NoDeploy) {
 }
 
 Write-Host "Deploying to $Device ..." -ForegroundColor Cyan
-adb -s push $OutDll /sdcard/CNRMods/$OutName
+adb -s $Device push $OutDll /sdcard/CNRMods/$OutName
 if ($LASTEXITCODE -ne 0) {
     Write-Host "DEPLOY FAILED" -ForegroundColor Red
     exit 1
