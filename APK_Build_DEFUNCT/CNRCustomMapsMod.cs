@@ -91,10 +91,6 @@ namespace CNRMods
         MSD_SubSceneInWorldWide _lastSubScene = (MSD_SubSceneInWorldWide)(-1);
         int _virtualIdx = 0; // tracks position in _allMaps independently of mCurWWMapSelect
 
-        // Custom map URL input
-        string _activeCustomSlot = ""; // e.g. "FreeRun13_1" — which slot is currently shown
-        string _urlInput = "";          // live text field value
-
         // ── Lifecycle ────────────────────────────────────────────────────────────────
 
         void Awake()
@@ -108,8 +104,6 @@ namespace CNRMods
         {
             _hooked = false;
             _lastSubScene = (MSD_SubSceneInWorldWide)(-1);
-            _activeCustomSlot = "";
-            _urlInput = "";
         }
 
         void Update()
@@ -253,9 +247,6 @@ namespace CNRMods
             {
                 // Standard map — set normally and let game handle it
                 PlayerPrefs.SetString("CNRMod_CustomMapName", "");
-                PlayerPrefs.SetString("CNRMod_ActiveMapURL", "");
-                _activeCustomSlot = "";
-                _urlInput = "";
                 msd.mCurWWMapSelect = scene;
                 msd.mWWMapUITexture.mainTexture = (Texture)(object)msd.mWWMapTexture[stdIdx];
                 msd.mWWMapUITexture.MarkAsChanged();
@@ -278,12 +269,6 @@ namespace CNRMods
                 // Store the custom display name in PlayerPrefs so OnGUI can show it
                 // even after mCurWWMapSelect is overwritten with the real scene name
                 PlayerPrefs.SetString("CNRMod_CustomMapName", CUSTOM_NAMES[scene]);
-
-                // Load previously saved URL for this slot
-                _activeCustomSlot = scene;
-                _urlInput = PlayerPrefs.GetString("CNRMod_MapURL_" + scene, "");
-                PlayerPrefs.SetString("CNRMod_ActiveMapURL", _urlInput);
-                PlayerPrefs.Save();
             }
 
             ModEntry.Log("Map changed to: " + scene + " (loads: " + msd.mCurWWMapSelect + ")");
@@ -330,37 +315,6 @@ namespace CNRMods
             };
             GUI.color = new Color(1f, 1f, 0.3f, 0.85f);
             GUI.Label(new Rect(bx, by + bh, bw, 28f), "Requires mod on all clients", noteStyle);
-
-            // ── URL input (only visible when a custom slot is active) ──
-            if (!string.IsNullOrEmpty(_activeCustomSlot))
-            {
-                float uy = by + bh + 28f + 10f;
-
-                var lblStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize  = 12,
-                    fontStyle = FontStyle.Normal,
-                    alignment = TextAnchor.MiddleLeft,
-                };
-                GUI.color = new Color(0.85f, 0.85f, 0.85f, 0.9f);
-                GUI.Label(new Rect(bx, uy, bw, 22f), "Map JSON URL:", lblStyle);
-                uy += 22f;
-
-                var tfStyle = new GUIStyle(GUI.skin.textField)
-                {
-                    fontSize  = 11,
-                    alignment = TextAnchor.MiddleLeft,
-                };
-                GUI.color = Color.white;
-                string newUrl = GUI.TextField(new Rect(bx, uy, bw, 30f), _urlInput, 512, tfStyle);
-                if (newUrl != _urlInput)
-                {
-                    _urlInput = newUrl;
-                    PlayerPrefs.SetString("CNRMod_MapURL_" + _activeCustomSlot, newUrl);
-                    PlayerPrefs.SetString("CNRMod_ActiveMapURL", newUrl);
-                    PlayerPrefs.Save();
-                }
-            }
 
             GUI.color = Color.white;
         }

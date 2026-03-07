@@ -129,8 +129,11 @@ namespace CNRMods
 
             if (asMaster)
             {
-                // Broadcast map URL + version via room custom properties
-                if (_mapUrl != "") SetRoomCustomProp(pnt, "CNR_MAP_URL", _mapUrl);
+                // Broadcast map URL + version via room custom properties.
+                // PlayerPrefs (set by the in-game URL picker) takes priority over server.cfg.
+                string urlToUse = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
+                if (string.IsNullOrEmpty(urlToUse)) urlToUse = _mapUrl;
+                if (!string.IsNullOrEmpty(urlToUse)) SetRoomCustomProp(pnt, "CNR_MAP_URL", urlToUse);
                 SetRoomCustomProp(pnt, "CNR_MOD_VERSION", _modVersion);
             }
             else
