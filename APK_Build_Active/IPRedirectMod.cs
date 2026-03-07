@@ -1,50 +1,58 @@
-using System;
+﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using UnityEngine;
+using Pathfinding.Serialization.JsonFx;
 
 namespace CNRMods
 {
-    /// <summary>
-    /// IP Redirect Mod — overrides Photon server to point at the custom LAN server.
-    /// Entry point: CNRMods.ModEntry.Load() — called by the patched Extensions static ctor.
-    /// Config: /storage/emulated/0/CNRMods/server.cfg  (SERVER_IP=x.x.x.x)
-    /// </summary>
+    // ══════════════════════════════════════════════════════════════════════════
+    //  ENTRY POINT — MainMenuDirector.LoadMods() looks for CNRMods.ModEntry.Load()
+    // ══════════════════════════════════════════════════════════════════════════
     public class ModEntry
     {
         private const string LogPath    = "/storage/emulated/0/CNRMods/redir.log";
         private const string ConfigPath = "/storage/emulated/0/CNRMods/server.cfg";
 
+        // Config values (read once in Load())
+        public static string ServerIp      = "";
+        public static int    ServerPort    = 5055;
+        public static string AppId         = "CNRLan";
+        public static string MapUrl        = "";
+        public static string ModVersion    = "1.0.0";
+        public static bool   KickNoMod     = true;
+        public static string WebUrl        = "";    // http://<host>:1337 for node server; derived from SERVER_IP if not set
+        public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
+
+        private static bool _loaded = false;
+
         public static void Load()
         {
+            if (_loaded) { Log("IPRedirectMod: already loaded, skipping"); return; }
+            _loaded = true;
             Log("=== IPRedirectMod Load() ===");
             try
             {
-                string ip = ReadServerIp();
-                if (string.IsNullOrEmpty(ip))
-                {
-                    Log("No SERVER_IP in server.cfg — aborting");
-                    return;
-                }
+                ReadConfig();
 
-                Log("Creating redirect MonoBehaviour for IP: " + ip);
-                var go = new GameObject("CNRIPRedirect");
-                var hook = go.AddComponent<RedirectHook>();
-                hook.ServerIp = ip;
+                var go = new GameObject("CNRMod_Root");
+                go.AddComponent<RedirectHook>();
+                go.AddComponent<CustomMapsHook>();
+                go.AddComponent<MapLoader>();
                 GameObject.DontDestroyOnLoad(go);
-            }
-            catch (Exception ex)
-            {
-                Log("Load() exception: " + ex);
-            }
 
-            CustomMapsEntry.Initialize();
+                Log("Mod root created.  IP=" + (ServerIp != "" ? ServerIp : "(none)") +
+                    "  MOD_VERSION=" + ModVersion + "  KICK_NO_MOD=" + KickNoMod);
+            }
+            catch (Exception ex) { Log("Load() error: " + ex); }
+
             LoadExternalMods();
         }
 
-        // Scan /sdcard/CNRMods/ for any .dll other than IPRedirectMod.dll, load it, and call
-        // the first public static Load() method found — that is the convention for separate mods.
+        // Scan /sdcard/CNRMods/ for any .dll other than IPRedirectMod.dll and call its public
+        // static Load() — this is how CNRSettingsMod.dll and others get initialized.
         private static void LoadExternalMods()
         {
             const string dir = "/storage/emulated/0/CNRMods";
@@ -69,289 +77,526 @@ namespace CNRMods
                                 null, Type.EmptyTypes, null);
                             if (m != null) { m.Invoke(null, null); found = true; break; }
                         }
-                        if (!found) Log("LoadExternalMods: no Load() entry point in " + name);
+                        if (!found) Log("LoadExternalMods: no Load() in " + name);
                     }
-                    catch (Exception ex) { Log("LoadExternalMods: error loading " + name + ": " + ex.Message); }
+                    catch (Exception ex2) { Log("LoadExternalMods: error in " + name + ": " + ex2.Message); }
                 }
             }
             catch (Exception ex) { Log("LoadExternalMods: " + ex.Message); }
         }
 
-        private static string ReadServerIp()
+        private static void ReadConfig()
         {
-            if (!File.Exists(ConfigPath))
+            if (!File.Exists(ConfigPath)) { Log("No server.cfg found"); return; }
+            foreach (string raw in File.ReadAllLines(ConfigPath))
             {
-                Log("server.cfg not found at " + ConfigPath);
-                return null;
+                string line = raw.Trim();
+                if (string.IsNullOrEmpty(line) || line.StartsWith("#")) continue;
+                int eq = line.IndexOf('=');
+                if (eq < 0) continue;
+                string key = line.Substring(0, eq).Trim().ToUpperInvariant();
+                string val = line.Substring(eq + 1).Trim();
+                switch (key)
+                {
+                    case "SERVER_IP":   ServerIp   = val;   break;
+                    case "SERVER_PORT": int pp; if (int.TryParse(val, out pp)) ServerPort = pp; break;
+                    case "APP_ID":      AppId      = val;   break;
+                    case "MAP_URL":     MapUrl     = val;   break;
+                    case "MOD_VERSION": ModVersion = val;   break;
+                    case "KICK_NO_MOD": KickNoMod  = val.ToLower() != "false" && val != "0"; break;
+                    case "WEB_URL":     WebUrl     = val; break;
+                }
             }
-            foreach (string line in File.ReadAllLines(ConfigPath))
-            {
-                string t = line.Trim();
-                if (t.StartsWith("SERVER_IP="))
-                    return t.Substring("SERVER_IP=".Length).Trim();
-            }
-            return null;
+            Log("Config: IP=" + ServerIp + "  PORT=" + ServerPort + "  MAP_URL=" + MapUrl +
+                "  VERSION=" + ModVersion + "  KICK=" + KickNoMod);
+            if (string.IsNullOrEmpty(WebUrl) && !string.IsNullOrEmpty(ServerIp))
+                WebUrl = "http://" + ServerIp + ":1337";
+            Log("WebUrl=" + (WebUrl != "" ? WebUrl : "(not set)"));
         }
 
         public static void Log(string msg)
         {
             try { File.AppendAllText(LogPath, "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + msg + "\n"); }
             catch { }
-            try { Debug.Log("[IPRedirect] " + msg); } catch { }
+            try { Debug.Log("[CNRMod] " + msg); } catch { }
+        }
+
+        // port 1337 is plain HTTP — strip accidental https://
+        public static string SanitizeUrl(string url)
+        {
+            if (url != null && url.StartsWith("https://") && url.Contains(":1337"))
+                url = "http://" + url.Substring(8);
+            return url;
+        }
+
+        public static string ParseJsonStringValue(string json, string key)
+        {
+            try
+            {
+                string k = "\"" + key + "\":";
+                int ki = json.IndexOf(k);
+                if (ki < 0) return null;
+                int vi = json.IndexOf('"', ki + k.Length);
+                if (vi < 0) return null;
+                int ei = json.IndexOf('"', vi + 1);
+                if (ei < 0) return null;
+                return json.Substring(vi + 1, ei - vi - 1).Replace("\\n", "").Replace("\\/", "/");
+            }
+            catch { return null; }
         }
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    //  REDIRECT HOOK — Photon TCP redirect + room poll + map broadcast + kick
+    // ══════════════════════════════════════════════════════════════════════════
     public class RedirectHook : MonoBehaviour
     {
-        public string ServerIp = "";
+        // Overlay
+        private string _overlayMsg   = null;
+        private float  _overlayAlpha = 0f;
 
-        // Overlay state — set by ShowOverlay(), rendered in OnGUI(), faded by FadeOverlay()
-        private string _overlayMessage = null;
-        private float  _overlayOpacity = 0f;
+        // Room state
+        private bool  _inRoom   = false;
+        private bool  _isMaster = false;
+        private float _pollTimer = 0f;
+        private const float PollInterval  = 1.0f;
+        private const float KickGraceSecs = 5.0f;
+        private readonly Dictionary<int, float> _pendingVerify = new Dictionary<int, float>();
 
-        private void Awake()
-        {
-            Application.runInBackground = true;
-        }
-
-        // Update() real-time heartbeat — logged 5 times then stops
-        private DateTime _lastUpdateLog = DateTime.MinValue;
-        private int _updateLogCount = 0;
+        // Cached Photon type
+        private static Type _pnt = null;
 
         private static readonly string[] ConnectScenes = { "MultiplayerSelect", "CNRConnectMenu" };
-        private bool _connected = false;
 
-        private void Start()
-        {
-            Application.runInBackground = true;
-            _lastUpdateLog = DateTime.Now;
-            ModEntry.Log("Start() — scene=" + Application.loadedLevelName);
-        }
+        private void Awake()  { Application.runInBackground = true; }
 
         private void OnLevelWasLoaded(int level)
         {
             string scene = Application.loadedLevelName;
-            ModEntry.Log("OnLevelWasLoaded: scene=" + scene + " level=" + level);
-
-            bool isConnectScene = System.Array.IndexOf(ConnectScenes, scene) >= 0;
-            if (isConnectScene)
+            ModEntry.Log("Scene: " + scene);
+            _pollDebugCount = 0;  // fresh diagnostics each scene
+            if (Array.IndexOf(ConnectScenes, scene) >= 0 && ModEntry.ServerIp != "")
             {
-                ModEntry.Log("Entered connect scene — starting LAN connection");
-                _connected = false;
+                ModEntry.Log("Connect scene — starting LAN redirect");
                 StartCoroutine(RedirectCoroutine());
-            }
-            else if (scene != "MainMenu")
-            {
-                ModEntry.Log("Scene '" + scene + "' is not a connect scene and not MainMenu — leaving connection untouched");
             }
         }
 
         private void Update()
         {
-            if (_updateLogCount >= 5) return;
-            if ((DateTime.Now - _lastUpdateLog).TotalSeconds >= 3.0)
+            _pollTimer -= Time.deltaTime;
+            if (_pollTimer > 0f) return;
+            _pollTimer = PollInterval;
+            PollRoomState();
+        }
+
+        // ── Room state machine ────────────────────────────────────────────────
+        private int _pollDebugCount = 0;  // limit verbose poll logging
+        private void PollRoomState()
+        {
+            try
             {
-                _updateLogCount++;
-                ModEntry.Log("[Update tick " + _updateLogCount + "] deltaTime=" + Time.deltaTime.ToString("F4")
-                    + " unscaled=" + Time.unscaledDeltaTime.ToString("F4")
-                    + " realTime=" + Time.realtimeSinceStartup.ToString("F1")
-                    + " timescale=" + Time.timeScale.ToString("F2"));
-                _lastUpdateLog = DateTime.Now;
+                Type pnt = GetPhotonNetType();
+                if (pnt == null) { if (_pollDebugCount++ < 3) ModEntry.Log("PollRoomState: PhotonNetwork type not found"); return; }
+
+                bool nowInRoom = GetStaticBool(pnt, "inRoom");
+                bool nowMaster = nowInRoom && GetStaticBool(pnt, "isMasterClient");
+
+                // Log first 15 polls so we can see what Photon is returning
+                if (_pollDebugCount < 15)
+                {
+                    _pollDebugCount++;
+                    ModEntry.Log("Poll[" + _pollDebugCount + "] inRoom=" + nowInRoom + " isMaster=" + nowMaster + " scene=" + Application.loadedLevelName);
+                }
+
+                if (!_inRoom && nowInRoom)       OnEnteredRoom(pnt, nowMaster);
+                else if (_inRoom && !nowInRoom)  OnLeftRoom();
+
+                _inRoom   = nowInRoom;
+                _isMaster = nowMaster;
+
+                if (_inRoom && _isMaster && ModEntry.KickNoMod)
+                    CheckKickPlayers(pnt);
+            }
+            catch (Exception ex) { ModEntry.Log("PollRoomState error: " + ex.Message); }
+        }
+
+        private void OnEnteredRoom(Type pnt, bool asMaster)
+        {
+            _pollDebugCount = 999; // stop verbose poll logging once we're in a room
+            ModEntry.IsMaster = asMaster;
+            ModEntry.Log("Entered room (asMaster=" + asMaster + ")");
+            _pendingVerify.Clear();
+
+            string roomName = GetRoomName(pnt);
+            ModEntry.Log("Room: " + (roomName ?? "(unknown)"));
+
+            SetRoomProp(pnt, "CNR_MOD_VERSION", ModEntry.ModVersion);
+
+            if (asMaster)
+            {
+                string url = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
+                if (!string.IsNullOrEmpty(url))
+                {
+                    SetRoomProp(pnt, "CNR_MAP_URL", url);
+                    // Tell node server — clients will query it on join
+                    if (!string.IsNullOrEmpty(ModEntry.WebUrl) && !string.IsNullOrEmpty(roomName))
+                        StartCoroutine(PostRoomToServer(roomName, url));
+                    // Download for local spawn
+                    StartCoroutine(DownloadMap(url));
+                    ModEntry.Log("Master: registered map " + url);
+                }
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(ModEntry.WebUrl) && !string.IsNullOrEmpty(roomName))
+                {
+                    // Fetch URL from node server, then cache + MapLoader polling will spawn it
+                    StartCoroutine(FetchAndCacheMap(roomName));
+                }
+                else
+                {
+                    // Fallback: read Photon room prop directly
+                    string roomUrl = GetRoomPropStr(pnt, "CNR_MAP_URL");
+                    if (!string.IsNullOrEmpty(roomUrl)) StartCoroutine(DownloadMap(roomUrl));
+                }
             }
         }
 
-        private void OnApplicationPause(bool paused)
+        private void OnLeftRoom()
         {
-            ModEntry.Log("OnApplicationPause: " + paused);
+            ModEntry.Log("Left room");
+            _pendingVerify.Clear();
+            _pollDebugCount = 0; // re-enable verbose logging for next room
         }
 
-        private void OnDestroy()
+        // ── Room name / node server helpers ────────────────────────────
+        private static string GetRoomName(Type pnt)
         {
-            ModEntry.Log("OnDestroy — MonoBehaviour destroyed");
+            try
+            {
+                PropertyInfo rp = pnt.GetProperty("room", BindingFlags.Static | BindingFlags.Public);
+                if (rp == null) return null;
+                object room = rp.GetValue(null, null);
+                if (room == null) return null;
+                // Room.Name / room.name
+                PropertyInfo np = room.GetType().GetProperty("Name", BindingFlags.Instance | BindingFlags.Public);
+                if (np == null) np = room.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public);
+                if (np != null) return np.GetValue(room, null) as string;
+            }
+            catch (Exception ex) { ModEntry.Log("GetRoomName error: " + ex.Message); }
+            return null;
         }
 
-        private void ShowOverlay(string message)
+        // POST {room, mapUrl} to node server so clients can query it
+        private IEnumerator PostRoomToServer(string roomName, string url)
         {
-            ModEntry.Log("OVERLAY: " + message.Replace("\n", " | "));
-            _overlayMessage = message;
-            _overlayOpacity = 1f;
+            string body = "{\"room\":\"" + EscapeJson(roomName) + "\",\"mapUrl\":\"" + EscapeJson(url) + "\"}";            byte[] data = System.Text.Encoding.UTF8.GetBytes(body);
+            var h = new System.Collections.Hashtable();
+            h["Content-Type"] = "application/json";
+            ModEntry.Log("PostRoom -> " + ModEntry.WebUrl + "/rooms");
+            var www = new WWW(ModEntry.WebUrl + "/rooms", data, h);
+            yield return www;
+            if (!string.IsNullOrEmpty(www.error)) ModEntry.Log("PostRoom error: " + www.error);
+            else ModEntry.Log("PostRoom OK: " + www.text);
+        }
+
+        // GET /rooms/<roomName> from node server, cache the map URL, start download
+        private IEnumerator FetchAndCacheMap(string roomName)
+        {
+            string fetchUrl = ModEntry.SanitizeUrl(ModEntry.WebUrl + "/rooms/" + Uri.EscapeDataString(roomName));
+            ModEntry.Log("Client: GET " + fetchUrl);
+            var www = new WWW(fetchUrl);
+            yield return www;
+            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("FetchRoom error: " + www.error); yield break; }
+            string mapUrl = ModEntry.ParseJsonStringValue(www.text, "mapUrl");
+            if (string.IsNullOrEmpty(mapUrl)) { ModEntry.Log("FetchRoom: no mapUrl in: " + www.text); yield break; }
+            ModEntry.Log("Client: got mapUrl=" + mapUrl);
+            PlayerPrefs.SetString("CNRMod_ActiveMapURL", mapUrl);
+            PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
+            PlayerPrefs.Save();
+            StartCoroutine(DownloadMap(mapUrl));
+        }
+
+        private static string EscapeJson(string s)
+        {
+            if (s == null) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
+        }
+
+        // ── Kick ──────────────────────────────────────────────────────────────
+        private void CheckKickPlayers(Type pnt)
+        {
+            try
+            {
+                PropertyInfo op = pnt.GetProperty("otherPlayers", BindingFlags.Static | BindingFlags.Public);
+                if (op == null) return;
+                var others = op.GetValue(null, null) as System.Array;
+                if (others == null) return;
+
+                var current = new HashSet<int>();
+                foreach (object player in others)
+                {
+                    if (player == null) continue;
+                    int    pid = GetIntProp(player, "ID");
+                    string ver = GetPlayerCustomProp(player, "CNR_MOD_VERSION");
+                    current.Add(pid);
+
+                    if (!_pendingVerify.ContainsKey(pid))
+                    {
+                        if (string.IsNullOrEmpty(ver))
+                        {
+                            _pendingVerify[pid] = Time.time;
+                            ModEntry.Log("Player " + pid + " grace window started");
+                        }
+                    }
+                    else
+                    {
+                        if (!string.IsNullOrEmpty(ver))
+                        {
+                            _pendingVerify.Remove(pid);
+                            if (!VersionOk(ver))
+                            {
+                                ModEntry.Log("Kicking player " + pid + ": version mismatch '" + ver + "'");
+                                KickPlayer(pnt, player);
+                            }
+                        }
+                        else if (Time.time - _pendingVerify[pid] > KickGraceSecs)
+                        {
+                            ModEntry.Log("Kicking player " + pid + ": no mod version after " + KickGraceSecs + "s");
+                            _pendingVerify.Remove(pid);
+                            KickPlayer(pnt, player);
+                        }
+                    }
+                }
+
+                var gone = new List<int>();
+                foreach (int pid in _pendingVerify.Keys)
+                    if (!current.Contains(pid)) gone.Add(pid);
+                foreach (int pid in gone) _pendingVerify.Remove(pid);
+            }
+            catch (Exception ex) { ModEntry.Log("CheckKickPlayers error: " + ex.Message); }
+        }
+
+        private void KickPlayer(Type pnt, object player)
+        {
+            try
+            {
+                MethodInfo m = pnt.GetMethod("CloseConnection",
+                    BindingFlags.Static | BindingFlags.Public,
+                    null, new Type[] { player.GetType() }, null);
+                if (m != null) m.Invoke(null, new object[] { player });
+            }
+            catch (Exception ex) { ModEntry.Log("KickPlayer error: " + ex.Message); }
+        }
+
+        private bool VersionOk(string other)
+        {
+            try
+            {
+                int a = int.Parse(ModEntry.ModVersion.Trim().Split('.')[0]);
+                int b = int.Parse(other.Trim().Split('.')[0]);
+                return a == b;
+            }
+            catch { return true; }
+        }
+
+        // ── Map download ──────────────────────────────────────────────────────
+        private IEnumerator DownloadMap(string url)
+        {
+            url = ModEntry.SanitizeUrl(url);
+            ModEntry.Log("DownloadMap: " + url);
+            var www = new WWW(url);
+            yield return www;
+
+            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("DownloadMap error: " + www.error); yield break; }
+            string json = www.text;
+            if (string.IsNullOrEmpty(json)) { ModEntry.Log("DownloadMap: empty response"); yield break; }
+
+            try
+            {
+                const string dir = "/storage/emulated/0/CNRMods/";
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                File.WriteAllText(dir + "custom_map_cache.json", json);
+                PlayerPrefs.SetInt("CNRMod_MapCacheReady", 1);
+                PlayerPrefs.Save();
+                ModEntry.Log("Map cached (" + json.Length + " bytes)");
+            }
+            catch (Exception ex) { ModEntry.Log("DownloadMap save error: " + ex.Message); }
+        }
+
+        // ── Photon prop helpers ───────────────────────────────────────────────
+        private void SetRoomProp(Type pnt, string key, string value)
+        {
+            try
+            {
+                PropertyInfo rp = pnt.GetProperty("room", BindingFlags.Static | BindingFlags.Public);
+                if (rp == null) return;
+                object room = rp.GetValue(null, null);
+                if (room == null) return;
+                var ht = new System.Collections.Hashtable();
+                ht[key] = value;
+                MethodInfo m = room.GetType().GetMethod("SetCustomProperties",
+                    new Type[] { typeof(System.Collections.Hashtable) });
+                if (m != null) m.Invoke(room, new object[] { ht });
+            }
+            catch (Exception ex) { ModEntry.Log("SetRoomProp error: " + ex.Message); }
+        }
+
+        private void SetPlayerProp(Type pnt, string key, string value)
+        {
+            try
+            {
+                PropertyInfo pp = pnt.GetProperty("player", BindingFlags.Static | BindingFlags.Public);
+                if (pp == null) return;
+                object player = pp.GetValue(null, null);
+                if (player == null) return;
+                var ht = new System.Collections.Hashtable();
+                ht[key] = value;
+                MethodInfo m = player.GetType().GetMethod("SetCustomProperties",
+                    new Type[] { typeof(System.Collections.Hashtable) });
+                if (m != null) m.Invoke(player, new object[] { ht });
+            }
+            catch (Exception ex) { ModEntry.Log("SetPlayerProp error: " + ex.Message); }
+        }
+
+        private string GetRoomPropStr(Type pnt, string key)
+        {
+            try
+            {
+                PropertyInfo rp = pnt.GetProperty("room", BindingFlags.Static | BindingFlags.Public);
+                if (rp == null) return null;
+                object room = rp.GetValue(null, null);
+                if (room == null) return null;
+                PropertyInfo cp = room.GetType().GetProperty("customProperties",
+                    BindingFlags.Instance | BindingFlags.Public);
+                if (cp == null) return null;
+                var ht = cp.GetValue(room, null) as System.Collections.Hashtable;
+                return (ht != null && ht.ContainsKey(key)) ? ht[key] as string : null;
+            }
+            catch { return null; }
+        }
+
+        private string GetPlayerCustomProp(object player, string key)
+        {
+            try
+            {
+                PropertyInfo cp = player.GetType().GetProperty("customProperties",
+                    BindingFlags.Instance | BindingFlags.Public);
+                if (cp == null) return null;
+                var ht = cp.GetValue(player, null) as System.Collections.Hashtable;
+                return (ht != null && ht.ContainsKey(key)) ? ht[key] as string : null;
+            }
+            catch { return null; }
+        }
+
+        private int GetIntProp(object obj, string name)
+        {
+            try
+            {
+                PropertyInfo p = obj.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
+                if (p != null) return (int)p.GetValue(obj, null);
+            }
+            catch { }
+            return -1;
+        }
+
+        // ── Redirect coroutine ────────────────────────────────────────────────
+        private IEnumerator RedirectCoroutine()
+        {
+            object settings = null;
+            while (settings == null) { settings = GetPhotonServerSettings(); if (settings == null) yield return null; }
+
+            Type t = settings.GetType();
+            SetMember(t, settings, "ServerAddress", ModEntry.ServerIp);
+            SetMember(t, settings, "ServerPort",    ModEntry.ServerPort);
+            SetMember(t, settings, "AppID",         ModEntry.AppId);
+            SetMember(t, settings, "HostType",      2);
+            ModEntry.Log("Override -> " + ModEntry.ServerIp + ":" + ModEntry.ServerPort);
+
+            CallStaticVoid("PhotonNetwork", "Disconnect");
+            float timeout = 8f;
+            while (timeout > 0f) { if (GetConnectionState() == 0) break; timeout -= Time.unscaledDeltaTime; yield return null; }
+
+            SwapToTcp();
+            DisableEncryption();
+
+            ModEntry.Log("Calling ConnectUsingSettings...");
+            try { CallStaticWithArg("PhotonNetwork", "ConnectUsingSettings", "v2.4"); }
+            catch (Exception ex) { ModEntry.Log("ConnectUsingSettings error: " + ex.Message); yield break; }
+
+            float connectTimeout = 30f;
+            int lastState = -999;
+            while (connectTimeout > 0f)
+            {
+                int state = GetDetailedState();
+                if (state != lastState)
+                {
+                    ModEntry.Log("detailState=" + state + " (" + (30f - connectTimeout).ToString("F1") + "s)");
+                    lastState = state;
+                }
+                if (state == 0)  { ShowOverlay("LAN server unreachable.\n" + ModEntry.ServerIp); yield break; }
+                if (state >= 6)  { ModEntry.Log("Lobby joined!"); yield break; }
+                connectTimeout -= Time.unscaledDeltaTime;
+                yield return null;
+            }
+            ModEntry.Log("Connection timed out");
+            CallStaticVoid("PhotonNetwork", "Disconnect");
+            ShowOverlay("LAN connection timed out.\n" + ModEntry.ServerIp);
+        }
+
+        // ── Overlay ───────────────────────────────────────────────────────────
+        private void ShowOverlay(string msg)
+        {
+            ModEntry.Log("OVERLAY: " + msg);
+            _overlayMsg   = msg;
+            _overlayAlpha = 1f;
             StartCoroutine(FadeOverlay());
         }
 
         private IEnumerator FadeOverlay()
         {
-            // Stay fully visible for 6 seconds, then fade out over 4 seconds
             yield return new WaitForSeconds(6f);
-            float t = 4f;
-            while (t > 0f)
-            {
-                _overlayOpacity = t / 4f;
-                t -= Time.deltaTime;
-                yield return null;
-            }
-            _overlayMessage = null;
-            _overlayOpacity  = 0f;
+            float ft = 4f;
+            while (ft > 0f) { _overlayAlpha = ft / 4f; ft -= Time.deltaTime; yield return null; }
+            _overlayMsg   = null;
+            _overlayAlpha = 0f;
         }
 
         private void OnGUI()
         {
-            if (_overlayMessage == null || _overlayOpacity <= 0f) return;
-
-            // Semi-transparent dark band at the top of the screen
-            GUI.color = new Color(0f, 0f, 0f, 0.75f * _overlayOpacity);
+            if (_overlayMsg == null || _overlayAlpha <= 0f) return;
+            GUI.color = new Color(0f, 0f, 0f, 0.75f * _overlayAlpha);
             GUI.DrawTexture(new Rect(0f, 0f, Screen.width, 140f), Texture2D.whiteTexture);
-
-            // Red label text
-            GUI.color = new Color(1f, 0.35f, 0.35f, _overlayOpacity);
+            GUI.color = new Color(1f, 0.35f, 0.35f, _overlayAlpha);
             var style = new GUIStyle(GUI.skin.label);
             style.fontSize  = Mathf.Max(22, Screen.width / 22);
             style.alignment = TextAnchor.MiddleCenter;
             style.wordWrap  = true;
-            GUI.Label(new Rect(20f, 8f, Screen.width - 40f, 124f),
-                      "[CNR-Mod] " + _overlayMessage, style);
-
+            GUI.Label(new Rect(20f, 8f, Screen.width - 40f, 124f), "[CNR-Mod] " + _overlayMsg, style);
             GUI.color = Color.white;
         }
 
-        private IEnumerator RedirectCoroutine()
+        // ── Photon reflection helpers ─────────────────────────────────────────
+        private static Type GetPhotonNetType()
         {
-            // Step 1: wait until PhotonServerSettings object is available
-            object settings = null;
-            while (settings == null)
-            {
-                settings = GetPhotonServerSettings();
-                if (settings == null) yield return null;
-            }
-
-            // Step 2: write our server into PhotonServerSettings
-            Type t = settings.GetType();
-            SetMember(t, settings, "ServerAddress", ServerIp);
-            SetMember(t, settings, "ServerPort",    5055);
-            SetMember(t, settings, "AppID",         "CNRLan");
-            SetMember(t, settings, "HostType",      2); // SelfHosted
-            ModEntry.Log("Override applied → " + ServerIp + ":5055  AppID=CNRLan");
-
-            // Step 3: disconnect unconditionally (handles connecting + connected states)
-            CallStaticVoid("PhotonNetwork", "Disconnect");
-            ModEntry.Log("Disconnect() called");
-
-            // Step 4: wait until connectionState == 0 (Disconnected)
-            float timeout = 8f;
-            while (timeout > 0f)
-            {
-                int state = GetConnectionState();
-                if (state == 0) break;
-                timeout -= Time.unscaledDeltaTime;
-                yield return null;
-            }
-            ModEntry.Log("Photon disconnected, swapping to TCP then reconnecting");
-
-            // Step 5: swap the underlying socket from UDP (EnetPeer) to TCP (TPeer)
-            // The game initialises networkingPeer with ConnectionProtocol.Udp (0), but our server
-            // listens on TCP.  We replace peerBase inside the existing networkingPeer with a fresh
-            // TPeer so the subsequent Connect() goes over TCP without rebuilding any other state.
-            SwapToTcp();
-
-            // Step 5b: disable encryption so the client calls OpAuthenticate directly
-            // requestSecurity=true (default) causes EstablishEncryption() to be called instead of
-            // OpAuthenticate() when OnStatusChanged(Connect) fires — our LAN server has no DH handler.
-            DisableEncryption();
-
-            // Step 6: reconnect using our overridden settings
-            // Log BEFORE the call so we can tell if the call itself is what kills the coroutine
-            ModEntry.Log("About to call ConnectUsingSettings...");
-            bool connectCallSucceeded = false;
-            try
-            {
-                CallStaticWithArg("PhotonNetwork", "ConnectUsingSettings", "v2.4");
-                connectCallSucceeded = true;
-                ModEntry.Log("ConnectUsingSettings() returned OK → connecting to " + ServerIp + ":5055");
-            }
-            catch (Exception ex)
-            {
-                ModEntry.Log("ConnectUsingSettings() THREW: " + ex.Message + "\n" + ex.StackTrace);
-            }
-
-            if (!connectCallSucceeded)
-            {
-                ModEntry.Log("ERROR: ConnectUsingSettings failed — giving up");
-                ShowOverlay("LAN connect call FAILED.\n" + ServerIp + ":5055\nSee /CNRMods/redir.log");
-                yield break;
-            }
-
-            // Step 7: monitor connection state for up to 30 seconds
-            ModEntry.Log("Monitoring connection state (30s timeout)...");
-            float connectTimeout = 30f;
-            float heartbeatTimer = 0f;
-            int lastDetailed = -999;
-            while (connectTimeout > 0f)
-            {
-                int connState   = -1;
-                int detailState = -1;
-                try { connState   = GetConnectionState(); } catch (Exception ex) { ModEntry.Log("GetConnectionState threw: " + ex.Message); }
-                try { detailState = GetDetailedState();   } catch (Exception ex) { ModEntry.Log("GetDetailedState threw: " + ex.Message); }
-                if (detailState != lastDetailed)
-                {
-                    ModEntry.Log("connState=" + connState + "  detailState=" + detailState
-                        + "  (" + (30f - connectTimeout).ToString("F1") + "s elapsed)"
-                        + "  runInBg=" + Application.runInBackground);
-                    lastDetailed = detailState;
-                }
-                // Heartbeat log every 3 seconds
-                heartbeatTimer -= Time.unscaledDeltaTime;
-                if (heartbeatTimer <= 0f)
-                {
-                    ModEntry.Log("[heartbeat] connState=" + connState + "  detailState=" + detailState
-                        + "  (" + (30f - connectTimeout).ToString("F1") + "s elapsed)"
-                        + "  runInBg=" + Application.runInBackground
-                        + "  dt=" + Time.unscaledDeltaTime.ToString("F4"));
-                    heartbeatTimer = 3f;
-                }
-                if (detailState == 0 || connState == 0)
-                {
-                    ModEntry.Log("Connection FAILED — Disconnected after " + (30f - connectTimeout).ToString("F1") + "s");
-                    ShowOverlay("LAN server unreachable.\n" + ServerIp + ":5055\nCheck server is running.");
-                    yield break;
-                }
-                // detailState >= 6 means JoinedLobby or further — master connection is fully up
-                if (detailState >= 6)
-                {
-                    ModEntry.Log("Connected to lobby! detailState=" + detailState + " after " + (30f - connectTimeout).ToString("F1") + "s");
-                    yield break;
-                }
-                connectTimeout -= Time.unscaledDeltaTime;
-                yield return null;
-            }
-
-            // Timeout — force disconnect so game is not stuck in Connecting limbo
-            ModEntry.Log("Connection TIMED OUT after 30s (last detailState=" + lastDetailed + ") — forcing Disconnect()");
-            CallStaticVoid("PhotonNetwork", "Disconnect");
-            ShowOverlay("LAN connection timed out.\n" + ServerIp + ":5055\ndetailState was " + lastDetailed + " — is server running?");
+            if (_pnt != null) return _pnt;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            { Type t = asm.GetType("PhotonNetwork"); if (t != null) { _pnt = t; return t; } }
+            return null;
         }
 
-        // ---------------------------------------------------------------- helpers
-
-        private static void DisableEncryption()
+        private static bool GetStaticBool(Type t, string name)
         {
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            try
             {
-                Type pn = asm.GetType("PhotonNetwork");
-                if ((object)pn == null) continue;
-                FieldInfo fPeer = pn.GetField("networkingPeer",
-                    BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
-                if ((object)fPeer == null) continue;
-                object peer = fPeer.GetValue(null);
-                if ((object)peer == null) continue;
-                FieldInfo fSec = peer.GetType().GetField("requestSecurity",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if ((object)fSec != null)
-                {
-                    fSec.SetValue(peer, false);
-                    ModEntry.Log("requestSecurity = false → will use direct OpAuthenticate (no DH)");
-                    return;
-                }
+                PropertyInfo p = t.GetProperty(name, BindingFlags.Static | BindingFlags.Public);
+                if (p != null) return (bool)p.GetValue(null, null);
+                FieldInfo f = t.GetField(name, BindingFlags.Static | BindingFlags.Public);
+                if (f != null) return (bool)f.GetValue(null);
             }
-            ModEntry.Log("WARNING: requestSecurity field not found — encryption may block auth");
+            catch { }
+            return false;
         }
 
         private static object GetPhotonServerSettings()
@@ -359,13 +604,13 @@ namespace CNRMods
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 Type pn = asm.GetType("PhotonNetwork");
-                if ((object)pn == null) continue;
+                if (pn == null) continue;
                 PropertyInfo p = pn.GetProperty("PhotonServerSettings",
                     BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                if ((object)p != null) { object r = p.GetValue(null, null); if (r != null) return r; }
+                if (p != null) { object r = p.GetValue(null, null); if (r != null) return r; }
                 FieldInfo f = pn.GetField("PhotonServerSettings",
                     BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                if ((object)f != null) { object r = f.GetValue(null); if (r != null) return r; }
+                if (f != null) { object r = f.GetValue(null); if (r != null) return r; }
             }
             return null;
         }
@@ -375,226 +620,896 @@ namespace CNRMods
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 Type pn = asm.GetType("PhotonNetwork");
-                if ((object)pn == null) continue;
-                PropertyInfo p = pn.GetProperty("connectionState",
-                    BindingFlags.Static | BindingFlags.Public);
-                if ((object)p != null)
-                {
-                    object v = p.GetValue(null, null);
-                    return Convert.ToInt32(v);
-                }
-                FieldInfo f = pn.GetField("connectionState",
-                    BindingFlags.Static | BindingFlags.Public);
-                if ((object)f != null)
-                    return Convert.ToInt32(f.GetValue(null));
+                if (pn == null) continue;
+                PropertyInfo p = pn.GetProperty("connectionState", BindingFlags.Static | BindingFlags.Public);
+                if (p != null) return Convert.ToInt32(p.GetValue(null, null));
             }
             return -1;
         }
 
-        // connectionStateDetailed returns NetworkingPeer.State (PeerState enum):
-        //   Disconnected=0, PeerCreated=1, Connecting=2, Connected=3,
-        //   Queued=4, Authenticated=5, JoinedLobby=6, ConnectingToGameserver=7,
-        //   Joined=8, Leaving=9, Left=10, ...
         private static int GetDetailedState()
         {
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 Type pn = asm.GetType("PhotonNetwork");
-                if ((object)pn == null) continue;
-                PropertyInfo p = pn.GetProperty("connectionStateDetailed",
-                    BindingFlags.Static | BindingFlags.Public);
-                if ((object)p != null)
-                {
-                    object v = p.GetValue(null, null);
-                    return Convert.ToInt32(v);
-                }
+                if (pn == null) continue;
+                PropertyInfo p = pn.GetProperty("connectionStateDetailed", BindingFlags.Static | BindingFlags.Public);
+                if (p != null) return Convert.ToInt32(p.GetValue(null, null));
             }
             return -1;
         }
 
-        private static void CallStaticVoid(string typeName, string methodName)
+        private static void CallStaticVoid(string typeName, string method)
         {
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 Type t = asm.GetType(typeName);
-                if ((object)t == null) continue;
-                MethodInfo m = t.GetMethod(methodName,
-                    BindingFlags.Static | BindingFlags.Public, null, Type.EmptyTypes, null);
-                if ((object)m != null) { m.Invoke(null, null); return; }
+                if (t == null) continue;
+                MethodInfo m = t.GetMethod(method, BindingFlags.Static | BindingFlags.Public,
+                    null, Type.EmptyTypes, null);
+                if (m != null) { m.Invoke(null, null); return; }
             }
-            ModEntry.Log("CallStaticVoid: " + typeName + "." + methodName + " not found");
         }
 
-        private static void CallStaticWithArg(string typeName, string methodName, object arg)
+        private static void CallStaticWithArg(string typeName, string method, object arg)
         {
-            try
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                Type t = asm.GetType(typeName);
+                if (t == null) continue;
+                foreach (MethodInfo m in t.GetMethods(BindingFlags.Static | BindingFlags.Public))
                 {
-                    Type t = asm.GetType(typeName);
-                    if ((object)t == null) continue;
-                    foreach (MethodInfo m in t.GetMethods(BindingFlags.Static | BindingFlags.Public))
-                    {
-                        if (m.Name != methodName) continue;
-                        ParameterInfo[] prms = m.GetParameters();
-                        if (prms.Length != 1) continue;
-                        if (!prms[0].ParameterType.IsAssignableFrom(arg.GetType())) continue;
-                        m.Invoke(null, new object[] { arg });
-                        return;
-                    }
+                    if (m.Name != method) continue;
+                    ParameterInfo[] prms = m.GetParameters();
+                    if (prms.Length != 1) continue;
+                    if (!prms[0].ParameterType.IsAssignableFrom(arg.GetType())) continue;
+                    m.Invoke(null, new object[] { arg });
+                    return;
                 }
-                ModEntry.Log("CallStaticWithArg: " + typeName + "." + methodName + " not found");
             }
-            catch (Exception ex) { ModEntry.Log("CallStaticWithArg error: " + ex.Message); }
+        }
+
+        private static void DisableEncryption()
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type pn = asm.GetType("PhotonNetwork");
+                if (pn == null) continue;
+                FieldInfo fp = pn.GetField("networkingPeer",
+                    BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+                if (fp == null) continue;
+                object peer = fp.GetValue(null);
+                if (peer == null) continue;
+                FieldInfo fs = peer.GetType().GetField("requestSecurity",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (fs != null) { fs.SetValue(peer, false); ModEntry.Log("requestSecurity=false"); return; }
+            }
         }
 
         private static void SwapToTcp()
         {
             try
             {
-                // 1. Get PhotonNetwork.networkingPeer
                 Type pnType = null;
                 foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                {
-                    pnType = asm.GetType("PhotonNetwork");
-                    if ((object)pnType != null) break;
-                }
-                if ((object)pnType == null) { ModEntry.Log("SwapToTcp: PhotonNetwork not found"); return; }
+                { pnType = asm.GetType("PhotonNetwork"); if (pnType != null) break; }
+                if (pnType == null) return;
 
                 FieldInfo peerFieldPN = pnType.GetField("networkingPeer",
                     BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
-                if ((object)peerFieldPN == null) { ModEntry.Log("SwapToTcp: networkingPeer field not found"); return; }
+                if (peerFieldPN == null) return;
                 object peer = peerFieldPN.GetValue(null);
-                if (peer == null) { ModEntry.Log("SwapToTcp: networkingPeer is null"); return; }
+                if (peer == null) return;
 
-                // 2. Find peerBase field by walking up type hierarchy
                 FieldInfo peerBaseField = null;
                 Type search = peer.GetType();
-                while ((object)search != null)
+                while (search != null)
                 {
                     peerBaseField = search.GetField("peerBase",
                         BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                    if ((object)peerBaseField != null) break;
+                    if (peerBaseField != null) break;
                     search = search.BaseType;
                 }
-                if ((object)peerBaseField == null) { ModEntry.Log("SwapToTcp: peerBase field not found"); return; }
+                if (peerBaseField == null) return;
 
-                object oldBase = peerBaseField.GetValue(peer);
-                if ((object)oldBase != null)
-                    ModEntry.Log("SwapToTcp: current peerBase is " + oldBase.GetType().Name);
-
-                // 3. Find TPeer type in loaded assemblies (namespace ExitGames.Client.Photon)
                 Type tpeerType = null;
                 foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
                 {
                     tpeerType = asm.GetType("ExitGames.Client.Photon.TPeer");
-                    if ((object)tpeerType == null) tpeerType = asm.GetType("TPeer");
-                    if ((object)tpeerType != null) break;
+                    if (tpeerType == null) tpeerType = asm.GetType("TPeer");
+                    if (tpeerType != null) break;
                 }
-                if ((object)tpeerType == null) { ModEntry.Log("SwapToTcp: TPeer type not found"); return; }
+                if (tpeerType == null) { ModEntry.Log("SwapToTcp: TPeer not found"); return; }
 
-                // 4. Instantiate a new TPeer (internal constructor, nonPublic=true)
                 object newTPeer = Activator.CreateInstance(tpeerType, true);
 
-                // 5. Set usedProtocol = Tcp (byte 1) on the new TPeer
-                Type baseSearch = tpeerType;
-                while ((object)baseSearch != null)
+                Type bs = tpeerType;
+                while (bs != null)
                 {
-                    FieldInfo upf = baseSearch.GetField("usedProtocol",
+                    FieldInfo upf = bs.GetField("usedProtocol",
                         BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                    if ((object)upf != null)
-                    {
-                        upf.SetValue(newTPeer, Enum.ToObject(upf.FieldType, (byte)1));
-                        ModEntry.Log("SwapToTcp: usedProtocol = Tcp");
-                        break;
-                    }
-                    baseSearch = baseSearch.BaseType;
+                    if (upf != null) { upf.SetValue(newTPeer, Enum.ToObject(upf.FieldType, (byte)1)); break; }
+                    bs = bs.BaseType;
                 }
 
-                // 6. Set the Listener on newTPeer = networkingPeer (which implements IPhotonPeerListener).
-                //    The Listener property in PeerBase is auto-generated; the backing field is
-                //    '<Listener>k__BackingField' in Mono.  We try the property setter first,
-                //    then the known backing-field names, so we don't depend on the exact name.
                 bool listenerSet = false;
-                // 6a. Try property setter
+                Type ls = tpeerType;
+                while (ls != null && !listenerSet)
                 {
-                    Type ps = tpeerType;
-                    while ((object)ps != null)
+                    PropertyInfo lp = ls.GetProperty("Listener",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (lp != null)
                     {
-                        PropertyInfo lp = ps.GetProperty("Listener",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if ((object)lp != null)
-                        {
-                            MethodInfo setter = lp.GetSetMethod(true); // true = include non-public
-                            if ((object)setter != null)
-                            {
-                                setter.Invoke(newTPeer, new object[] { peer });
-                                ModEntry.Log("SwapToTcp: Listener set via property setter = " + peer.GetType().Name);
-                                listenerSet = true;
-                            }
-                            break;
-                        }
-                        ps = ps.BaseType;
+                        MethodInfo setter = lp.GetSetMethod(true);
+                        if (setter != null) { setter.Invoke(newTPeer, new object[] { peer }); listenerSet = true; }
+                        break;
                     }
+                    ls = ls.BaseType;
                 }
-                // 6b. Fall back: look for known backing field names
                 if (!listenerSet)
                 {
-                    string[] candidateFields = new string[]
-                    {
-                        "<Listener>k__BackingField",
-                        "listener",
-                        "_listener",
-                        "Listener"
-                    };
+                    string[] cands = new string[] { "<Listener>k__BackingField", "listener", "_listener", "Listener" };
                     Type bfs = tpeerType;
-                    while ((object)bfs != null && !listenerSet)
+                    while (bfs != null && !listenerSet)
                     {
-                        foreach (string fn in candidateFields)
+                        foreach (string fn in cands)
                         {
                             FieldInfo bf = bfs.GetField(fn,
                                 BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                            if ((object)bf != null)
-                            {
-                                bf.SetValue(newTPeer, peer);
-                                ModEntry.Log("SwapToTcp: Listener set via field '" + fn + "' = " + peer.GetType().Name);
-                                listenerSet = true;
-                                break;
-                            }
+                            if (bf != null) { bf.SetValue(newTPeer, peer); listenerSet = true; break; }
                         }
                         if (!listenerSet) bfs = bfs.BaseType;
                     }
                 }
-                if (!listenerSet)
-                    ModEntry.Log("SwapToTcp: WARNING — could not find Listener property/field on TPeer hierarchy!");
 
-                // 8. Swap peerBase in networkingPeer
                 peerBaseField.SetValue(peer, newTPeer);
-                ModEntry.Log("SwapToTcp: peerBase swapped to TPeer - client will connect via TCP");
+                ModEntry.Log("SwapToTcp: done");
             }
-            catch (Exception ex) { ModEntry.Log("SwapToTcp error: " + ex.Message + "\n" + ex.StackTrace); }
+            catch (Exception ex) { ModEntry.Log("SwapToTcp error: " + ex.Message); }
         }
 
         private static void SetMember(Type t, object inst, string name, object val)
         {
-            FieldInfo f = t.GetField(name,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if ((object)f != null)
+            FieldInfo f = t.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (f != null)
             {
                 object v = f.FieldType.IsEnum
                     ? Enum.ToObject(f.FieldType, Convert.ChangeType(val, Enum.GetUnderlyingType(f.FieldType)))
                     : Convert.ChangeType(val, f.FieldType);
                 f.SetValue(inst, v);
-                ModEntry.Log("  " + name + " = " + v);
+                ModEntry.Log("  " + name + "=" + v);
                 return;
             }
-            PropertyInfo p = t.GetProperty(name,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if ((object)p != null && p.CanWrite)
+            PropertyInfo p = t.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (p != null && p.CanWrite) { p.SetValue(inst, Convert.ChangeType(val, p.PropertyType), null); ModEntry.Log("  " + name + "=" + val); }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  CUSTOM MAPS HOOK — extended map selector with per-slot URL input box
+    // ══════════════════════════════════════════════════════════════════════════
+    public class CustomMapsHook : MonoBehaviour
+    {
+        static readonly string[] STANDARD_MAPS =
+        {
+            "FreeRun3_1",  "FreeRun4_1",  "FreeRun5_1",  "FreeRun6_1",  "FreeRun7_1",
+            "FreeRun8_1",  "FreeRun9_1",  "FreeRun10_1", "FreeRun11_1", "FreeRun12_1",
+        };
+
+        static readonly string[] CUSTOM_MAPS = { "FreeRun13_1", "FreeRun14_1", "FreeRun15_1" };
+
+        static readonly Dictionary<string, string> CUSTOM_NAMES = new Dictionary<string, string>
+        {
+            { "FreeRun13_1", "[MOD] Map 11" },
+            { "FreeRun14_1", "[MOD] Map 12" },
+            { "FreeRun15_1", "[MOD] Map 13" },
+        };
+
+        static readonly Dictionary<string, string> CUSTOM_SCENE_LOAD = new Dictionary<string, string>
+        {
+            { "FreeRun13_1", "FreeRun3_1" },
+            { "FreeRun14_1", "FreeRun5_1" },
+            { "FreeRun15_1", "FreeRun8_1" },
+        };
+
+        string[] _allMaps;
+        bool     _hooked      = false;
+        bool     _hookAttempted = false;  // true after first attempt — prevents spam on 0-hook result
+        MSD_SubSceneInWorldWide _lastSubScene = (MSD_SubSceneInWorldWide)(-1);
+        int      _virtualIdx  = 0;
+        string   _activeSlot  = "";
+        string   _urlInput    = "";
+
+        void Awake()
+        {
+            var list = new List<string>(STANDARD_MAPS);
+            list.AddRange(CUSTOM_MAPS);
+            _allMaps = list.ToArray();
+        }
+
+        void OnLevelWasLoaded(int level)
+        {
+            _hooked         = false;
+            _hookAttempted  = false;
+            _lastSubScene   = (MSD_SubSceneInWorldWide)(-1);
+            _activeSlot     = "";
+            _urlInput       = "";
+        }
+
+        void Update()
+        {
+            if (_hooked) return;
+            if (Application.loadedLevelName != "MultiplayerSelect") return;
+            var msd = MultiplayerSelectDirector.mInstance;
+            if (msd == null) return;
+            if (msd.mCurWWSubScene != _lastSubScene)
             {
-                p.SetValue(inst, Convert.ChangeType(val, p.PropertyType), null);
-                ModEntry.Log("  " + name + " = " + val);
+                _lastSubScene = msd.mCurWWSubScene;
+                ModEntry.Log("CustomMaps subScene=" + msd.mCurWWSubScene);
             }
+            if (msd.mCurWWSubScene != MSD_SubSceneInWorldWide.RoomCreate) return;
+            if (_hookAttempted) return;  // already tried this sub-scene entry, don't spam
+            _hookAttempted = true;
+            StartCoroutine(HookButtons());
+            _hooked = true;
+        }
+
+        IEnumerator HookButtons()
+        {
+            yield return new WaitForSeconds(0.1f);
+            var all = (MonoBehaviour[])Resources.FindObjectsOfTypeAll(typeof(MonoBehaviour));
+            int hooked = 0;
+            foreach (var comp in all)
+            {
+                if (comp.GetType().Name != "MapSelectButtonEvent") continue;
+                FieldInfo btnField = comp.GetType().GetField("buttonName",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (btnField == null) continue;
+                string btnName = btnField.GetValue(comp).ToString();
+                if (btnName == "WWMapNext" || btnName == "WWMapPre")
+                {
+                    object nilVal = Enum.Parse(btnField.FieldType, "Nil");
+                    btnField.SetValue(comp, nilVal);
+                    var nav = comp.gameObject.AddComponent<MapNavButton>();
+                    nav.isNext = (btnName == "WWMapNext");
+                    nav.hook   = this;
+                    hooked++;
+                    ModEntry.Log("Hooked button: " + btnName);
+                }
+            }
+            // Don't reset _hooked to false on 0 — that causes infinite spam.
+            // If we got 0 hooks, log it and leave _hooked=true to stop retrying.
+            // OnLevelWasLoaded will reset both flags when the sub-scene changes.
+            if (hooked > 0)
+            {
+                _hooked = true;
+                var msd = MultiplayerSelectDirector.mInstance;
+                if (msd != null)
+                {
+                    int idx = Array.IndexOf(STANDARD_MAPS, msd.mCurWWMapSelect);
+                    if (idx >= 0) _virtualIdx = idx;
+                }
+            }
+            ModEntry.Log("HookButtons done: " + hooked + " hooked");
+        }
+
+        void OnJoinedRoom()
+        {
+            var msd = MultiplayerSelectDirector.mInstance;
+            if (msd == null) return;
+            string scene = msd.mCurWWMapSelect;
+            if (CUSTOM_NAMES.ContainsKey(scene))
+                StartCoroutine(LoadLevelWatchdog(scene));
+        }
+
+        IEnumerator LoadLevelWatchdog(string scene)
+        {
+            yield return new WaitForSeconds(5f);
+            if (Application.loadedLevelName == "MultiplayerSelect")
+            {
+                ModEntry.Log("Watchdog: redirecting from " + scene + " to FreeRun3_1");
+                var msd = MultiplayerSelectDirector.mInstance;
+                if (msd != null) { msd.mCurWWMapSelect = "FreeRun3_1"; Application.LoadLevel("FreeRun3_1"); }
+            }
+        }
+
+        public void OnNextMap()
+        {
+            var msd = MultiplayerSelectDirector.mInstance;
+            if (msd == null) return;
+            _virtualIdx = (_virtualIdx >= _allMaps.Length - 1) ? 0 : _virtualIdx + 1;
+            ApplyMap(msd, _virtualIdx);
+        }
+
+        public void OnPreMap()
+        {
+            var msd = MultiplayerSelectDirector.mInstance;
+            if (msd == null) return;
+            _virtualIdx = (_virtualIdx <= 0) ? _allMaps.Length - 1 : _virtualIdx - 1;
+            ApplyMap(msd, _virtualIdx);
+        }
+
+        void ApplyMap(MultiplayerSelectDirector msd, int idx)
+        {
+            string scene  = _allMaps[idx];
+            int    stdIdx = Array.IndexOf(STANDARD_MAPS, scene);
+
+            if (stdIdx >= 0)
+            {
+                PlayerPrefs.SetString("CNRMod_CustomMapName", "");
+                PlayerPrefs.SetString("CNRMod_ActiveMapURL",  "");
+                PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
+                PlayerPrefs.DeleteKey("CNRMod_DonorScene");
+                _activeSlot = "";
+                _urlInput   = "";
+                msd.mCurWWMapSelect = scene;
+                msd.mWWMapUITexture.mainTexture = (Texture)(object)msd.mWWMapTexture[stdIdx];
+                msd.mWWMapUITexture.MarkAsChanged();
+                msd.WWResetModeCheckBox();
+            }
+            else
+            {
+                string[] validDonors = new string[]{"FreeRun3_1","FreeRun5_1","FreeRun8_1"};
+                string donorPref = PlayerPrefs.GetString("CNRMod_DonorScene", "");
+                string loadScene = (Array.IndexOf(validDonors, donorPref) >= 0) ? donorPref
+                    : (CUSTOM_SCENE_LOAD.ContainsKey(scene) ? CUSTOM_SCENE_LOAD[scene] : "FreeRun3_1");
+                msd.mCurWWMapSelect = loadScene;
+                msd.mWWMapUITexture.mainTexture = (Texture)(object)msd.mWWMapTexture[STANDARD_MAPS.Length - 1];
+                msd.mWWMapUITexture.MarkAsChanged();
+                msd.mModeCheckBoxSH.SetActive(false);
+                msd.mModeCheckBoxTDM.SetActive(true);
+                msd.SwitchToMode(GrowthGameModeTag.tTeamDeathMatch);
+
+                PlayerPrefs.SetString("CNRMod_CustomMapName", CUSTOM_NAMES[scene]);
+                _activeSlot = scene;
+                _urlInput   = PlayerPrefs.GetString("CNRMod_MapURL_" + scene, "");
+                PlayerPrefs.SetString("CNRMod_ActiveMapURL", _urlInput);
+                PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");  // force re-download for this slot's URL
+                PlayerPrefs.Save();
+                // Fetch donor every time a custom slot is selected (not just on URL change)
+                if (!string.IsNullOrEmpty(_urlInput))
+                    StartCoroutine(FetchDonor(_urlInput));
+            }
+            ModEntry.Log("Map -> " + scene + " (loads: " + msd.mCurWWMapSelect + ")");
+        }
+
+        IEnumerator FetchDonor(string url)
+        {
+            if (string.IsNullOrEmpty(url)) yield break;
+            url = ModEntry.SanitizeUrl(url);
+            var www = new WWW(url);
+            yield return www;
+            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("FetchDonor error: " + www.error); yield break; }
+            string donor = ModEntry.ParseJsonStringValue(www.text, "donor");
+            string[] validDonors = new string[]{"FreeRun3_1","FreeRun5_1","FreeRun8_1"};
+            if (!string.IsNullOrEmpty(donor) && Array.IndexOf(validDonors, donor) >= 0)
+            {
+                PlayerPrefs.SetString("CNRMod_DonorScene", donor);
+                PlayerPrefs.Save();
+                // Also apply directly to the map selector so the scene is correct immediately
+                var msd2 = MultiplayerSelectDirector.mInstance;
+                if (msd2 != null) msd2.mCurWWMapSelect = donor;
+                ModEntry.Log("FetchDonor: donor=" + donor + " applied");
+            }
+            else
+            {
+                ModEntry.Log("FetchDonor: no valid donor field in response");
+            }
+        }
+
+        void OnGUI()
+        {
+            var msd = MultiplayerSelectDirector.mInstance;
+            if (msd == null) return;
+            if (msd.mCurWWSubScene != MSD_SubSceneInWorldWide.RoomCreate) return;
+
+            string displayName = PlayerPrefs.GetString("CNRMod_CustomMapName", "");
+            if (string.IsNullOrEmpty(displayName)) return;
+
+            float sw = Screen.width;
+            float sh = Screen.height;
+            float bw = 300f;
+            float bx = sw * 0.5f - 150f;
+            float by = sh * 0.34f;
+
+            var nameStyle = new GUIStyle(GUI.skin.label);
+            nameStyle.fontSize  = 20;
+            nameStyle.fontStyle = FontStyle.Bold;
+            nameStyle.alignment = TextAnchor.MiddleCenter;
+            GUI.color = new Color(1f, 0.55f, 0.05f, 0.95f);
+            GUI.Label(new Rect(bx, by, bw, 40f), displayName, nameStyle);
+
+            var noteStyle = new GUIStyle(GUI.skin.label);
+            noteStyle.fontSize  = 12;
+            noteStyle.fontStyle = FontStyle.Italic;
+            noteStyle.alignment = TextAnchor.MiddleCenter;
+            GUI.color = new Color(1f, 1f, 0.3f, 0.85f);
+            GUI.Label(new Rect(bx, by + 40f, bw, 24f), "Requires mod on all clients", noteStyle);
+
+            if (!string.IsNullOrEmpty(_activeSlot))
+            {
+                float uy = by + 40f + 24f + 8f;
+                var lblStyle = new GUIStyle(GUI.skin.label);
+                lblStyle.fontSize  = 12;
+                lblStyle.alignment = TextAnchor.MiddleLeft;
+                GUI.color = new Color(0.85f, 0.85f, 0.85f, 0.9f);
+                GUI.Label(new Rect(bx, uy, bw, 22f), "Map JSON URL:", lblStyle);
+                uy += 22f;
+
+                GUI.color = Color.white;
+                string newUrl = GUI.TextField(new Rect(bx, uy, bw, 30f), _urlInput, 512);
+                if (newUrl != _urlInput)
+                {
+                    _urlInput = newUrl;
+                    PlayerPrefs.SetString("CNRMod_MapURL_" + _activeSlot, newUrl);
+                    PlayerPrefs.SetString("CNRMod_ActiveMapURL", newUrl);
+                    PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");  // force re-download on next room load
+                    PlayerPrefs.Save();
+                    StartCoroutine(FetchDonor(newUrl));
+                }
+            }
+
+            GUI.color = Color.white;
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  MAP NAV BUTTON — attached to NGUI arrow buttons to intercept clicks
+    // ══════════════════════════════════════════════════════════════════════════
+    public class MapNavButton : MonoBehaviour
+    {
+        public bool isNext;
+        public CustomMapsHook hook;
+        void OnClick() { if (hook != null) { if (isNext) hook.OnNextMap(); else hook.OnPreMap(); } }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  MAP LOADER — spawns cached JSON objects when a custom map scene loads
+    // ══════════════════════════════════════════════════════════════════════════
+    class MapObjData
+    {
+        public string  path;
+        public string  mesh;
+        public string  mat;
+        public float[] color;
+        public float[] pos;
+        public float[] rot;
+        public float[] size;
+    }
+
+    public class MapLoader : MonoBehaviour
+    {
+        private const string CachePath = "/storage/emulated/0/CNRMods/custom_map_cache.json";
+
+        // Base scenes used for custom map slots
+        private static readonly string[] BASE_SCENES = { "FreeRun3_1", "FreeRun5_1", "FreeRun8_1" };
+
+        // Skip these — UI draw calls, player character, logic markers
+        private static readonly string[] SKIP_CONTAINS = new string[]
+        {
+            "_UIDrawCall", "ExampleCharacter", "IsDied", "IsPause", "IsFireOnline",
+        };
+
+        // Skip objects whose full path is exactly one of these (invisible boundary volumes)
+        private static readonly string[] SKIP_EXACT = new string[]
+        {
+            "Cube", "Sphere", "Plane", "Cylinder", "Capsule",
+        };
+
+        private GameObject _mapRoot = null;
+        private bool _spawnRunning = false;
+
+        void OnLevelWasLoaded(int level)
+        {
+            if (Array.IndexOf(BASE_SCENES, Application.loadedLevelName) < 0) return;
+            if (_mapRoot != null) { Destroy(_mapRoot); _mapRoot = null; }
+            _spawnRunning = false;
+            ModEntry.Log("MapLoader: entered base scene, waiting for map data...");
+            StartCoroutine(WaitAndSpawn());
+        }
+
+        // Polls until cache is ready (written by RedirectHook.DownloadMap).
+        // Falls back to direct download after 3s if ActiveMapURL is already known.
+        IEnumerator WaitAndSpawn()
+        {
+            if (_spawnRunning) yield break;
+            _spawnRunning = true;
+
+            // Immediate: cache already written from a previous room session
+            if (PlayerPrefs.GetInt("CNRMod_MapCacheReady", 0) == 1 && File.Exists(CachePath))
+            {
+                ModEntry.Log("MapLoader: cache ready immediately");
+                StartCoroutine(SpawnAfterDelay());
+                yield break;
+            }
+
+            float waited = 0f;
+            while (waited < 30f)
+            {
+                yield return new WaitForSeconds(0.5f);
+                waited += 0.5f;
+
+                if (PlayerPrefs.GetInt("CNRMod_MapCacheReady", 0) == 1 && File.Exists(CachePath))
+                {
+                    ModEntry.Log("MapLoader: cache ready after " + waited.ToString("F1") + "s");
+                    StartCoroutine(SpawnAfterDelay());
+                    yield break;
+                }
+
+                // After 3s, if RedirectHook hasn’t kicked off a download yet,
+                // try downloading directly from the URL the map picker saved
+                if (waited >= 3f)
+                {
+                    string url = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
+                    if (!string.IsNullOrEmpty(url))
+                    {
+                        ModEntry.Log("MapLoader: 3s timeout, direct download from " + url);
+                        StartCoroutine(DownloadAndSpawn(url));
+                        yield break;
+                    }
+                }
+            }
+            ModEntry.Log("MapLoader: timed out 30s with no map data");
+            _spawnRunning = false;
+        }
+
+        IEnumerator DownloadAndSpawn(string url)
+        {
+            url = ModEntry.SanitizeUrl(url);
+            var www = new WWW(url);
+            yield return www;
+            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("MapLoader download error: " + www.error); _spawnRunning = false; yield break; }
+            string json = www.text;
+            if (string.IsNullOrEmpty(json)) { ModEntry.Log("MapLoader: empty response"); _spawnRunning = false; yield break; }
+            try
+            {
+                File.WriteAllText(CachePath, json);
+                PlayerPrefs.SetInt("CNRMod_MapCacheReady", 1);
+                PlayerPrefs.Save();
+                ModEntry.Log("MapLoader: cached (" + json.Length + " bytes)");
+            }
+            catch (Exception ex) { ModEntry.Log("MapLoader cache error: " + ex.Message); _spawnRunning = false; yield break; }
+            StartCoroutine(SpawnAfterDelay());
+        }
+
+        IEnumerator SpawnAfterDelay()
+        {
+            yield return new WaitForSeconds(0.5f);
+            try
+            {
+                string json = File.ReadAllText(CachePath);
+                ModEntry.Log("MapLoader: parsing " + json.Length + " bytes");
+                string trimmedJson = json.Trim();
+                MapObjData[] items;
+                if (trimmedJson.StartsWith("{"))
+                {
+                    // Wrapper format: {"donor":"FreeRun8_1","objects":[...]}
+                    string donor = ModEntry.ParseJsonStringValue(trimmedJson, "donor");
+                    if (!string.IsNullOrEmpty(donor)) ModEntry.Log("MapLoader: donor=" + donor);
+                    int arrStart = trimmedJson.IndexOf("\"objects\"");
+                    arrStart = arrStart >= 0 ? trimmedJson.IndexOf('[', arrStart) : -1;
+                    if (arrStart < 0) { ModEntry.Log("MapLoader: no objects array in wrapper"); yield break; }
+                    int depth = 0, arrEnd = arrStart;
+                    for (int ci = arrStart; ci < trimmedJson.Length; ci++)
+                    {
+                        if (trimmedJson[ci] == '[') depth++;
+                        else if (trimmedJson[ci] == ']') { depth--; if (depth == 0) { arrEnd = ci; break; } }
+                    }
+                    items = JsonReader.Deserialize<MapObjData[]>(trimmedJson.Substring(arrStart, arrEnd - arrStart + 1));
+                }
+                else
+                {
+                    items = JsonReader.Deserialize<MapObjData[]>(trimmedJson);
+                }
+                if (items == null || items.Length == 0)
+                {
+                    ModEntry.Log("MapLoader: JSON parse failed or empty");
+                    yield break;
+                }
+
+                // Collect material cache (fallback for objects not found in donor)
+                var sceneMatCache = new Dictionary<string, Material>(StringComparer.OrdinalIgnoreCase);
+                foreach (Renderer sr in (Renderer[])FindObjectsOfType(typeof(Renderer)))
+                {
+                    if (sr == null || sr.sharedMaterial == null) continue;
+                    string mn = sr.sharedMaterial.name;
+                    if (!string.IsNullOrEmpty(mn) && !sceneMatCache.ContainsKey(mn))
+                        sceneMatCache[mn] = sr.sharedMaterial;
+                }
+                ModEntry.Log("MapLoader: " + sceneMatCache.Count + " scene materials loaded");
+
+                // Create mapRoot NOW (before ClearBaseScene) so clones parented here are preserved
+                _mapRoot = new GameObject("[CustomMap]");
+                int spawned = 0;
+                var clonedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                // Pass 1 — clone actual donor GameObjects while scene is still intact
+                foreach (MapObjData obj in items)
+                {
+                    if (ShouldSkip(obj.path)) continue;
+                    // Markers are tiny — handle them in pass 2 as primitives
+                    bool isMarker = obj.path.Contains("EscapePosition") ||
+                                    obj.path.Contains("EnemyPosition")  ||
+                                    obj.path.Contains("PlayerPosition");
+                    if (isMarker) continue;
+
+                    GameObject donor = GameObject.Find(obj.path);
+                    if (donor == null) continue;
+                    try
+                    {
+                        GameObject clone = (GameObject)UnityEngine.Object.Instantiate(donor);
+                        clone.name = obj.path.Replace("/", "_");
+                        clone.transform.parent = _mapRoot.transform;
+                        clone.SetActive(true);
+                        // Ensure all renderers visible
+                        foreach (Renderer r in clone.GetComponentsInChildren<Renderer>(true))
+                            r.enabled = true;
+                        // Destroy ALL colliders — they either reference the static batch mesh
+                        // (MeshColliders) or have a pivot-relative center that becomes wrong
+                        // once we reposition the clone to the JSON bounding-box center.
+                        foreach (Collider c in clone.GetComponentsInChildren<Collider>(true))
+                            UnityEngine.Object.Destroy(c);
+                        if (obj.pos != null && obj.pos.Length == 3)
+                            clone.transform.position = new Vector3(obj.pos[0], obj.pos[1], obj.pos[2]);
+                        if (obj.rot != null && obj.rot.Length >= 3)
+                            clone.transform.rotation = Quaternion.Euler(obj.rot[0], obj.rot[1], obj.rot[2]);
+
+                        // Try MeshCollider.convex for objects that are NOT part of Unity's
+                        // static batch (individually authored meshes, e.g. props/stairs).
+                        // Statically batched objects have sharedMesh == null or named "Combined Mesh…"
+                        // and will fall through to the 6-face hollow-shell below.
+                        bool colliderAdded = false;
+                        foreach (MeshFilter mf in clone.GetComponentsInChildren<MeshFilter>(true))
+                        {
+                            if (mf.sharedMesh == null || mf.sharedMesh.vertexCount < 4) continue;
+                            string mn = mf.sharedMesh.name ?? "";
+                            if (mn.IndexOf("Combined", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                            if (mf.sharedMesh.vertexCount > 8000) continue;
+                            try
+                            {
+                                var mc = mf.gameObject.AddComponent<MeshCollider>();
+                                mc.sharedMesh = mf.sharedMesh;
+                                mc.convex     = true;
+                                colliderAdded = true;
+                            }
+                            catch (Exception mcEx)
+                            {
+                                ModEntry.Log("MeshCollider failed for " + obj.path + ": " + mcEx.Message);
+                                var bad = mf.gameObject.GetComponent<MeshCollider>();
+                                if (bad != null) UnityEngine.Object.Destroy(bad);
+                            }
+                        }
+
+                        // 6-face hollow-shell fallback — thin BoxCollider slabs parented to
+                        // _mapRoot (always scale 1,1,1) so bc.size == world size exactly,
+                        // regardless of the clone's pivot offset or donor scale.
+                        if (!colliderAdded && obj.size != null && obj.size.Length == 3
+                                          && obj.pos  != null && obj.pos.Length  == 3)
+                        {
+                            float wx = obj.size[0], wy = obj.size[1], wz = obj.size[2];
+                            float cx = obj.pos[0],  cy = obj.pos[1],  cz = obj.pos[2];
+                            const float T = 0.15f;
+                            AddFaceSlab(_mapRoot, new Vector3(cx,           cy + wy*0.5f, cz          ), new Vector3(wx, T,  wz));
+                            AddFaceSlab(_mapRoot, new Vector3(cx,           cy - wy*0.5f, cz          ), new Vector3(wx, T,  wz));
+                            AddFaceSlab(_mapRoot, new Vector3(cx + wx*0.5f, cy,           cz          ), new Vector3(T,  wy, wz));
+                            AddFaceSlab(_mapRoot, new Vector3(cx - wx*0.5f, cy,           cz          ), new Vector3(T,  wy, wz));
+                            AddFaceSlab(_mapRoot, new Vector3(cx,           cy,           cz + wz*0.5f), new Vector3(wx, wy, T ));
+                            AddFaceSlab(_mapRoot, new Vector3(cx,           cy,           cz - wz*0.5f), new Vector3(wx, wy, T ));
+                        }
+                        clonedPaths.Add(obj.path);
+                        spawned++;
+                    }
+                    catch (Exception cloneEx) { ModEntry.Log("Clone failed: " + obj.path + " err: " + cloneEx.Message); }
+                }
+                ModEntry.Log("MapLoader: cloned " + clonedPaths.Count + " donor objects");
+
+                // Now hide original scene geometry (clones under [CustomMap] are safe)
+                ClearBaseScene();
+
+                // Pass 2 — primitive fallback for anything not found in the donor
+                foreach (MapObjData obj in items)
+                {
+                    if (ShouldSkip(obj.path)) continue;
+                    if (clonedPaths.Contains(obj.path)) continue;  // already cloned
+
+                    PrimitiveType ptype = MeshToPrimitive(obj.mesh);
+                    var go = GameObject.CreatePrimitive(ptype);
+                    go.name = obj.path.Replace("/", "_");
+                    go.transform.parent = _mapRoot.transform;
+
+                    if (obj.pos != null && obj.pos.Length == 3)
+                        go.transform.position = new Vector3(obj.pos[0], obj.pos[1], obj.pos[2]);
+                    if (obj.size != null && obj.size.Length == 3)
+                        go.transform.localScale = new Vector3(
+                            Mathf.Max(0.01f, obj.size[0]),
+                            Mathf.Max(0.01f, obj.size[1]),
+                            Mathf.Max(0.01f, obj.size[2]));
+                    if (obj.rot != null && obj.rot.Length >= 3)
+                        go.transform.rotation = Quaternion.Euler(obj.rot[0], obj.rot[1], obj.rot[2]);
+
+                    var renderer = go.GetComponent<Renderer>();
+                    if (renderer != null)
+                    {
+                        Material mat = null;
+                        if (!string.IsNullOrEmpty(obj.mat))
+                            sceneMatCache.TryGetValue(obj.mat, out mat);
+                        if (mat != null)
+                            renderer.material = mat;
+                        else if (obj.color != null && obj.color.Length >= 3)
+                            renderer.material.color = new Color(
+                                obj.color[0] / 255f, obj.color[1] / 255f, obj.color[2] / 255f,
+                                obj.color.Length >= 4 ? obj.color[3] / 255f : 1f);
+                    }
+
+                    // Markers: invisible, no collision
+                    bool isMarker2 = obj.path.Contains("EscapePosition") ||
+                                     obj.path.Contains("EnemyPosition")  ||
+                                     obj.path.Contains("PlayerPosition");
+                    if (isMarker2)
+                    {
+                        if (renderer != null) renderer.enabled = false;
+                        var col = go.GetComponent<Collider>();
+                        if (col != null) col.enabled = false;
+                    }
+                    spawned++;
+                }
+
+                ModEntry.Log("MapLoader: spawned " + spawned + " (" + clonedPaths.Count + " cloned, " + (spawned - clonedPaths.Count) + " primitives)");
+                TeleportToSpawn(items);
+            }
+            catch (Exception ex) { ModEntry.Log("MapLoader error: " + ex.Message); }
+        }
+
+        // Teleport the local player to the most appropriate spawn in the map data.
+        // Always computes the centroid of placed geometry first, then only uses
+        // spawn markers if they are within 60 units of that centroid (guards against
+        // markers from a different scene's coordinate space being re-used in a dump).
+        private static void TeleportToSpawn(MapObjData[] items)
+        {
+            try
+            {
+                // Step 1: compute centroid XZ and find the floor surface (top of lowest solid obj)
+                float sx = 0, sy = 0, sz = 0; int cnt = 0;
+                float floorY = float.MaxValue;
+                foreach (MapObjData obj in items)
+                {
+                    if (obj.pos == null || obj.pos.Length < 3) continue;
+                    if (ShouldSkip(obj.path)) continue;
+                    if (obj.path != null && obj.path.Contains("Position")) continue;
+                    sx += obj.pos[0]; sy += obj.pos[1]; sz += obj.pos[2]; cnt++;
+                    // Top surface of this object
+                    float halfH = (obj.size != null && obj.size.Length >= 2) ? Mathf.Abs(obj.size[1]) * 0.5f : 0.5f;
+                    float topSurface = obj.pos[1] + halfH;
+                    if (topSurface < floorY) floorY = topSurface;
+                }
+                // centroid XZ, Y = just above floor surface (1.8 = player height)
+                float spawnY = (floorY < float.MaxValue ? floorY : (cnt > 0 ? sy / cnt : 0f)) + 1.8f;
+                Vector3 centroid = cnt > 0
+                    ? new Vector3(sx / cnt, spawnY, sz / cnt)
+                    : new Vector3(0f, spawnY, 0f);
+
+                // Step 2: look for a team spawn marker that is close to the centroid
+                string prefer  = ModEntry.IsMaster ? "EscapePosition" : "EnemyPosition";
+                Vector3 pos = centroid;
+                bool usedMarker = false;
+
+                foreach (MapObjData obj in items)
+                {
+                    if (obj.path == null || obj.pos == null || obj.pos.Length < 3) continue;
+                    if (!obj.path.Contains(prefer)) continue;
+                    Vector3 candidate = new Vector3(obj.pos[0], obj.pos[1] + 1f, obj.pos[2]);
+                    float dist = Vector3.Distance(new Vector3(candidate.x, centroid.y, candidate.z),
+                                                  new Vector3(centroid.x,  centroid.y, centroid.z));
+                    if (dist <= 60f) { pos = candidate; usedMarker = true; break; }
+                }
+
+                ModEntry.Log("TeleportToSpawn: centroid=" + centroid + " target=" + pos + " usedMarker=" + usedMarker);
+
+                if (!usedMarker)
+                    ModEntry.Log("TeleportToSpawn: spawn markers too far from geometry, using centroid");
+
+                GameObject player = GameObject.Find("ExampleCharacter");
+                if (player == null) { ModEntry.Log("TeleportToSpawn: ExampleCharacter not found"); return; }
+
+                // Disable CharacterController so the position override takes effect
+                var cc = player.GetComponent<CharacterController>();
+                if (cc != null) cc.enabled = false;
+                player.transform.position = pos;
+                if (cc != null) cc.enabled = true;
+
+                ModEntry.Log("TeleportToSpawn: moved to " + pos + " (isMaster=" + ModEntry.IsMaster + ")");
+            }
+            catch (Exception ex) { ModEntry.Log("TeleportToSpawn error: " + ex.Message); }
+        }
+
+        // Disable all renderers + colliders on base scene geometry, leaving
+        // cameras, lights, directors, audio, players, and UI intact.
+        private static void ClearBaseScene()
+        {
+            // Name fragments that identify non-geometry roots to preserve
+            string[] preserve = new string[]
+            {
+                "Camera", "camera", "Light", "light", "Sun", "Sky", "Fog",
+                "Director", "Manager", "Controller", "Audio", "Sound",
+                "Player", "Character", "Spawn", "SpawnPoint",
+                "Canvas", "EventSystem", "UI", "UIRoot", "NGUI",
+                "_UIDrawCall", "UIPanel", "UICamera", "UISprite", "UILabel",
+                "Photon", "CNRMod", "[CustomMap]",
+                "ExampleCharacter", "IsDied", "IsPause",
+                // In-game HUD, controls, settings, skybox — must not lose colliders
+                "InGameMenu", "VCAnalog", "Joystick", "HUD", "Hud",
+                "MainScene", "KamcordPrefab", "CNRSettings",
+                // Environment / lighting roots
+                "Environment", "Ambient", "Render", "Skybox", "Directional",
+            };
+
+            int cleared = 0;
+            System.Text.StringBuilder clearedNames = new System.Text.StringBuilder();
+            System.Text.StringBuilder preservedNames = new System.Text.StringBuilder();
+            GameObject[] roots = (GameObject[])GameObject.FindObjectsOfType(typeof(GameObject));
+            foreach (GameObject go in roots)
+            {
+                if (go.transform.parent != null) continue;  // only root objects
+                if (ShouldPreserveRoot(go.name, preserve))
+                {
+                    if (preservedNames.Length < 300) preservedNames.Append(go.name).Append("|");
+                    continue;
+                }
+
+                if (clearedNames.Length < 300) clearedNames.Append(go.name).Append("|");
+                // Disable Renderers and Colliders. NGUI button colliders are safe
+                // because UIRoot/_UIDrawCall/UIPanel etc. are all in the preserve list.
+                foreach (Renderer r in go.GetComponentsInChildren<Renderer>(true))
+                    r.enabled = false;
+                foreach (Collider c in go.GetComponentsInChildren<Collider>(true))
+                    c.enabled = false;
+                cleared++;
+            }
+            ModEntry.Log("ClearBaseScene: cleared " + cleared + " | CLEARED: " + clearedNames);
+            ModEntry.Log("ClearBaseScene: PRESERVED: " + preservedNames);
+        }
+
+        private static bool ShouldPreserveRoot(string name, string[] keywords)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            foreach (string k in keywords)
+                if (name.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
+        }
+
+        // Creates a thin BoxCollider slab as a child of 'parent', positioned at an
+        // exact world-space centre with world-space extents.  Because the child starts
+        // with scale (1,1,1), local units == world units and the math is trivial.
+        private static void AddFaceSlab(GameObject parent, Vector3 worldCenter, Vector3 worldSize)
+        {
+            GameObject slab = new GameObject("_col");
+            slab.transform.parent   = parent.transform;
+            slab.transform.position = worldCenter;           // Unity auto-converts to localPosition
+            slab.transform.localRotation = Quaternion.identity;
+            slab.transform.localScale    = Vector3.one;
+            BoxCollider bc = slab.AddComponent<BoxCollider>();
+            bc.center = Vector3.zero;
+            bc.size   = worldSize;  // scale is (1,1,1) so local == world
+        }
+
+        private static bool ShouldSkip(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return true;
+            foreach (string s in SKIP_EXACT)
+                if (path == s) return true;
+            foreach (string s in SKIP_CONTAINS)
+                if (path.Contains(s)) return true;
+            return false;
+        }
+
+        private static PrimitiveType MeshToPrimitive(string mesh)
+        {
+            if (string.IsNullOrEmpty(mesh)) return PrimitiveType.Cube;
+            string m = mesh.ToLower();
+            if (m.Contains("sphere"))   return PrimitiveType.Sphere;
+            if (m.Contains("capsule"))  return PrimitiveType.Capsule;
+            if (m.Contains("cylinder")) return PrimitiveType.Cylinder;
+            return PrimitiveType.Cube;
         }
     }
 }

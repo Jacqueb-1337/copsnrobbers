@@ -190,40 +190,17 @@ namespace CNRSettingsMod
 
         // -- Sliderotate reflection cache --------------------------------------
         private MonoBehaviour _sliderotate;
-        private FieldInfo     _fiSensX, _fiSensY;
-        private FieldInfo     _fiCannotRotate; // bool cannotRotate on Sliderotate
-        private GameObject   _aimBtn          = null;
-        private bool         _unscopeOnFire   = true;   // default: game behaviour (unscope after fire)
-        private float        _diagTimer       = 0f;    // diagnostics: log every N seconds
-
-        // -- Camera / FOV scope detection -------------------------------------
-        private Camera _mainCam    = null;
-        private float  _defaultFov = 60f;
-        private float  _scopedFov  = -1f; // captured on first scope-in
+        private FieldInfo _fiSensX, _fiSensY;
 
         // -- Settings values ---------------------------------------------------
-        private float _sensNormal    = 3.2f;
-        private float _adsMultiplier = 0.5f; // 0.0-1.0: multiply normal sens when scoped
-        private bool  _isAiming      = false;
-        private bool  _prevIsAiming  = false; // track transitions to avoid writing every frame
-        private float _keepScopeTimer = -1f;  // >0 while we're trying to re-scope after fire
-        private float _lastFireTime   = -999f; // Time.time when fire last detected
-        private int   _prevFpsOnFire  = -1;    // previous value of FpsOnFire pref (toggled on each press)
+        private float _sensNormal = 3.2f;
+        private float _sensAimed  = 1.5f;  // direct sensitivity when ADS is active
+        private bool  _isAiming   = false;
 
         // -- IMGUI state -------------------------------------------------------
         private Rect    _winRect;
         private Vector2 _scroll;
         private const float REF_W = 600f;
-
-        // -- Pause-menu sprites (MenuSystem atlas, cached on first in-game scene) --
-        private static Texture2D _spPanelBack   = null;
-        private static Texture2D _spButtonNull  = null;
-        private static Texture2D _spPropKuang   = null;  // checkbox unchecked bg
-        private static Texture2D _spSelectKuang = null;  // checkbox checked (checkmark)
-        private static Texture2D _spSliderB     = null;
-        private static Texture2D _spSliderThumb = null;
-        private static bool      _menuSpsCached = false;
-        private static Font      _gameFont      = null;
 
         // -- HUD drag editor ---------------------------------------------------
         private bool    _hudEditMode    = false;
@@ -260,15 +237,6 @@ namespace CNRSettingsMod
         {
             UpdateScene(Application.loadedLevelName);
             SettingsModEntry.Log("scene=" + Application.loadedLevelName + " inGame=" + _inGameScene);
-            StartCoroutine(DumpSpritesDelayed());
-        }
-
-        private IEnumerator DumpSpritesDelayed()
-        {
-            yield return null;
-            yield return null;
-            DumpAllSprites();
-            if (_inGameScene && !_menuSpsCached) CacheMenuSystemSprites();
         }
 
         private void UpdateScene(string scene)
@@ -283,14 +251,7 @@ namespace CNRSettingsMod
             _suppressSaveIdx  = false;
             _suppressSaveFor  = -1;
             _isAiming         = false;
-            _prevIsAiming     = false;
-            _keepScopeTimer   = -1f;
-            _lastFireTime     = -999f;
-            _prevFpsOnFire    = -1;
             _sliderotate      = null;
-            _allSliderotates.Clear();
-            _mainCam          = null;
-            _scopedFov        = -1f;
             if (_nguiUICam != null) { _nguiUICam.enabled = true; _nguiUICam = null; }
             _nguiCam          = null;
             _pausePanelRef    = null;
@@ -413,14 +374,12 @@ namespace CNRSettingsMod
             SettingsModEntry.Log("patched -> Settings  go=" + ((Component)target).gameObject.name);
         }
 
-        private bool _spriteDumped = false;
         public void OpenSettings()
         {
             _showSettings = !_showSettings;
             if (_showSettings)
             {
                 ReCacheHUD(); CacheNguiCam();
-                if (!_spriteDumped) { _spriteDumped = true; DumpAllSprites(); }
                 // Block NGUI from processing touches while settings are open
                 if (_nguiUICam == null && _nguiCam != null) _nguiUICam = _nguiCam.GetComponent<UICamera>();
                 if (_nguiUICam == null) { UICamera[] cams = (UICamera[])FindObjectsOfType(typeof(UICamera)); if (cams.Length > 0) _nguiUICam = cams[0]; }
@@ -498,181 +457,30 @@ namespace CNRSettingsMod
 
         private void ApplySensitivity()
         {
-            _diagTimer += Time.deltaTime;
-            bool doLog = _diagTimer >= 3f;
-            if (doLog) _diagTimer = 0f;
-
             if (_sliderotate == null) CacheSliderotate();
-            if (_sliderotate == null || _fiSensX == null)
+            if (_sliderotate == null || _fiSensX == null) return;
+            float eff = _isAiming ? _sensAimed : _sensNormal;
+            if (Mathf.Abs((float)_fiSensX.GetValue(_sliderotate) - eff) > 0.02f)
             {
-                if (doLog) SettingsModEntry.Log("DIAG: Sliderotate NOT found - skipping sens");
-                return;
+                _fiSensX.SetValue(_sliderotate, eff);
+                _fiSensY.SetValue(_sliderotate, eff);
             }
-
-            if (_aimBtn == null) CacheAimBtn();
-            if (_mainCam == null) CacheMainCam();
-
-            // Detect fire button press: FpsOnFire pref is toggled (0↔1) on every press.
-            // Any value change means the fire button was just tapped.
-            int curFpsOnFire = PlayerPrefs.GetInt("FpsOnFire", 0);
-            if (_prevFpsOnFire != -1 && curFpsOnFire != _prevFpsOnFire)
-                _lastFireTime = Time.time;
-            _prevFpsOnFire = curFpsOnFire;
-            // When scoped, game uses TweenFOV to zoom camera down from ~60 to ~20-30.
-            bool isNowScoped = false;
-            float currentFov = -1f;
-            if (_mainCam != null)
-            {
-                currentFov = _mainCam.fieldOfView;
-                // Only update defaultFov while not scoped (so it captures the true unscoped fov)
-                if (currentFov > _defaultFov - 2f) _defaultFov = currentFov;
-                isNowScoped = currentFov < _defaultFov - 5f;
-                // Capture the scoped FOV for potential keep-scope use
-                if (isNowScoped && (_scopedFov < 0f || currentFov < _scopedFov))
-                    _scopedFov = currentFov;
-            }
-
-            float aimedSens = _sensNormal * _adsMultiplier;
-            if (doLog) SettingsModEntry.Log("DIAG: isAiming=" + _isAiming
-                + " isNowScoped=" + isNowScoped
-                + " fov=" + currentFov.ToString("F1")
-                + " defaultFov=" + _defaultFov.ToString("F1")
-                + " aimBtn=" + (_aimBtn != null ? _aimBtn.activeSelf.ToString() : "null")
-                + " sr_enabled=" + (_sliderotate != null ? ((Behaviour)_sliderotate).enabled.ToString() : "null")
-                + " cannotRot=" + (_fiCannotRotate != null ? _fiCannotRotate.GetValue(_sliderotate).ToString() : "null")
-                + " sensX=" + _fiSensX.GetValue(_sliderotate)
-                + " normal=" + _sensNormal + " mult=" + _adsMultiplier + " aimed=" + aimedSens.ToString("F2"));
-
-            bool wasAiming = _isAiming;
-            _isAiming = isNowScoped;
-
-            // ---- Keep-scope: if scope just ended due to firing, re-press AimBtn ----
-            // Only trigger if the fire button was pressed recently (< 0.35s ago).
-            // This lets manual aim-button taps pass through unchanged.
-            if (wasAiming && !_isAiming && !_unscopeOnFire)
-            {
-                float timeSinceFire = Time.time - _lastFireTime;
-                if (timeSinceFire < 0.35f)
-                {
-                    _keepScopeTimer = 1.5f;
-                    SettingsModEntry.Log("KeepScope: fire-triggered unscope (dt=" + timeSinceFire.ToString("F3") + "s), starting re-scope");
-                }
-                else
-                {
-                    SettingsModEntry.Log("KeepScope: manual unscope (dt=" + timeSinceFire.ToString("F3") + "s), NOT re-scoping");
-                }
-            }
-            if (_keepScopeTimer > 0f && !_isAiming)
-            {
-                _keepScopeTimer -= Time.deltaTime;
-                // Simulate pressing the Aim button every frame until re-scoped or timed out
-                PlayerPrefs.SetInt("OnAim", 1);
-            }
-            else if (_isAiming && _keepScopeTimer > 0f)
-            {
-                // Successfully re-scoped
-                SettingsModEntry.Log("KeepScope: re-scope SUCCESS");
-                _keepScopeTimer = -1f;
-            }
-
-            // Sliderotate only reads PlayerPrefs in Start(), NOT in Update().
-            // Write directly to sensitivityX/Y via reflection -- takes effect immediately.
-            // Only write on state transition so we don't fight whatever else may set the field.
-            if (_isAiming != wasAiming)
-            {
-                float newSens = _isAiming ? aimedSens : _sensNormal;
-                WriteAllSens(newSens);
-                SettingsModEntry.Log("SensChange: scoped=" + _isAiming + " fov=" + currentFov.ToString("F1") + " -> sensitivityX=" + newSens.ToString("F2") + " (" + _allSliderotates.Count + " instances)");
-            }
-            _prevIsAiming = _isAiming;
         }
-
-        // (fire detection now uses FpsOnFire pref polling in ApplySensitivity)
 
         public void ToggleAiming() { _isAiming = !_isAiming; }
 
-        // All Sliderotate instances — patch every one of them
-        private System.Collections.Generic.List<MonoBehaviour> _allSliderotates
-            = new System.Collections.Generic.List<MonoBehaviour>();
-
-        private void WriteAllSens(float value)
-        {
-            if (_fiSensX == null) return;
-            foreach (MonoBehaviour sr in _allSliderotates)
-            {
-                if (sr == null) continue;
-                _fiSensX.SetValue(sr, value);
-                _fiSensY.SetValue(sr, value);
-            }
-        }
-
         private void CacheSliderotate()
         {
-            _allSliderotates.Clear();
             UnityEngine.Object[] all = Resources.FindObjectsOfTypeAll(typeof(MonoBehaviour));
             foreach (UnityEngine.Object obj in all)
             {
                 MonoBehaviour mb = obj as MonoBehaviour;
-                if (mb == null) continue;
-                if (string.Compare(mb.GetType().Name, "Sliderotate", System.StringComparison.OrdinalIgnoreCase) != 0) continue;
-                _allSliderotates.Add(mb);
-                SettingsModEntry.Log("SR[" + _allSliderotates.Count + "] GO="
-                    + mb.gameObject.name
-                    + " active=" + mb.gameObject.activeInHierarchy
-                    + " enabled=" + ((Behaviour)mb).enabled);
-            }
-            if (_allSliderotates.Count > 0)
-            {
-                _sliderotate = _allSliderotates[0];
-                Type t = _sliderotate.GetType();
-                _fiSensX       = t.GetField("sensitivityX",  BindingFlags.Instance | BindingFlags.NonPublic);
-                _fiSensY       = t.GetField("sensitivityY",  BindingFlags.Instance | BindingFlags.NonPublic);
-                _fiCannotRotate = t.GetField("cannotRotate", BindingFlags.Instance | BindingFlags.NonPublic);
-            }
-            SettingsModEntry.Log("CacheSliderotate: total=" + _allSliderotates.Count
-                + " fiSensX=" + (_fiSensX != null));
-            CacheAimBtn();
-            CacheMainCam();
-        }
-
-        private void CacheMainCam()
-        {
-            // Try Camera.main (requires "MainCamera" tag)
-            Camera cam = Camera.main;
-            if (cam != null)
-            {
-                _mainCam = cam;
-                _defaultFov = cam.fieldOfView;
-                _scopedFov = -1f;
-                SettingsModEntry.Log("CacheMainCam: " + cam.gameObject.name + " fov=" + cam.fieldOfView);
-                return;
-            }
-            // Fallback: find first non-UI camera in the active scene
-            Camera[] allCams = (Camera[])UnityEngine.Object.FindObjectsOfType(typeof(Camera));
-            foreach (Camera c in allCams)
-            {
-                string n = c.gameObject.name.ToLower();
-                if (n.Contains("ngui") || n.Contains("ui") || n.Contains("menu")) continue;
-                _mainCam = c;
-                _defaultFov = c.fieldOfView;
-                _scopedFov = -1f;
-                SettingsModEntry.Log("CacheMainCam fallback: " + c.gameObject.name + " fov=" + c.fieldOfView);
-                return;
-            }
-            SettingsModEntry.Log("CacheMainCam: NOT found");
-        }
-
-        private void CacheAimBtn()
-        {
-            // Prefer the drag-cached GO; fall back to FindObjectsOfTypeAll which
-            // finds inactive objects too (unlike GameObject.Find).
-            if (_dragGOs[4] != null) { _aimBtn = _dragGOs[4]; return; }
-            UnityEngine.Object[] all = Resources.FindObjectsOfTypeAll(typeof(GameObject));
-            foreach (UnityEngine.Object obj in all)
-            {
-                GameObject go = obj as GameObject;
-                if (go != null && go.name == "Image Button(Aim)")
-                { _aimBtn = go; SettingsModEntry.Log("CacheAimBtn found: " + go.name); return; }
+                if (mb == null || mb.GetType().Name != "Sliderotate" || !mb.gameObject.activeInHierarchy) continue;
+                _sliderotate = mb;
+                Type t = mb.GetType();
+                _fiSensX = t.GetField("sensitivityX", BindingFlags.Instance | BindingFlags.NonPublic);
+                _fiSensY = t.GetField("sensitivityY", BindingFlags.Instance | BindingFlags.NonPublic);
+                break;
             }
         }
 
@@ -977,13 +785,10 @@ namespace CNRSettingsMod
                 GUIUtility.ScaleAroundPivot(new Vector2(sc, sc), Vector2.zero);
                 float vh2 = Screen.height / sc;
                 GUIStyle rb = new GUIStyle(GUI.skin.button);
-                rb.fontSize = 10; rb.fontStyle = FontStyle.Bold;
+                rb.fontSize = 14; rb.fontStyle = FontStyle.Bold;
                 rb.normal.textColor = new Color(0.4f, 1f, 0.6f);
-                if (GUI.Button(new Rect(REF_W - 10f - 120f, vh2 - 34f, 120f, 26f), "Reload Mods", rb))
-                {
-                    DumpAllSprites();
+                if (GUI.Button(new Rect(REF_W - 10f - 160f, vh2 - 44f, 160f, 34f), "Reload Mods", rb))
                     ReloadExternalMods();
-                }
                 return;
             }
             if (!_showSettings && !_hudEditMode) return;
@@ -1008,16 +813,14 @@ namespace CNRSettingsMod
                 GUI.DrawTexture(new Rect(0, 0, vw, vh), Texture2D.whiteTexture);
                 GUI.color = Color.white;
 
-                float w = Mathf.Min(vw * 0.96f, 420f);
-                float h = Mathf.Min(vh * 0.92f, 525f);
+                float w = Mathf.Min(vw * 0.96f, 560f);
+                float h = Mathf.Min(vh * 0.92f, 700f);
                 _winRect = new Rect((vw - w) * 0.5f, (vh - h) * 0.5f, w, h);
 
                 GUIStyle winBg = new GUIStyle(GUI.skin.window);
-                winBg.normal.background   = (_spPanelBack != null)
-                    ? _spPanelBack
-                    : MakeTex(2, 2, new Color(0.10f, 0.10f, 0.12f, 0.97f));
+                winBg.normal.background   = MakeTex(2, 2, new Color(0.10f, 0.10f, 0.12f, 0.97f));
                 winBg.onNormal.background = winBg.normal.background;
-                winBg.fontSize            = 15;
+                winBg.fontSize            = 20;
                 _winRect = GUI.Window(9902, _winRect, DrawSettingsWindow, "  [CNR Mod]  Settings", winBg);
             }
 
@@ -1040,49 +843,30 @@ namespace CNRSettingsMod
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Normal  [" + _sensNormal.ToString("F1") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newSens = DrawSlider(_sensNormal, 1f, 7f);
+            float newSens = GUILayout.HorizontalSlider(_sensNormal, 1f, 7f, GUILayout.Height(36f));
             GUILayout.EndHorizontal();
             if (Mathf.Abs(newSens - _sensNormal) > 0.05f)
             {
                 _sensNormal = Mathf.Round(newSens * 10f) / 10f;
                 PlayerPrefs.SetFloat("Sensitivity", _sensNormal);
                 if (_sliderotate != null && _fiSensX != null)
-                    WriteAllSens(_sensNormal);
+                {
+                    _fiSensX.SetValue(_sliderotate, _sensNormal);
+                    _fiSensY.SetValue(_sliderotate, _sensNormal);
+                }
             }
             GUILayout.Space(6f);
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Aimed   [" + Mathf.RoundToInt(_adsMultiplier * 100f) + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newAimed = DrawSlider(_adsMultiplier, 0.1f, 1.0f);
+            GUILayout.Label("Aimed   [" + _sensAimed.ToString("F1") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newAimed = GUILayout.HorizontalSlider(_sensAimed, 0.5f, 7f, GUILayout.Height(36f));
             GUILayout.EndHorizontal();
-            if (Mathf.Abs(newAimed - _adsMultiplier) > 0.005f)
+            if (Mathf.Abs(newAimed - _sensAimed) > 0.05f)
             {
-                _adsMultiplier = Mathf.Round(newAimed * 20f) / 20f; // snap to 5% steps
-                PlayerPrefs.SetFloat("CNRMod_AimedMult", _adsMultiplier);
+                _sensAimed = Mathf.Round(newAimed * 10f) / 10f;
+                PlayerPrefs.SetFloat("CNRMod_AimedSens", _sensAimed);
             }
-            GUILayout.Label("  % of normal sens while scoped (e.g. 50% = half speed)", HintStyle());
-            GUILayout.Space(10f);
-
-            // ---- AWP / ADS --------------------------------------------------
-            SectionHeader("AWP / ADS");
-            GUILayout.Space(4f);
-            {
-                GUILayout.Space(2f);
-                bool clicked = GUILayout.Button(GUIContent.none, GhostBtnStyle(), GUILayout.Height(34f));
-                Rect rk = GUILayoutUtility.GetLastRect();
-                Texture2D chkTex = _unscopeOnFire
-                    ? (_spSelectKuang ?? MakeTex(2, 2, Color.white))
-                    : (_spPropKuang   ?? MakeTex(2, 2, new Color(0.35f, 0.35f, 0.35f)));
-                GUI.DrawTexture(new Rect(rk.x + 3f, rk.y + 2f, 30f, 30f), chkTex, ScaleMode.ScaleToFit);
-                GUI.Label(new Rect(rk.x + 39f, rk.y, rk.width - 42f, rk.height), "Unscope after firing", LabelStyle());
-                if (clicked)
-                {
-                    _unscopeOnFire = !_unscopeOnFire;
-                    PlayerPrefs.SetInt("CNRMod_UnscopeOnFire", _unscopeOnFire ? 1 : 0);
-                    if (_unscopeOnFire) _keepScopeTimer = -1f; // cancel any pending re-scope
-                }
-            }
-            GUILayout.Label("  ON (default) = AWP un-scopes after each shot\n  OFF = stays scoped until you tap aim again", HintStyle());
+            GUILayout.Label("  Sensitivity while ADS/aim is toggled on (any weapon)", HintStyle());
             GUILayout.Space(14f);
 
             // ---- HUD Visibility ---------------------------------------------
@@ -1090,19 +874,12 @@ namespace CNRSettingsMod
             GUILayout.Space(4f);
             for (int i = 0; i < VIS_ITEMS.Length; i++)
             {
-                GUILayout.Space(2f);
-                bool clicked = GUILayout.Button(GUIContent.none, GhostBtnStyle(), GUILayout.Height(34f));
-                Rect r = GUILayoutUtility.GetLastRect();
-                Texture2D chkTex = _visOn[i]
-                    ? (_spSelectKuang ?? MakeTex(2, 2, Color.white))
-                    : (_spPropKuang   ?? MakeTex(2, 2, new Color(0.35f, 0.35f, 0.35f)));
-                GUI.DrawTexture(new Rect(r.x + 3f, r.y + 2f, 30f, 30f), chkTex, ScaleMode.ScaleToFit);
-                GUI.Label(new Rect(r.x + 39f, r.y, r.width - 42f, r.height), VIS_ITEMS[i].displayName, LabelStyle());
-                if (clicked)
+                bool newVis = GUILayout.Toggle(_visOn[i], "  " + VIS_ITEMS[i].displayName, ToggleStyle());
+                if (newVis != _visOn[i])
                 {
-                    _visOn[i] = !_visOn[i];
-                    PlayerPrefs.SetInt(VIS_ITEMS[i].prefKey, _visOn[i] ? 1 : 0);
-                    if (_visGOs[i] != null) _visGOs[i].SetActive(_visOn[i]);
+                    _visOn[i] = newVis;
+                    PlayerPrefs.SetInt(VIS_ITEMS[i].prefKey, newVis ? 1 : 0);
+                    if (_visGOs[i] != null) _visGOs[i].SetActive(newVis);
                 }
             }
             GUILayout.Space(10f);
@@ -1113,13 +890,21 @@ namespace CNRSettingsMod
             GUILayout.Label("  Drag/resize all HUD buttons: fire, jump, reload, record, aim, toolbar, chat, healthbar, team scores, pause, player list, health pack, ammo buy, HUD hide.  Center of handle = drag.  Edge = resize.  RST = reset.", HintStyle());
             GUILayout.Space(6f);
 
-            if (GUILayout.Button("Edit Layout  (drag mode)", BtnStyle(20, new Color(0.9f, 0.9f, 1f))))
+            GUIStyle editBtn = new GUIStyle(GUI.skin.button);
+            editBtn.fontSize    = 20;
+            editBtn.fixedHeight = 48f;
+            editBtn.normal.textColor = new Color(0.9f, 0.9f, 1f);
+            if (GUILayout.Button("Edit Layout  (drag mode)", editBtn))
                 StartCoroutine(EnterEditModeNextFrame());
 
             GUILayout.Space(14f);
 
             // ---- Reset All HUD ----------------------------------------------
-            if (GUILayout.Button("Reset All HUD to Defaults", BtnStyle(18, new Color(1f, 0.45f, 0.45f))))
+            GUIStyle resetAllBtn = new GUIStyle(GUI.skin.button);
+            resetAllBtn.fontSize    = 18;
+            resetAllBtn.fixedHeight = 44f;
+            resetAllBtn.normal.textColor = new Color(1f, 0.45f, 0.45f);
+            if (GUILayout.Button("Reset All HUD to Defaults", resetAllBtn))
             {
                 if (_inGameScene)
                     StartCoroutine(ResetHUDViaEditMode());
@@ -1140,7 +925,10 @@ namespace CNRSettingsMod
             GUILayout.Space(6f);
 
             // ---- Close & Save -----------------------------------------------
-            if (GUILayout.Button("  Close & Save  ", BtnStyle(22, Color.white)))
+            GUIStyle closeBtn = new GUIStyle(GUI.skin.button);
+            closeBtn.fontSize    = 22;
+            closeBtn.fixedHeight = 52f;
+            if (GUILayout.Button("  Close & Save  ", closeBtn))
             {
                 _showSettings = false;
                 if (_nguiUICam != null) _nguiUICam.enabled = true;
@@ -1292,80 +1080,24 @@ namespace CNRSettingsMod
         private static GUIStyle LabelStyle()
         {
             GUIStyle s = new GUIStyle(GUI.skin.label);
-            s.fontSize = 15; s.normal.textColor = Color.white;
-            if (_gameFont != null) s.font = _gameFont;
-            return s;
+            s.fontSize = 20; s.normal.textColor = Color.white; return s;
         }
         private static GUIStyle HintStyle()
         {
             GUIStyle s = new GUIStyle(GUI.skin.label);
-            s.fontSize = 11; s.wordWrap = true;
-            s.normal.textColor = new Color(0.72f, 0.72f, 0.72f);
-            if (_gameFont != null) s.font = _gameFont;
-            return s;
+            s.fontSize = 16; s.wordWrap = true;
+            s.normal.textColor = new Color(0.7f, 0.7f, 0.7f); return s;
         }
-        private static GUIStyle GhostBtnStyle()
+        private static GUIStyle ToggleStyle()
         {
-            GUIStyle s = new GUIStyle();
-            s.normal.background = null;
-            s.hover.background  = MakeTex(2, 2, new Color(1f, 1f, 1f, 0.08f));
-            s.active.background = MakeTex(2, 2, new Color(1f, 1f, 1f, 0.16f));
-            return s;
-        }
-        private static GUIStyle BtnStyle(int fontSize = 20, Color textColor = default(Color))
-        {
-            if (textColor == default(Color)) textColor = Color.white;
-            GUIStyle s = new GUIStyle(GUI.skin.button);
-            s.fontSize    = fontSize;
-            s.fixedHeight = fontSize < 15 ? 33f : 39f;
-            s.normal.textColor  = textColor;
-            s.hover.textColor   = textColor;
-            s.active.textColor  = textColor;
-            if (_gameFont != null) s.font = _gameFont;
-            if (_spButtonNull != null)
-            {
-                s.normal.background  = _spButtonNull;
-                s.hover.background   = _spButtonNull;
-                s.active.background  = _spButtonNull;
-            }
-            return s;
-        }
-        // Draw a slider using invisible IMGUI input + manual texture paint
-        private static float DrawSlider(float val, float min, float max)
-        {
-            const float thumbW = 30f;
-            const float height = 33f;
-            // Invisible styles -- input only, no drawing
-            GUIStyle invisBg    = new GUIStyle();
-            GUIStyle invisThumb = new GUIStyle();
-            invisBg.fixedHeight    = height;
-            invisThumb.fixedWidth  = thumbW;
-            invisThumb.fixedHeight = height;
-            float newVal = GUILayout.HorizontalSlider(val, min, max, invisBg, invisThumb, GUILayout.Height(height));
-            if (Event.current.type == EventType.Repaint)
-            {
-                Rect r = GUILayoutUtility.GetLastRect();
-                // Track
-                float trackH = 10f;
-                Rect track = new Rect(r.x + thumbW * 0.5f, r.y + (r.height - trackH) * 0.5f,
-                                      r.width - thumbW, trackH);
-                Texture2D trackTex = _spSliderB ?? MakeTex(2, 2, new Color(0.20f, 0.22f, 0.28f, 1f));
-                GUI.DrawTexture(track, trackTex, ScaleMode.StretchToFill);
-                // Thumb
-                float t = (val - min) / Mathf.Max(max - min, 0.001f);
-                float thumbX = r.x + t * (r.width - thumbW);
-                Rect thumb = new Rect(thumbX, r.y + (r.height - thumbW) * 0.5f, thumbW, thumbW);
-                Texture2D thumbTex = _spSliderThumb ?? MakeTex(2, 2, new Color(0.55f, 0.55f, 0.60f, 1f));
-                GUI.DrawTexture(thumb, thumbTex, ScaleMode.ScaleToFit);
-            }
-            return newVal;
+            GUIStyle s = new GUIStyle(GUI.skin.toggle);
+            s.fontSize = 20; s.normal.textColor = Color.white; return s;
         }
         private static void SectionHeader(string title)
         {
             GUIStyle s = new GUIStyle(GUI.skin.label);
-            s.fontStyle = FontStyle.Bold; s.fontSize = 16;
+            s.fontStyle = FontStyle.Bold; s.fontSize = 22;
             s.normal.textColor = new Color(1f, 0.85f, 0.3f);
-            if (_gameFont != null) s.font = _gameFont;
             GUILayout.Label("--  " + title + "  --", s);
         }
         private static Texture2D MakeTex(int w, int h, Color col)
@@ -1446,8 +1178,13 @@ namespace CNRSettingsMod
                     SettingsModEntry.Log("DRAG[" + i + "] " + item.displayName + " NOT FOUND");
             }
 
-            // Keep _aimBtn reference up to date from drag cache
-            if (_dragGOs[4] != null) _aimBtn = _dragGOs[4];
+            // Attach ADS state tracker to Aim button (DRAG index 4)
+            if (_dragGOs[4] != null)
+            {
+                AimBtnProxy abp = _dragGOs[4].GetComponent<AimBtnProxy>();
+                if (abp == null) abp = _dragGOs[4].AddComponent<AimBtnProxy>();
+                abp.hook = this;
+            }
         }
 
         private void LogSceneHud()
@@ -1487,18 +1224,8 @@ namespace CNRSettingsMod
         // =====================================================================
         private void LoadPrefs()
         {
-            _sensNormal     = PlayerPrefs.GetFloat("Sensitivity",       3.2f);
-            // Guard against corruption: if a previous crash left a very low value in
-            // "Sensitivity" (from a scoped-in write), clamp it back to minimum 1.0 and
-            // restore the pref so Sliderotate starts correctly next time.
-            if (_sensNormal < 1.0f)
-            {
-                _sensNormal = 3.2f;
-                PlayerPrefs.SetFloat("Sensitivity", _sensNormal);
-                SettingsModEntry.Log("LoadPrefs: corrected corrupted Sensitivity pref -> 3.2");
-            }
-            _adsMultiplier  = PlayerPrefs.GetFloat("CNRMod_AimedMult",  0.5f);
-            _unscopeOnFire  = PlayerPrefs.GetInt("CNRMod_UnscopeOnFire", 1) == 1;
+            _sensNormal = PlayerPrefs.GetFloat("Sensitivity",      3.2f);
+            _sensAimed  = PlayerPrefs.GetFloat("CNRMod_AimedSens",  1.5f);
             for (int i = 0; i < VIS_ITEMS.Length; i++)
                 _visOn[i] = PlayerPrefs.GetInt(VIS_ITEMS[i].prefKey, 1) == 1;
             // Pre-populate _savedScales so LateUpdate can enforce them immediately.
@@ -1532,118 +1259,38 @@ namespace CNRSettingsMod
         // =====================================================================
         private void ReloadExternalMods()
         {
-            SettingsModEntry.Log("ReloadExternalMods: delegating to MainMenuDirector.LoadMods()");
-            try { MainMenuDirector.LoadMods(); }
-            catch (Exception ex) { SettingsModEntry.Log("ReloadExternalMods err: " + ex.Message); }
-        }
-
-        private void CacheMenuSystemSprites()
-        {
-            UISprite[] all = (UISprite[])FindObjectsOfType(typeof(UISprite));
-            UIAtlas atlas = null;
-            foreach (UISprite s in all)
+            SettingsModEntry.Log("ReloadExternalMods: triggered from button");
+            const string dir = "/storage/emulated/0/CNRMods";
+            try
             {
-                if (s.atlas != null && s.atlas.name == "MenuSystem") { atlas = s.atlas; break; }
+                string[] files = System.IO.Directory.GetFiles(dir, "*.dll");
+                foreach (string path in files)
+                {
+                    try
+                    {
+                        string name = System.IO.Path.GetFileName(path);
+                        if (name.Equals("IPRedirectMod.dll", StringComparison.OrdinalIgnoreCase)) continue;
+                        SettingsModEntry.Log("ReloadExternalMods: loading " + name);
+                        // Destroy any existing instances of this mod first
+                        foreach (GameObject existing in GameObject.FindObjectsOfType(typeof(GameObject)))
+                            if (existing.name == "CNRSettingsMod" && existing != this.gameObject)
+                                Destroy(existing);
+                        byte[] data = System.IO.File.ReadAllBytes(path);
+                        Assembly asm = Assembly.Load(data);
+                        bool found = false;
+                        foreach (Type t in asm.GetTypes())
+                        {
+                            MethodInfo m = t.GetMethod("Load",
+                                BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+                            if (m != null) { m.Invoke(null, null); found = true; break; }
+                        }
+                        if (!found) SettingsModEntry.Log("ReloadExternalMods: no Load() in " + name);
+                        else SettingsModEntry.Log("ReloadExternalMods: reloaded " + name);
+                    }
+                    catch (Exception ex) { SettingsModEntry.Log("ReloadExternalMods err: " + ex.Message); }
+                }
             }
-            if (atlas == null) { SettingsModEntry.Log("CacheMenuSprites: MenuSystem not found"); return; }
-            _spPanelBack   = ExtractSprite(atlas, "PanelBack");
-            _spButtonNull  = ExtractSprite(atlas, "ButtonNull_2");
-            _spPropKuang   = ExtractSprite(atlas, "PropKuang");
-            _spSelectKuang = ExtractSprite(atlas, "SelectKuang");
-            _spSliderB     = ExtractSprite(atlas, "SliderB");
-            _spSliderThumb = ExtractSprite(atlas, "SliderThumb");
-            _menuSpsCached = true;
-            if (_gameFont == null)
-            {
-                UILabel[] lbls = (UILabel[])FindObjectsOfType(typeof(UILabel));
-                foreach (UILabel lbl in lbls)
-                    if (lbl.font != null && lbl.font.dynamicFont != null)
-                    { _gameFont = lbl.font.dynamicFont; break; }
-            }
-            SettingsModEntry.Log("CacheMenuSprites: Panel=" + (_spPanelBack!=null) +
-                " Btn=" + (_spButtonNull!=null) + " Chk=" + (_spPropKuang!=null) +
-                " Sel=" + (_spSelectKuang!=null) + " SlB=" + (_spSliderB!=null) +
-                " SlT=" + (_spSliderThumb!=null) + " Font=" + (_gameFont!=null));
-        }
-
-        private static Texture2D ExtractSprite(UIAtlas atlas, string spName)
-        {
-            UIAtlas.Sprite sp = atlas.GetSprite(spName);
-            if (sp == null) { SettingsModEntry.Log("ExtractSprite: not found: " + spName); return null; }
-            Rect outer = sp.outer;
-            int texW = atlas.texture.width;
-            int texH = atlas.texture.height;
-            int px, py, pw, ph;
-            if (atlas.coordinates == UIAtlas.Coordinates.Pixels)
-            {
-                px = Mathf.RoundToInt(outer.x);     py = Mathf.RoundToInt(outer.y);
-                pw = Mathf.RoundToInt(outer.width); ph = Mathf.RoundToInt(outer.height);
-            }
-            else // TexCoords: 0-1 normalized, Y=0 at bottom
-            {
-                px = Mathf.RoundToInt(outer.x * texW);      py = Mathf.RoundToInt((1f - outer.y - outer.height) * texH);
-                pw = Mathf.RoundToInt(outer.width  * texW); ph = Mathf.RoundToInt(outer.height * texH);
-            }
-            if (pw <= 0 || ph <= 0) return null;
-            // Y in NGUI Pixels is from top; GL ReadPixels uses Y from bottom
-            float uScale = (float)pw / texW;
-            float vScale = (float)ph / texH;
-            float uOff   = (float)px / texW;
-            float vOff   = 1f - (float)(py + ph) / texH;
-            RenderTexture rt = RenderTexture.GetTemporary(pw, ph, 0, RenderTextureFormat.ARGB32);
-            Material mat = new Material(Shader.Find("Unlit/Transparent"));
-            mat.mainTexture = atlas.texture;
-            mat.SetTextureOffset("_MainTex", new Vector2(uOff, vOff));
-            mat.SetTextureScale("_MainTex",  new Vector2(uScale, vScale));
-            Graphics.Blit(atlas.texture, rt, mat);
-            RenderTexture prev = RenderTexture.active;
-            RenderTexture.active = rt;
-            Texture2D result = new Texture2D(pw, ph, TextureFormat.ARGB32, false);
-            result.ReadPixels(new Rect(0, 0, pw, ph), 0, 0);
-            result.Apply();
-            RenderTexture.active = prev;
-            RenderTexture.ReleaseTemporary(rt);
-            UnityEngine.Object.Destroy(mat);
-            SettingsModEntry.Log("ExtractSprite: " + spName + " " + pw + "x" + ph);
-            return result;
-        }
-
-        private void DumpAllSprites()
-        {
-            // One-time dump: log every UISprite in the scene so we can identify
-            // the atlas + sprite names used by the gun shop card background/border.
-            SettingsModEntry.Log("=== SPRITE DUMP START ===");
-            UISprite[] all = (UISprite[])FindObjectsOfType(typeof(UISprite));
-            System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<string>> byAtlas =
-                new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<string>>();
-            foreach (UISprite s in all)
-            {
-                string atlasName = (s.atlas != null) ? s.atlas.name : "null";
-                string spName = s.spriteName ?? "null";
-                string goPath = GetPath(s.transform);
-                if (!byAtlas.ContainsKey(atlasName))
-                    byAtlas[atlasName] = new System.Collections.Generic.List<string>();
-                string entry = spName + "  [" + goPath + "]";
-                if (!byAtlas[atlasName].Contains(entry))
-                    byAtlas[atlasName].Add(entry);
-            }
-            foreach (var kv in byAtlas)
-            {
-                SettingsModEntry.Log("ATLAS: " + kv.Key);
-                foreach (string e in kv.Value)
-                    SettingsModEntry.Log("  sprite: " + e);
-            }
-            SettingsModEntry.Log("=== SPRITE DUMP END ===");
-        }
-
-        private static string GetPath(Transform t)
-        {
-            if (t == null) return "";
-            string path = t.name;
-            Transform p = t.parent;
-            int depth = 0;
-            while (p != null && depth < 5) { path = p.name + "/" + path; p = p.parent; depth++; }
-            return path;
+            catch (Exception ex) { SettingsModEntry.Log("ReloadExternalMods dir err: " + ex.Message); }
         }
 
         private static bool IsGameScene(string scene)
@@ -1660,5 +1307,10 @@ namespace CNRSettingsMod
         private void OnClick() { if (hook != null) hook.OpenSettings(); }
     }
 
+    // Proxy on the ADS/Aim button -- toggles _isAiming so sensitivity switches
+    public class AimBtnProxy : MonoBehaviour
+    {
+        public SettingsModHook hook;
+        private void OnClick() { if (hook != null) hook.ToggleAiming(); }
+    }
 }
-
