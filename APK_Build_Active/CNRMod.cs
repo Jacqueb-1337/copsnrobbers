@@ -21,14 +21,14 @@ namespace CNRMods
         public static int    ServerPort    = 5055;
         public static string AppId         = "CNRLan";
         public static string MapUrl        = "";
-        public static string ModVersion    = "1.0.0";
+        public static string ModVersion    = "2.0.1";
         public static bool   KickNoMod     = true;
         public static string WebUrl        = "";    // http://<host>:1337 for node server; derived from SERVER_IP if not set
         public static string EconomyUrl    = "";    // https://<host>/economy  for PHP economy API
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "1.0.0";
+        public const  string Version = "2.0.1";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -1082,10 +1082,30 @@ namespace CNRMods
                     if (m.Id == omId) { om = m; break; }
                 if (om == null) { ModEntry.Log("ApplyMap: official map not found: " + omId); return; }
 
+                // Determine donor scene: read from pre-cached JSON's "donor" field if available.
+                // Admin panel no longer stores base_scene; the JSON itself is authoritative.
                 string[] validDonors = new string[]{"FreeRun3_1","FreeRun5_1","FreeRun8_1"};
-                string loadScene = (Array.IndexOf(validDonors, om.BaseScene) >= 0) ? om.BaseScene : "FreeRun3_1";
+                string   loadScene   = "FreeRun3_1";   // safe default
+                string   cachePath   = ContentManager.MapCacheDir + om.Id + ".json";
+                if (File.Exists(cachePath))
+                {
+                    try
+                    {
+                        string cachedJson = File.ReadAllText(cachePath);
+                        string donor = ModEntry.ParseJsonStringValue(cachedJson, "donor");
+                        if (!string.IsNullOrEmpty(donor) && Array.IndexOf(validDonors, donor) >= 0)
+                            loadScene = donor;
+                    }
+                    catch { }
+                }
+
                 msd.mCurWWMapSelect = loadScene;
-                msd.mWWMapUITexture.mainTexture = (Texture)(object)msd.mWWMapTexture[STANDARD_MAPS.Length - 1];
+
+                // Use downloaded thumbnail if available; fall back to last standard map texture
+                Texture2D thumb = ContentManager.GetMapThumbnail(om.Id);
+                msd.mWWMapUITexture.mainTexture = thumb != null
+                    ? (Texture)(object)thumb
+                    : (Texture)(object)msd.mWWMapTexture[STANDARD_MAPS.Length - 1];
                 msd.mWWMapUITexture.MarkAsChanged();
                 msd.WWResetModeCheckBox();
 
@@ -1095,7 +1115,6 @@ namespace CNRMods
                 _activeIsOfficial = true;
 
                 // Use pre-cached JSON if available; otherwise MapLoader will download via ActiveMapURL
-                string cachePath    = ContentManager.MapCacheDir + om.Id + ".json";
                 string stdCachePath = "/storage/emulated/0/CNRMods/custom_map_cache.json";
                 if (File.Exists(cachePath))
                 {
@@ -1105,7 +1124,7 @@ namespace CNRMods
                         PlayerPrefs.SetInt("CNRMod_MapCacheReady", 1);
                         PlayerPrefs.SetString("CNRMod_DonorScene", loadScene);
                         PlayerPrefs.SetString("CNRMod_ActiveMapURL", "");
-                        ModEntry.Log("Official map '" + om.Name + "': used pre-cached JSON");
+                        ModEntry.Log("Official map '" + om.Name + "': used pre-cached JSON (donor=" + loadScene + ")");
                     }
                     catch (Exception copyEx)
                     {
@@ -1120,7 +1139,7 @@ namespace CNRMods
                     PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
                     PlayerPrefs.DeleteKey("CNRMod_DonorScene");
                     StartCoroutine(FetchDonor(om.Url));
-                    ModEntry.Log("Official map '" + om.Name + "': URL queued for download");
+                    ModEntry.Log("Official map '" + om.Name + "': URL queued for download (no cache yet)");
                 }
                 PlayerPrefs.Save();
             }
@@ -1339,8 +1358,9 @@ namespace CNRMods
             _spawnRunning = false;
             // Only hold the player if a custom map is actually pending.
             // On vanilla map loads (no active URL), let the game run normally.
-            string activeUrl = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
-            if (string.IsNullOrEmpty(activeUrl))
+            string activeUrl  = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
+            bool   cacheReady = PlayerPrefs.GetInt("CNRMod_MapCacheReady", 0) == 1 && File.Exists(CachePath);
+            if (string.IsNullOrEmpty(activeUrl) && !cacheReady)
             {
                 ModEntry.Log("MapLoader: vanilla map load, no custom map pending — skipping hold");
                 return;
@@ -2034,10 +2054,12 @@ namespace CNRMods
     // ══════════════════════════════════════════════════════════════════════════
     public class OfficialMapEntry
     {
-        public string Id        = "";
-        public string Name      = "";
-        public string Url       = "";
-        public string BaseScene = "FreeRun3_1";
+        public string Id            = "";
+        public string Name          = "";
+        public string Url           = "";
+        public string ThumbnailUrl  = "";   // optional image shown in map picker
+        public string Hash          = "";   // MD5 of the map JSON file (empty = skip verify)
+        public string ThumbnailHash = "";   // MD5 of the thumbnail image (empty = skip verify)
     }
 
     public class OfficialTextureEntry
@@ -2045,19 +2067,21 @@ namespace CNRMods
         public string Id           = "";
         public string MaterialName = "";
         public string Url          = "";
+        public string Hash         = "";   // MD5 of the texture file
     }
 
     public class OfficialDataEntry
     {
-        public string Id  = "";
-        public string Key = "";
-        public string Url = "";
+        public string Id   = "";
+        public string Key  = "";
+        public string Url  = "";
+        public string Hash = "";   // MD5 of the data file
     }
 
     // Raw JSON deserialization targets (field names match server JSON keys)
-    class CManifestMap     { public string id = ""; public string name = ""; public string url = ""; public string base_scene = "FreeRun3_1"; }
-    class CManifestTexture { public string id = ""; public string material_name = ""; public string url = ""; }
-    class CManifestData    { public string id = ""; public string key = ""; public string url = ""; }
+    class CManifestMap     { public string id = ""; public string name = ""; public string url = ""; public string thumbnail_url = ""; public string hash = ""; public string thumbnail_hash = ""; }
+    class CManifestTexture { public string id = ""; public string material_name = ""; public string url = ""; public string hash = ""; }
+    class CManifestData    { public string id = ""; public string key = ""; public string url = ""; public string hash = ""; }
     class CManifest
     {
         public string           manifest_version = "";
@@ -2071,6 +2095,7 @@ namespace CNRMods
         private const string ContentUrl    = "https://play.jacqueb.me/economy/content.php";
         public  const string MapCacheDir   = "/storage/emulated/0/CNRMods/content_cache/maps/";
         private const string TexCacheDir   = "/storage/emulated/0/CNRMods/content_cache/textures/";
+        private const string ThumbCacheDir = "/storage/emulated/0/CNRMods/content_cache/thumbs/";
         private const string DataCacheDir  = "/storage/emulated/0/CNRMods/content_cache/data/";
         private const string ManifestCache = "/storage/emulated/0/CNRMods/content_cache/manifest.json";
         private const string VersionPref   = "CNRMod_ContentVersion";
@@ -2081,7 +2106,15 @@ namespace CNRMods
         public static bool Ready = false;
 
         // material name (lowercase) → Texture2D loaded from file
-        private static Dictionary<string, Texture2D> _texCache = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
+        private static Dictionary<string, Texture2D> _texCache   = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
+        // map id → Texture2D thumbnail
+        private static Dictionary<string, Texture2D> _thumbCache = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
+
+        public static Texture2D GetMapThumbnail(string id)
+        {
+            Texture2D t;
+            return _thumbCache.TryGetValue(id, out t) ? t : null;
+        }
 
         void Start()
         {
@@ -2104,7 +2137,7 @@ namespace CNRMods
                 string[] dirs = new string[]
                 {
                     "/storage/emulated/0/CNRMods/content_cache/",
-                    MapCacheDir, TexCacheDir, DataCacheDir
+                    MapCacheDir, TexCacheDir, ThumbCacheDir, DataCacheDir
                 };
                 foreach (string d in dirs)
                     if (!Directory.Exists(d)) Directory.CreateDirectory(d);
@@ -2125,11 +2158,122 @@ namespace CNRMods
                     string p = TexCacheDir + te.Id + ".png";
                     if (File.Exists(p)) LoadTexFile(te.Id, p);
                 }
+                // Pre-load cached map thumbnails
+                foreach (var om in OfficialMaps)
+                {
+                    foreach (string ext in new[]{"jpg","png"})
+                    {
+                        string p = ThumbCacheDir + om.Id + "." + ext;
+                        if (File.Exists(p)) { LoadThumbFile(om.Id, p); break; }
+                    }
+                }
+                // Verify hashes; delete bad files and force a re-download on next sync
+                if (!VerifyAndClean())
+                {
+                    ModEntry.Log("ContentManager: hash mismatch(es) found — clearing version to force re-download");
+                    PlayerPrefs.SetString(VersionPref, "");
+                    PlayerPrefs.Save();
+                }
                 ModEntry.Log("ContentManager: cache loaded — maps=" + OfficialMaps.Length
                     + " tex=" + OfficialTextures.Length + " data=" + OfficialData.Length);
             }
             catch (Exception ex) { ModEntry.Log("ContentManager: LoadCachedManifest error: " + ex.Message); }
             Ready = true;
+        }
+
+        // Compute MD5 hex string for a file (returns null on error)
+        static string ComputeMD5(string path)
+        {
+            try
+            {
+                using (var md5 = System.Security.Cryptography.MD5.Create())
+                using (var stream = File.OpenRead(path))
+                {
+                    byte[] h = md5.ComputeHash(stream);
+                    var sb = new System.Text.StringBuilder(32);
+                    foreach (byte b in h) sb.Append(b.ToString("x2"));
+                    return sb.ToString();
+                }
+            }
+            catch { return null; }
+        }
+
+        // For each cached file that has a server-provided hash, verify MD5.
+        // Deletes any file whose hash doesn't match the server manifest.
+        // Returns true if everything is OK, false if anything was deleted.
+        static bool VerifyAndClean()
+        {
+            bool allOk = true;
+            foreach (var m in OfficialMaps)
+            {
+                // Map JSON
+                if (!string.IsNullOrEmpty(m.Hash))
+                {
+                    string p = MapCacheDir + m.Id + ".json";
+                    if (File.Exists(p))
+                    {
+                        string got = ComputeMD5(p);
+                        if (got != m.Hash.ToLower())
+                        {
+                            ModEntry.Log("ContentManager: map hash mismatch [" + m.Id + "] server=" + m.Hash + " local=" + got + " — deleting");
+                            try { File.Delete(p); } catch {}
+                            allOk = false;
+                        }
+                    }
+                }
+                // Thumbnail
+                if (!string.IsNullOrEmpty(m.ThumbnailHash))
+                {
+                    foreach (string ext in new[]{"jpg","png","gif","webp"})
+                    {
+                        string tp = ThumbCacheDir + m.Id + "." + ext;
+                        if (!File.Exists(tp)) continue;
+                        string got = ComputeMD5(tp);
+                        if (got != m.ThumbnailHash.ToLower())
+                        {
+                            ModEntry.Log("ContentManager: thumb hash mismatch [" + m.Id + "] — deleting");
+                            try { File.Delete(tp); } catch {}
+                            allOk = false;
+                        }
+                        break;
+                    }
+                }
+            }
+            foreach (var te in OfficialTextures)
+            {
+                if (!string.IsNullOrEmpty(te.Hash))
+                {
+                    string p = TexCacheDir + te.Id + ".png";
+                    if (File.Exists(p))
+                    {
+                        string got = ComputeMD5(p);
+                        if (got != te.Hash.ToLower())
+                        {
+                            ModEntry.Log("ContentManager: tex hash mismatch [" + te.Id + "] — deleting");
+                            try { File.Delete(p); } catch {}
+                            allOk = false;
+                        }
+                    }
+                }
+            }
+            foreach (var d in OfficialData)
+            {
+                if (!string.IsNullOrEmpty(d.Hash))
+                {
+                    string p = DataCacheDir + d.Id + ".json";
+                    if (File.Exists(p))
+                    {
+                        string got = ComputeMD5(p);
+                        if (got != d.Hash.ToLower())
+                        {
+                            ModEntry.Log("ContentManager: data hash mismatch [" + d.Id + "] — deleting");
+                            try { File.Delete(p); } catch {}
+                            allOk = false;
+                        }
+                    }
+                }
+            }
+            return allOk;
         }
 
         // Fetch fresh manifest, compare version, download anything new
@@ -2191,19 +2335,19 @@ namespace CNRMods
                 var mList = new List<OfficialMapEntry>();
                 foreach (var m in rawMaps)
                     if (!string.IsNullOrEmpty(m.id) && !string.IsNullOrEmpty(m.url))
-                        mList.Add(new OfficialMapEntry { Id = m.id, Name = m.name, Url = m.url, BaseScene = m.base_scene ?? "FreeRun3_1" });
+                        mList.Add(new OfficialMapEntry { Id = m.id, Name = m.name, Url = m.url, ThumbnailUrl = m.thumbnail_url ?? "", Hash = m.hash ?? "", ThumbnailHash = m.thumbnail_hash ?? "" });
                 OfficialMaps = mList.ToArray();
 
                 var tList = new List<OfficialTextureEntry>();
                 foreach (var t in rawTex)
                     if (!string.IsNullOrEmpty(t.id) && !string.IsNullOrEmpty(t.url))
-                        tList.Add(new OfficialTextureEntry { Id = t.id, MaterialName = t.material_name, Url = t.url });
+                        tList.Add(new OfficialTextureEntry { Id = t.id, MaterialName = t.material_name, Url = t.url, Hash = t.hash ?? "" });
                 OfficialTextures = tList.ToArray();
 
                 var dList = new List<OfficialDataEntry>();
                 foreach (var d in rawData)
                     if (!string.IsNullOrEmpty(d.id) && !string.IsNullOrEmpty(d.url))
-                        dList.Add(new OfficialDataEntry { Id = d.id, Key = d.key, Url = d.url });
+                        dList.Add(new OfficialDataEntry { Id = d.id, Key = d.key, Url = d.url, Hash = d.hash ?? "" });
                 OfficialData = dList.ToArray();
             }
             catch (Exception ex) { ModEntry.Log("ContentManager: ParseManifest error: " + ex.Message); }
@@ -2237,17 +2381,60 @@ namespace CNRMods
             {
                 string path = MapCacheDir + m.Id + ".json";
                 yield return StartCoroutine(DownloadFile(m.Url, path, "map:" + m.Id));
+                if (File.Exists(path) && !string.IsNullOrEmpty(m.Hash))
+                {
+                    string got = ComputeMD5(path);
+                    if (got != m.Hash.ToLower())
+                    {
+                        ModEntry.Log("ContentManager: map download hash mismatch [" + m.Id + "] expected=" + m.Hash + " got=" + got + " — deleting");
+                        try { File.Delete(path); } catch {}
+                    }
+                }
+
+                // Download thumbnail if URL is provided
+                if (!string.IsNullOrEmpty(m.ThumbnailUrl))
+                {
+                    string ext       = m.ThumbnailUrl.EndsWith(".png") ? "png" : "jpg";
+                    string thumbPath = ThumbCacheDir + m.Id + "." + ext;
+                    yield return StartCoroutine(DownloadFile(m.ThumbnailUrl, thumbPath, "thumb:" + m.Id));
+                    if (File.Exists(thumbPath))
+                    {
+                        if (!string.IsNullOrEmpty(m.ThumbnailHash) && ComputeMD5(thumbPath) != m.ThumbnailHash.ToLower())
+                        {
+                            ModEntry.Log("ContentManager: thumb download hash mismatch [" + m.Id + "] — deleting");
+                            try { File.Delete(thumbPath); } catch {}
+                        }
+                        else LoadThumbFile(m.Id, thumbPath);
+                    }
+                }
             }
             foreach (var te in OfficialTextures)
             {
                 string path = TexCacheDir + te.Id + ".png";
                 yield return StartCoroutine(DownloadFile(te.Url, path, "tex:" + te.Id));
-                if (File.Exists(path)) LoadTexFile(te.Id, path);
+                if (File.Exists(path))
+                {
+                    if (!string.IsNullOrEmpty(te.Hash) && ComputeMD5(path) != te.Hash.ToLower())
+                    {
+                        ModEntry.Log("ContentManager: tex download hash mismatch [" + te.Id + "] — deleting");
+                        try { File.Delete(path); } catch {}
+                    }
+                    else LoadTexFile(te.Id, path);
+                }
             }
             foreach (var d in OfficialData)
             {
                 string path = DataCacheDir + d.Id + ".json";
                 yield return StartCoroutine(DownloadFile(d.Url, path, "data:" + d.Id));
+                if (File.Exists(path) && !string.IsNullOrEmpty(d.Hash))
+                {
+                    string got = ComputeMD5(path);
+                    if (got != d.Hash.ToLower())
+                    {
+                        ModEntry.Log("ContentManager: data download hash mismatch [" + d.Id + "] — deleting");
+                        try { File.Delete(path); } catch {}
+                    }
+                }
             }
         }
 
@@ -2274,6 +2461,22 @@ namespace CNRMods
                 }
             }
             catch (Exception ex) { ModEntry.Log("ContentManager: LoadTexFile error [" + id + "]: " + ex.Message); }
+        }
+
+        static void LoadThumbFile(string id, string path)
+        {
+            try
+            {
+                byte[] bytes = File.ReadAllBytes(path);
+                var tex = new Texture2D(2, 2, TextureFormat.ARGB32, false);
+                if (tex.LoadImage(bytes))
+                {
+                    tex.name = "thumb_" + id;
+                    _thumbCache[id] = tex;
+                    ModEntry.Log("ContentManager: loaded thumbnail for " + id);
+                }
+            }
+            catch (Exception ex) { ModEntry.Log("ContentManager: LoadThumbFile error [" + id + "]: " + ex.Message); }
         }
 
         // After each scene load, swap any scene material whose name matches a loaded texture entry
@@ -2391,6 +2594,21 @@ namespace CNRMods
             if (_ecoScene == "MainMenu") StartCoroutine(EcoPatchDelay());
         }
 
+        // ── Reconnect (called from Update when not Ready) ─────────────────────
+        private IEnumerator ReconnectAttempt()
+        {
+            if (string.IsNullOrEmpty(ModEntry.EconomyUrl)) { _reconnectRunning = false; yield break; }
+            string androidId = GetAndroidId();
+            if (string.IsNullOrEmpty(androidId))            { _reconnectRunning = false; yield break; }
+            string displayName = PlayerPrefs.GetString("LocalMultiplayerNickName", "Player");
+            if (_playerId == androidId && !string.IsNullOrEmpty(_token))
+                yield return StartCoroutine(ReLogin(androidId, displayName));
+            else
+                yield return StartCoroutine(Register(androidId, displayName));
+            if (Ready) StartCoroutine(FetchInbox());
+            _reconnectRunning = false;
+        }
+
         // ── Registration / initial sync ───────────────────────────────────────
         private IEnumerator RegisterAndSync()
         {
@@ -2431,7 +2649,7 @@ namespace CNRMods
             if (!string.IsNullOrEmpty(www.error))
             {
                 ModEntry.Log("EcoHook register error: " + www.error);
-                // Server unreachable — fall back to local prefs, mark not ready
+                _connectError = www.error;
                 Ready = false; ServerUp = false;
                 yield break;
             }
@@ -2468,7 +2686,7 @@ namespace CNRMods
             var www = new WWW(url, System.Text.Encoding.UTF8.GetBytes(body), hdrs);
             yield return www;
 
-            if (!string.IsNullOrEmpty(www.error)) { Ready = false; ServerUp = false; ModEntry.Log("EcoHook relogin error: " + www.error); yield break; }
+            if (!string.IsNullOrEmpty(www.error)) { Ready = false; ServerUp = false; _connectError = www.error; ModEntry.Log("EcoHook relogin error: " + www.error); yield break; }
             ModEntry.Log("EcoHook relogin OK");
             ApplyServerBalance(www.text);
         }
@@ -2553,6 +2771,9 @@ namespace CNRMods
         private float _retryTimer  = 0f;
         private const float RetryDelayMin = 5f;
         private const float RetryDelayMax = 120f;
+        private float _reconnectTimer   = 0f;   // countdown until next login retry
+        private bool  _reconnectRunning = false;
+        private string _connectError    = "";   // last connection error to show in UI
         private float _inboxTimer = 0f;
         private const float InboxInterval = 60f;
 
@@ -2575,9 +2796,32 @@ namespace CNRMods
         private string      _ecoAccountMsg  = "";
         private Rect        _ecoMailWinRect;
         private Rect        _ecoAcctWinRect;
+        private UICamera[]  _nguiCameras = null;   // cached for click-through blocking
+        private bool        _nguiBlocked = false;
+        private GameObject  _goRecordBtn    = null;   // Recordings button GO — anchor for settings btn
+        private GameObject  _goAgreementBtn = null;   // User agreement button GO — anchor for mail btn
+        private Texture2D   _texSettingsIcon = null;
+        private Texture2D   _texMailIcon     = null;
 
         private void Update()
         {
+            // Keep NGUI cameras disabled while any IMGUI overlay is open.
+            // UICamera reads Input.touches/GetMouseButtonDown() directly, so
+            // Event.current.Use() alone cannot block NGUI button clicks.
+            SetNguiBlocking(_showEcoMail || _showEcoAccount);
+
+            // Reconnect loop — runs even while GUI overlay is open
+            if (!Ready && !_reconnectRunning)
+            {
+                _reconnectTimer -= Time.deltaTime;
+                if (_reconnectTimer <= 0f)
+                {
+                    _reconnectTimer   = 15f;  // retry every 15 s
+                    _reconnectRunning = true;
+                    StartCoroutine(ReconnectAttempt());
+                }
+            }
+
             if (!Ready) return;
 
             // Periodically refresh mail inbox — only when server is reachable
@@ -2901,6 +3145,18 @@ namespace CNRMods
         }
 
         // ── Main-menu overlay — scene tracking, patching, drawing ─────────────
+        // Disable NGUI UICamera components while an overlay is open so that
+        // taps handled by IMGUI don't also fire NGUI buttons behind the overlay.
+        private void SetNguiBlocking(bool block)
+        {
+            if (block == _nguiBlocked) return;
+            if (_nguiCameras == null)
+                _nguiCameras = (UICamera[])FindObjectsOfType(typeof(UICamera));
+            foreach (var cam in _nguiCameras)
+                if (cam != null) cam.enabled = !block;
+            _nguiBlocked = block;
+        }
+
         private void OnLevelWasLoaded(int lvl)
         {
             _ecoScene    = Application.loadedLevelName ?? "";
@@ -2908,8 +3164,12 @@ namespace CNRMods
             _ecoDbgLog   = false;
             _showEcoMail    = false;
             _showEcoAccount = false;
-            _goHelpBtn   = null;
+            _goHelpBtn      = null;
+            _goRecordBtn    = null;
+            _goAgreementBtn = null;
             _ecoNguiCam  = null;
+            _nguiCameras = null;   // invalidate cache; new UICamera instances after scene load
+            _nguiBlocked = false;
             if (_ecoScene == "MainMenu") StartCoroutine(EcoPatchDelay());
         }
 
@@ -2924,20 +3184,39 @@ namespace CNRMods
         {
             if (_ecoPatched) return;
             _ecoPatched = true;
-            // Find + hide the ? (HelpScene) button, cache its GO as position anchor
+            // Find + hide the ? (HelpScene) button; also cache Recordings and UserAgreement GOs as position anchors
             MonoBehaviour[] all = (MonoBehaviour[])(object)
                 UnityEngine.Object.FindObjectsOfType(typeof(MonoBehaviour));
             foreach (MonoBehaviour mb in all)
             {
-                if (mb.GetType().Name != "UIButtonEventKit") continue;
-                FieldInfo fi = mb.GetType().GetField("buttonName",
-                    BindingFlags.Instance | BindingFlags.Public);
-                if (fi == null) continue;
-                if ((int)(object)fi.GetValue(mb) != 59) continue;
-                _goHelpBtn = ((Component)(object)mb).gameObject;
-                _goHelpBtn.SetActive(false);
-                break;
+                string typeName = mb.GetType().Name;
+                if (typeName == "UIButtonEventKit")
+                {
+                    FieldInfo fi = mb.GetType().GetField("buttonName",
+                        BindingFlags.Instance | BindingFlags.Public);
+                    if (fi == null) continue;
+                    int bval = (int)(object)fi.GetValue(mb);
+                    if (bval == 59 && _goHelpBtn == null)        // ToHelpScene — hide it
+                    {
+                        _goHelpBtn = ((Component)(object)mb).gameObject;
+                        _goHelpBtn.SetActive(false);
+                    }
+                    else if (bval == 63 && _goRecordBtn == null) // ShowVideoBtn — Recordings
+                    {
+                        _goRecordBtn = ((Component)(object)mb).gameObject;
+                    }
+                }
+                else if (typeName == "RatingPopButtonEvent" && _goAgreementBtn == null)
+                {
+                    FieldInfo fi = mb.GetType().GetField("buttonName",
+                        BindingFlags.Instance | BindingFlags.Public);
+                    if (fi != null && (int)(object)fi.GetValue(mb) == 5) // ShowAgreement
+                        _goAgreementBtn = ((Component)(object)mb).gameObject;
+                }
             }
+            // Load button icons (once per app session; texture persists across scene reloads)
+            if (_texSettingsIcon == null) _texSettingsIcon = LoadPngIcon("/sdcard/CNRMods/settings.png");
+            if (_texMailIcon     == null) _texMailIcon     = LoadPngIcon("/sdcard/CNRMods/mail.png");
             // Cache NGUI camera
             foreach (string n in new string[]{ "Camera", "UI Camera", "UICamera" })
             {
@@ -2951,7 +3230,28 @@ namespace CNRMods
                 if (lbl.font != null && lbl.font.dynamicFont != null)
                 { _ecoFont = lbl.font.dynamicFont; break; }
             ModEntry.Log("EcoHook menu: helpBtn=" + (_goHelpBtn != null ? "found" : "null")
+                + " recordBtn=" + (_goRecordBtn != null ? "found" : "null")
+                + " agreementBtn=" + (_goAgreementBtn != null ? "found" : "null")
+                + " settingsIcon=" + (_texSettingsIcon != null ? "ok" : "missing")
+                + " mailIcon=" + (_texMailIcon != null ? "ok" : "missing")
                 + " nguiCam=" + (_ecoNguiCam != null ? "found" : "null"));
+            // Dump all component types on button GOs to identify what's present at runtime
+            if (_goAgreementBtn != null)
+                ModEntry.Log("AgreementBtn comps: " + EcoNguiDumpComponents(_goAgreementBtn));
+            if (_goRecordBtn != null)
+                ModEntry.Log("RecordBtn comps: " + EcoNguiDumpComponents(_goRecordBtn));
+        }
+
+        static Texture2D LoadPngIcon(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return null;
+                byte[] bytes = File.ReadAllBytes(path);
+                var tex = new Texture2D(2, 2, TextureFormat.ARGB32, false);
+                return tex.LoadImage(bytes) ? tex : null;
+            }
+            catch { return null; }
         }
 
         private void OnGUI()
@@ -2959,9 +3259,9 @@ namespace CNRMods
             // Version watermark — top-left corner, visible in all scenes
             {
                 var vs = new GUIStyle(GUI.skin.label);
-                vs.fontSize  = 10;
-                vs.fontStyle = FontStyle.Normal;
-                vs.normal.textColor = new Color(1f, 1f, 1f, 0.4f);
+                vs.fontSize  = 22;
+                vs.fontStyle = FontStyle.Bold;
+                vs.normal.textColor = new Color(1f, 1f, 1f, 0.55f);
                 string verStr = "CNRMod v" + ModEntry.Version;
                 try
                 {
@@ -2971,7 +3271,7 @@ namespace CNRMods
                 }
                 catch { }
                 GUI.color = Color.white;
-                GUI.Label(new Rect(5f, 5f, 500f, 16f), verStr, vs);
+                GUI.Label(new Rect(5f, 5f, 700f, 28f), verStr, vs);
             }
 
             if (_ecoScene != "MainMenu") return;
@@ -3003,31 +3303,97 @@ namespace CNRMods
             if (unread > 0) sbMail.normal.textColor = new Color(1f, 0.5f, 0.3f);
             string acctLabel = SettingsModPresent ? "Settings" : "Account";
 
-            float btnH = 26f, mailW = 130f, acctW = 120f, pad = 8f;
-            float mailX, mailY, acctX, acctY;
-            if (_ecoNguiCam != null && _goHelpBtn != null)
+            const float pad = 6f, textBtnH = 26f;
+
+            // ── Mail button — to the right of the user agreement button ───────
+            float mailW, mailH, mailX, mailY;
+            if (_ecoNguiCam != null && _goAgreementBtn != null)
             {
-                Rect ag = EcoNguiRect(_ecoNguiCam, _goHelpBtn, sc);
-                mailX = ag.x + (ag.width - mailW) * 0.5f;
-                mailY = ag.y + (ag.height - btnH) * 0.5f;
-                acctX = mailX + mailW + pad;
-                acctY = mailY;
+                Rect ar = EcoNguiRect(_ecoNguiCam, _goAgreementBtn, sc);
+                // match anchor button size exactly
+                mailW = ar.width;
+                mailH = ar.height;
+                mailX = ar.x + ar.width + pad;
+                mailY = ar.y;
                 if (!_ecoDbgLog)
                 {
                     _ecoDbgLog = true;
-                    ModEntry.Log("Eco btns: ag=" + ag.x.ToString("F0") + "," + ag.y.ToString("F0")
-                        + " " + ag.width.ToString("F0") + "x" + ag.height.ToString("F0")
+                    ModEntry.Log("Eco btns: ar=" + ar.x.ToString("F0") + "," + ar.y.ToString("F0")
+                        + " " + ar.width.ToString("F0") + "x" + ar.height.ToString("F0")
                         + " Screen=" + Screen.width + "x" + Screen.height + " sc=" + sc.ToString("F2"));
                 }
             }
             else
             {
+                mailW = _texMailIcon != null ? textBtnH : 130f;
+                mailH = textBtnH;
                 mailX = ECO_REF_W - 10f - 260f; mailY = vh - 34f;
+            }
+
+            // ── Settings/Account button — to the left of the recordings button ─
+            float acctW, acctH, acctX, acctY;
+            if (_ecoNguiCam != null && _goRecordBtn != null)
+            {
+                Rect rr = EcoNguiRect(_ecoNguiCam, _goRecordBtn, sc);
+                // match anchor button size exactly
+                acctW = rr.width;
+                acctH = rr.height;
+                acctX = rr.x - acctW - pad;
+                acctY = rr.y;
+            }
+            else
+            {
+                acctW = _texSettingsIcon != null ? textBtnH : 120f;
+                acctH = textBtnH;
                 acctX = ECO_REF_W - 10f - 120f; acctY = vh - 34f;
             }
 
-            if (GUI.Button(new Rect(mailX, mailY, mailW, btnH), mailLabel, sbMail)) EcoOpenMail();
-            if (GUI.Button(new Rect(acctX, acctY, acctW, btnH), acctLabel, sb))  EcoOpenAccount();
+            // ── Draw mail button ──────────────────────────────────────────────
+            if (_texMailIcon != null)
+            {
+                GUIStyle iconSt = new GUIStyle();
+                iconSt.imagePosition   = ImagePosition.ImageOnly;
+                iconSt.normal.background  = null;
+                iconSt.hover.background   = EcoMkTex(2, 2, new Color(1f, 1f, 1f, 0.2f));
+                iconSt.active.background  = EcoMkTex(2, 2, new Color(1f, 1f, 1f, 0.4f));
+                iconSt.border  = new RectOffset(0, 0, 0, 0);
+                iconSt.padding = new RectOffset(0, 0, 0, 0);
+                if (unread > 0) GUI.color = new Color(1f, 0.7f, 0.4f);
+                if (GUI.Button(new Rect(mailX, mailY, mailW, mailH),
+                               new GUIContent(_texMailIcon), iconSt)) EcoOpenMail();
+                GUI.color = Color.white;
+                if (unread > 0)
+                {
+                    GUIStyle badgeSt = new GUIStyle(GUI.skin.label);
+                    badgeSt.fontSize  = 11;
+                    badgeSt.fontStyle = FontStyle.Bold;
+                    badgeSt.normal.textColor = new Color(1f, 0.3f, 0.2f);
+                    GUI.Label(new Rect(mailX + mailW - 14f, mailY - 4f, 22f, 18f),
+                              unread.ToString(), badgeSt);
+                }
+            }
+            else
+            {
+                if (GUI.Button(new Rect(mailX, mailY, mailW, mailH), mailLabel, sbMail)) EcoOpenMail();
+            }
+
+            // ── Draw settings/account button ──────────────────────────────────
+            if (_texSettingsIcon != null)
+            {
+                GUIStyle iconSt = new GUIStyle();
+                iconSt.imagePosition   = ImagePosition.ImageOnly;
+                iconSt.normal.background  = null;
+                iconSt.hover.background   = EcoMkTex(2, 2, new Color(1f, 1f, 1f, 0.2f));
+                iconSt.active.background  = EcoMkTex(2, 2, new Color(1f, 1f, 1f, 0.4f));
+                iconSt.border  = new RectOffset(0, 0, 0, 0);
+                iconSt.padding = new RectOffset(0, 0, 0, 0);
+                if (GUI.Button(new Rect(acctX, acctY, acctW, acctH),
+                               new GUIContent(_texSettingsIcon), iconSt)) EcoOpenAccount();
+            }
+            else
+            {
+                if (GUI.Button(new Rect(acctX, acctY, acctW, acctH), acctLabel, sb)) EcoOpenAccount();
+            }
         }
 
         private void EcoOpenMail()
@@ -3087,8 +3453,17 @@ namespace CNRMods
                 GUIStyle mt = EcoLblSt();
                 mt.normal.textColor = new Color(0.55f, 0.55f, 0.65f);
                 mt.alignment = TextAnchor.MiddleCenter;
-                GUILayout.Label(Ready ? "No mail yet." : "Not connected to server.", mt,
-                    GUILayout.Height(80f));
+                if (!Ready)
+                {
+                    int countdown = Mathf.CeilToInt(_reconnectTimer);
+                    string errLine = string.IsNullOrEmpty(_connectError) ? "" : "\n" + _connectError;
+                    GUILayout.Label("Server offline — retrying in " + countdown + "s" + errLine, mt,
+                        GUILayout.Height(80f));
+                }
+                else
+                {
+                    GUILayout.Label("No mail yet.", mt, GUILayout.Height(80f));
+                }
             }
             else
             {
@@ -3175,10 +3550,23 @@ namespace CNRMods
             string dispId = pid.Length >= 8 ? pid.Substring(0, 8) + "..." : (pid.Length > 0 ? pid : "(not registered)");
             GUILayout.Label("Device ID:  " + dispId, EcoLblSt());
             GUILayout.Space(4f);
-            string statusTxt = Ready ? "Connected" : (ServerUp ? "Syncing..." : "Offline");
-            Color  statusCol = Ready ? new Color(0.3f, 1f, 0.4f) : (ServerUp ? new Color(1f, 0.85f, 0.2f) : new Color(1f, 0.4f, 0.4f));
+            string statusTxt;
+            Color  statusCol;
+            if (Ready)      { statusTxt = "Connected";  statusCol = new Color(0.3f, 1f, 0.4f); }
+            else if (ServerUp) { statusTxt = "Syncing\u2026"; statusCol = new Color(1f, 0.85f, 0.2f); }
+            else
+            {
+                int cd = Mathf.CeilToInt(_reconnectTimer);
+                statusTxt = "Offline \u2014 retrying in " + cd + "s";
+                statusCol = new Color(1f, 0.4f, 0.4f);
+            }
             GUIStyle stSt = EcoLblSt(); stSt.normal.textColor = statusCol;
             GUILayout.Label("Server:  " + statusTxt, stSt);
+            if (!Ready && !string.IsNullOrEmpty(_connectError))
+            {
+                GUIStyle errSt = EcoHintSt(); errSt.normal.textColor = new Color(1f, 0.5f, 0.4f);
+                GUILayout.Label(_connectError, errSt);
+            }
             GUILayout.Space(10f);
             if (Ready)
             {
@@ -3283,6 +3671,32 @@ namespace CNRMods
             for (int i = 0; i < p.Length; i++) p[i] = col;
             Texture2D t = new Texture2D(w, h); t.SetPixels(p); t.Apply(); return t;
         }
+        // Returns the names of all components on go + its children + its ancestors (for debug).
+        private static string EcoNguiDumpComponents(GameObject go)
+        {
+            var sb = new System.Text.StringBuilder();
+            // Dump self + full subtree first
+            Component[] all = go.GetComponentsInChildren(typeof(Component));
+            sb.Append("[subtree]:");
+            foreach (Component c in all)
+                sb.Append(c.GetType().Name + "@" + c.gameObject.name + ",");
+            sb.Append(" ");
+            // Then ancestors
+            Transform cur = go.transform.parent;
+            int depth = 0;
+            while (cur != null)
+            {
+                sb.Append("[" + cur.name + "]:");
+                Component[] ac = cur.gameObject.GetComponents(typeof(Component));
+                foreach (Component c in ac)
+                    sb.Append(c.GetType().Name + ",");
+                sb.Append(" ");
+                cur = cur.parent;
+                if (++depth > 6) break;
+            }
+            return sb.ToString();
+        }
+
         private static Rect EcoNguiRect(Camera cam, GameObject go, float sc)
         {
             if (go == null) return new Rect(0, 0, 0, 0);
@@ -3290,16 +3704,49 @@ namespace CNRMods
             float cx = sp.x / sc;
             float cy = (Screen.height - sp.y) / sc;
             float hw = 30f / sc, hh = 30f / sc;
-            Component wc = go.GetComponentInChildren(typeof(UIWidget)) as Component;
-            if (wc != null)
+            float bestArea = 0f;
+            string bestName = "(fallback)";
+            // Walk the full subtree first (self + all descendants), then ancestors.
+            // Strategy 1: BoxCollider — project local-space corners through world transform + camera.
+            // Using TransformPoint so UIRoot's scale is properly applied.
+            BoxCollider bc = go.GetComponent<BoxCollider>();
+            if (bc != null)
             {
-                System.Type tp = wc.GetType();
-                System.Reflection.PropertyInfo wp = tp.GetProperty("width",
-                    BindingFlags.Instance | BindingFlags.Public);
-                System.Reflection.PropertyInfo hp = tp.GetProperty("height",
-                    BindingFlags.Instance | BindingFlags.Public);
-                if (wp != null) hw = System.Convert.ToSingle(wp.GetValue(wc, null)) * 0.5f / sc;
-                if (hp != null) hh = System.Convert.ToSingle(hp.GetValue(wc, null)) * 0.5f / sc;
+                float wx = bc.size.x * 0.5f;
+                float wy = bc.size.y * 0.5f;
+                Vector3 spL = cam.WorldToScreenPoint(go.transform.TransformPoint(bc.center + new Vector3(-wx, 0, 0)));
+                Vector3 spR = cam.WorldToScreenPoint(go.transform.TransformPoint(bc.center + new Vector3( wx, 0, 0)));
+                Vector3 spD = cam.WorldToScreenPoint(go.transform.TransformPoint(bc.center + new Vector3(0, -wy, 0)));
+                Vector3 spU = cam.WorldToScreenPoint(go.transform.TransformPoint(bc.center + new Vector3(0,  wy, 0)));
+                float screenW = spR.x - spL.x;
+                float screenH = spU.y - spD.y;
+                if (screenW > 0f && screenH > 0f)
+                {
+                    hw = screenW * 0.5f / sc;
+                    hh = screenH * 0.5f / sc;
+                    bestName = "BoxCollider@" + go.name + " screen=" + (int)screenW + "x" + (int)screenH;
+                }
+            }
+            // Strategy 2: UISprite/UIWidget via reflection — try property first, then field.
+            // GetComponentsInChildren(typeof(Component)) works because Component is a Unity engine base.
+            Component[] subtree = go.GetComponentsInChildren(typeof(Component));
+            foreach (Component wc in subtree)
+            {
+                string tn = wc.GetType().Name;
+                if (tn != "UISprite" && tn != "UIWidget" && tn != "UITexture" && tn != "UILabel") continue;
+                float w = 0f, h = 0f;
+                // Try property (NGUI >= 3.x)
+                System.Reflection.PropertyInfo wp = wc.GetType().GetProperty("width",  System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.FlattenHierarchy);
+                System.Reflection.PropertyInfo hp = wc.GetType().GetProperty("height", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.FlattenHierarchy);
+                if (wp != null && hp != null) { w = System.Convert.ToSingle(wp.GetValue(wc, null)); h = System.Convert.ToSingle(hp.GetValue(wc, null)); }
+                else
+                {
+                    // Try field (older NGUI)
+                    System.Reflection.FieldInfo wf = wc.GetType().GetField("width",  System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.FlattenHierarchy);
+                    System.Reflection.FieldInfo hf = wc.GetType().GetField("height", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.FlattenHierarchy);
+                    if (wf != null && hf != null) { w = System.Convert.ToSingle(wf.GetValue(wc)); h = System.Convert.ToSingle(hf.GetValue(wc)); }
+                }
+                if (w * h > bestArea) { bestArea = w * h; hw = w * 0.5f / sc; hh = h * 0.5f / sc; bestName = tn + "@" + wc.gameObject.name + " " + (int)w + "x" + (int)h; }
             }
             return new Rect(cx - hw, cy - hh, hw * 2f, hh * 2f);
         }
