@@ -13,7 +13,7 @@ namespace CNRMods
     // ══════════════════════════════════════════════════════════════════════════
     public class ModEntry
     {
-        private const string LogPath    = "/storage/emulated/0/CNRMods/cnrmod.log";
+        private const string LogPath    = "/storage/emulated/0/CNRMods/redir.log";
         private const string ConfigPath = "/storage/emulated/0/CNRMods/server.cfg";
 
         // Config values (read once in Load())
@@ -24,38 +24,15 @@ namespace CNRMods
         public static string ModVersion    = "1.0.0";
         public static bool   KickNoMod     = true;
         public static string WebUrl        = "";    // http://<host>:1337 for node server; derived from SERVER_IP if not set
-        public static string EconomyUrl    = "";    // https://<host>/economy  for PHP economy API
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
-
-        // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "1.0.0";
-
-        // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
-        // External mods call RegisterMod(name, version) via reflection on ModEntry.
-        public static Dictionary<string, string> RegisteredMods = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        public static void RegisterMod(string name, string version)
-        {
-            if (string.IsNullOrEmpty(name)) return;
-            RegisteredMods[name] = version ?? "?";
-            Log("Mod registered: " + name + " v" + (version ?? "?"));
-        }
-
-        // Returns the registered version string for the named mod, or null if not registered.
-        public static string GetModVersion(string name)
-        {
-            string v;
-            return RegisteredMods.TryGetValue(name, out v) ? v : null;
-        }
 
         private static bool _loaded = false;
 
         public static void Load()
         {
-            if (_loaded) { Log("CNRMod: already loaded, skipping"); return; }
+            if (_loaded) { Log("IPRedirectMod: already loaded, skipping"); return; }
             _loaded = true;
-            RegisterMod("CNRMod", Version);
-            Log("=== CNRMod Load() v" + Version + " ===");
+            Log("=== IPRedirectMod Load() ===");
             try
             {
                 ReadConfig();
@@ -64,8 +41,6 @@ namespace CNRMods
                 go.AddComponent<RedirectHook>();
                 go.AddComponent<CustomMapsHook>();
                 go.AddComponent<MapLoader>();
-                go.AddComponent<ContentManager>();
-                go.AddComponent<EconomyHook>();
                 GameObject.DontDestroyOnLoad(go);
 
                 Log("Mod root created.  IP=" + (ServerIp != "" ? ServerIp : "(none)") +
@@ -83,7 +58,7 @@ namespace CNRMods
             LoadExternalMods();
         }
 
-        // Scan /sdcard/CNRMods/ for any .dll other than CNRMod.dll and call its public
+        // Scan /sdcard/CNRMods/ for any .dll other than IPRedirectMod.dll and call its public
         // static Load() — this is how CNRSettingsMod.dll and others get initialized.
         private static void LoadExternalMods()
         {
@@ -94,7 +69,7 @@ namespace CNRMods
                 foreach (string path in files)
                 {
                     string name = System.IO.Path.GetFileName(path);
-                    if (name.Equals("CNRMod.dll", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (name.Equals("IPRedirectMod.dll", StringComparison.OrdinalIgnoreCase)) continue;
                     try
                     {
                         Log("LoadExternalMods: loading " + name);
@@ -135,9 +110,8 @@ namespace CNRMods
                     case "APP_ID":      AppId      = val;   break;
                     case "MAP_URL":     MapUrl     = val;   break;
                     case "MOD_VERSION": ModVersion = val;   break;
-                    case "KICK_NO_MOD":   KickNoMod   = val.ToLower() != "false" && val != "0"; break;
-                    case "WEB_URL":       WebUrl      = val; break;
-                    case "ECONOMY_URL":   EconomyUrl  = val; break;
+                    case "KICK_NO_MOD": KickNoMod  = val.ToLower() != "false" && val != "0"; break;
+                    case "WEB_URL":     WebUrl     = val; break;
                 }
             }
             Log("Config: IP=" + ServerIp + "  PORT=" + ServerPort + "  MAP_URL=" + MapUrl +
@@ -145,10 +119,6 @@ namespace CNRMods
             if (string.IsNullOrEmpty(WebUrl) && !string.IsNullOrEmpty(ServerIp))
                 WebUrl = "http://" + ServerIp + ":1337";
             Log("WebUrl=" + (WebUrl != "" ? WebUrl : "(not set)"));
-            // Economy URL: hardcoded host unless overridden by ECONOMY_URL in server.cfg
-            if (string.IsNullOrEmpty(EconomyUrl))
-                EconomyUrl = "https://play.jacqueb.me/economy";
-            Log("EconomyUrl=" + EconomyUrl);
         }
 
         public static void Log(string msg)
@@ -178,32 +148,6 @@ namespace CNRMods
                 int ei = json.IndexOf('"', vi + 1);
                 if (ei < 0) return null;
                 return json.Substring(vi + 1, ei - vi - 1).Replace("\\n", "").Replace("\\/", "/");
-            }
-            catch { return null; }
-        }
-
-        // Parses both "key":123 and "key":"123"
-        public static string ParseJsonValue(string json, string key)
-        {
-            try
-            {
-                string k = "\"" + key + "\":";
-                int ki = json.IndexOf(k);
-                if (ki < 0) return null;
-                int vi = ki + k.Length;
-                // skip whitespace
-                while (vi < json.Length && json[vi] == ' ') vi++;
-                if (vi >= json.Length) return null;
-                if (json[vi] == '"')
-                {
-                    int ei = json.IndexOf('"', vi + 1);
-                    if (ei < 0) return null;
-                    return json.Substring(vi + 1, ei - vi - 1).Replace("\\/", "/");
-                }
-                // unquoted value (number, bool, null)
-                int end = vi;
-                while (end < json.Length && json[end] != ',' && json[end] != '}' && json[end] != ']') end++;
-                return json.Substring(vi, end - vi).Trim();
             }
             catch { return null; }
         }
@@ -904,9 +848,8 @@ namespace CNRMods
         bool     _hookAttempted = false;  // true after first attempt — prevents spam on 0-hook result
         MSD_SubSceneInWorldWide _lastSubScene = (MSD_SubSceneInWorldWide)(-1);
         int      _virtualIdx  = 0;
-        string   _activeSlot  = "";   // non-empty → user custom slot, empty → standard/official
+        string   _activeSlot  = "";
         string   _urlInput    = "";
-        bool     _activeIsOfficial = false;  // true when selected map is an official server map
         Font     _gameFont    = null;
 
         // Find the game's NGUI dynamic font via any live UILabel.
@@ -922,33 +865,18 @@ namespace CNRMods
 
         void Awake()
         {
-            // Initial map list (no official maps yet — rebuilt in HookButtons after ContentManager loads)
             var list = new List<string>(STANDARD_MAPS);
             list.AddRange(CUSTOM_MAPS);
             _allMaps = list.ToArray();
-        }
-
-        // Rebuild _allMaps with current official maps from ContentManager injected between
-        // standard maps and the user's three custom URL slots.
-        void RebuildMapList()
-        {
-            var list = new List<string>(STANDARD_MAPS);
-            foreach (var om in ContentManager.OfficialMaps)
-                list.Add("OFFICIAL_" + om.Id);
-            list.AddRange(CUSTOM_MAPS);
-            _allMaps = list.ToArray();
-            ModEntry.Log("CustomMaps: map list rebuilt — " + STANDARD_MAPS.Length + " std + "
-                + ContentManager.OfficialMaps.Length + " official + " + CUSTOM_MAPS.Length + " custom = " + _allMaps.Length);
         }
 
         void OnLevelWasLoaded(int level)
         {
-            _hooked           = false;
-            _hookAttempted    = false;
-            _lastSubScene     = (MSD_SubSceneInWorldWide)(-1);
-            _activeSlot       = "";
-            _urlInput         = "";
-            _activeIsOfficial = false;
+            _hooked         = false;
+            _hookAttempted  = false;
+            _lastSubScene   = (MSD_SubSceneInWorldWide)(-1);
+            _activeSlot     = "";
+            _urlInput       = "";
             // Clear the persisted label so it doesn't reappear on the next room-create visit
             PlayerPrefs.SetString("CNRMod_CustomMapName", "");
             PlayerPrefs.Save();
@@ -975,14 +903,6 @@ namespace CNRMods
         IEnumerator HookButtons()
         {
             yield return new WaitForSeconds(0.1f);
-
-            // Wait up to 5s for ContentManager to finish its manifest fetch
-            float waited = 0f;
-            while (!ContentManager.Ready && waited < 5f)
-            { yield return new WaitForSeconds(0.25f); waited += 0.25f; }
-
-            RebuildMapList();
-
             var all = (MonoBehaviour[])Resources.FindObjectsOfTypeAll(typeof(MonoBehaviour));
             int hooked = 0;
             foreach (var comp in all)
@@ -1004,6 +924,8 @@ namespace CNRMods
                 }
             }
             // Don't reset _hooked to false on 0 — that causes infinite spam.
+            // If we got 0 hooks, log it and leave _hooked=true to stop retrying.
+            // OnLevelWasLoaded will reset both flags when the sub-scene changes.
             if (hooked > 0)
             {
                 _hooked = true;
@@ -1060,73 +982,19 @@ namespace CNRMods
 
             if (stdIdx >= 0)
             {
-                // ─ Standard map ─
                 PlayerPrefs.SetString("CNRMod_CustomMapName", "");
                 PlayerPrefs.SetString("CNRMod_ActiveMapURL",  "");
                 PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
                 PlayerPrefs.DeleteKey("CNRMod_DonorScene");
-                _activeSlot       = "";
-                _urlInput         = "";
-                _activeIsOfficial = false;
+                _activeSlot = "";
+                _urlInput   = "";
                 msd.mCurWWMapSelect = scene;
                 msd.mWWMapUITexture.mainTexture = (Texture)(object)msd.mWWMapTexture[stdIdx];
                 msd.mWWMapUITexture.MarkAsChanged();
                 msd.WWResetModeCheckBox();
             }
-            else if (scene.StartsWith("OFFICIAL_"))
-            {
-                // ─ Official server-provided map ─
-                string omId = scene.Substring("OFFICIAL_".Length);
-                OfficialMapEntry om = null;
-                foreach (var m in ContentManager.OfficialMaps)
-                    if (m.Id == omId) { om = m; break; }
-                if (om == null) { ModEntry.Log("ApplyMap: official map not found: " + omId); return; }
-
-                string[] validDonors = new string[]{"FreeRun3_1","FreeRun5_1","FreeRun8_1"};
-                string loadScene = (Array.IndexOf(validDonors, om.BaseScene) >= 0) ? om.BaseScene : "FreeRun3_1";
-                msd.mCurWWMapSelect = loadScene;
-                msd.mWWMapUITexture.mainTexture = (Texture)(object)msd.mWWMapTexture[STANDARD_MAPS.Length - 1];
-                msd.mWWMapUITexture.MarkAsChanged();
-                msd.WWResetModeCheckBox();
-
-                PlayerPrefs.SetString("CNRMod_CustomMapName", om.Name);
-                _activeSlot       = "";   // no URL input for official maps
-                _urlInput         = "";
-                _activeIsOfficial = true;
-
-                // Use pre-cached JSON if available; otherwise MapLoader will download via ActiveMapURL
-                string cachePath    = ContentManager.MapCacheDir + om.Id + ".json";
-                string stdCachePath = "/storage/emulated/0/CNRMods/custom_map_cache.json";
-                if (File.Exists(cachePath))
-                {
-                    try
-                    {
-                        File.Copy(cachePath, stdCachePath, true);
-                        PlayerPrefs.SetInt("CNRMod_MapCacheReady", 1);
-                        PlayerPrefs.SetString("CNRMod_DonorScene", loadScene);
-                        PlayerPrefs.SetString("CNRMod_ActiveMapURL", "");
-                        ModEntry.Log("Official map '" + om.Name + "': used pre-cached JSON");
-                    }
-                    catch (Exception copyEx)
-                    {
-                        ModEntry.Log("Official map copy error: " + copyEx.Message);
-                        PlayerPrefs.SetString("CNRMod_ActiveMapURL", om.Url);
-                        PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
-                    }
-                }
-                else
-                {
-                    PlayerPrefs.SetString("CNRMod_ActiveMapURL", om.Url);
-                    PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
-                    PlayerPrefs.DeleteKey("CNRMod_DonorScene");
-                    StartCoroutine(FetchDonor(om.Url));
-                    ModEntry.Log("Official map '" + om.Name + "': URL queued for download");
-                }
-                PlayerPrefs.Save();
-            }
             else
             {
-                // ─ User custom map slot ─
                 string[] validDonors = new string[]{"FreeRun3_1","FreeRun5_1","FreeRun8_1"};
                 string donorPref = PlayerPrefs.GetString("CNRMod_DonorScene", "");
                 string loadScene = (Array.IndexOf(validDonors, donorPref) >= 0) ? donorPref
@@ -1134,15 +1002,16 @@ namespace CNRMods
                 msd.mCurWWMapSelect = loadScene;
                 msd.mWWMapUITexture.mainTexture = (Texture)(object)msd.mWWMapTexture[STANDARD_MAPS.Length - 1];
                 msd.mWWMapUITexture.MarkAsChanged();
+                // Let the game's own logic decide available modes (TDM+KC enabled, SH hidden automatically by donor map)
                 msd.WWResetModeCheckBox();
 
                 PlayerPrefs.SetString("CNRMod_CustomMapName", CUSTOM_NAMES[scene]);
-                _activeSlot       = scene;
-                _activeIsOfficial = false;
-                _urlInput         = PlayerPrefs.GetString("CNRMod_MapURL_" + scene, "");
+                _activeSlot = scene;
+                _urlInput   = PlayerPrefs.GetString("CNRMod_MapURL_" + scene, "");
                 PlayerPrefs.SetString("CNRMod_ActiveMapURL", _urlInput);
-                PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
+                PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");  // force re-download for this slot's URL
                 PlayerPrefs.Save();
+                // Fetch donor every time a custom slot is selected (not just on URL change)
                 if (!string.IsNullOrEmpty(_urlInput))
                     StartCoroutine(FetchDonor(_urlInput));
             }
@@ -1216,9 +1085,8 @@ namespace CNRMods
             noteStyle.fontStyle = FontStyle.Normal;
             noteStyle.alignment = TextAnchor.MiddleLeft;
             if (gf != null) noteStyle.font = gf;
-            string subNote = _activeIsOfficial ? "Official server map" : "Requires mod on all clients";
-            GUI.color = _activeIsOfficial ? new Color(0.4f, 0.9f, 0.4f, 0.85f) : new Color(1f, 1f, 0.3f, 0.85f);
-            GUI.Label(new Rect(bx, by + bigFont + 6f, bw, subFont + 4f), subNote, noteStyle);
+            GUI.color = new Color(1f, 1f, 0.3f, 0.85f);
+            GUI.Label(new Rect(bx, by + bigFont + 6f, bw, subFont + 4f), "Requires mod on all clients", noteStyle);
 
             if (!string.IsNullOrEmpty(_activeSlot))
             {
@@ -1242,7 +1110,7 @@ namespace CNRMods
                     _urlInput = newUrl;
                     PlayerPrefs.SetString("CNRMod_MapURL_" + _activeSlot, newUrl);
                     PlayerPrefs.SetString("CNRMod_ActiveMapURL", newUrl);
-                    PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
+                    PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");  // force re-download on next room load
                     PlayerPrefs.Save();
                     StartCoroutine(FetchDonor(newUrl));
                 }
@@ -2026,1297 +1894,6 @@ namespace CNRMods
                     uvs[i] = new Vector2((v.z + 0.5f) * uX, (v.y + 0.5f) * vX);
             }
             mesh.uv = uvs;
-        }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    //  CONTENT MANAGER — downloads and caches official maps, textures, data files
-    // ══════════════════════════════════════════════════════════════════════════
-    public class OfficialMapEntry
-    {
-        public string Id        = "";
-        public string Name      = "";
-        public string Url       = "";
-        public string BaseScene = "FreeRun3_1";
-    }
-
-    public class OfficialTextureEntry
-    {
-        public string Id           = "";
-        public string MaterialName = "";
-        public string Url          = "";
-    }
-
-    public class OfficialDataEntry
-    {
-        public string Id  = "";
-        public string Key = "";
-        public string Url = "";
-    }
-
-    // Raw JSON deserialization targets (field names match server JSON keys)
-    class CManifestMap     { public string id = ""; public string name = ""; public string url = ""; public string base_scene = "FreeRun3_1"; }
-    class CManifestTexture { public string id = ""; public string material_name = ""; public string url = ""; }
-    class CManifestData    { public string id = ""; public string key = ""; public string url = ""; }
-    class CManifest
-    {
-        public string           manifest_version = "";
-        public CManifestMap[]     maps     = new CManifestMap[0];
-        public CManifestTexture[] textures = new CManifestTexture[0];
-        public CManifestData[]    data     = new CManifestData[0];
-    }
-
-    public class ContentManager : MonoBehaviour
-    {
-        private const string ContentUrl    = "https://play.jacqueb.me/economy/content.php";
-        public  const string MapCacheDir   = "/storage/emulated/0/CNRMods/content_cache/maps/";
-        private const string TexCacheDir   = "/storage/emulated/0/CNRMods/content_cache/textures/";
-        private const string DataCacheDir  = "/storage/emulated/0/CNRMods/content_cache/data/";
-        private const string ManifestCache = "/storage/emulated/0/CNRMods/content_cache/manifest.json";
-        private const string VersionPref   = "CNRMod_ContentVersion";
-
-        public static OfficialMapEntry[]     OfficialMaps     = new OfficialMapEntry[0];
-        public static OfficialTextureEntry[] OfficialTextures = new OfficialTextureEntry[0];
-        public static OfficialDataEntry[]    OfficialData     = new OfficialDataEntry[0];
-        public static bool Ready = false;
-
-        // material name (lowercase) → Texture2D loaded from file
-        private static Dictionary<string, Texture2D> _texCache = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
-
-        void Start()
-        {
-            EnsureDirs();
-            // Load cached manifest synchronously so map list is ready before the lobby opens
-            LoadCachedManifest();
-            StartCoroutine(FetchAndSync());
-        }
-
-        void OnLevelWasLoaded(int level)
-        {
-            if (_texCache.Count > 0)
-                StartCoroutine(ApplyTextureSwaps());
-        }
-
-        static void EnsureDirs()
-        {
-            try
-            {
-                string[] dirs = new string[]
-                {
-                    "/storage/emulated/0/CNRMods/content_cache/",
-                    MapCacheDir, TexCacheDir, DataCacheDir
-                };
-                foreach (string d in dirs)
-                    if (!Directory.Exists(d)) Directory.CreateDirectory(d);
-            }
-            catch (Exception ex) { ModEntry.Log("ContentManager EnsureDirs: " + ex.Message); }
-        }
-
-        // Load everything from the local cache file (no network call)
-        static void LoadCachedManifest()
-        {
-            if (!File.Exists(ManifestCache)) { Ready = true; return; }
-            try
-            {
-                ParseManifest(File.ReadAllText(ManifestCache));
-                // Pre-load cached texture bytes
-                foreach (var te in OfficialTextures)
-                {
-                    string p = TexCacheDir + te.Id + ".png";
-                    if (File.Exists(p)) LoadTexFile(te.Id, p);
-                }
-                ModEntry.Log("ContentManager: cache loaded — maps=" + OfficialMaps.Length
-                    + " tex=" + OfficialTextures.Length + " data=" + OfficialData.Length);
-            }
-            catch (Exception ex) { ModEntry.Log("ContentManager: LoadCachedManifest error: " + ex.Message); }
-            Ready = true;
-        }
-
-        // Fetch fresh manifest, compare version, download anything new
-        IEnumerator FetchAndSync()
-        {
-            var www = new WWW(ContentUrl);
-            yield return www;
-
-            if (!string.IsNullOrEmpty(www.error))
-            {
-                ModEntry.Log("ContentManager: fetch error: " + www.error);
-                Ready = true;
-                yield break;
-            }
-
-            string json    = www.text;
-            string newVer  = ModEntry.ParseJsonValue(json, "manifest_version") ?? "";
-            string oldVer  = PlayerPrefs.GetString(VersionPref, "");
-
-            // Always re-parse in case names/urls changed
-            ParseManifest(json);
-
-            try { File.WriteAllText(ManifestCache, json); } catch {}
-
-            if (newVer != oldVer || newVer == "")
-            {
-                ModEntry.Log("ContentManager: new version (" + oldVer + " -> " + newVer + "), downloading items");
-                yield return StartCoroutine(DownloadItems());
-                PlayerPrefs.SetString(VersionPref, newVer);
-                PlayerPrefs.Save();
-            }
-            else
-            {
-                ModEntry.Log("ContentManager: up to date (" + newVer + ")");
-            }
-
-            Ready = true;
-            ModEntry.Log("ContentManager ready — maps=" + OfficialMaps.Length
-                + " tex=" + OfficialTextures.Length + " data=" + OfficialData.Length);
-        }
-
-        static void ParseManifest(string json)
-        {
-            try
-            {
-                // Extract the three arrays from the wrapper object manually,
-                // then defer to JsonFx for each typed array.
-                var maps     = ExtractArray(json, "maps");
-                var textures = ExtractArray(json, "textures");
-                var data     = ExtractArray(json, "data");
-
-                var rawMaps = string.IsNullOrEmpty(maps) ? new CManifestMap[0]
-                    : JsonReader.Deserialize<CManifestMap[]>(maps) ?? new CManifestMap[0];
-                var rawTex  = string.IsNullOrEmpty(textures) ? new CManifestTexture[0]
-                    : JsonReader.Deserialize<CManifestTexture[]>(textures) ?? new CManifestTexture[0];
-                var rawData = string.IsNullOrEmpty(data) ? new CManifestData[0]
-                    : JsonReader.Deserialize<CManifestData[]>(data) ?? new CManifestData[0];
-
-                var mList = new List<OfficialMapEntry>();
-                foreach (var m in rawMaps)
-                    if (!string.IsNullOrEmpty(m.id) && !string.IsNullOrEmpty(m.url))
-                        mList.Add(new OfficialMapEntry { Id = m.id, Name = m.name, Url = m.url, BaseScene = m.base_scene ?? "FreeRun3_1" });
-                OfficialMaps = mList.ToArray();
-
-                var tList = new List<OfficialTextureEntry>();
-                foreach (var t in rawTex)
-                    if (!string.IsNullOrEmpty(t.id) && !string.IsNullOrEmpty(t.url))
-                        tList.Add(new OfficialTextureEntry { Id = t.id, MaterialName = t.material_name, Url = t.url });
-                OfficialTextures = tList.ToArray();
-
-                var dList = new List<OfficialDataEntry>();
-                foreach (var d in rawData)
-                    if (!string.IsNullOrEmpty(d.id) && !string.IsNullOrEmpty(d.url))
-                        dList.Add(new OfficialDataEntry { Id = d.id, Key = d.key, Url = d.url });
-                OfficialData = dList.ToArray();
-            }
-            catch (Exception ex) { ModEntry.Log("ContentManager: ParseManifest error: " + ex.Message); }
-        }
-
-        // Extract a named JSON array string (e.g. [...]  from  {"maps":[...], ...})
-        static string ExtractArray(string json, string key)
-        {
-            try
-            {
-                string k = "\"" + key + "\":";
-                int ki = json.IndexOf(k);
-                if (ki < 0) return null;
-                int start = json.IndexOf('[', ki + k.Length);
-                if (start < 0) return null;
-                int depth = 0, end = start;
-                for (int i = start; i < json.Length; i++)
-                {
-                    if (json[i] == '[') depth++;
-                    else if (json[i] == ']') { depth--; if (depth == 0) { end = i; break; } }
-                }
-                return json.Substring(start, end - start + 1);
-            }
-            catch { return null; }
-        }
-
-        // Download all content items (maps → MapCacheDir, textures → TexCacheDir, data → DataCacheDir)
-        IEnumerator DownloadItems()
-        {
-            foreach (var m in OfficialMaps)
-            {
-                string path = MapCacheDir + m.Id + ".json";
-                yield return StartCoroutine(DownloadFile(m.Url, path, "map:" + m.Id));
-            }
-            foreach (var te in OfficialTextures)
-            {
-                string path = TexCacheDir + te.Id + ".png";
-                yield return StartCoroutine(DownloadFile(te.Url, path, "tex:" + te.Id));
-                if (File.Exists(path)) LoadTexFile(te.Id, path);
-            }
-            foreach (var d in OfficialData)
-            {
-                string path = DataCacheDir + d.Id + ".json";
-                yield return StartCoroutine(DownloadFile(d.Url, path, "data:" + d.Id));
-            }
-        }
-
-        IEnumerator DownloadFile(string url, string dest, string label)
-        {
-            var www = new WWW(url);
-            yield return www;
-            if (!string.IsNullOrEmpty(www.error))
-            { ModEntry.Log("ContentManager: download error [" + label + "]: " + www.error); yield break; }
-            try { File.WriteAllBytes(dest, www.bytes); ModEntry.Log("ContentManager: saved " + label); }
-            catch (Exception ex) { ModEntry.Log("ContentManager: write error [" + label + "]: " + ex.Message); }
-        }
-
-        static void LoadTexFile(string id, string path)
-        {
-            try
-            {
-                byte[] bytes = File.ReadAllBytes(path);
-                var tex = new Texture2D(2, 2, TextureFormat.ARGB32, false);
-                if (tex.LoadImage(bytes))
-                {
-                    tex.name = id;
-                    _texCache[id] = tex;
-                }
-            }
-            catch (Exception ex) { ModEntry.Log("ContentManager: LoadTexFile error [" + id + "]: " + ex.Message); }
-        }
-
-        // After each scene load, swap any scene material whose name matches a loaded texture entry
-        IEnumerator ApplyTextureSwaps()
-        {
-            yield return new WaitForSeconds(0.3f);
-
-            // Build a lookup: materialName (from entry) → Texture2D
-            var matToTex = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
-            foreach (var te in OfficialTextures)
-            {
-                if (_texCache.ContainsKey(te.Id))
-                    matToTex[te.MaterialName] = _texCache[te.Id];
-            }
-            if (matToTex.Count == 0) yield break;
-
-            int swapped = 0;
-            var renderers = (Renderer[])FindObjectsOfType(typeof(Renderer));
-            var seen = new HashSet<int>();
-            foreach (Renderer r in renderers)
-            {
-                if (r == null || r.sharedMaterial == null) continue;
-                int iid = r.sharedMaterial.GetInstanceID();
-                if (seen.Contains(iid)) continue;
-                seen.Add(iid);
-
-                string mname = r.sharedMaterial.name;
-                int pi = mname.IndexOf(" (Instance)", StringComparison.OrdinalIgnoreCase);
-                if (pi >= 0) mname = mname.Substring(0, pi).Trim();
-
-                if (matToTex.ContainsKey(mname))
-                {
-                    r.material.mainTexture = matToTex[mname];
-                    swapped++;
-                }
-            }
-            if (swapped > 0) ModEntry.Log("ContentManager: swapped " + swapped + " material texture(s)");
-        }
-
-        // Read a cached data file by its registered key. Returns null if not downloaded yet.
-        public static string GetData(string key)
-        {
-            foreach (var d in OfficialData)
-            {
-                if (string.Equals(d.Key, key, StringComparison.OrdinalIgnoreCase))
-                {
-                    string path = DataCacheDir + d.Id + ".json";
-                    if (File.Exists(path))
-                    {
-                        try { return File.ReadAllText(path); }
-                        catch { return null; }
-                    }
-                }
-            }
-            return null;
-        }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    //  ECONOMY HOOK — server-authoritative coins/gems sync
-    // ══════════════════════════════════════════════════════════════════════════
-    public class EconomyHook : MonoBehaviour
-    {
-        // Public state read by CNRSettingsMod to show spinner in HUD
-        public static bool  Ready       = false;  // true once server balance loaded
-        public static bool  ServerUp    = false;  // true when last call succeeded
-        public static int   ServerCoins = 0;
-        public static int   ServerGems  = 0;
-
-        // ── Mail inbox (parallel arrays, populated by FetchInbox) ─────────────
-        public static int[]    MailIds      = new int[0];
-        public static string[] MailSubjects = new string[0];
-        public static string[] MailBodies   = new string[0];
-        public static int[]    MailCoins    = new int[0];
-        public static int[]    MailGems     = new int[0];
-        public static bool[]   MailClaimed  = new bool[0];
-        public static int      MailUnread   = 0;
-
-        // ── CNRSettingsMod integration ────────────────────────────────────────
-        /// <summary>Set by CNRSettingsMod on startup; changes Account button label to "Settings".</summary>
-        public static bool          SettingsModPresent     = false;
-        /// <summary>Registered by CNRSettingsMod; called when Account/Settings button is tapped.</summary>
-        public static System.Action OnAccountButtonClicked = null;
-
-        private const string PREF_PLAYER_ID    = "CNRMod_EcoPlayerId";
-        private const string PREF_TOKEN        = "CNRMod_EcoToken";
-        private const string PREF_LAST_SVR_COINS = "CNRMod_SvrCoins";  // last server-acknowledged balance
-        private const string PREF_LAST_SVR_GEMS  = "CNRMod_SvrGems";
-        private const string COINS_KEY          = "GameCoins";
-        private const string GEMS_KEY           = "GameGems";
-
-        private string _playerId = "";
-        private string _token    = "";
-
-        // Pending outgoing queue: each entry is { delta_coins, delta_gems, reason, match_id }
-        private readonly List<PendingTx> _queue = new List<PendingTx>();
-        private bool _sending = false;
-
-        private struct PendingTx
-        {
-            public int    deltaCoins;
-            public int    deltaGems;
-            public string reason;
-            public string matchId;   // null = earn, non-null = dedup
-            public bool   isSpend;
-        }
-
-        private void Start()
-        {
-            _playerId = PlayerPrefs.GetString(PREF_PLAYER_ID, "");
-            _token    = PlayerPrefs.GetString(PREF_TOKEN, "");
-            StartCoroutine(RegisterAndSync());
-            // Initialise menu overlay for the already-loaded scene
-            _ecoScene = Application.loadedLevelName ?? "";
-            if (_ecoScene == "MainMenu") StartCoroutine(EcoPatchDelay());
-        }
-
-        // ── Registration / initial sync ───────────────────────────────────────
-        private IEnumerator RegisterAndSync()
-        {
-            if (string.IsNullOrEmpty(ModEntry.EconomyUrl)) yield break;
-
-            // Get ANDROID_ID as stable device identifier
-            string androidId = GetAndroidId();
-            if (string.IsNullOrEmpty(androidId)) { ModEntry.Log("EcoHook: could not get ANDROID_ID"); yield break; }
-
-            string displayName = PlayerPrefs.GetString("LocalMultiplayerNickName", "Player");
-
-            // If we already have a stored player_id that matches this device, re-login
-            // Otherwise register fresh
-            if (_playerId == androidId && !string.IsNullOrEmpty(_token))
-            {
-                yield return StartCoroutine(ReLogin(androidId, displayName));
-            }
-            else
-            {
-                yield return StartCoroutine(Register(androidId, displayName));
-            }
-
-            // Fetch inbox immediately after login/register
-            if (Ready) StartCoroutine(FetchInbox());
-        }
-
-        private IEnumerator Register(string androidId, string displayName)
-        {
-            string url  = ModEntry.EconomyUrl + "/register.php";
-            string body = "player_id=" + Uri.EscapeDataString(androidId) +
-                          "&display_name=" + Uri.EscapeDataString(displayName) +
-                          "&token=" + Uri.EscapeDataString(_token); // send existing token if we have one
-            var hdrs = new System.Collections.Hashtable();
-            hdrs["Content-Type"] = "application/x-www-form-urlencoded";
-            var www = new WWW(url, System.Text.Encoding.UTF8.GetBytes(body), hdrs);
-            yield return www;
-
-            if (!string.IsNullOrEmpty(www.error))
-            {
-                ModEntry.Log("EcoHook register error: " + www.error);
-                // Server unreachable — fall back to local prefs, mark not ready
-                Ready = false; ServerUp = false;
-                yield break;
-            }
-
-            string newToken = ModEntry.ParseJsonStringValue(www.text, "token");
-            if (string.IsNullOrEmpty(newToken))
-            {
-                // Could be 409 conflict if already registered — try re-login
-                if (!string.IsNullOrEmpty(_token))
-                    yield return StartCoroutine(ReLogin(androidId, displayName));
-                else
-                    ModEntry.Log("EcoHook register failed: " + www.text);
-                yield break;
-            }
-
-            _playerId = androidId;
-            _token    = newToken;
-            PlayerPrefs.SetString(PREF_PLAYER_ID, _playerId);
-            PlayerPrefs.SetString(PREF_TOKEN, _token);
-            PlayerPrefs.Save();
-            ModEntry.Log("EcoHook registered. playerId=" + _playerId.Substring(0, 4) + "...");
-
-            ApplyServerBalance(www.text);
-        }
-
-        private IEnumerator ReLogin(string androidId, string displayName)
-        {
-            string url  = ModEntry.EconomyUrl + "/register.php";
-            string body = "player_id=" + Uri.EscapeDataString(androidId) +
-                          "&display_name=" + Uri.EscapeDataString(displayName) +
-                          "&token=" + Uri.EscapeDataString(_token);
-            var hdrs = new System.Collections.Hashtable();
-            hdrs["Content-Type"] = "application/x-www-form-urlencoded";
-            var www = new WWW(url, System.Text.Encoding.UTF8.GetBytes(body), hdrs);
-            yield return www;
-
-            if (!string.IsNullOrEmpty(www.error)) { Ready = false; ServerUp = false; ModEntry.Log("EcoHook relogin error: " + www.error); yield break; }
-            ModEntry.Log("EcoHook relogin OK");
-            ApplyServerBalance(www.text);
-        }
-
-        private void ApplyServerBalance(string json)
-        {
-            string coinsStr = ModEntry.ParseJsonValue(json, "coins");
-            string gemsStr  = ModEntry.ParseJsonValue(json, "gems");
-            int coins, gems;
-            if (int.TryParse(coinsStr, out coins) && int.TryParse(gemsStr, out gems))
-            {
-                // Detect unsynced local delta vs the last server-acknowledged balance.
-                // Positive delta = earned offline and not yet sent to server.
-                // Negative delta = spent offline and not yet sent to server.
-                int lastSvrC = PlayerPrefs.GetInt(PREF_LAST_SVR_COINS, -1);
-                int lastSvrG = PlayerPrefs.GetInt(PREF_LAST_SVR_GEMS,  -1);
-                int localC   = PlayerPrefs.GetInt(COINS_KEY, 0);
-                int localG   = PlayerPrefs.GetInt(GEMS_KEY,  0);
-
-                int deltaC = (lastSvrC >= 0) ? (localC - lastSvrC) : 0;
-                int deltaG = (lastSvrG >= 0) ? (localG - lastSvrG) : 0;
-
-                // Final balance = server truth adjusted for what hasn't been synced yet
-                int finalCoins = Math.Max(0, coins + deltaC);
-                int finalGems  = Math.Max(0, gems  + deltaG);
-
-                if (deltaC != 0 || deltaG != 0)
-                {
-                    long ts = (long)(DateTime.UtcNow - new DateTime(1970,1,1)).TotalSeconds;
-                    string pfx = _playerId.Substring(0, Math.Min(8, _playerId.Length));
-
-                    // If coins and gems moved in the same direction use one transaction;
-                    // if they moved in opposite directions use two (different endpoints).
-                    bool coinSpend = deltaC < 0;
-                    bool gemSpend  = deltaG < 0;
-
-                    if (deltaC != 0 && deltaG != 0 && coinSpend != gemSpend)
-                    {
-                        // Opposite directions — split into two transactions
-                        if (deltaC != 0)
-                            _queue.Add(new PendingTx { deltaCoins=deltaC, deltaGems=0,
-                                reason="reconcile", matchId=pfx+"_rc_c_"+ts, isSpend=coinSpend });
-                        if (deltaG != 0)
-                            _queue.Add(new PendingTx { deltaCoins=0, deltaGems=deltaG,
-                                reason="reconcile", matchId=pfx+"_rc_g_"+ts, isSpend=gemSpend });
-                    }
-                    else
-                    {
-                        bool isSpend = (deltaC < 0 || deltaG < 0);
-                        _queue.Add(new PendingTx { deltaCoins=deltaC, deltaGems=deltaG,
-                            reason="reconcile", matchId=pfx+"_rc_"+ts, isSpend=isSpend });
-                    }
-                    ModEntry.Log("ApplyBalance: queuing reconcile deltaC=" + deltaC + " deltaG=" + deltaG);
-                }
-
-                ServerCoins = finalCoins;
-                ServerGems  = finalGems;
-                PlayerPrefs.SetInt(COINS_KEY, finalCoins);
-                PlayerPrefs.SetInt(GEMS_KEY,  finalGems);
-                PlayerPrefs.SetInt(PREF_LAST_SVR_COINS, finalCoins);
-                PlayerPrefs.SetInt(PREF_LAST_SVR_GEMS,  finalGems);
-                PlayerPrefs.Save();
-                _lastCoins = finalCoins;
-                _lastGems  = finalGems;
-                Ready    = true;
-                ServerUp = true;
-                ModEntry.Log("EcoHook balance synced: coins=" + finalCoins + " gems=" + finalGems
-                    + (deltaC != 0 || deltaG != 0 ? " (reconcile dC=" + deltaC + " dG=" + deltaG + ")" : ""));
-            }
-            else
-            {
-                ModEntry.Log("EcoHook: could not parse balance from: " + json);
-            }
-        }
-
-        // ── Per-frame: watch for local PlayerPrefs coin/gem changes ────────────
-        private int  _lastCoins = -1;
-        private int  _lastGems  = -1;
-        private float _watchTimer = 0f;
-        private const float WatchInterval = 0.5f;
-        private float _retryDelay  = 0f;   // backoff when server unreachable
-        private float _retryTimer  = 0f;
-        private const float RetryDelayMin = 5f;
-        private const float RetryDelayMax = 120f;
-        private float _inboxTimer = 0f;
-        private const float InboxInterval = 60f;
-
-        // ── Main-menu IMGUI overlay ───────────────────────────────────────────
-        private const float ECO_REF_W   = 600f;
-        private string      _ecoScene   = "";
-        private bool        _ecoPatched = false;
-        private bool        _ecoDbgLog  = false;
-        private GameObject  _goHelpBtn  = null;   // hidden ? button GO — position anchor
-        private Camera      _ecoNguiCam = null;
-        private static Font _ecoFont    = null;
-        private bool        _showEcoMail    = false;
-        private bool        _showEcoAccount = false;
-        private Vector2     _ecoMailScroll  = Vector2.zero;
-        private Vector2     _ecoAcctScroll  = Vector2.zero;
-        private float       _ecoLastToggle  = -10f;
-        private string      _ecoPinInput    = "";
-        private string      _ecoClaimName   = "";
-        private string      _ecoClaimPin    = "";
-        private string      _ecoAccountMsg  = "";
-        private Rect        _ecoMailWinRect;
-        private Rect        _ecoAcctWinRect;
-
-        private void Update()
-        {
-            if (!Ready) return;
-
-            // Periodically refresh mail inbox — only when server is reachable
-            if (ServerUp)
-            {
-                _inboxTimer -= Time.deltaTime;
-                if (_inboxTimer <= 0f)
-                {
-                    _inboxTimer = InboxInterval;
-                    StartCoroutine(FetchInbox());
-                }
-            }
-
-            // Backoff timer: wait after a failed send before retrying
-            if (_retryDelay > 0f)
-            {
-                _retryTimer -= Time.deltaTime;
-                if (_retryTimer > 0f) return;  // still cooling off
-                _retryDelay = 0f;  // ready to try again
-            }
-
-            _watchTimer -= Time.deltaTime;
-            if (_watchTimer > 0f) return;
-            _watchTimer = WatchInterval;
-
-            int nowCoins = PlayerPrefs.GetInt(COINS_KEY, 0);
-            int nowGems  = PlayerPrefs.GetInt(GEMS_KEY,  0);
-
-            if (_lastCoins < 0) { _lastCoins = nowCoins; _lastGems = nowGems; return; }
-
-            int dc = nowCoins - _lastCoins;
-            int dg = nowGems  - _lastGems;
-
-            if (dc != 0 || dg != 0)
-            {
-                // Local balance changed — queue a server transaction
-                bool isSpend = (dc < 0 || dg < 0);
-                string reason = isSpend ? "local_spend" : "local_earn";
-                // Generate a match_id for dedup based on timestamp + amount to
-                // prevent the same change being reported twice if the watch fires twice
-                string matchId = _playerId.Substring(0, Math.Min(8, _playerId.Length)) +
-                                 "_" + (long)(DateTime.UtcNow - new DateTime(1970,1,1)).TotalSeconds +
-                                 "_c" + dc + "g" + dg;
-                _queue.Add(new PendingTx { deltaCoins=dc, deltaGems=dg, reason=reason, matchId=matchId, isSpend=isSpend });
-                _lastCoins = nowCoins;
-                _lastGems  = nowGems;
-                ModEntry.Log("EcoHook queued: dc=" + dc + " dg=" + dg + " reason=" + reason);
-            }
-
-            if (_queue.Count > 0 && !_sending)
-                StartCoroutine(FlushQueue());
-        }
-
-        // ── Queue flush ───────────────────────────────────────────────────────
-        private IEnumerator FlushQueue()
-        {
-            _sending = true;
-            while (_queue.Count > 0)
-            {
-                PendingTx tx = _queue[0];
-                _queue.RemoveAt(0);
-
-                bool isEarn = !tx.isSpend;
-                // For spends we use absolute values; server deducts
-                int absDc = Math.Abs(tx.deltaCoins);
-                int absDg = Math.Abs(tx.deltaGems);
-
-                string endpoint = isEarn ? "/earn.php" : "/spend.php";
-                string body = "player_id=" + Uri.EscapeDataString(_playerId) +
-                              "&token="    + Uri.EscapeDataString(_token) +
-                              "&coins="    + absDc +
-                              "&gems="     + absDg +
-                              "&reason="   + Uri.EscapeDataString(tx.reason) +
-                              (tx.matchId != null ? "&match_id=" + Uri.EscapeDataString(tx.matchId) : "");
-                var hdrs = new System.Collections.Hashtable();
-                hdrs["Content-Type"] = "application/x-www-form-urlencoded";
-                var www = new WWW(ModEntry.EconomyUrl + endpoint,
-                                  System.Text.Encoding.UTF8.GetBytes(body), hdrs);
-                yield return www;
-
-                if (!string.IsNullOrEmpty(www.error))
-                {
-                    ModEntry.Log("EcoHook flush error (" + endpoint + "): " + www.error);
-                    ServerUp = false;
-                    // Re-queue for retry with exponential backoff
-                    _queue.Insert(0, tx);
-                    _retryDelay = (_retryDelay <= 0f) ? RetryDelayMin
-                                  : Math.Min(_retryDelay * 2f, RetryDelayMax);
-                    _retryTimer = _retryDelay;
-                    ModEntry.Log("EcoHook: retry in " + _retryDelay.ToString("F0") + "s");
-                    break;
-                }
-
-                ServerUp  = true;
-                _retryDelay = 0f;  // reset backoff on success
-                // Update local cache to server truth
-                string coinsStr = ModEntry.ParseJsonValue(www.text, "coins");
-                string gemsStr  = ModEntry.ParseJsonValue(www.text, "gems");
-                int coins, gems;
-                if (int.TryParse(coinsStr, out coins) && int.TryParse(gemsStr, out gems))
-                {
-                    ServerCoins = coins;
-                    ServerGems  = gems;
-                    // Correct any drift between local and server
-                    if (PlayerPrefs.GetInt(COINS_KEY, 0) != coins)
-                    {
-                        PlayerPrefs.SetInt(COINS_KEY, coins);
-                        _lastCoins = coins;
-                    }
-                    if (PlayerPrefs.GetInt(GEMS_KEY, 0) != gems)
-                    {
-                        PlayerPrefs.SetInt(GEMS_KEY, gems);
-                        _lastGems = gems;
-                    }
-                    // Persist last-server-acknowledged balance so ApplyServerBalance
-                    // can detect unsynced spends across restarts
-                    PlayerPrefs.SetInt(PREF_LAST_SVR_COINS, coins);
-                    PlayerPrefs.SetInt(PREF_LAST_SVR_GEMS,  gems);
-                    PlayerPrefs.Save();
-                }
-            }
-            _sending = false;
-        }
-
-        // ── Public API for CNRSettingsMod (wheel, explicit earn/spend) ──────────
-        /// <summary>Start a gift wheel spin — calls /wheel.php?action=spin and awards prize locally.</summary>
-        public static void RequestSetPin(string pin)
-        {
-            var hook = (EconomyHook)(object)FindObjectOfType(typeof(EconomyHook));
-            if (hook != null) hook.StartCoroutine(hook.DoSetPin(pin));
-        }
-
-        private IEnumerator DoSetPin(string pin)
-        {
-            string body = "player_id=" + Uri.EscapeDataString(_playerId) +
-                          "&token="    + Uri.EscapeDataString(_token) +
-                          "&pin="      + Uri.EscapeDataString(pin);
-            var hdrs = new System.Collections.Hashtable();
-            hdrs["Content-Type"] = "application/x-www-form-urlencoded";
-            var www = new WWW(ModEntry.EconomyUrl + "/set_pin.php",
-                              System.Text.Encoding.UTF8.GetBytes(body), hdrs);
-            yield return www;
-            ModEntry.Log("SetPin: " + (string.IsNullOrEmpty(www.error) ? www.text : www.error));
-        }
-
-        public static void RequestClaim(string displayName, string pin)
-        {
-            var hook = (EconomyHook)(object)FindObjectOfType(typeof(EconomyHook));
-            if (hook != null) hook.StartCoroutine(hook.DoClaim(displayName, pin));
-        }
-
-        private IEnumerator DoClaim(string displayName, string pin)
-        {
-            string body = "display_name=" + Uri.EscapeDataString(displayName) +
-                          "&pin="         + Uri.EscapeDataString(pin) +
-                          "&new_device="  + Uri.EscapeDataString(GetAndroidId());
-            var hdrs = new System.Collections.Hashtable();
-            hdrs["Content-Type"] = "application/x-www-form-urlencoded";
-            var www = new WWW(ModEntry.EconomyUrl + "/claim.php",
-                              System.Text.Encoding.UTF8.GetBytes(body), hdrs);
-            yield return www;
-            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("Claim error: " + www.error); yield break; }
-            string newToken = ModEntry.ParseJsonStringValue(www.text, "token");
-            string newId    = ModEntry.ParseJsonStringValue(www.text, "player_id");
-            if (!string.IsNullOrEmpty(newToken) && !string.IsNullOrEmpty(newId))
-            {
-                _playerId = newId; _token = newToken;
-                PlayerPrefs.SetString(PREF_PLAYER_ID, newId);
-                PlayerPrefs.SetString(PREF_TOKEN, newToken);
-                PlayerPrefs.Save();
-                Ready = false;
-                yield return StartCoroutine(RegisterAndSync());
-            }
-            ModEntry.Log("Claim: " + www.text);
-        }
-
-        // ── Mail inbox ────────────────────────────────────────────────────────────
-        public static void RequestClaimMail(int mailId)
-        {
-            var hook = (EconomyHook)(object)FindObjectOfType(typeof(EconomyHook));
-            if (hook != null) hook.StartCoroutine(hook.DoClaimMail(mailId));
-        }
-
-        public static void RequestFetchInbox()
-        {
-            var hook = (EconomyHook)(object)FindObjectOfType(typeof(EconomyHook));
-            if (hook != null) hook.StartCoroutine(hook.FetchInbox());
-        }
-
-        private IEnumerator DoClaimMail(int mailId)
-        {
-            string body = "player_id=" + Uri.EscapeDataString(_playerId) +
-                          "&token="    + Uri.EscapeDataString(_token) +
-                          "&action=claim&mail_id=" + mailId;
-            var hdrs = new System.Collections.Hashtable();
-            hdrs["Content-Type"] = "application/x-www-form-urlencoded";
-            var www = new WWW(ModEntry.EconomyUrl + "/mail.php",
-                              System.Text.Encoding.UTF8.GetBytes(body), hdrs);
-            yield return www;
-            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("ClaimMail error: " + www.error); yield break; }
-            string coinsStr = ModEntry.ParseJsonValue(www.text, "coins");
-            string gemsStr  = ModEntry.ParseJsonValue(www.text, "gems");
-            int coins, gems;
-            if (int.TryParse(coinsStr, out coins) && int.TryParse(gemsStr, out gems))
-            {
-                ServerCoins = coins; ServerGems = gems;
-                PlayerPrefs.SetInt(COINS_KEY, coins); PlayerPrefs.SetInt(GEMS_KEY, gems);
-                PlayerPrefs.SetInt(PREF_LAST_SVR_COINS, coins);
-                PlayerPrefs.SetInt(PREF_LAST_SVR_GEMS,  gems);
-                PlayerPrefs.Save();
-                // Update _lastCoins so the watch loop does NOT re-report this as
-                // a local delta (which would double-spend/earn on the server)
-                _lastCoins = coins; _lastGems = gems;
-            }
-            // Mark as claimed locally so UI updates immediately
-            for (int i = 0; i < MailIds.Length; i++)
-                if (MailIds[i] == mailId) { MailClaimed[i] = true; break; }
-            int unread = 0;
-            for (int i = 0; i < MailClaimed.Length; i++) if (!MailClaimed[i]) unread++;
-            MailUnread = unread;
-            ModEntry.Log("ClaimMail " + mailId + ": " + www.text);
-        }
-
-        internal IEnumerator FetchInbox()
-        {
-            if (!Ready || string.IsNullOrEmpty(_playerId) || string.IsNullOrEmpty(_token)) yield break;
-            string url = ModEntry.EconomyUrl + "/mail.php?action=inbox" +
-                         "&player_id=" + Uri.EscapeDataString(_playerId) +
-                         "&token="     + Uri.EscapeDataString(_token);
-            var www = new WWW(url);
-            yield return www;
-            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("FetchInbox error: " + www.error); yield break; }
-            ParseInbox(www.text);
-            ModEntry.Log("FetchInbox: " + MailIds.Length + " items, " + MailUnread + " unread");
-        }
-
-        private static void ParseInbox(string json)
-        {
-            int arrStart = json.IndexOf('[');
-            int arrEnd   = json.LastIndexOf(']');
-            if (arrStart < 0 || arrEnd <= arrStart)
-            {
-                MailIds = new int[0]; MailSubjects = new string[0]; MailBodies = new string[0];
-                MailCoins = new int[0]; MailGems = new int[0]; MailClaimed = new bool[0]; MailUnread = 0;
-                return;
-            }
-            string arr = json.Substring(arrStart + 1, arrEnd - arrStart - 1).Trim();
-            if (arr.Length == 0)
-            {
-                MailIds = new int[0]; MailSubjects = new string[0]; MailBodies = new string[0];
-                MailCoins = new int[0]; MailGems = new int[0]; MailClaimed = new bool[0]; MailUnread = 0;
-                return;
-            }
-            var ids      = new System.Collections.Generic.List<int>();
-            var subjects = new System.Collections.Generic.List<string>();
-            var bodies   = new System.Collections.Generic.List<string>();
-            var coinsL   = new System.Collections.Generic.List<int>();
-            var gemsL    = new System.Collections.Generic.List<int>();
-            var claimL   = new System.Collections.Generic.List<bool>();
-            string[] objs = arr.Split(new string[]{"},{"}, StringSplitOptions.RemoveEmptyEntries);
-            foreach (string obj in objs)
-            {
-                int id, c, g;
-                int.TryParse(ModEntry.ParseJsonValue(obj, "id")    ?? "0", out id);
-                int.TryParse(ModEntry.ParseJsonValue(obj, "coins") ?? "0", out c);
-                int.TryParse(ModEntry.ParseJsonValue(obj, "gems")  ?? "0", out g);
-                string sub   = ModEntry.ParseJsonValue(obj, "subject") ?? "";
-                string bod   = ModEntry.ParseJsonValue(obj, "body")    ?? "";
-                string clStr = ModEntry.ParseJsonValue(obj, "claimed") ?? "0";
-                bool cl = (clStr == "1" || clStr == "true");
-                ids.Add(id); subjects.Add(sub); bodies.Add(bod); coinsL.Add(c); gemsL.Add(g); claimL.Add(cl);
-            }
-            MailIds      = ids.ToArray();
-            MailSubjects = subjects.ToArray();
-            MailBodies   = bodies.ToArray();
-            MailCoins    = coinsL.ToArray();
-            MailGems     = gemsL.ToArray();
-            MailClaimed  = claimL.ToArray();
-            int unread = 0;
-            for (int i = 0; i < claimL.Count; i++) if (!claimL[i]) unread++;
-            MailUnread = unread;
-        }
-
-        public static IEnumerator RequestWheelSpin(System.Action<string,int,int,int> onDone)
-        {
-            // onDone(prizeType, prizeAmount, newCoins, newGems)
-            var hook = FindObjectOfType<EconomyHook>();
-            if (hook == null || !Ready) { onDone(null, 0, 0, 0); yield break; }
-            yield return hook.StartCoroutine(hook.DoWheelSpin(onDone));
-        }
-
-        private IEnumerator DoWheelSpin(System.Action<string,int,int,int> onDone)
-        {
-            string body = "player_id=" + Uri.EscapeDataString(_playerId) +
-                          "&token="    + Uri.EscapeDataString(_token) +
-                          "&action=spin";
-            var hdrs = new System.Collections.Hashtable();
-            hdrs["Content-Type"] = "application/x-www-form-urlencoded";
-            var www = new WWW(ModEntry.EconomyUrl + "/wheel.php",
-                              System.Text.Encoding.UTF8.GetBytes(body), hdrs);
-            yield return www;
-
-            if (!string.IsNullOrEmpty(www.error)) { onDone(null, 0, 0, 0); yield break; }
-
-            string prizeType   = ModEntry.ParseJsonValue(www.text, "prize_type");
-            string prizeAmtStr = ModEntry.ParseJsonValue(www.text, "prize_amount");
-            string coinsStr    = ModEntry.ParseJsonValue(www.text, "coins");
-            string gemsStr     = ModEntry.ParseJsonValue(www.text, "gems");
-            int prizeAmt, coins, gems;
-            int.TryParse(prizeAmtStr, out prizeAmt);
-            int.TryParse(coinsStr,    out coins);
-            int.TryParse(gemsStr,     out gems);
-            // Apply server truth
-            PlayerPrefs.SetInt(COINS_KEY, coins); PlayerPrefs.SetInt(GEMS_KEY, gems);
-            PlayerPrefs.SetInt(PREF_LAST_SVR_COINS, coins);
-            PlayerPrefs.SetInt(PREF_LAST_SVR_GEMS,  gems);
-            PlayerPrefs.Save();
-            ServerCoins = coins; ServerGems = gems;
-            _lastCoins = coins; _lastGems = gems;
-            onDone(prizeType, prizeAmt, coins, gems);
-        }
-
-        // ── Main-menu overlay — scene tracking, patching, drawing ─────────────
-        private void OnLevelWasLoaded(int lvl)
-        {
-            _ecoScene    = Application.loadedLevelName ?? "";
-            _ecoPatched  = false;
-            _ecoDbgLog   = false;
-            _showEcoMail    = false;
-            _showEcoAccount = false;
-            _goHelpBtn   = null;
-            _ecoNguiCam  = null;
-            if (_ecoScene == "MainMenu") StartCoroutine(EcoPatchDelay());
-        }
-
-        private IEnumerator EcoPatchDelay()
-        {
-            yield return null;
-            yield return null;
-            EcoPatchMainMenu();
-        }
-
-        private void EcoPatchMainMenu()
-        {
-            if (_ecoPatched) return;
-            _ecoPatched = true;
-            // Find + hide the ? (HelpScene) button, cache its GO as position anchor
-            MonoBehaviour[] all = (MonoBehaviour[])(object)
-                UnityEngine.Object.FindObjectsOfType(typeof(MonoBehaviour));
-            foreach (MonoBehaviour mb in all)
-            {
-                if (mb.GetType().Name != "UIButtonEventKit") continue;
-                FieldInfo fi = mb.GetType().GetField("buttonName",
-                    BindingFlags.Instance | BindingFlags.Public);
-                if (fi == null) continue;
-                if ((int)(object)fi.GetValue(mb) != 59) continue;
-                _goHelpBtn = ((Component)(object)mb).gameObject;
-                _goHelpBtn.SetActive(false);
-                break;
-            }
-            // Cache NGUI camera
-            foreach (string n in new string[]{ "Camera", "UI Camera", "UICamera" })
-            {
-                GameObject g = GameObject.Find(n);
-                if (g != null) { _ecoNguiCam = g.GetComponent<Camera>(); if (_ecoNguiCam != null) break; }
-            }
-            // Cache game font from any UILabel in the scene
-            UILabel[] lbls = (UILabel[])(object)
-                UnityEngine.Object.FindObjectsOfType(typeof(UILabel));
-            foreach (UILabel lbl in lbls)
-                if (lbl.font != null && lbl.font.dynamicFont != null)
-                { _ecoFont = lbl.font.dynamicFont; break; }
-            ModEntry.Log("EcoHook menu: helpBtn=" + (_goHelpBtn != null ? "found" : "null")
-                + " nguiCam=" + (_ecoNguiCam != null ? "found" : "null"));
-        }
-
-        private void OnGUI()
-        {
-            // Version watermark — top-left corner, visible in all scenes
-            {
-                var vs = new GUIStyle(GUI.skin.label);
-                vs.fontSize  = 10;
-                vs.fontStyle = FontStyle.Normal;
-                vs.normal.textColor = new Color(1f, 1f, 1f, 0.4f);
-                string verStr = "CNRMod v" + ModEntry.Version;
-                try
-                {
-                    foreach (var kv in ModEntry.RegisteredMods)
-                        if (!kv.Key.Equals("CNRMod", StringComparison.OrdinalIgnoreCase))
-                            verStr += "  +  " + kv.Key + " v" + kv.Value;
-                }
-                catch { }
-                GUI.color = Color.white;
-                GUI.Label(new Rect(5f, 5f, 500f, 16f), verStr, vs);
-            }
-
-            if (_ecoScene != "MainMenu") return;
-            if (!_ecoPatched) return;
-            float sc = Screen.width / ECO_REF_W;
-            GUIUtility.ScaleAroundPivot(new Vector2(sc, sc), Vector2.zero);
-
-            if (_showEcoMail)
-            {
-                EcoDrawMailOverlay();
-                if (Event.current.type != EventType.Repaint && Event.current.type != EventType.Layout)
-                    Event.current.Use();
-                return;
-            }
-            if (_showEcoAccount)
-            {
-                EcoDrawAccountOverlay();
-                if (Event.current.type != EventType.Repaint && Event.current.type != EventType.Layout)
-                    Event.current.Use();
-                return;
-            }
-
-            float vh = Screen.height / sc;
-            GUIStyle sb = EcoBtnSt(14, new Color(1f, 0.85f, 0.3f));
-            sb.fontStyle = FontStyle.Bold;
-            int unread = MailUnread;
-            string mailLabel = unread > 0 ? "Mail (" + unread + ")" : "Mail";
-            GUIStyle sbMail = new GUIStyle(sb);
-            if (unread > 0) sbMail.normal.textColor = new Color(1f, 0.5f, 0.3f);
-            string acctLabel = SettingsModPresent ? "Settings" : "Account";
-
-            float btnH = 26f, mailW = 130f, acctW = 120f, pad = 8f;
-            float mailX, mailY, acctX, acctY;
-            if (_ecoNguiCam != null && _goHelpBtn != null)
-            {
-                Rect ag = EcoNguiRect(_ecoNguiCam, _goHelpBtn, sc);
-                mailX = ag.x + (ag.width - mailW) * 0.5f;
-                mailY = ag.y + (ag.height - btnH) * 0.5f;
-                acctX = mailX + mailW + pad;
-                acctY = mailY;
-                if (!_ecoDbgLog)
-                {
-                    _ecoDbgLog = true;
-                    ModEntry.Log("Eco btns: ag=" + ag.x.ToString("F0") + "," + ag.y.ToString("F0")
-                        + " " + ag.width.ToString("F0") + "x" + ag.height.ToString("F0")
-                        + " Screen=" + Screen.width + "x" + Screen.height + " sc=" + sc.ToString("F2"));
-                }
-            }
-            else
-            {
-                mailX = ECO_REF_W - 10f - 260f; mailY = vh - 34f;
-                acctX = ECO_REF_W - 10f - 120f; acctY = vh - 34f;
-            }
-
-            if (GUI.Button(new Rect(mailX, mailY, mailW, btnH), mailLabel, sbMail)) EcoOpenMail();
-            if (GUI.Button(new Rect(acctX, acctY, acctW, btnH), acctLabel, sb))  EcoOpenAccount();
-        }
-
-        private void EcoOpenMail()
-        {
-            if (Time.unscaledTime - _ecoLastToggle < 0.5f) return;
-            _ecoLastToggle = Time.unscaledTime;
-            _showEcoMail   = true;
-            _ecoMailScroll = Vector2.zero;
-            StartCoroutine(FetchInbox());
-        }
-
-        private void EcoOpenAccount()
-        {
-            if (Time.unscaledTime - _ecoLastToggle < 0.5f) return;
-            _ecoLastToggle = Time.unscaledTime;
-            if (SettingsModPresent && OnAccountButtonClicked != null)
-            {
-                OnAccountButtonClicked();
-                return;
-            }
-            _showEcoAccount = true;
-            _ecoAcctScroll  = Vector2.zero;
-            _ecoAccountMsg  = "";
-        }
-
-        // ── Mail panel ─────────────────────────────────────────────────────────
-        private void EcoDrawMailOverlay()
-        {
-            float vw = ECO_REF_W;
-            float vh = Screen.height / (Screen.width / ECO_REF_W);
-            GUI.Button(new Rect(0, 0, vw, vh), GUIContent.none, GUIStyle.none);
-            GUI.color = new Color(0f, 0f, 0f, 0.88f);
-            GUI.DrawTexture(new Rect(0, 0, vw, vh), Texture2D.whiteTexture);
-            GUI.color = Color.white;
-            float w = Mathf.Min(vw * 0.96f, 420f);
-            float h = Mathf.Min(vh * 0.92f, 525f);
-            _ecoMailWinRect = new Rect((vw - w) * 0.5f, (vh - h) * 0.5f, w, h);
-            GUIStyle wBg = new GUIStyle(GUI.skin.window);
-            wBg.normal.background   = EcoMkTex(2, 2, new Color(0.10f, 0.10f, 0.12f, 0.97f));
-            wBg.onNormal.background = wBg.normal.background;
-            wBg.fontSize = 15;
-            _ecoMailWinRect = GUI.Window(9903, _ecoMailWinRect, EcoMailWindow, "  Mail", wBg);
-        }
-
-        private void EcoMailWindow(int id)
-        {
-            float closeH  = 38f;
-            float scrollH = _ecoMailWinRect.height - 52f - closeH;
-            GUIStyle vScr = new GUIStyle(GUI.skin.verticalScrollbar); vScr.fixedWidth = 30f;
-            _ecoMailScroll = GUILayout.BeginScrollView(_ecoMailScroll, false, true,
-                GUIStyle.none, vScr,
-                GUILayout.Width(_ecoMailWinRect.width - 4f), GUILayout.Height(scrollH));
-            GUILayout.Space(6f);
-
-            if (MailIds.Length == 0)
-            {
-                GUIStyle mt = EcoLblSt();
-                mt.normal.textColor = new Color(0.55f, 0.55f, 0.65f);
-                mt.alignment = TextAnchor.MiddleCenter;
-                GUILayout.Label(Ready ? "No mail yet." : "Not connected to server.", mt,
-                    GUILayout.Height(80f));
-            }
-            else
-            {
-                GUIStyle subjSt    = EcoLblSt(); subjSt.fontStyle = FontStyle.Bold;
-                GUIStyle bodySt    = EcoHintSt();
-                GUIStyle rewardSt  = EcoLblSt(); rewardSt.normal.textColor  = new Color(1f, 0.88f, 0.3f);
-                GUIStyle claimedSt = EcoLblSt(); claimedSt.normal.textColor = new Color(0.45f, 0.75f, 0.45f);
-                for (int i = 0; i < MailIds.Length; i++)
-                {
-                    bool cl = i < MailClaimed.Length && MailClaimed[i];
-                    GUIStyle card = new GUIStyle(GUI.skin.box);
-                    card.normal.background = EcoMkTex(2, 2, cl
-                        ? new Color(0.07f, 0.10f, 0.07f, 0.80f)
-                        : new Color(0.09f, 0.13f, 0.20f, 0.95f));
-                    GUILayout.BeginVertical(card, GUILayout.ExpandWidth(true));
-                    GUILayout.Space(4f);
-                    string subj = i < MailSubjects.Length ? MailSubjects[i] : "";
-                    string bod  = i < MailBodies.Length   ? MailBodies[i]   : "";
-                    int    c    = i < MailCoins.Length    ? MailCoins[i]    : 0;
-                    int    g    = i < MailGems.Length     ? MailGems[i]     : 0;
-                    GUILayout.Label(subj, cl ? claimedSt : subjSt);
-                    if (bod.Length > 0) GUILayout.Label(bod, bodySt);
-                    if (c > 0 || g > 0)
-                    {
-                        string rwd = "";
-                        if (c > 0) rwd += c + " coins";
-                        if (c > 0 && g > 0) rwd += "  +  ";
-                        if (g > 0) rwd += g + " gems";
-                        GUILayout.Label("Reward: " + rwd, rewardSt);
-                    }
-                    GUILayout.Space(4f);
-                    GUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    if (cl)
-                        GUILayout.Label("Claimed", claimedSt, GUILayout.Width(90f));
-                    else if (GUILayout.Button("Claim Reward", EcoBtnSt(14, new Color(0.3f, 1f, 0.5f)),
-                        GUILayout.Width(120f), GUILayout.Height(28f)))
-                        RequestClaimMail(MailIds[i]);
-                    GUILayout.EndHorizontal();
-                    GUILayout.Space(4f);
-                    GUILayout.EndVertical();
-                    GUILayout.Space(6f);
-                }
-            }
-            GUILayout.Space(6f);
-            GUILayout.EndScrollView();
-            float bx = (_ecoMailWinRect.width - 160f) * 0.5f;
-            float by = _ecoMailWinRect.height - closeH - 6f;
-            if (GUI.Button(new Rect(bx, by, 160f, closeH - 4f), "  Close  ", EcoBtnSt(22, Color.white)))
-            { _showEcoMail = false; _ecoLastToggle = Time.unscaledTime; }
-        }
-
-        // ── Account panel (standalone — only shown when CNRSettingsMod absent) ──
-        private void EcoDrawAccountOverlay()
-        {
-            float vw = ECO_REF_W;
-            float vh = Screen.height / (Screen.width / ECO_REF_W);
-            GUI.Button(new Rect(0, 0, vw, vh), GUIContent.none, GUIStyle.none);
-            GUI.color = new Color(0f, 0f, 0f, 0.88f);
-            GUI.DrawTexture(new Rect(0, 0, vw, vh), Texture2D.whiteTexture);
-            GUI.color = Color.white;
-            float w = Mathf.Min(vw * 0.96f, 420f);
-            float h = Mathf.Min(vh * 0.92f, 525f);
-            _ecoAcctWinRect = new Rect((vw - w) * 0.5f, (vh - h) * 0.5f, w, h);
-            GUIStyle wBg = new GUIStyle(GUI.skin.window);
-            wBg.normal.background   = EcoMkTex(2, 2, new Color(0.10f, 0.10f, 0.12f, 0.97f));
-            wBg.onNormal.background = wBg.normal.background;
-            wBg.fontSize = 15;
-            _ecoAcctWinRect = GUI.Window(9904, _ecoAcctWinRect, EcoAccountWindow, "  Account", wBg);
-        }
-
-        private void EcoAccountWindow(int id)
-        {
-            float pw     = _ecoAcctWinRect.width - 28f;
-            float closeH = 38f;
-            float scrollH = _ecoAcctWinRect.height - 52f - closeH;
-            GUIStyle vScr = new GUIStyle(GUI.skin.verticalScrollbar); vScr.fixedWidth = 30f;
-            _ecoAcctScroll = GUILayout.BeginScrollView(_ecoAcctScroll, false, true,
-                GUIStyle.none, vScr,
-                GUILayout.Width(_ecoAcctWinRect.width - 4f), GUILayout.Height(scrollH));
-            EcoSecHdr("Your Account");
-            GUILayout.Space(6f);
-            string pid    = PlayerPrefs.GetString(PREF_PLAYER_ID, "");
-            string dispId = pid.Length >= 8 ? pid.Substring(0, 8) + "..." : (pid.Length > 0 ? pid : "(not registered)");
-            GUILayout.Label("Device ID:  " + dispId, EcoLblSt());
-            GUILayout.Space(4f);
-            string statusTxt = Ready ? "Connected" : (ServerUp ? "Syncing..." : "Offline");
-            Color  statusCol = Ready ? new Color(0.3f, 1f, 0.4f) : (ServerUp ? new Color(1f, 0.85f, 0.2f) : new Color(1f, 0.4f, 0.4f));
-            GUIStyle stSt = EcoLblSt(); stSt.normal.textColor = statusCol;
-            GUILayout.Label("Server:  " + statusTxt, stSt);
-            GUILayout.Space(10f);
-            if (Ready)
-            {
-                GUILayout.Label("Coins:  " + ServerCoins, EcoLblSt());
-                GUILayout.Label("Gems:   " + ServerGems,  EcoLblSt());
-                GUILayout.Space(10f);
-            }
-            EcoSecHdr("Set Recovery PIN");
-            GUILayout.Space(4f);
-            GUILayout.Label("4-8 digits. Used to reclaim your account on a new phone.", EcoHintSt());
-            GUILayout.Space(4f);
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("PIN:", EcoLblSt(), GUILayout.Width(60f));
-            _ecoPinInput = GUILayout.TextField(_ecoPinInput, 8, GUI.skin.textField, GUILayout.Width(pw - 70f));
-            GUILayout.EndHorizontal();
-            GUILayout.Space(6f);
-            if (GUILayout.Button("Save PIN", EcoBtnSt(18, new Color(0.4f, 0.8f, 1f))))
-            {
-                if (_ecoPinInput.Length >= 4 && _ecoPinInput.Length <= 8)
-                {
-                    bool ok = true;
-                    foreach (char ch in _ecoPinInput) if (ch < '0' || ch > '9') { ok = false; break; }
-                    if (ok) { RequestSetPin(_ecoPinInput); _ecoAccountMsg = "PIN saved!"; _ecoPinInput = ""; }
-                    else _ecoAccountMsg = "PIN must be digits only.";
-                }
-                else _ecoAccountMsg = "PIN must be 4-8 digits.";
-            }
-            GUILayout.Space(10f);
-            EcoSecHdr("Transfer to This Phone");
-            GUILayout.Space(4f);
-            GUILayout.Label("Enter the Display Name and PIN from your other device.", EcoHintSt());
-            GUILayout.Space(4f);
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Name:", EcoLblSt(), GUILayout.Width(60f));
-            _ecoClaimName = GUILayout.TextField(_ecoClaimName, 32, GUI.skin.textField, GUILayout.Width(pw - 70f));
-            GUILayout.EndHorizontal();
-            GUILayout.Space(4f);
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("PIN:", EcoLblSt(), GUILayout.Width(60f));
-            _ecoClaimPin = GUILayout.PasswordField(_ecoClaimPin, '*', 8, GUI.skin.textField, GUILayout.Width(pw - 70f));
-            GUILayout.EndHorizontal();
-            GUILayout.Space(6f);
-            if (GUILayout.Button("Transfer Account", EcoBtnSt(18, new Color(1f, 0.7f, 0.3f))))
-            {
-                if (_ecoClaimName.Length > 0 && _ecoClaimPin.Length >= 4)
-                { RequestClaim(_ecoClaimName, _ecoClaimPin); _ecoAccountMsg = "Transfer requested..."; _ecoClaimName = ""; _ecoClaimPin = ""; }
-                else _ecoAccountMsg = "Enter name and PIN.";
-            }
-            GUILayout.Space(10f);
-            if (_ecoAccountMsg.Length > 0)
-            {
-                GUIStyle ms = EcoLblSt(); ms.normal.textColor = new Color(1f, 0.9f, 0.4f); ms.wordWrap = true;
-                GUILayout.Label(_ecoAccountMsg, ms);
-            }
-            GUILayout.Space(6f);
-            GUILayout.EndScrollView();
-            float bx = (_ecoAcctWinRect.width - 160f) * 0.5f;
-            float by = _ecoAcctWinRect.height - closeH - 6f;
-            if (GUI.Button(new Rect(bx, by, 160f, closeH - 4f), "  Close  ", EcoBtnSt(22, Color.white)))
-            { _showEcoAccount = false; _ecoLastToggle = Time.unscaledTime; }
-        }
-
-        // ── IMGUI helpers ────────────────────────────────────────────────────────
-        private static GUIStyle EcoLblSt()
-        {
-            GUIStyle s = new GUIStyle(GUI.skin.label);
-            s.fontSize = 15; s.normal.textColor = Color.white;
-            if (_ecoFont != null) s.font = _ecoFont;
-            return s;
-        }
-        private static GUIStyle EcoHintSt()
-        {
-            GUIStyle s = new GUIStyle(GUI.skin.label);
-            s.fontSize = 11; s.wordWrap = true;
-            s.normal.textColor = new Color(0.72f, 0.72f, 0.72f);
-            if (_ecoFont != null) s.font = _ecoFont;
-            return s;
-        }
-        private static GUIStyle EcoBtnSt(int fontSize = 20, Color col = default(Color))
-        {
-            if (col == default(Color)) col = Color.white;
-            GUIStyle s = new GUIStyle(GUI.skin.button);
-            s.fontSize = fontSize;
-            s.fixedHeight = fontSize < 15 ? 33f : 39f;
-            s.normal.textColor  = col;
-            s.hover.textColor   = col;
-            s.active.textColor  = col;
-            if (_ecoFont != null) s.font = _ecoFont;
-            return s;
-        }
-        private static void EcoSecHdr(string title)
-        {
-            GUIStyle s = new GUIStyle(GUI.skin.label);
-            s.fontStyle = FontStyle.Bold; s.fontSize = 16;
-            s.normal.textColor = new Color(1f, 0.85f, 0.3f);
-            if (_ecoFont != null) s.font = _ecoFont;
-            GUILayout.Label("--  " + title + "  --", s);
-        }
-        private static Texture2D EcoMkTex(int w, int h, Color col)
-        {
-            Color[] p = new Color[w * h];
-            for (int i = 0; i < p.Length; i++) p[i] = col;
-            Texture2D t = new Texture2D(w, h); t.SetPixels(p); t.Apply(); return t;
-        }
-        private static Rect EcoNguiRect(Camera cam, GameObject go, float sc)
-        {
-            if (go == null) return new Rect(0, 0, 0, 0);
-            Vector3 sp = cam.WorldToScreenPoint(go.transform.position);
-            float cx = sp.x / sc;
-            float cy = (Screen.height - sp.y) / sc;
-            float hw = 30f / sc, hh = 30f / sc;
-            Component wc = go.GetComponentInChildren(typeof(UIWidget)) as Component;
-            if (wc != null)
-            {
-                System.Type tp = wc.GetType();
-                System.Reflection.PropertyInfo wp = tp.GetProperty("width",
-                    BindingFlags.Instance | BindingFlags.Public);
-                System.Reflection.PropertyInfo hp = tp.GetProperty("height",
-                    BindingFlags.Instance | BindingFlags.Public);
-                if (wp != null) hw = System.Convert.ToSingle(wp.GetValue(wc, null)) * 0.5f / sc;
-                if (hp != null) hh = System.Convert.ToSingle(hp.GetValue(wc, null)) * 0.5f / sc;
-            }
-            return new Rect(cx - hw, cy - hh, hw * 2f, hh * 2f);
-        }
-
-        // ── ANDROID_ID helper ─────────────────────────────────────────────────
-        private static string GetAndroidId()
-        {
-            try
-            {
-                var player    = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-                var activity  = player.GetStatic<AndroidJavaObject>("currentActivity");
-                var resolver  = activity.Call<AndroidJavaObject>("getContentResolver");
-                var secure    = new AndroidJavaClass("android.provider.Settings$Secure");
-                string id     = secure.CallStatic<string>("getString", resolver, "android_id");
-                return string.IsNullOrEmpty(id) ? null : id.ToLowerInvariant();
-            }
-            catch (Exception ex) { ModEntry.Log("GetAndroidId error: " + ex.Message); return null; }
         }
     }
 }
