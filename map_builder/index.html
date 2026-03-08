@@ -27,7 +27,7 @@ body { background: #12121e; color: #dde; font-family: 'Segoe UI', sans-serif; fo
 /* ── Side panels ── */
 .panel { width: 220px; background: #1a1a2e; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
 #left-panel { border-right: 1px solid #252545; }
-#right-panel { border-left: 1px solid #252545; }
+#right-panel { border-left: 1px solid #252545; overflow-y: auto; }
 .panel-section { padding: 8px; border-bottom: 1px solid #252545; flex-shrink: 0; }
 .panel-section h3 { font-size: 10px; text-transform: uppercase; color: #666688; margin-bottom: 6px; letter-spacing: 1px; }
 .search-input { width: 100%; background: #12121e; border: 1px solid #333360; border-radius: 3px; color: #dde; padding: 4px 6px; font-size: 12px; outline: none; }
@@ -68,7 +68,7 @@ select:focus { border-color: #e94560; }
 .btn-del:hover { background: #5a2020; }
 
 /* ── Scene list ── */
-#scene-list-wrap { overflow-y: auto; flex: 1; }
+#scene-list-wrap { flex-shrink: 0; }
 .scene-list-item { padding: 4px 10px; font-size: 11px; cursor: pointer; border-bottom: 1px solid #1e1e30; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #8888aa; }
 .scene-list-item:hover { background: #252545; color: #dde; }
 .scene-list-item.selected { color: #e94560; }
@@ -81,6 +81,26 @@ select:focus { border-color: #e94560; }
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: #12121e; }
 ::-webkit-scrollbar-thumb { background: #333360; border-radius: 3px; }
+
+/* ── Collidable + groups ── */
+.toggle-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+.toggle-row label { font-size:12px; cursor:pointer; }
+.toggle-row input[type=checkbox] { cursor:pointer; accent-color:#e94560; }
+#groups-panel { flex-shrink: 0; }
+.group-header { display:flex; align-items:center; gap:4px; padding:4px 8px; background:#161622; border-bottom:1px solid #1e1e30; cursor:pointer; user-select:none; }
+.group-header:hover { background:#1e1e30; }
+.collapse-arrow { font-size:9px; color:#555577; flex-shrink:0; transition:transform 0.1s; }
+.section-collapse-btn { background:none; border:none; color:#555577; font-size:10px; cursor:pointer; padding:0 3px; line-height:1; float:right; }
+.section-collapse-btn:hover { color:#aaaacc; }
+.group-name-lbl { flex:1; font-size:11px; font-weight:600; color:#aaaacc; }
+.group-xform-btn { font-size:10px; padding:1px 5px; margin-left:2px; }
+.group-entry { display:flex; align-items:center; padding:3px 6px 3px 22px; font-size:11px; cursor:pointer; border-bottom:1px solid #1a1a28; color:#666688; }
+.group-entry .ge-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.group-entry .ge-rm { flex-shrink:0; background:none; border:none; color:#444466; font-size:11px; cursor:pointer; padding:0 2px; line-height:1; }
+.group-entry .ge-rm:hover { color:#e94560; }
+.group-entry:hover { background:#252545; color:#dde; }
+.group-entry.selected { color:#e94560; }
+.group-entry.is-colbox { color:#44aaff; }
 </style>
 
 <script type="importmap">
@@ -115,6 +135,7 @@ select:focus { border-color: #e94560; }
   <div class="sep"></div>
   <button class="btn active" id="btn-donor" title="Toggle donor reference">👁 Donor</button>
   <button class="btn active" id="btn-grid"  title="Toggle grid">⊞ Grid</button>
+  <button class="btn active" id="btn-colliders" title="Toggle collision box wireframes">⬡ Colliders</button>
 </div>
 
 <div id="main">
@@ -196,15 +217,40 @@ select:focus { border-color: #e94560; }
       </select>
     </div>
     <div class="panel-section">
+      <div class="toggle-row">
+        <input type="checkbox" id="chk-collidable" checked>
+        <label for="chk-collidable">Collidable</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#666688;margin-top:2px">
+        <span>Group:</span>
+        <span id="sel-group-name" style="color:#aaaacc;flex:1">—</span>
+        <button class="btn" id="btn-move-group" style="font-size:10px;padding:2px 5px;display:none" title="Transform all objects in this group together (G)">⇄ Move Group</button>
+        <button class="btn" id="btn-ungroup" style="font-size:10px;padding:2px 5px" title="Remove from group">✕</button>
+      </div>
+    </div>
+    <div class="panel-section">
       <div class="action-btns">
         <button class="btn" id="btn-clone">Clone</button>
         <button class="btn btn-del" id="btn-del">Delete</button>
       </div>
     </div>
-    <div class="panel-section" style="flex-shrink:0"><h3>Scene Objects (<span id="obj-count">0</span>)</h3></div>
+    <div class="panel-section" style="flex-shrink:0">
+      <h3 style="display:flex;align-items:center">
+        <button class="section-collapse-btn" id="btn-toggle-scene-list" title="Collapse/expand scene objects">▶</button>
+        Scene Objects (<span id="obj-count">0</span>)
+      </h3>
+    </div>
     <div id="scene-list-wrap">
       <div id="scene-list"></div>
     </div>
+    <div class="panel-section" style="flex-shrink:0">
+      <h3>Groups (<span id="group-count">0</span>)</h3>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <button class="btn" id="btn-new-group" style="flex:1;font-size:11px">+ New Group</button>
+        <button class="btn" id="btn-add-to-group" style="flex:1;font-size:11px" title="Add selected to a group">➕ Add</button>
+      </div>
+    </div>
+    <div id="groups-panel"></div>
   </div>
 
 </div>
@@ -213,6 +259,7 @@ select:focus { border-color: #e94560; }
   <span style="color:#666688;font-size:11px">Place marker:</span>
   <button class="btn" id="btn-enemy"  style="background:#2a0f00;border-color:#7a3000">⚔ Enemy</button>
   <button class="btn" id="btn-escape" style="background:#00200a;border-color:#008030">✦ Escape</button>
+  <button class="btn" id="btn-colbox" style="background:#0a0a2e;border-color:#3040a0">⬡ Col Box</button>
   <button class="btn" id="btn-player" style="background:#001a30;border-color:#005080">▶ Player</button>
   <div class="sep"></div>
   <span id="status">Ready — load a scene JSON to start building</span>
@@ -304,7 +351,7 @@ const scene  = new THREE.Scene();
 scene.fog    = new THREE.Fog(0x0e0e1a, 300, 700);
 
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 1200);
-camera.position.set(105, 50, 0);
+camera.position.set(105, 50, 154);
 camera.lookAt(105, 5, 77);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -333,10 +380,17 @@ orbitCtrl.target.set(105, 5, 77);
 const tc = new TransformControls(camera, renderer.domElement);
 tc.addEventListener('dragging-changed', e => {
   orbitCtrl.enabled = !e.value;
-  // Bake scale when scale-drag ends
-  if (!e.value && appState.mode === 'scale' && appState.sel) {
-    bakeScale(appState.sel);
-    syncPropsFromMesh(appState.sel);
+  if (e.value) {
+    // Drag START — capture before-state for undo (skip: group pivot calls pushUndo on its own)
+    if (!appState.groupPivot) pushUndo();
+  } else {
+    // Drag END
+    if (appState.groupPivot) {
+      finalizeGroupTransform();
+    } else if (appState.mode === 'scale' && appState.sel) {
+      bakeScale(appState.sel);
+      syncPropsFromMesh(appState.sel);
+    }
   }
 });
 tc.addEventListener('objectChange', () => {
@@ -366,6 +420,13 @@ const appState = {
   // Undo/redo stacks — each entry is a JSON snapshot of placedGroup
   undoStack:    [],
   redoStack:    [],
+  idCounter:    0,
+  groups:       {},      // { gid: { name, members: Set<string> } }
+  colBoxVisible: true,
+  groupPivot:   null,
+  activeGroupId: null,
+  sceneListCollapsed: true,
+  groupsCollapsed:    new Set(), // gids that are currently collapsed
 };
 
 // ─── Undo / Redo ─────────────────────────────────────────────────────────────
@@ -376,19 +437,26 @@ function snapshotPlaced() {
     if (!o.isMesh) return;
     const ud = o.userData;
     items.push({
-      path:     ud.path,
-      mesh:     ud.mesh,
-      mat:      ud.mat,
-      color:    ud.color,
-      size:     [...ud.size],
-      pos:      [o.position.x, o.position.y, o.position.z],
-      rot:      [THREE.MathUtils.radToDeg(o.rotation.x),
-                 THREE.MathUtils.radToDeg(o.rotation.y),
-                 THREE.MathUtils.radToDeg(o.rotation.z)],
-      isMarker: ud.isMarker || false,
+      id:        ud.id,
+      path:      ud.path,
+      mesh:      ud.mesh,
+      mat:       ud.mat,
+      color:     ud.color,
+      size:      [...ud.size],
+      pos:       [o.position.x, o.position.y, o.position.z],
+      rot:       [THREE.MathUtils.radToDeg(o.rotation.x),
+                  THREE.MathUtils.radToDeg(o.rotation.y),
+                  THREE.MathUtils.radToDeg(o.rotation.z)],
+      isMarker:  ud.isMarker  || false,
+      isColBox:  ud.isColBox  || false,
+      collidable: ud.collidable !== false,
+      groupId:   ud.groupId   || null,
     });
   });
-  return JSON.stringify(items);
+  const groups = {};
+  for (const [gid, g] of Object.entries(appState.groups))
+    groups[gid] = { name: g.name, members: [...g.members] };
+  return JSON.stringify({ items, groups, idCounter: appState.idCounter });
 }
 
 function pushUndo() {
@@ -404,12 +472,29 @@ function restoreSnapshot(snap) {
     (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => m.dispose());
     placedGroup.remove(c);
   }
+  if (appState.groupPivot) {
+    [...appState.groupPivot.children].forEach(m => { if (m.isMesh) placedGroup.attach(m); });
+    scene.remove(appState.groupPivot);
+    appState.groupPivot = null;
+    appState.activeGroupId = null;
+  }
   tc.detach();
   appState.sel = null;
   document.getElementById('sel-name').textContent = 'None';
   clearInputs();
 
-  const items = JSON.parse(snap);
+  const parsed = JSON.parse(snap);
+  const items  = Array.isArray(parsed) ? parsed : (parsed.items || []);
+
+  // Restore groups
+  appState.groups = {};
+  if (!Array.isArray(parsed) && parsed.groups) {
+    for (const [gid, g] of Object.entries(parsed.groups))
+      appState.groups[gid] = { name: g.name, members: new Set(g.members) };
+  }
+  if (!Array.isArray(parsed) && parsed.idCounter)
+    appState.idCounter = parsed.idCounter;
+
   for (const obj of items) {
     if (obj.isMarker) {
       const colorMap = { EnemyPosition: 0xff3300, EscapePosition: 0x00ee66, PlayerPosition: 0x0088ff };
@@ -422,11 +507,14 @@ function restoreSnapshot(snap) {
       m.position.set(obj.pos[0], obj.pos[1], obj.pos[2]);
       m.userData = { ...obj };
       placedGroup.add(m);
+    } else if (obj.isColBox) {
+      placedGroup.add(makeCollisionBox(obj));
     } else {
       placedGroup.add(makeBox(obj, 1.0));
     }
   }
   refreshSceneList();
+  refreshGroupsPanel();
 }
 
 function undo() {
@@ -516,8 +604,65 @@ function makeBox(data, opacity = 1.0) {
   }
   mesh.castShadow    = opacity >= 1;
   mesh.receiveShadow = opacity >= 1;
-  mesh.userData      = { path: data.path, mesh: data.mesh, mat: data.mat || 'Default-Diffuse', color: data.color || [0,0,0], size: [...size], rot: data.rot ? [...data.rot] : undefined };
+  mesh.userData      = {
+    id:        data.id || generateId(),
+    path:      data.path,
+    mesh:      data.mesh,
+    mat:       data.mat || 'Default-Diffuse',
+    color:     data.color || [0,0,0],
+    size:      [...size],
+    rot:       data.rot ? [...data.rot] : undefined,
+    collidable: data.collidable !== false,
+    groupId:   data.groupId || null,
+    isColBox:  false,
+  };
   return mesh;
+}
+
+function generateId() { return 'id' + (++appState.idCounter); }
+
+function makeCollisionBox(data) {
+  const size = (data.size && data.size.every(v => v > 0)) ? data.size : [1, 1, 1];
+  const [sx, sy, sz] = size;
+  const geo  = new THREE.BoxGeometry(sx, sy, sz);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
+  mesh.position.set(data.pos[0], data.pos[1], data.pos[2]);
+  if (data.rot && data.rot.length >= 3)
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(data.rot[0]),
+      THREE.MathUtils.degToRad(data.rot[1]),
+      THREE.MathUtils.degToRad(data.rot[2])
+    );
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color: 0x44aaff })
+  );
+  edges.name    = '__colbox_edge__';
+  edges.visible = appState.colBoxVisible;
+  mesh.add(edges);
+  mesh.userData = {
+    id:        data.id || generateId(),
+    path:      data.path || 'CollisionBox',
+    mesh:      'Cube',
+    mat:       'Default-Diffuse',
+    color:     [0, 0, 0],
+    size:      [...size],
+    rot:       data.rot ? [...data.rot] : undefined,
+    collidable: true,
+    groupId:   data.groupId || null,
+    isColBox:  true,
+  };
+  return mesh;
+}
+
+function refreshColliderEdgesVisibility() {
+  placedGroup.traverse(o => {
+    if (o.name === '__colbox_edge__') o.visible = appState.colBoxVisible;
+  });
+  if (appState.ghost) {
+    const e = appState.ghost.getObjectByName('__colbox_edge__');
+    if (e) e.visible = appState.colBoxVisible;
+  }
 }
 
 function makeMarker(type, worldPos) {
@@ -536,21 +681,27 @@ function makeMarker(type, worldPos) {
     ? prefixes.player
     : prefixes[type] + appState.markerIdx[type];
   mesh.userData = {
-    path, mesh: 'Sphere', mat: 'Default-Diffuse',
+    id: generateId(), path, mesh: 'Sphere', mat: 'Default-Diffuse',
     color: [255, 255, 255], size: [1, 1, 1], isMarker: true,
+    collidable: false, groupId: null, isColBox: false,
   };
   return mesh;
 }
 
 function bakeScale(mesh) {
-  if (!mesh.userData.size) return;
+  if (!mesh.userData.size || mesh.userData.isMarker) return;
   const s  = mesh.scale;
   const ns = [mesh.userData.size[0] * s.x, mesh.userData.size[1] * s.y, mesh.userData.size[2] * s.z];
   mesh.geometry.dispose();
-  mesh.geometry    = new THREE.BoxGeometry(...ns);
+  mesh.geometry      = new THREE.BoxGeometry(...ns);
   mesh.userData.size = ns;
   mesh.scale.set(1, 1, 1);
-  rebuildMaterials(mesh);
+  if (mesh.userData.isColBox) {
+    const edge = mesh.getObjectByName('__colbox_edge__');
+    if (edge) { edge.geometry.dispose(); edge.geometry = new THREE.EdgesGeometry(mesh.geometry); }
+  } else {
+    rebuildMaterials(mesh);
+  }
 }
 
 // ─── Load donor scene ────────────────────────────────────────────────────────
@@ -591,7 +742,7 @@ function loadDonorScene(json, frameCamera = true) {
     const center = box.getCenter(new THREE.Vector3());
     const span   = box.getSize(new THREE.Vector3());
     const dist   = Math.max(span.x, span.y, span.z) * 0.9;
-    camera.position.set(center.x, center.y + dist * 0.6, center.z + dist * 0.7);
+    camera.position.set(center.x, center.y + dist * 0.6, center.z - dist * 0.7);
     orbitCtrl.target.copy(center);
     gridHelper.position.set(center.x, 0, center.z);
     floorMesh.position.set(center.x, 0, center.z);
@@ -660,15 +811,37 @@ async function loadMapFile(json) {
           new THREE.MeshBasicMaterial({ color: col })
         );
         mesh.position.set(obj.pos[0], obj.pos[1], obj.pos[2]);
-        mesh.userData = { path: obj.path, mesh: 'Sphere', mat: 'Default-Diffuse', color: [255,255,255], size: [1,1,1], isMarker: true };
+        mesh.userData = { id: generateId(), path: obj.path, mesh: 'Sphere', mat: 'Default-Diffuse', color: [255,255,255], size: [1,1,1], isMarker: true, collidable: false, groupId: null, isColBox: false };
         placedGroup.add(mesh);
+      } else if (obj.isColBox) {
+        if (!obj.size || obj.size.some(v => v <= 0)) continue;
+        placedGroup.add(makeCollisionBox(obj));
       } else {
         if (!obj.size || obj.size.some(v => v <= 0)) continue;
         placedGroup.add(makeBox(obj, 1.0));
       }
       count++;
     }
+
+    // Reconstruct groups
+    if (json.groups && json.groups.length) {
+      for (const gData of json.groups) {
+        const gid = createGroup(gData.name);
+        const g   = appState.groups[gid];
+        if (gData.memberPaths && gData.memberPaths.length) {
+          const paths = new Set(gData.memberPaths);
+          placedGroup.traverse(o => {
+            if (o.isMesh && paths.has(o.userData.path) && !g.members.has(o.userData.id)) {
+              g.members.add(o.userData.id);
+              o.userData.groupId = gid;
+            }
+          });
+        }
+      }
+    }
+
     refreshSceneList();
+    refreshGroupsPanel();
 
     // Frame camera on placed objects (falling back to donor ghost)
     const target = placedGroup.children.length ? placedGroup : donorGroup;
@@ -677,7 +850,7 @@ async function loadMapFile(json) {
       const center = box.getCenter(new THREE.Vector3());
       const span   = box.getSize(new THREE.Vector3());
       const dist   = Math.max(span.x, span.y, span.z) * 0.9;
-      camera.position.set(center.x, center.y + dist * 0.6, center.z + dist * 0.7);
+      camera.position.set(center.x, center.y + dist * 0.6, center.z - dist * 0.7);
       orbitCtrl.target.copy(center);
       gridHelper.position.set(center.x, 0, center.z);
       floorMesh.position.set(center.x, 0, center.z);
@@ -787,11 +960,10 @@ function cancelPlace() {
 function commitPlace(worldPos) {
   let mesh;
   if (appState.ghostData) {
-    const data = {
-      ...appState.ghostData,
-      pos: [+worldPos.x.toFixed(3), +(appState.ghostData.size[1] / 2).toFixed(3), +worldPos.z.toFixed(3)],
-    };
-    mesh = makeBox(data, 1.0);
+    const gd  = appState.ghostData;
+    const pos = [+worldPos.x.toFixed(3), +(gd.size[1] / 2).toFixed(3), +worldPos.z.toFixed(3)];
+    const data = { ...gd, pos };
+    mesh = gd.isColBox ? makeCollisionBox(data) : makeBox(data, 1.0);
   } else if (appState.markerType) {
     mesh = makeMarker(appState.markerType, new THREE.Vector3(worldPos.x, 0.6, worldPos.z));
   }
@@ -888,7 +1060,27 @@ function select(mesh) {
     document.getElementById('sel-name').textContent = 'None';
     clearInputs();
   }
+  // Collidable checkbox
+  const chk = document.getElementById('chk-collidable');
+  if (mesh && !mesh.userData.isMarker) {
+    chk.checked  = mesh.userData.isColBox ? true : (mesh.userData.collidable !== false);
+    chk.disabled = !!mesh.userData.isColBox;
+  } else {
+    chk.checked  = true;
+    chk.disabled = true;
+  }
+  // Group label + Move Group button
+  const gname   = document.getElementById('sel-group-name');
+  const moveGrp = document.getElementById('btn-move-group');
+  if (mesh && mesh.userData.groupId && appState.groups[mesh.userData.groupId]) {
+    gname.textContent   = appState.groups[mesh.userData.groupId].name;
+    moveGrp.style.display = '';
+  } else {
+    gname.textContent   = '—';
+    moveGrp.style.display = 'none';
+  }
   refreshSceneList();
+  refreshGroupsPanel();
 }
 
 function syncPropsFromMesh(mesh) {
@@ -899,7 +1091,8 @@ function syncPropsFromMesh(mesh) {
   setInput('ry', THREE.MathUtils.radToDeg(r.y));
   setInput('rz', THREE.MathUtils.radToDeg(r.z));
   const matSel = document.getElementById('mat-sel');
-  if ([...matSel.options].some(o => o.value === mesh.userData.mat))
+  matSel.disabled = !!mesh.userData.isColBox;
+  if (!mesh.userData.isColBox && [...matSel.options].some(o => o.value === mesh.userData.mat))
     matSel.value = mesh.userData.mat;
 }
 
@@ -933,7 +1126,12 @@ function applyProps() {
       m.geometry.dispose();
       m.geometry = new THREE.BoxGeometry(sx, sy, sz);
       m.userData.size = [sx, sy, sz];
-      rebuildMaterials(m);
+      if (m.userData.isColBox) {
+        const edge = m.getObjectByName('__colbox_edge__');
+        if (edge) { edge.geometry.dispose(); edge.geometry = new THREE.EdgesGeometry(m.geometry); }
+      } else {
+        rebuildMaterials(m);
+      }
     }
   }
 }
@@ -956,12 +1154,21 @@ function refreshSceneList() {
   placedGroup.traverse(o => { if (o.isMesh) items.push(o); });
   document.getElementById('obj-count').textContent = items.length;
 
+  const wrap = document.getElementById('scene-list-wrap');
+  const collapsed = appState.sceneListCollapsed;
+  wrap.style.display = collapsed ? 'none' : '';
+  const arrow = document.getElementById('btn-toggle-scene-list');
+  if (arrow) arrow.textContent = collapsed ? '▶' : '▼';
+
   const list = document.getElementById('scene-list');
   list.innerHTML = '';
+  if (collapsed) return;
   items.forEach((o, i) => {
     const div = document.createElement('div');
     div.className = 'scene-list-item' + (o === appState.sel ? ' selected' : '');
-    div.textContent = `${i + 1}. ${(o.userData.path || '').split('/').pop()}`;
+    if (o.userData.isColBox) div.style.color = (o === appState.sel ? '' : '#44aaff');
+    const label = (o.userData.path || '').split('/').pop();
+    div.textContent = `${i + 1}. ${o.userData.isColBox ? '\u2b21 ' : ''}${label}`;
     div.title       = o.userData.path || '';
     div.addEventListener('click', () => {
       select(o);
@@ -971,7 +1178,221 @@ function refreshSceneList() {
   });
 }
 
+// ─── Group management ─────────────────────────────────────────────────────────
+
+function getMeshById(id) {
+  let found = null;
+  placedGroup.traverse(o => { if (o.isMesh && o.userData.id === id) found = o; });
+  // Members may be reparented to the pivot during an active group transform
+  if (!found && appState.groupPivot) {
+    appState.groupPivot.traverse(o => { if (o.isMesh && o.userData.id === id) found = o; });
+  }
+  return found;
+}
+
+function createGroup(name) {
+  const gid = 'g' + generateId();
+  appState.groups[gid] = { name: name || 'Group', members: new Set() };
+  return gid;
+}
+
+function addMeshToGroup(mesh, gid) {
+  if (mesh.userData.groupId && appState.groups[mesh.userData.groupId])
+    appState.groups[mesh.userData.groupId].members.delete(mesh.userData.id);
+  mesh.userData.groupId = gid;
+  if (gid && appState.groups[gid])
+    appState.groups[gid].members.add(mesh.userData.id);
+  refreshGroupsPanel();
+  if (appState.sel === mesh) {
+    const gname = document.getElementById('sel-group-name');
+    gname.textContent = (gid && appState.groups[gid]) ? appState.groups[gid].name : '\u2014';
+  }
+}
+
+function removeFromGroup(mesh) { addMeshToGroup(mesh, null); }
+
+function deleteGroup(gid) {
+  placedGroup.traverse(o => { if (o.isMesh && o.userData.groupId === gid) o.userData.groupId = null; });
+  delete appState.groups[gid];
+  refreshGroupsPanel();
+}
+
+function beginGroupTransform(groupId) {
+  if (appState.groupPivot) finalizeGroupTransform();
+  const g = appState.groups[groupId];
+  if (!g) return;
+  const members = [];
+  placedGroup.traverse(o => { if (o.isMesh && g.members.has(o.userData.id)) members.push(o); });
+  if (!members.length) { setStatus('Group has no placed members'); return; }
+  const center = new THREE.Vector3();
+  members.forEach(m => center.add(m.getWorldPosition(new THREE.Vector3())));
+  center.divideScalar(members.length);
+  const pivot = new THREE.Object3D();
+  pivot.position.copy(center);
+  scene.add(pivot);
+  pivot.updateWorldMatrix(true, true); // ensure world matrix is current before reparenting
+  members.forEach(m => pivot.attach(m));
+  appState.groupPivot    = pivot;
+  appState.activeGroupId = groupId;
+  tc.attach(pivot);
+  tc.setMode(appState.mode);
+  setStatus(`Transforming group \u201c${g.name}\u201d (${members.length} objects) \u2014 drag gizmo, release to finish`);
+}
+
+function finalizeGroupTransform(silent = false) {
+  const pivot = appState.groupPivot;
+  if (!pivot) return;
+  const members = [...pivot.children].filter(c => c.isMesh);
+  members.forEach(child => {
+    placedGroup.attach(child);           // preserves world position/rotation
+    // Bake any scale the pivot applied into each object's geometry + userData.size
+    const s = child.scale;
+    if (Math.abs(s.x - 1) > 1e-4 || Math.abs(s.y - 1) > 1e-4 || Math.abs(s.z - 1) > 1e-4) {
+      bakeScale(child);
+    }
+  });
+  scene.remove(pivot);
+  appState.groupPivot    = null;
+  appState.activeGroupId = null;
+  tc.detach();
+  // Refresh props panel if the currently selected mesh was part of this group
+  if (appState.sel && members.includes(appState.sel)) syncPropsFromMesh(appState.sel);
+  if (!silent) {
+    pushUndo();
+    refreshSceneList();
+    refreshGroupsPanel();
+    setStatus('Group transform applied');
+  }
+}
+
+function refreshGroupsPanel() {
+  const panel = document.getElementById('groups-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+  const entries = Object.entries(appState.groups);
+  document.getElementById('group-count').textContent = entries.length;
+  for (const [gid, g] of entries) {
+    // Default-collapse new groups on first render
+    if (!appState.groupsCollapsed.has(gid + '_seen')) {
+      appState.groupsCollapsed.add(gid);
+      appState.groupsCollapsed.add(gid + '_seen');
+    }
+    const isCollapsed = appState.groupsCollapsed.has(gid);
+
+    const hdr = document.createElement('div');
+    hdr.className = 'group-header';
+
+    const arrow = document.createElement('span');
+    arrow.className = 'collapse-arrow';
+    arrow.textContent = isCollapsed ? '▶' : '▼';
+    arrow.addEventListener('click', e => {
+      e.stopPropagation();
+      if (appState.groupsCollapsed.has(gid)) appState.groupsCollapsed.delete(gid);
+      else appState.groupsCollapsed.add(gid);
+      refreshGroupsPanel();
+    });
+
+    const lbl = document.createElement('span');
+    lbl.className   = 'group-name-lbl';
+    lbl.textContent = `📦 ${g.name} (${g.members.size})`;
+    lbl.addEventListener('click', e => {
+      e.stopPropagation();
+      if (appState.groupsCollapsed.has(gid)) appState.groupsCollapsed.delete(gid);
+      else appState.groupsCollapsed.add(gid);
+      refreshGroupsPanel();
+    });
+
+    const xBtn = document.createElement('button');
+    xBtn.className   = 'btn group-xform-btn';
+    xBtn.textContent = '⇄ Transform';
+    xBtn.title       = 'Transform all members together';
+    xBtn.addEventListener('click', e => { e.stopPropagation(); beginGroupTransform(gid); });
+    const cBtn = document.createElement('button');
+    cBtn.className   = 'btn group-xform-btn';
+    cBtn.textContent = '⧉ Clone';
+    cBtn.title       = 'Clone all members into a new group';
+    cBtn.addEventListener('click', e => { e.stopPropagation(); cloneGroup(gid); });
+    const dBtn = document.createElement('button');
+    dBtn.className   = 'btn btn-del group-xform-btn';
+    dBtn.textContent = '✕';
+    dBtn.title       = 'Delete group (objects remain)';
+    dBtn.addEventListener('click', e => { e.stopPropagation(); deleteGroup(gid); });
+    hdr.append(arrow, lbl, xBtn, cBtn, dBtn);
+    panel.appendChild(hdr);
+
+    if (isCollapsed) continue;
+
+    for (const memberId of g.members) {
+      const mesh = getMeshById(memberId);
+      const div  = document.createElement('div');
+      const isColBox = mesh && mesh.userData.isColBox;
+      div.className = 'group-entry' + (mesh === appState.sel ? ' selected' : '') + (isColBox ? ' is-colbox' : '');
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'ge-name';
+      nameSpan.textContent = mesh ? (mesh.userData.path || memberId).split('/').pop() : `[missing: ${memberId}]`;
+      nameSpan.title = mesh ? (mesh.userData.path || memberId) : memberId;
+      if (mesh) nameSpan.addEventListener('click', () => { select(mesh); orbitCtrl.target.copy(mesh.position); });
+
+      const rmBtn = document.createElement('button');
+      rmBtn.className = 'ge-rm';
+      rmBtn.textContent = '✕';
+      rmBtn.title = 'Remove from group';
+      rmBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (mesh) { pushUndo(); removeFromGroup(mesh); refreshSceneList(); }
+      });
+
+      div.append(nameSpan, rmBtn);
+      panel.appendChild(div);
+    }
+  }
+}
+
 // ─── Clone / Delete ──────────────────────────────────────────────────────────
+
+function cloneGroup(groupId) {
+  const g = appState.groups[groupId];
+  if (!g) return;
+
+  // If this group is currently being pivot-transformed, commit it silently first
+  // so members are back in placedGroup and have correct world positions
+  if (appState.activeGroupId === groupId && appState.groupPivot) {
+    finalizeGroupTransform(true);
+  }
+
+  const members = [];
+  placedGroup.traverse(o => { if (o.isMesh && g.members.has(o.userData.id)) members.push(o); });
+  if (!members.length) { setStatus('Group has no objects to clone'); return; }
+
+  // Compute world-space AABB for offset (use expandByObject which works in world space)
+  const box = new THREE.Box3();
+  members.forEach(m => box.expandByObject(m));
+  const offset = (box.max.x - box.min.x) + 0.5;
+
+  pushUndo();
+  const newGid = createGroup(g.name + ' copy');
+  const clones = members.map(m => {
+    // Use world position so offset is always in world space regardless of parent
+    const wp = m.getWorldPosition(new THREE.Vector3());
+    const data = {
+      ...m.userData,
+      id:      null,
+      groupId: null,
+      pos: [wp.x + offset, wp.y, wp.z],
+    };
+    const nm = m.userData.isColBox ? makeCollisionBox(data) : makeBox(data, 1.0);
+    placedGroup.add(nm);
+    addMeshToGroup(nm, newGid);
+    return nm;
+  });
+
+  // Select the first clone so the user sees something is selected
+  select(clones[0]);
+  refreshSceneList();
+  refreshGroupsPanel();
+  setStatus(`Cloned group \u201c${g.name}\u201d \u2192 \u201c${g.name} copy\u201d (${clones.length} objects)`);
+}
 
 function cloneSelected() {
   const m = appState.sel;
@@ -979,9 +1400,11 @@ function cloneSelected() {
   pushUndo();
   const data = {
     ...m.userData,
+    id:      null,  // fresh id
+    groupId: null,  // don't auto-clone into same group
     pos: [m.position.x + m.userData.size[0] + 0.5, m.position.y, m.position.z],
   };
-  const nm = makeBox(data, 1.0);
+  const nm = m.userData.isColBox ? makeCollisionBox(data) : makeBox(data, 1.0);
   placedGroup.add(nm);
   select(nm);
   refreshSceneList();
@@ -990,6 +1413,8 @@ function cloneSelected() {
 function deleteSelected() {
   const m = appState.sel;
   if (!m) return;
+  if (m.userData.groupId && appState.groups[m.userData.groupId])
+    appState.groups[m.userData.groupId].members.delete(m.userData.id);
   pushUndo();
   tc.detach();
   placedGroup.remove(m);
@@ -997,6 +1422,7 @@ function deleteSelected() {
   (Array.isArray(m.material) ? m.material : [m.material]).forEach(x => x.dispose());
   select(null);
   refreshSceneList();
+  refreshGroupsPanel();
 }
 
 document.getElementById('btn-clone').addEventListener('click', cloneSelected);
@@ -1017,10 +1443,20 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); return; }
 
   switch (e.key) {
-    case 'q': case 'Q': setMode('translate'); break;  // Q = move gizmo
+    case 'q': case 'Q': setMode('translate'); break;
     case 'e': case 'E': setMode('rotate');    break;
     case 'r': case 'R': setMode('scale');     break;
-    case 'Escape':       cancelPlace();        break;
+    case 'g': case 'G': {
+      // Start group transform for the selected object's group
+      const m = appState.sel;
+      if (m && m.userData.groupId) beginGroupTransform(m.userData.groupId);
+      else if (appState.groupPivot) finalizeGroupTransform();
+      break;
+    }
+    case 'Escape':
+      if (appState.groupPivot) { finalizeGroupTransform(); }
+      else { cancelPlace(); }
+      break;
     case 'Delete': case 'Backspace': deleteSelected(); break;
     case 'd': case 'D':
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); cloneSelected(); }
@@ -1077,6 +1513,63 @@ document.getElementById('btn-grid').addEventListener('click', () => {
   document.getElementById('btn-grid').classList.toggle('active', gridHelper.visible);
 });
 
+document.getElementById('btn-colliders').addEventListener('click', () => {
+  appState.colBoxVisible = !appState.colBoxVisible;
+  refreshColliderEdgesVisibility();
+  document.getElementById('btn-colliders').classList.toggle('active', appState.colBoxVisible);
+});
+
+document.getElementById('chk-collidable').addEventListener('change', e => {
+  const m = appState.sel;
+  if (!m || m.userData.isMarker || m.userData.isColBox) return;
+  m.userData.collidable = e.target.checked;
+});
+
+document.getElementById('btn-move-group').addEventListener('click', () => {
+  const m = appState.sel;
+  if (!m || !m.userData.groupId) { setStatus('Select an object that belongs to a group'); return; }
+  beginGroupTransform(m.userData.groupId);
+});
+
+document.getElementById('btn-ungroup').addEventListener('click', () => {
+  const m = appState.sel;
+  if (!m) { setStatus('Select an object first'); return; }
+  removeFromGroup(m);
+  setStatus('Removed from group');
+});
+
+document.getElementById('btn-toggle-scene-list').addEventListener('click', () => {
+  appState.sceneListCollapsed = !appState.sceneListCollapsed;
+  refreshSceneList();
+});
+
+document.getElementById('btn-new-group').addEventListener('click', () => {
+  const name = prompt('Group name:', 'Group ' + (Object.keys(appState.groups).length + 1));
+  if (!name) return;
+  const gid = createGroup(name);
+  refreshGroupsPanel();
+  setStatus(`Created group "${name}"`);
+  const m = appState.sel;
+  if (m && !m.userData.isMarker) {
+    if (confirm(`Add selected object to "${name}"?`)) addMeshToGroup(m, gid);
+  }
+});
+
+document.getElementById('btn-add-to-group').addEventListener('click', () => {
+  const m = appState.sel;
+  if (!m || m.userData.isMarker) { setStatus('Select an object first'); return; }
+  const entries = Object.entries(appState.groups);
+  if (!entries.length) { setStatus('No groups — create one first'); return; }
+  const choices = entries.map(([, g], i) => `${i + 1}: ${g.name}`).join('\n');
+  const ans = prompt(`Add "${(m.userData.path || '').split('/').pop()}" to which group?\n${choices}\n\n(number, or 0 to remove from group)`);
+  if (ans === null) return;
+  const idx = parseInt(ans) - 1;
+  if (ans.trim() === '0') { removeFromGroup(m); setStatus('Removed from group'); return; }
+  if (idx < 0 || idx >= entries.length) { setStatus('Invalid selection'); return; }
+  addMeshToGroup(m, entries[idx][0]);
+  setStatus(`Added to group "${entries[idx][1].name}"`);
+});
+
 function readJsonFile(input, callback) {
   const file = input.files[0];
   if (!file) return;
@@ -1102,6 +1595,16 @@ document.getElementById('donor-select').addEventListener('change', e => {
 document.getElementById('btn-enemy').addEventListener('click',  () => beginPlaceMarker('enemy'));
 document.getElementById('btn-escape').addEventListener('click', () => beginPlaceMarker('escape'));
 document.getElementById('btn-player').addEventListener('click', () => beginPlaceMarker('player'));
+document.getElementById('btn-colbox').addEventListener('click', () => {
+  cancelPlace();
+  const data = { isColBox: true, path: 'CollisionBox', mesh: 'Cube', mat: 'Default-Diffuse', color: [0,0,0], size: [2, 2, 2] };
+  appState.ghostData = data;
+  appState.ghost = makeCollisionBox({ ...data, pos: [0, 1, 0] });
+  scene.add(appState.ghost);
+  tc.detach();
+  document.getElementById('placing-hint').style.display = 'block';
+  setStatus('Placing Collision Box \u2014 click to place, Esc to cancel');
+});
 
 // ─── Export ──────────────────────────────────────────────────────────────────
 
@@ -1115,25 +1618,39 @@ document.getElementById('btn-export').addEventListener('click', () => {
     const ry  = THREE.MathUtils.radToDeg(o.rotation.y);
     const rz  = THREE.MathUtils.radToDeg(o.rotation.z);
     const entry = {
-      path:  ud.path  || 'Custom/Object' + objects.length,
-      mesh:  ud.mesh  || 'Combined Mesh (root: scene)',
-      mat:   ud.mat   || 'Default-Diffuse',
-      color: ud.color || [0, 0, 0],
+      path:      ud.path  || 'Custom/Object' + objects.length,
+      mesh:      ud.mesh  || 'Combined Mesh (root: scene)',
+      mat:       ud.mat   || 'Default-Diffuse',
+      color:     ud.color || [0, 0, 0],
       pos,
-      size:  [...(ud.size || [1, 1, 1])].map(v => +v.toFixed(3)),
+      size:      [...(ud.size || [1, 1, 1])].map(v => +v.toFixed(3)),
+      collidable: ud.collidable !== false,
     };
+    if (ud.isColBox)    entry.isColBox = true;
+    if (ud.isMarker)    entry.isMarker = true;
     if (Math.abs(rx) > 0.01 || Math.abs(ry) > 0.01 || Math.abs(rz) > 0.01)
       entry.rot = [+rx.toFixed(2), +ry.toFixed(2), +rz.toFixed(2)];
     objects.push(entry);
   });
 
-  const out  = JSON.stringify({ donor: appState.donorName || 'FreeRun5_1', objects }, null, 2);
+  // Serialize groups using member paths (duplicates resolved by first match on load)
+  const groups = [];
+  for (const [, g] of Object.entries(appState.groups)) {
+    const memberPaths = [];
+    for (const mid of g.members) {
+      const mesh = getMeshById(mid);
+      if (mesh) memberPaths.push(mesh.userData.path);
+    }
+    groups.push({ name: g.name, memberPaths });
+  }
+
+  const out  = JSON.stringify({ donor: appState.donorName || 'FreeRun5_1', objects, groups }, null, 2);
   const blob = new Blob([out], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = Object.assign(document.createElement('a'), { href: url, download: (appState.donorName || 'map') + '_custom.json' });
   a.click();
   URL.revokeObjectURL(url);
-  setStatus(`Exported ${objects.length} objects`);
+  setStatus(`Exported ${objects.length} objects, ${groups.length} group(s)`);
 });
 
 // ─── Resize ──────────────────────────────────────────────────────────────────
