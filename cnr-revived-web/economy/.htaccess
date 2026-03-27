@@ -1,0 +1,4 @@
+# Prevent direct access to _db.php and admin config
+<Files "_db.php">
+    Require all denied
+</Files>
