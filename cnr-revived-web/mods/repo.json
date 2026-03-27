@@ -1,0 +1,58 @@
+{
+  "name": "Official CNR Mods",
+  "mods": [
+    {
+      "id": "CNRMod",
+      "name": "CNR Mod (Core)",
+      "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
+      "latestVersion": "2.0.1",
+      "filename": "CNRMod.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod.dll",
+      "latestOnly": true,
+      "versions": [
+        {
+          "version": "2.0.1",
+          "url": "https://play.jacqueb.me/mods/CNRMod.dll",
+          "changelog": "LAN server redirect. Custom map support. Economy hook. DLL mod loader with /sdcard/CNRMods/ scanner."
+        },
+        {
+          "version": "2.0.0",
+          "url": "https://play.jacqueb.me/mods/CNRMod.dll",
+          "changelog": "Initial public release."
+        }
+      ]
+    },
+    {
+      "id": "CNRSettingsMod",
+      "name": "CNR Settings",
+      "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with PIN login.",
+      "latestVersion": "2.0.1",
+      "filename": "CNRSettingsMod.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod.dll",
+      "latestOnly": false,
+      "versions": [
+        {
+          "version": "2.0.1",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod.dll",
+          "changelog": "Full HUD drag-and-resize for all UI elements. KBM bindings with capture mode. ADS multiplier. Wide camera toggle (35deg / 70deg). Account PIN system."
+        }
+      ]
+    },
+    {
+      "id": "CNRModManager",
+      "name": "Mod Manager",
+      "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
+      "latestVersion": "1.0.0",
+      "filename": "CNRModManager.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRModManager.dll",
+      "latestOnly": false,
+      "versions": [
+        {
+          "version": "1.0.0",
+          "url": "https://play.jacqueb.me/mods/CNRModManager.dll",
+          "changelog": "Initial release. Browse tab with mod list and detail pages. Version history with changelogs. latestOnly flag per mod. Multiple repo support with PlayerPrefs storage."
+        }
+      ]
+    }
+  ]
+}
