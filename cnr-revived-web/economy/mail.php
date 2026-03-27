@@ -59,7 +59,7 @@ if ($method === 'POST') {
             ->execute([$mail_id]);
 
         if ($mail['coins'] > 0 || $mail['gems'] > 0) {
-            $pdo->prepare("UPDATE players SET coins = coins + ?, gems = gems + ? WHERE id = ?")
+            $pdo->prepare("UPDATE accounts SET coins = coins + ?, gems = gems + ? WHERE id = ?")
                 ->execute([(int)$mail['coins'], (int)$mail['gems'], $player['id']]);
 
             $pdo->prepare(
@@ -79,7 +79,7 @@ if ($method === 'POST') {
         fail('db_error');
     }
 
-    $bal = $pdo->prepare("SELECT coins, gems FROM players WHERE id = ?");
+    $bal = $pdo->prepare("SELECT coins, gems FROM accounts WHERE id = ?");
     $bal->execute([$player['id']]);
     $b = $bal->fetch();
     ok(['coins' => (int)$b['coins'], 'gems' => (int)$b['gems']]);

@@ -34,14 +34,14 @@ try {
         if ($check->fetch()) {
             $pdo->rollBack();
             // Re-fetch current balance
-            $cur = $pdo->prepare("SELECT coins, gems FROM players WHERE id=?");
+            $cur = $pdo->prepare("SELECT coins, gems FROM accounts WHERE id=?");
             $cur->execute([$player_id]);
             $b = $cur->fetch();
             ok(['coins' => (int)$b['coins'], 'gems' => (int)$b['gems'], 'duplicate' => true]);
         }
     }
 
-    $pdo->prepare("UPDATE players SET coins=coins+?, gems=gems+? WHERE id=?")
+    $pdo->prepare("UPDATE accounts SET coins=coins+?, gems=gems+? WHERE id=?")
         ->execute([$delta_coins, $delta_gems, $player_id]);
 
     $pdo->prepare("INSERT INTO transactions (player_id,delta_coins,delta_gems,reason,match_id,created_at) VALUES (?,?,?,?,?,?)")
@@ -52,7 +52,7 @@ try {
     $pdo->rollBack();
     // Unique constraint on (player_id, match_id) hit by race — treat as duplicate
     if (str_contains($e->getMessage(), 'UNIQUE')) {
-        $cur = $pdo->prepare("SELECT coins, gems FROM players WHERE id=?");
+        $cur = $pdo->prepare("SELECT coins, gems FROM accounts WHERE id=?");
         $cur->execute([$player_id]);
         $b = $cur->fetch();
         ok(['coins' => (int)$b['coins'], 'gems' => (int)$b['gems'], 'duplicate' => true]);
@@ -60,7 +60,7 @@ try {
     fail('db error: ' . $e->getMessage(), 500);
 }
 
-$cur = $pdo->prepare("SELECT coins, gems FROM players WHERE id=?");
+$cur = $pdo->prepare("SELECT coins, gems FROM accounts WHERE id=?");
 $cur->execute([$player_id]);
 $b = $cur->fetch();
 ok(['coins' => (int)$b['coins'], 'gems' => (int)$b['gems']]);

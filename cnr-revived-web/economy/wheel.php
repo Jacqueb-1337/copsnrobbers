@@ -62,11 +62,11 @@ foreach ($prizes as $p) {
 $pdo->beginTransaction();
 try {
     if ($prize_type === 'coins') {
-        $pdo->prepare("UPDATE players SET coins=coins+? WHERE id=?")->execute([$prize_amount, $player_id]);
+        $pdo->prepare("UPDATE accounts SET coins=coins+? WHERE id=?")->execute([$prize_amount, $player_id]);
         $pdo->prepare("INSERT INTO transactions (player_id,delta_coins,delta_gems,reason,created_at) VALUES (?,?,0,'wheel_spin',?)")
             ->execute([$player_id, $prize_amount, $now]);
     } else {
-        $pdo->prepare("UPDATE players SET gems=gems+? WHERE id=?")->execute([$prize_amount, $player_id]);
+        $pdo->prepare("UPDATE accounts SET gems=gems+? WHERE id=?")->execute([$prize_amount, $player_id]);
         $pdo->prepare("INSERT INTO transactions (player_id,delta_coins,delta_gems,reason,created_at) VALUES (?,0,?,'wheel_spin',?)")
             ->execute([$player_id, $prize_amount, $now]);
     }
@@ -82,7 +82,7 @@ try {
     fail('db error: ' . $e->getMessage(), 500);
 }
 
-$cur = $pdo->prepare("SELECT coins, gems FROM players WHERE id=?");
+$cur = $pdo->prepare("SELECT coins, gems FROM accounts WHERE id=?");
 $cur->execute([$player_id]);
 $b = $cur->fetch();
 ok([

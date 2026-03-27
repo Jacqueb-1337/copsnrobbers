@@ -166,6 +166,16 @@
     border: 1px solid rgba(255,255,255,0.08);
   }
   .v-dl-btn.old:hover { background: rgba(255,255,255,0.12); }
+  .v-dl-btn.below-min {
+    background: rgba(255,80,80,0.07); color: rgba(255,120,120,0.55);
+    border: 1px solid rgba(255,80,80,0.15); cursor: not-allowed; pointer-events: none;
+  }
+  .v-below-min-label {
+    margin-left: auto; padding: 7px 12px; font-size: 12px; font-weight: 600;
+    color: rgba(255,120,120,0.55); background: rgba(255,80,80,0.07);
+    border: 1px solid rgba(255,80,80,0.15); border-radius: 8px;
+    white-space: nowrap; cursor: not-allowed;
+  }
   .v-changelog { font-size: 13px; color: var(--muted); line-height: 1.55; }
 
   /* ── Loading / error ─────────────────────────────────── */
@@ -263,6 +273,17 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+function compareVersions(a, b) {
+  const pa = String(a || '0').split('.').map(Number);
+  const pb = String(b || '0').split('.').map(Number);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] || 0, nb = pb[i] || 0;
+    if (na !== nb) return na < nb ? -1 : 1;
+  }
+  return 0;
+}
+
 function latestVersion(mod) {
   return mod.latestVersion || (mod.versions && mod.versions[0] && mod.versions[0].version) || '';
 }
@@ -314,15 +335,22 @@ function showDetail(idx) {
   const versionsHtml = versions.map((v, i) => {
     const isLatest = i === 0;
     const canDownload = isLatest || !mod.latestOnly;
+    const belowMin = mod.minVersion && compareVersions(v.version, mod.minVersion) < 0;
+    let dlHtml = '';
+    if (!canDownload) {
+      // latestOnly restriction — no button at all
+    } else if (belowMin) {
+      dlHtml = `<span class="v-below-min-label" title="Minimum required version is v${esc(mod.minVersion)}">⛔ Below min v${esc(mod.minVersion)}</span>`;
+    } else if (v.url) {
+      dlHtml = `<a class="v-dl-btn ${isLatest ? '' : 'old'}" ${dlAttr(v.url, mod.filename)} onclick="event.stopPropagation()">⬇ Download</a>`;
+    }
     return `
       <div class="version-row ${isLatest ? 'is-latest' : ''}">
         <div class="version-row-top">
           <span class="v-num">v${esc(v.version)}</span>
           ${isLatest ? '<span class="v-latest-badge">Latest</span>' : ''}
           ${!isLatest && mod.latestOnly ? '<span class="v-latest-only-label">latest version only</span>' : ''}
-          ${canDownload && v.url
-            ? `<a class="v-dl-btn ${isLatest ? '' : 'old'}" ${dlAttr(v.url, mod.filename)} onclick="event.stopPropagation()">⬇ Download</a>`
-            : ''}
+          ${dlHtml}
         </div>
         ${v.changelog ? `<div class="v-changelog">${esc(v.changelog)}</div>` : ''}
       </div>`;
