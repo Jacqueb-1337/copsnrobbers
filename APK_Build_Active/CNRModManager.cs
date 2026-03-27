@@ -61,12 +61,63 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.0.0";
+        public  const string Version        = "1.3.0";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
+        public  static bool  IsOpen         = false;
 
-        private static bool _loaded = false;
+        private static bool      _loaded       = false;
+        private static FieldInfo _ecoOpenFI    = null;   // CNRMods.EconomyHook.ModManagerOpen
+        private static bool      _ecoFIChecked = false;
+
+        // Sets EconomyHook.ModManagerOpen in CNRMod via reflection.
+        // Called whenever IsOpen changes so CNRMod can hide its IMGUI buttons.
+        internal static void SetEcoHookOpen(bool open)
+        {
+            if (!_ecoFIChecked)
+            {
+                _ecoFIChecked = true;
+                try
+                {
+                    Assembly myAsm = typeof(ModManagerEntry).Assembly;
+                    foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        if (asm == myAsm) continue;
+                        Type t = asm.GetType("CNRMods.EconomyHook");
+                        if (t == null) continue;
+                        _ecoOpenFI = t.GetField("ModManagerOpen",
+                            BindingFlags.Public | BindingFlags.Static);
+                        break;
+                    }
+                }
+                catch { }
+            }
+            try { if (_ecoOpenFI != null) _ecoOpenFI.SetValue(null, open); } catch { }
+        }
+
+        // Called by CNRMod's multiplayer dialog "Open Mod Manager" button.
+        public static void OpenWindow()
+        {
+            try
+            {
+                // Find the ModManagerHook MonoBehaviour instance and call its OpenWindow()
+                foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    Type t = asm.GetType("CNRModManager.ModManagerHook");
+                    if (t == null) continue;
+                    UnityEngine.Object[] hooks = UnityEngine.Object.FindObjectsOfType(t);
+                    if (hooks != null && hooks.Length > 0)
+                    {
+                        MethodInfo m = t.GetMethod("OpenWindowPublic",
+                            BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                        if (m != null) { m.Invoke(hooks[0], null); }
+                    }
+                    break;
+                }
+            }
+            catch { }
+        }
 
         // Called by CNRMod's DLL scanner
         public static void Load()
@@ -207,6 +258,7 @@ namespace CNRModManager
             public string name;
             public string description;
             public string latestVersion;
+            public string minVersion;
             public string filename;
             public string latestUrl;
             public bool   latestOnly;
@@ -217,6 +269,25 @@ namespace CNRModManager
         private bool   _browseFetching     = false;
         private string _statusMsg          = "";   // shared download / action feedback
         private int    _detailModIdx       = -1;    // -1=list view, >=0=detail for that index
+
+        // ── Auto-update / update check ────────────────────────────────────────
+        private const string PREF_AU_PREFIX  = "CNRModMgr_AU_"; // auto-update per mod (int 0/1, default 1)
+        private const string PREF_IV_PREFIX  = "CNRModMgr_IV_"; // last-installed version per mod
+
+        private List<RepoMod> _pendingUpdates        = new List<RepoMod>(); // outdated mods w/ au=true
+        private bool          _updateBannerDismissed = false;
+        private bool          _autoFetchDone         = false;  // startup repo fetch, once per session
+
+        // ── Toast notification ────────────────────────────────────────────────
+        private string _toastMsg   = "";
+        private float  _toastUntil = 0f;
+
+        // ── Batch update ──────────────────────────────────────────────────────
+        private bool          _batchRunning      = false;
+        private int           _batchTotal        = 0;
+        private int           _batchDone         = 0;
+        private List<RepoMod> _batchQueue        = new List<RepoMod>();
+        private bool          _batchNeedsRestart = false;
 
         // ── Repos tab data ────────────────────────────────────────────────────
         private List<string> _repos      = new List<string>();
@@ -229,6 +300,12 @@ namespace CNRModManager
             _scene = Application.loadedLevelName ?? "";
             if (_scene == "MainMenu") PatchMenu();
             LoadRepoList();
+            // Silent background fetch on startup to detect available updates
+            if (!_autoFetchDone && _repos.Count > 0)
+            {
+                _autoFetchDone = true;
+                StartCoroutine(FetchBrowse(_repos[0]));
+            }
         }
 
         private void OnLevelWasLoaded(int level)
@@ -238,6 +315,8 @@ namespace CNRModManager
             _nguiCameras = null;
             _nguiBlocked = false;
             _showWindow  = false;
+            ModManagerEntry.IsOpen = false;
+            ModManagerEntry.SetEcoHookOpen(false);
             if (_scene == "MainMenu") PatchMenu();
         }
 
@@ -283,6 +362,7 @@ namespace CNRModManager
             if (_showWindow)
             {
                 DrawWindow(vw, vh);
+                DrawToast(vw, vh);
                 // Eat all pointer events so NGUI doesn't see them
                 if (Event.current.isMouse || Event.current.isKey)
                     Event.current.Use();
@@ -293,8 +373,10 @@ namespace CNRModManager
             float btnW = 110f, btnH = 26f;
             float btnX = vw - btnW - 6f;
             float btnY = 6f;
-            if (GUI.Button(new Rect(btnX, btnY, btnW, btnH), "Mod Manager",
-                MakeBtnStyle(13, new Color(0.4f, 0.8f, 1f))))
+            int    updCnt  = _pendingUpdates != null ? _pendingUpdates.Count : 0;
+            string mmLabel = updCnt > 0 ? "Mods (" + updCnt + " \u25cf)" : "Mod Manager";
+            if (GUI.Button(new Rect(btnX, btnY, btnW, btnH), mmLabel,
+                MakeBtnStyle(13, updCnt > 0 ? new Color(1f, 0.85f, 0.3f) : new Color(0.4f, 0.8f, 1f))))
             {
                 if (Time.unscaledTime - _lastToggle > 0.3f)
                 {
@@ -302,17 +384,23 @@ namespace CNRModManager
                     OpenWindow();
                 }
             }
+            DrawToast(vw, vh);
         }
 
         private void OpenWindow()
         {
             _showWindow = true;
+            ModManagerEntry.IsOpen = true;
+            ModManagerEntry.SetEcoHookOpen(true);
             _scroll     = Vector2.zero;
             _statusMsg  = "";
             RefreshInstalledMods();
             if (_tab == 1 && _browseMods.Count == 0 && !_browseFetching)
                 StartFetchBrowse();
         }
+
+        // Called via reflection by ModManagerEntry.OpenWindow()
+        public void OpenWindowPublic() { OpenWindow(); }
 
         // ─────────────────────────────────────────────────────────────────────
         // INSTALLED TAB
@@ -327,8 +415,8 @@ namespace CNRModManager
                 {
                     string fn  = Path.GetFileName(path);
                     string dn  = Path.GetFileNameWithoutExtension(fn);
-                    string ver = GetRegisteredVersion(dn);
-                    if (ver == null) ver = "?";
+                    string ver = GetInstalledVersion(fn);
+                    if (string.IsNullOrEmpty(ver)) ver = "?";
                     InstalledMod im;
                     im.filename    = fn;
                     im.displayName = dn;
@@ -443,6 +531,7 @@ namespace CNRModManager
                             mod.description   = ParseJsonStr(obj, "description");
                             string latVer     = ParseJsonStr(obj, "latestVersion");
                             mod.latestVersion = !string.IsNullOrEmpty(latVer) ? latVer : ParseJsonStr(obj, "version");
+                            mod.minVersion    = ParseJsonStr(obj, "minVersion");
                             mod.filename      = ParseJsonStr(obj, "filename");
                             string latUrl     = ParseJsonStr(obj, "latestUrl");
                             mod.latestUrl     = !string.IsNullOrEmpty(latUrl) ? latUrl : ParseJsonStr(obj, "url");
@@ -463,6 +552,7 @@ namespace CNRModManager
                 }
                 _browseStatus = _browseMods.Count > 0 ? "" : "No mods found in repo";
                 ModManagerEntry.Log("ParseRepo: " + _browseMods.Count + " mods");
+                CheckForUpdates();
             }
             catch (Exception ex)
             {
@@ -540,7 +630,7 @@ namespace CNRModManager
             return -1;
         }
 
-        private IEnumerator DownloadMod(string displayName, string filename, string url)
+        private IEnumerator DownloadMod(string displayName, string filename, string url, string version)
         {
             _statusMsg = "Downloading " + displayName + "...";
             string dest = Path.Combine(ModManagerEntry.ModsDir, filename);
@@ -558,9 +648,17 @@ namespace CNRModManager
                 if (!Directory.Exists(ModManagerEntry.ModsDir))
                     Directory.CreateDirectory(ModManagerEntry.ModsDir);
                 File.WriteAllBytes(dest, www.bytes);
-                _statusMsg = displayName + " installed! Restart the app to load.";
                 ModManagerEntry.Log("Download OK: " + dest + " (" + www.bytes.Length + " bytes)");
+                if (!string.IsNullOrEmpty(version))
+                {
+                    PlayerPrefs.SetString(PREF_IV_PREFIX + filename, version);
+                    PlayerPrefs.SetInt(PREF_AU_PREFIX + filename, 1);
+                    PlayerPrefs.Save();
+                }
                 RefreshInstalledMods();
+                _statusMsg  = "";
+                _toastMsg   = displayName + " installed — restart game to apply!";
+                _toastUntil = Time.unscaledTime + 4f;
             }
             catch (Exception ex)
             {
@@ -572,14 +670,164 @@ namespace CNRModManager
         // ─────────────────────────────────────────────────────────────────────
         // DRAWING
         // ─────────────────────────────────────────────────────────────────────
+        // AUTO-UPDATE HELPERS
+        private bool GetAutoUpdate(string filename)
+        {
+            return PlayerPrefs.GetInt(PREF_AU_PREFIX + filename, 1) != 0;
+        }
+
+        private void SetAutoUpdate(string filename, bool val)
+        {
+            PlayerPrefs.SetInt(PREF_AU_PREFIX + filename, val ? 1 : 0);
+            PlayerPrefs.Save();
+        }
+
+        private string GetInstalledVersion(string filename)
+        {
+            // 1. PlayerPrefs (set on every download via Mod Manager)
+            string stored = PlayerPrefs.GetString(PREF_IV_PREFIX + filename, "");
+            if (!string.IsNullOrEmpty(stored)) return stored;
+
+            // 2. CNRMod's RegisteredMods reflection dict
+            string dn  = Path.GetFileNameWithoutExtension(filename);
+            string reg = GetRegisteredVersion(dn);
+            if (!string.IsNullOrEmpty(reg)) return reg;
+
+            // 3. Scan the DLL assembly itself for a public static/const Version string
+            try
+            {
+                string dllPath = Path.Combine(ModManagerEntry.ModsDir, filename);
+                if (File.Exists(dllPath))
+                {
+                    Assembly asm = Assembly.Load(File.ReadAllBytes(dllPath));
+                    foreach (Type t in asm.GetTypes())
+                    {
+                        // const string Version = "x.y.z"  (IsLiteral = true for const)
+                        FieldInfo fi = t.GetField("Version",
+                            BindingFlags.Public | BindingFlags.Static);
+                        if (fi != null && fi.FieldType == typeof(string))
+                        {
+                            object v = fi.GetValue(null);
+                            if (v != null && !string.IsNullOrEmpty(v.ToString()))
+                                return v.ToString();
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return "";
+        }
+
+        private string GetMinVersionFromRepo(string filename)
+        {
+            foreach (RepoMod rm in _browseMods)
+                if (rm.filename.Equals(filename, StringComparison.OrdinalIgnoreCase))
+                    return rm.minVersion ?? "";
+            return "";
+        }
+
+        private string GetLatestVersionFromRepo(string filename)
+        {
+            foreach (RepoMod rm in _browseMods)
+                if (rm.filename.Equals(filename, StringComparison.OrdinalIgnoreCase))
+                    return rm.latestVersion;
+            return "";
+        }
+
+        private void CheckForUpdates()
+        {
+            _pendingUpdates.Clear();
+            foreach (RepoMod mod in _browseMods)
+            {
+                if (!File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename))) continue;
+                string iv = GetInstalledVersion(mod.filename);
+                // Always queue if below minimum version (regardless of auto-update setting)
+                bool belowMin = !string.IsNullOrEmpty(mod.minVersion)
+                                && !string.IsNullOrEmpty(iv)
+                                && CompareVersions(iv, mod.minVersion) < 0;
+                bool outdated = !string.IsNullOrEmpty(iv) && iv != mod.latestVersion;
+                if (belowMin || (outdated && GetAutoUpdate(mod.filename)))
+                    _pendingUpdates.Add(mod);
+            }
+            _updateBannerDismissed = false;
+            ModManagerEntry.Log("CheckForUpdates: " + _pendingUpdates.Count + " update(s)");
+        }
+
+        // Returns -1 / 0 / +1  (a < b / a == b / a > b)  for semver strings.
+        private static int CompareVersions(string a, string b)
+        {
+            if (a == b) return 0;
+            string[] pa = a.TrimStart('v').Split('.');
+            string[] pb = b.TrimStart('v').Split('.');
+            int len = Math.Max(pa.Length, pb.Length);
+            for (int i = 0; i < len; i++)
+            {
+                int na, nb;
+                na = i < pa.Length && int.TryParse(pa[i], out na) ? na : 0;
+                nb = i < pb.Length && int.TryParse(pb[i], out nb) ? nb : 0;
+                if (na != nb) return na < nb ? -1 : 1;
+            }
+            return 0;
+        }
+
+        private void StartBatchUpdate()
+        {
+            if (_batchRunning) return;
+            _batchQueue.Clear();
+            foreach (RepoMod m in _pendingUpdates) _batchQueue.Add(m);
+            _batchTotal        = _batchQueue.Count;
+            _batchDone         = 0;
+            _batchNeedsRestart = false;
+            StartCoroutine(BatchUpdateCoroutine());
+        }
+
+        private IEnumerator BatchUpdateCoroutine()
+        {
+            _batchRunning = true;
+            for (int i = 0; i < _batchQueue.Count; i++)
+            {
+                RepoMod mod = _batchQueue[i];
+                yield return StartCoroutine(
+                    DownloadMod(mod.name, mod.filename, mod.latestUrl, mod.latestVersion));
+                _batchDone++;
+            }
+            _batchRunning          = false;
+            _batchNeedsRestart     = true;
+            _updateBannerDismissed = true;
+            _pendingUpdates.Clear();
+            _statusMsg  = "";
+            _toastMsg   = "All mods updated \u2014 restart game to apply!";
+            _toastUntil = Time.unscaledTime + 6f;
+        }
+
+        private void DrawToast(float vw, float vh)
+        {
+            if (string.IsNullOrEmpty(_toastMsg)) return;
+            if (Time.unscaledTime >= _toastUntil) { _toastMsg = ""; return; }
+            float alpha = Mathf.Clamp01((_toastUntil - Time.unscaledTime) / 0.8f);
+            float th = 40f, tw = Mathf.Min(vw - 40f, 400f);
+            float tx = (vw - tw) * 0.5f, ty = vh - th - 24f;
+            Color prev = GUI.color;
+            GUI.color = new Color(0.06f, 0.38f, 0.14f, alpha * 0.95f);
+            GUI.DrawTexture(new Rect(tx, ty, tw, th), Texture2D.whiteTexture);
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+            GUIStyle tst = MakeLabelStyle(13, Color.white);
+            tst.alignment = TextAnchor.MiddleCenter;
+            tst.wordWrap  = false;
+            GUI.Label(new Rect(tx, ty, tw, th), _toastMsg, tst);
+            GUI.color = prev;
+        }
+
         private void DrawWindow(float vw, float vh)
         {
             // Dim overlay
             GUI.color = new Color(0f, 0f, 0f, 0.88f);
             GUI.DrawTexture(new Rect(0, 0, vw, vh), Texture2D.whiteTexture);
             GUI.color = Color.white;
-            // Eat taps behind window
-            if (GUI.Button(new Rect(0, 0, vw, vh), GUIContent.none, GUIStyle.none)) { }
+            // (NGUI cameras are disabled while open, so no blocker button needed —
+            //  a full-screen invisible Button drawn first would steal all hotControl and
+            //  prevent every real button in the window from ever receiving clicks.)
 
             float winW = Mathf.Min(560f, vw - 20f);
             float winH = vh - 40f;
@@ -601,8 +849,10 @@ namespace CNRModManager
             if (GUI.Button(new Rect(winX + winW - 68f, winY + 5f, 60f, 24f),
                 "Close", MakeBtnStyle(14, new Color(1f, 0.4f, 0.4f))))
             {
-                _showWindow   = false;
-                _detailModIdx = -1;
+                _showWindow            = false;
+                ModManagerEntry.IsOpen = false;
+                ModManagerEntry.SetEcoHookOpen(false);
+                _detailModIdx          = -1;
                 return;
             }
 
@@ -657,23 +907,39 @@ namespace CNRModManager
             {
                 foreach (InstalledMod m in _installedMods)
                 {
+                    string latestVer  = GetLatestVersionFromRepo(m.filename);
+                    string minVer     = GetMinVersionFromRepo(m.filename);
+                    string instdVer   = GetInstalledVersion(m.filename);
+                    bool belowMin     = !string.IsNullOrEmpty(minVer)
+                                       && !string.IsNullOrEmpty(instdVer)
+                                       && CompareVersions(instdVer, minVer) < 0;
+                    bool hasUpdate    = !string.IsNullOrEmpty(latestVer)
+                                       && !string.IsNullOrEmpty(instdVer)
+                                       && instdVer != latestVer;
+                    bool core = m.filename.Equals("CNRMod.dll", StringComparison.OrdinalIgnoreCase);
+
+                    GUILayout.BeginVertical(GUI.skin.box);
+
+                    // Row 1: name, version, update badge, action
                     GUILayout.BeginHorizontal();
                     GUIStyle ns = MakeLabelStyle(13, Color.white);
                     ns.fontStyle = FontStyle.Bold;
-                    GUILayout.Label(m.displayName, ns, GUILayout.Width(190f));
+                    GUILayout.Label(m.displayName, ns, GUILayout.Width(160f));
                     GUILayout.Label("v" + m.version,
-                        MakeLabelStyle(12, new Color(0.7f, 0.9f, 0.7f)), GUILayout.Width(70f));
+                        MakeLabelStyle(12, new Color(0.7f, 0.9f, 0.7f)), GUILayout.Width(60f));
                     GUILayout.FlexibleSpace();
-                    bool core = m.filename.Equals("CNRMod.dll",        StringComparison.OrdinalIgnoreCase) ||
-                                m.filename.Equals("CNRModManager.dll", StringComparison.OrdinalIgnoreCase);
+                    if (hasUpdate || belowMin)
+                        GUILayout.Label(
+                            belowMin ? "v" + latestVer + " REQUIRED" : "v" + latestVer + " avail",
+                            MakeLabelStyle(11, belowMin ? new Color(1f, 0.35f, 0.35f) : new Color(1f, 0.75f, 0.3f)));
                     if (core)
                     {
                         GUILayout.Label("(core)", MakeLabelStyle(11, new Color(0.55f, 0.55f, 0.55f)),
-                            GUILayout.Width(60f));
+                            GUILayout.Width(50f));
                     }
                     else
                     {
-                        string fn = m.filename;   // capture for closure
+                        string fn = m.filename;
                         if (GUILayout.Button("Remove",
                             MakeBtnStyle(11, new Color(1f, 0.4f, 0.4f)),
                             GUILayout.Height(22f), GUILayout.Width(70f)))
@@ -688,7 +954,18 @@ namespace CNRModManager
                         }
                     }
                     GUILayout.EndHorizontal();
-                    GUILayout.Space(2f);
+
+                    // Row 2: auto-update checkbox (non-core only)
+                    if (!core)
+                    {
+                        bool au    = GetAutoUpdate(m.filename);
+                        bool newAu = GUILayout.Toggle(au, " Auto-update",
+                            MakeToggleStyle(11, new Color(0.6f, 0.6f, 0.65f)));
+                        if (newAu != au) { SetAutoUpdate(m.filename, newAu); CheckForUpdates(); }
+                    }
+
+                    GUILayout.EndVertical();
+                    GUILayout.Space(3f);
                 }
             }
 
@@ -721,6 +998,46 @@ namespace CNRModManager
             }
             GUILayout.EndHorizontal();
             GUILayout.Space(4f);
+
+            // Update available banner
+            if (_pendingUpdates.Count > 0 && !_batchRunning && !_updateBannerDismissed)
+            {
+                GUILayout.BeginVertical(GUI.skin.box);
+                GUILayout.BeginHorizontal();
+                GUIStyle bannerSt = MakeLabelStyle(13, new Color(1f, 0.85f, 0.3f));
+                bannerSt.fontStyle = FontStyle.Bold;
+                GUILayout.Label(_pendingUpdates.Count + " update(s) available", bannerSt);
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Update All", MakeBtnStyle(13, new Color(0.3f, 0.9f, 0.5f)),
+                    GUILayout.Height(26f), GUILayout.Width(90f)))
+                    StartBatchUpdate();
+                if (GUILayout.Button("x", MakeBtnStyle(13, new Color(0.6f, 0.6f, 0.6f)),
+                    GUILayout.Height(26f), GUILayout.Width(26f)))
+                    _updateBannerDismissed = true;
+                GUILayout.EndHorizontal();
+                foreach (RepoMod pu in _pendingUpdates)
+                    GUILayout.Label("  - " + pu.name + "  ->  v" + pu.latestVersion,
+                        MakeLabelStyle(11, new Color(0.7f, 0.7f, 0.75f)));
+                GUILayout.EndVertical();
+                GUILayout.Space(6f);
+            }
+            if (_batchRunning)
+            {
+                GUILayout.Label("Updating... (" + _batchDone + " / " + _batchTotal + ")",
+                    MakeLabelStyle(13, new Color(0.4f, 0.8f, 1f)));
+                GUILayout.Space(4f);
+            }
+            if (_batchNeedsRestart && !_batchRunning)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("All mods updated!", MakeLabelStyle(13, new Color(0.4f, 1f, 0.5f)));
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Quit Game", MakeBtnStyle(13, new Color(1f, 0.4f, 0.4f)),
+                    GUILayout.Height(26f), GUILayout.Width(80f)))
+                    Application.Quit();
+                GUILayout.EndHorizontal();
+                GUILayout.Space(4f);
+            }
 
             if (_browseFetching)
             {
@@ -760,12 +1077,32 @@ namespace CNRModManager
                     GUILayout.Label(brief, MakeLabelStyle(12, new Color(0.8f, 0.8f, 0.8f)));
                 }
 
+                bool installed    = File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename));
+                string installedVer = installed ? GetInstalledVersion(mod.filename) : "";
+                bool isUpToDate   = installed && !string.IsNullOrEmpty(installedVer)
+                                    && installedVer == mod.latestVersion;
+
+                // Auto-update toggle row (only when installed)
+                if (installed)
+                {
+                    bool au = GetAutoUpdate(mod.filename);
+                    GUILayout.BeginHorizontal();
+                    bool newAu = GUILayout.Toggle(au, " Auto-update",
+                        MakeToggleStyle(11, new Color(0.65f, 0.65f, 0.7f)));
+                    if (newAu != au) { SetAutoUpdate(mod.filename, newAu); CheckForUpdates(); }
+                    if (!string.IsNullOrEmpty(installedVer))
+                    {
+                        GUILayout.FlexibleSpace();
+                        GUILayout.Label("v" + installedVer + " installed",
+                            MakeLabelStyle(11, isUpToDate
+                                ? new Color(0.4f, 1f, 0.5f)
+                                : new Color(1f, 0.75f, 0.3f)));
+                    }
+                    GUILayout.EndHorizontal();
+                }
+
                 GUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
-                bool installed = File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename));
-                if (installed)
-                    GUILayout.Label("Installed", MakeLabelStyle(12, new Color(0.4f, 1f, 0.5f)),
-                        GUILayout.Width(68f));
                 int captureIdx = bi;
                 if (GUILayout.Button("Details", MakeBtnStyle(12, new Color(0.55f, 0.7f, 1f)),
                     GUILayout.Height(24f), GUILayout.Width(66f)))
@@ -773,14 +1110,26 @@ namespace CNRModManager
                     _detailModIdx = captureIdx;
                     _scroll       = Vector2.zero;
                 }
-                string instLabel = installed ? "Update" : "Install";
-                Color  instCol   = installed ? new Color(0.4f, 0.8f, 1f) : new Color(0.3f, 0.9f, 0.5f);
-                string capName   = mod.name;
-                string capFile   = mod.filename;
-                string capUrl    = mod.latestUrl;
-                if (GUILayout.Button(instLabel, MakeBtnStyle(12, instCol),
-                    GUILayout.Height(24f), GUILayout.Width(68f)))
-                    StartCoroutine(DownloadMod(capName, capFile, capUrl));
+                string capName = mod.name;
+                string capFile = mod.filename;
+                string capUrl  = mod.latestUrl;
+                string capVer  = mod.latestVersion;
+                if (isUpToDate)
+                {
+                    GUI.enabled = false;
+                    GUILayout.Button("Up to date",
+                        MakeBtnStyle(12, new Color(0.4f, 0.55f, 0.4f)),
+                        GUILayout.Height(24f), GUILayout.Width(78f));
+                    GUI.enabled = true;
+                }
+                else
+                {
+                    string instLabel = installed ? "Update" : "Install";
+                    Color  instCol   = installed ? new Color(0.4f, 0.8f, 1f) : new Color(0.3f, 0.9f, 0.5f);
+                    if (GUILayout.Button(instLabel, MakeBtnStyle(12, instCol),
+                        GUILayout.Height(24f), GUILayout.Width(68f)))
+                        StartCoroutine(DownloadMod(capName, capFile, capUrl, capVer));
+                }
                 GUILayout.EndHorizontal();
 
                 GUILayout.EndVertical();
@@ -816,6 +1165,15 @@ namespace CNRModManager
                 GUILayout.Label("Installed", MakeLabelStyle(13, new Color(0.4f, 1f, 0.5f)),
                     GUILayout.Width(72f));
             GUILayout.EndHorizontal();
+
+            // Auto-update toggle
+            if (installedMod)
+            {
+                bool au = GetAutoUpdate(mod.filename);
+                bool newAu = GUILayout.Toggle(au, " Auto-update when updates are available",
+                    MakeToggleStyle(12, new Color(0.65f, 0.65f, 0.7f)));
+                if (newAu != au) { SetAutoUpdate(mod.filename, newAu); CheckForUpdates(); }
+            }
             GUILayout.Space(6f);
 
             // Full description
@@ -854,22 +1212,45 @@ namespace CNRModManager
                     GUILayout.Label("v" + ver.version + (isLatest ? "  (latest)" : ""), verSt);
                     GUILayout.FlexibleSpace();
 
+                    bool belowMin = !string.IsNullOrEmpty(mod.minVersion)
+                        && CompareVersions(ver.version, mod.minVersion) < 0;
+
                     if (mod.latestOnly && !isLatest)
                     {
                         GUILayout.Label("(latest only)",
                             MakeLabelStyle(11, new Color(0.5f, 0.5f, 0.55f)));
                     }
+                    else if (belowMin)
+                    {
+                        GUILayout.Label("< min v" + mod.minVersion,
+                            MakeLabelStyle(11, new Color(0.8f, 0.3f, 0.3f)));
+                    }
                     else
                     {
-                        string btnLbl = isLatest ? (installedMod ? "Update" : "Install") : "Download";
-                        Color  btnClr = isLatest
-                            ? (installedMod ? new Color(0.4f, 0.8f, 1f) : new Color(0.3f, 0.9f, 0.5f))
-                            : new Color(0.65f, 0.65f, 0.75f);
+                        string detInstalledVer = GetInstalledVersion(mod.filename);
+                        bool isThisVerInstalled = isLatest && installedMod
+                            && !string.IsNullOrEmpty(detInstalledVer)
+                            && detInstalledVer == mod.latestVersion;
                         string vUrl = ver.url;
                         string vTag = ver.version;
-                        if (GUILayout.Button(btnLbl, MakeBtnStyle(12, btnClr),
-                            GUILayout.Height(24f), GUILayout.Width(82f)))
-                            StartCoroutine(DownloadMod(mod.name + " v" + vTag, mod.filename, vUrl));
+                        if (isThisVerInstalled)
+                        {
+                            GUI.enabled = false;
+                            GUILayout.Button("Up to date",
+                                MakeBtnStyle(12, new Color(0.4f, 0.55f, 0.4f)),
+                                GUILayout.Height(24f), GUILayout.Width(82f));
+                            GUI.enabled = true;
+                        }
+                        else
+                        {
+                            string btnLbl = isLatest ? (installedMod ? "Update" : "Install") : "Download";
+                            Color  btnClr = isLatest
+                                ? (installedMod ? new Color(0.4f, 0.8f, 1f) : new Color(0.3f, 0.9f, 0.5f))
+                                : new Color(0.65f, 0.65f, 0.75f);
+                            if (GUILayout.Button(btnLbl, MakeBtnStyle(12, btnClr),
+                                GUILayout.Height(24f), GUILayout.Width(82f)))
+                                StartCoroutine(DownloadMod(mod.name + " v" + vTag, mod.filename, vUrl, vTag));
+                        }
                     }
                     GUILayout.EndHorizontal();
 
@@ -974,6 +1355,16 @@ namespace CNRModManager
             if (_font != null) s.font = _font;
             s.fontSize = size;
             s.normal.textColor = col;
+            return s;
+        }
+
+        private GUIStyle MakeToggleStyle(int size, Color col)
+        {
+            GUIStyle s = new GUIStyle(GUI.skin.toggle);
+            if (_font != null) s.font = _font;
+            s.fontSize = size;
+            s.normal.textColor   = col;
+            s.onNormal.textColor = col;
             return s;
         }
     }

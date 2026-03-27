@@ -15,7 +15,7 @@ header('Content-Type: text/html; charset=utf-8');
 
 // ---- List players -----------------------------------------------------------
 if (isset($_GET['list'])) {
-    $rows = $pdo->query("SELECT id, display_name, coins, gems, registered_at FROM players ORDER BY coins DESC")->fetchAll();
+    $rows = $pdo->query("SELECT id, display_name, coins, gems, registered_at FROM accounts ORDER BY coins DESC")->fetchAll();
     echo "<html><head><style>body{font-family:monospace;background:#0d1117;color:#c9d1d9;padding:20px}table{border-collapse:collapse}td,th{padding:4px 12px;border-bottom:1px solid #333}th{color:#58a6ff}a{color:#3fb950}</style></head><body>";
     echo "<h2>Players (" . count($rows) . ")</h2><table><tr><th>ID</th><th>Name</th><th>Coins</th><th>Gems</th><th>Registered</th><th>Grant</th></tr>";
     foreach ($rows as $r) {
@@ -38,8 +38,7 @@ if ($id === '') {
     exit;
 }
 
-$row = $pdo->prepare("SELECT * FROM players WHERE id=?")->execute([$id]) ? $pdo->prepare("SELECT * FROM players WHERE id=?")->query() : null;
-$stmt = $pdo->prepare("SELECT * FROM players WHERE id=?");
+$stmt = $pdo->prepare("SELECT * FROM accounts WHERE id=?");
 $stmt->execute([$id]);
 $player = $stmt->fetch();
 
@@ -60,7 +59,7 @@ elseif (isset($_GET['gems']))  $newGems += (int)$_GET['gems'];
 $newCoins = max(0, $newCoins);
 $newGems  = max(0, $newGems);
 
-$pdo->prepare("UPDATE players SET coins=?, gems=?, last_seen=? WHERE id=?")
+$pdo->prepare("UPDATE accounts SET coins=?, gems=?, last_seen=? WHERE id=?")
     ->execute([$newCoins, $newGems, time(), $id]);
 
 $deltaCoins = $newCoins - (int)$player['coins'];

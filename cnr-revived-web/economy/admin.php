@@ -118,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = 'Subject is required.'; $flash_ok = false;
         } elseif ($pid === '*') {
             // Global broadcast — insert a row for every registered player
-            $all = $pdo->query("SELECT id FROM players")->fetchAll();
+            $all = $pdo->query("SELECT id FROM accounts")->fetchAll();
             $stmt = $pdo->prepare(
                 "INSERT INTO player_mail (player_id, subject, body, coins, gems, claimed, sent_at)
                  VALUES (?, ?, ?, ?, ?, 0, ?)"
@@ -131,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($pid === '') {
             $flash = 'Select a player (or All Players).'; $flash_ok = false;
         } else {
-            $row = $pdo->prepare("SELECT id FROM players WHERE id = ?");
+            $row = $pdo->prepare("SELECT id FROM accounts WHERE id = ?");
             $row->execute([$pid]);
             if (!$row->fetch()) {
                 $flash = 'Player not found.'; $flash_ok = false;
@@ -257,17 +257,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $gems  = (int)($_POST['gems']     ?? 0);
         $mode  = $_POST['mode'] ?? 'add';   // add | set
 
-        $row = $pdo->prepare("SELECT id, display_name FROM players WHERE id = ?");
+        $row = $pdo->prepare("SELECT id, display_name FROM accounts WHERE id = ?");
         $row->execute([$pid]);
         $player = $row->fetch();
         if (!$player) {
             $flash = 'Player not found.'; $flash_ok = false;
         } else {
             if ($mode === 'set') {
-                $pdo->prepare("UPDATE players SET coins = ?, gems = ? WHERE id = ?")
+                $pdo->prepare("UPDATE accounts SET coins = ?, gems = ? WHERE id = ?")
                     ->execute([$coins, $gems, $pid]);
             } else {
-                $pdo->prepare("UPDATE players SET coins = coins + ?, gems = gems + ? WHERE id = ?")
+                $pdo->prepare("UPDATE accounts SET coins = coins + ?, gems = gems + ? WHERE id = ?")
                     ->execute([$coins, $gems, $pid]);
             }
             $pdo->prepare(
@@ -281,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ── Query data ────────────────────────────────────────────────────────────────
-$total_players = (int)$pdo->query("SELECT COUNT(*) FROM players")->fetchColumn();
+$total_players = (int)$pdo->query("SELECT COUNT(*) FROM accounts")->fetchColumn();
 $total_tx      = (int)$pdo->query("SELECT COUNT(*) FROM transactions")->fetchColumn();
 $total_mail    = (int)$pdo->query("SELECT COUNT(*) FROM player_mail")->fetchColumn();
 $unread_mail   = (int)$pdo->query("SELECT COUNT(*) FROM player_mail WHERE claimed=0")->fetchColumn();
@@ -293,19 +293,19 @@ $content_items = $pdo->query(
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $players = $pdo->query(
-    "SELECT id, display_name, coins, gems, last_seen FROM players ORDER BY last_seen DESC LIMIT 200"
+    "SELECT id, display_name, coins, gems, last_seen FROM accounts ORDER BY last_seen DESC LIMIT 200"
 )->fetchAll();
 
 $recent_mail = $pdo->query("
     SELECT m.id, m.sent_at, m.subject, m.coins AS m_coins, m.gems AS m_gems,
            m.claimed, p.display_name
-      FROM player_mail m JOIN players p ON p.id = m.player_id
+      FROM player_mail m JOIN accounts p ON p.id = m.player_id
      ORDER BY m.id DESC LIMIT 100
 ")->fetchAll();
 
 $recent_tx = $pdo->query("
     SELECT t.created_at, p.display_name, t.delta_coins, t.delta_gems, t.reason
-      FROM transactions t JOIN players p ON p.id = t.player_id
+      FROM transactions t JOIN accounts p ON p.id = t.player_id
      ORDER BY t.id DESC LIMIT 100
 ")->fetchAll();
 
