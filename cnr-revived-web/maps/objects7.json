@@ -1,0 +1,7 @@
+[
+  {"path":"_UIDrawCall [Font Material]","mesh":"Mesh0 for Font Material","mat":"Font Material","color":[255,255,255],"pos":[1.81,-0.50,0.00],"size":[0.44,0.04,0.00]},
+  {"path":"_UIDrawCall [Font Material]","mesh":"Mesh0 for Font Material","mat":"Font Material","color":[255,255,255],"pos":[-0.13,-0.24,0.00],"size":[4.05,0.81,0.00]},
+  {"path":"_UIDrawCall [ChristmasAppend]","mesh":"Mesh0 for ChristmasAppend","mat":"ChristmasAppend","color":[0,0,0],"pos":[0.00,-0.61,0.00],"size":[4.08,0.17,0.00]},
+  {"path":"_UIDrawCall [MenuSystem2]","mesh":"Mesh0 for MenuSystem2","mat":"MenuSystem2","color":[0,0,0],"pos":[0.05,-0.41,0.00],"size":[1.17,1.13,0.00]},
+  {"path":"_UIDrawCall [MenuSystem]","mesh":"Mesh1 for MenuSystem","mat":"MenuSystem","color":[0,0,0],"pos":[-0.55,-0.26,0.00],"size":[1766.33,500.00,0.00]}
+]
