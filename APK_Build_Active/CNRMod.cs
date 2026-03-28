@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.7";
+        public const  string Version = "2.0.11";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -2966,6 +2966,10 @@ namespace CNRMods
         private bool        _showMpDialog     = false; // show "requires mods" dialog
         private bool        _mpMissingCnr     = false;
         private bool        _mpMissingStg     = false;
+        private bool        _mpMissingMgr     = false;
+        private bool        _mpNeedsUpdate    = false;  // required updates pending (from CNRModManager)
+        private bool        _mpPendingBlock   = false;  // survives scene reload — trigger dialog on next MainMenu
+        private bool        _mpPendingIsUpdate = false; // true=update required  false=dll missing
         private static FieldInfo _modMgrShowFI = null;  // cached: ModManagerHook._showWindow (to trigger open)
         private static readonly string _SettingsIconB64 =
             "iVBORw0KGgoAAAANSUhEUgAAAwEAAAK1CAYAAACQM+LCAAAAAXNSR0IArs4c6QAAAARzQklUCAgICHwIZIgAACAASURBVHic7L3d" +
@@ -6626,10 +6630,58 @@ namespace CNRMods
             _goAgreementBtn   = null;
             _goMultiplayerBtn = null;
             _showMpDialog     = false;
+            _mpNeedsUpdate    = false;
             _ecoNguiCam  = null;
             _nguiCameras = null;   // invalidate cache; new UICamera instances after scene load
             _nguiBlocked = false;
-            if (_ecoScene == "MainMenu") StartCoroutine(EcoPatchDelay());
+            if (_ecoScene == "MainMenu")
+            {
+                // If we were bounced back from MultiplayerSelect, show block dialog
+                if (_mpPendingBlock)
+                {
+                    _mpNeedsUpdate     = _mpPendingIsUpdate;
+                    _showMpDialog      = true;
+                    _mpPendingBlock    = false;
+                    _mpPendingIsUpdate = false;
+                }
+                StartCoroutine(EcoPatchDelay());
+            }
+            else if (_ecoScene == "MultiplayerSelect")
+            {
+                CheckMpModsAndBlock();
+            }
+        }
+
+        private void CheckMpModsAndBlock()
+        {
+            // Check CNRModManager is loaded and all required mods are up to date
+            bool mgrLoaded = false;
+            bool hasRequired = false;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.GetType("CNRModManager.ModManagerEntry") == null) continue;
+                mgrLoaded = true;
+                Type hookType = asm.GetType("CNRModManager.ModManagerHook");
+                if (hookType != null)
+                {
+                    FieldInfo fi = hookType.GetField("HasRequiredPending",
+                        BindingFlags.Public | BindingFlags.Static);
+                    if (fi != null) hasRequired = (bool)(object)fi.GetValue(null);
+                }
+                break;
+            }
+            if (!mgrLoaded)
+            {
+                _mpMissingCnr = false; _mpMissingStg = false; _mpMissingMgr = true;
+                _mpPendingBlock = true; _mpPendingIsUpdate = false;
+                Application.LoadLevel("MainMenu");
+                return;
+            }
+            if (hasRequired)
+            {
+                _mpPendingBlock = true; _mpPendingIsUpdate = true;
+                Application.LoadLevel("MainMenu");
+            }
         }
 
         private IEnumerator EcoPatchDelay()
@@ -6637,6 +6689,16 @@ namespace CNRMods
             yield return null;
             yield return null;
             EcoPatchMainMenu();
+            // Retry finding the multiplayer button if NGUI wasn't fully spawned yet
+            int retries = 0;
+            while (_goMultiplayerBtn == null && retries < 30)
+            {
+                yield return null;
+                yield return null;
+                retries++;
+                _ecoPatched = false;
+                EcoPatchMainMenu();
+            }
         }
 
         private void EcoPatchMainMenu()
@@ -6754,9 +6816,18 @@ namespace CNRMods
             }
 
             if (_ecoScene != "MainMenu") return;
-            if (!_ecoPatched) return;
             float sc = Screen.width / ECO_REF_W;
             GUIUtility.ScaleAroundPivot(new Vector2(sc, sc), Vector2.zero);
+
+            if (_showMpDialog)
+            {
+                EcoDrawMpRequiredDialog();
+                if (Event.current.type != EventType.Repaint && Event.current.type != EventType.Layout)
+                    Event.current.Use();
+                return;
+            }
+
+            if (!_ecoPatched) return;
 
             if (_showEcoMail)
             {
@@ -6768,14 +6839,6 @@ namespace CNRMods
             if (_showEcoAccount)
             {
                 EcoDrawAccountOverlay();
-                if (Event.current.type != EventType.Repaint && Event.current.type != EventType.Layout)
-                    Event.current.Use();
-                return;
-            }
-
-            if (_showMpDialog)
-            {
-                EcoDrawMpRequiredDialog();
                 if (Event.current.type != EventType.Repaint && Event.current.type != EventType.Layout)
                     Event.current.Use();
                 return;
@@ -6910,10 +6973,11 @@ namespace CNRMods
         }
 
         // ── Multiplayer blocked dialog ────────────────────────────────────────
-        public void ShowMpMissingDialog(bool cnrOk, bool stgOk)
+        public void ShowMpMissingDialog(bool cnrOk, bool stgOk, bool mgrOk)
         {
             _mpMissingCnr = !cnrOk;
             _mpMissingStg = !stgOk;
+            _mpMissingMgr = !mgrOk;
             _showMpDialog = true;
         }
 
@@ -6940,7 +7004,6 @@ namespace CNRMods
             float vw = ECO_REF_W;
             float vh = Screen.height / (Screen.width / ECO_REF_W);
             // Dim background
-            GUI.Button(new Rect(0, 0, vw, vh), GUIContent.none, GUIStyle.none);
             GUI.color = new Color(0f, 0f, 0f, 0.88f);
             GUI.DrawTexture(new Rect(0, 0, vw, vh), Texture2D.whiteTexture);
             GUI.color = Color.white;
@@ -6948,9 +7011,8 @@ namespace CNRMods
             // Dialog box
             float dw = Mathf.Min(vw * 0.90f, 420f);
             float dh = 210f;
-            // Show "Open Mod Manager" button if CNRModManager is loaded in the app domain.
             bool modMgrLoaded = false;
-            if (!modMgrLoaded) { foreach (var a in AppDomain.CurrentDomain.GetAssemblies()) { if (a.GetType("CNRModManager.ModManagerEntry") != null) { modMgrLoaded = true; break; } } }
+            foreach (var a in AppDomain.CurrentDomain.GetAssemblies()) { if (a.GetType("CNRModManager.ModManagerEntry") != null) { modMgrLoaded = true; break; } }
             if (modMgrLoaded) dh += 38f;
             float dx = (vw - dw) * 0.5f;
             float dy = (vh - dh) * 0.5f;
@@ -6961,27 +7023,34 @@ namespace CNRMods
 
             float px = dx + 16f, py = dy + 14f, pw = dw - 32f;
 
-            // Title
             GUIStyle titleSt = EcoBtnSt(17, new Color(1f, 0.65f, 0.2f));
             titleSt.fontStyle = FontStyle.Bold;
             titleSt.alignment = TextAnchor.MiddleLeft;
             GUI.Label(new Rect(px, py, pw, 26f), "Multiplayer requires mods", titleSt);
             py += 30f;
 
-            // Body
             GUIStyle bodySt = EcoBtnSt(13, Color.white);
             bodySt.alignment = TextAnchor.UpperLeft;
             bodySt.wordWrap  = true;
-            string body = "The following mod" + ((_mpMissingCnr && _mpMissingStg) ? "s are" : " is")
-                + " required to play multiplayer:\n";
-            if (_mpMissingCnr) body += "  \u2022 CNRMod.dll\n";
-            if (_mpMissingStg) body += "  \u2022 CNRSettingsMod.dll\n";
-            body += "\nInstall the missing mod" + ((_mpMissingCnr && _mpMissingStg) ? "s" : "")
-                + " and restart the game.";
+            string body;
+            if (_mpNeedsUpdate)
+            {
+                body = "One or more required mods are missing or out of date.\n\nOpen Mod Manager to install the required updates before playing multiplayer.";
+            }
+            else
+            {
+                int missingCount = (_mpMissingCnr ? 1 : 0) + (_mpMissingStg ? 1 : 0) + (_mpMissingMgr ? 1 : 0);
+                body = "The following mod" + (missingCount > 1 ? "s are" : " is")
+                    + " required to play multiplayer:\n";
+                if (_mpMissingCnr) body += "  \u2022 CNRMod.dll\n";
+                if (_mpMissingStg) body += "  \u2022 CNRSettingsMod.dll\n";
+                if (_mpMissingMgr) body += "  \u2022 CNRModManager.dll\n";
+                body += "\nInstall the missing mod" + (missingCount > 1 ? "s" : "")
+                    + " and restart the game.";
+            }
             GUI.Label(new Rect(px, py, pw, 110f), body, bodySt);
             py += 118f;
 
-            // Buttons
             float btnH = 34f, btnW = (dw - 32f - 8f) * 0.5f;
             GUIStyle closeSt = EcoBtnSt(14, Color.white);
             if (GUI.Button(new Rect(px, py, btnW, btnH), "Close", closeSt))
@@ -7365,17 +7434,15 @@ namespace CNRMods
         {
             bool cnrOk = System.IO.File.Exists("/sdcard/CNRMods/CNRMod.dll");
             bool stgOk = System.IO.File.Exists("/sdcard/CNRMods/CNRSettingsMod.dll");
-            if (cnrOk && stgOk)
+            bool mgrOk = System.IO.File.Exists("/sdcard/CNRMods/CNRModManager.dll");
+            if (cnrOk && stgOk && mgrOk)
             {
-                // Both mods present — let the game proceed normally
                 Application.LoadLevel("MultiPlayerSelect");
                 return;
             }
-            // Missing one or more — show dialog
+            // Missing one or more — show dialog if hook available, otherwise block silently
             if (hook != null)
-                hook.ShowMpMissingDialog(cnrOk, stgOk);
-            else
-                Application.LoadLevel("MultiPlayerSelect"); // fallback if hook lost
+                hook.ShowMpMissingDialog(cnrOk, stgOk, mgrOk);
         }
     }
 }

@@ -5,12 +5,32 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.7",
-      "minVersion": "2.0.7",
+      "latestVersion": "2.0.11",
+      "minVersion": "2.0.11",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.11",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.11.dll",
+          "changelog": "Fixed: Close and Open Mod Manager buttons in the multiplayer block dialog were not clickable. A full-screen GUI.Button was consuming all touch events before the actual buttons could receive them."
+        },
+        {
+          "version": "2.0.10",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.10.dll",
+          "changelog": "Fixed: multiplayer block dialog buttons were not clickable because OnGUI was returning early (ecoPatched=false) before drawing the dialog. Dialog now draws before the ecoPatched guard."
+        },
+        {
+          "version": "2.0.9",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.9.dll",
+          "changelog": "Reworked multiplayer block: now checks mods at the MultiplayerSelect scene boundary instead of button interception. Bounces back to MainMenu and shows a dialog if CNRModManager reports required updates pending (missing or below minVersion). Fixes the case sensitivity bug where 'MultiplayerSelect' was being navigated to as 'MultiPlayerSelect'."
+        },
+        {
+          "version": "2.0.8",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.8.dll",
+          "changelog": "Fixed: multiplayer button block now checks CNRModManager.dll in addition to CNRMod.dll and CNRSettingsMod.dll. Fixed: EcoPatchMainMenu retries up to 30 times (2-frame intervals) if NGUI buttons aren't spawned on first pass. Fixed: hook==null no longer silently bypasses the block."
+        },
         {
           "version": "2.0.7",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.7.dll",
@@ -56,13 +76,18 @@
     {
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
-      "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with PIN login.",
-      "latestVersion": "2.0.1",
-      "minVersion": "2.0.1",
+      "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
+      "latestVersion": "2.0.2",
+      "minVersion": "2.0.2",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "2.0.2",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.2.dll",
+          "changelog": "Account tab updated: Set Recovery Credentials now requires both a password (6+ chars) and a PIN (4-8 digits). Link Device (formerly Transfer Account) now requires name, password, and PIN matching the new auth scheme."
+        },
         {
           "version": "2.0.1",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.1.dll",
@@ -74,12 +99,32 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.3.1",
-      "minVersion": "1.3.1",
+      "latestVersion": "1.3.5",
+      "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager.dll",
-      "latestOnly": false,
+      "latestOnly": true,
       "versions": [
+        {
+          "version": "1.3.5",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.3.5.dll",
+          "changelog": "Connection error (UnknownHostException) now shows a friendly message instead of a raw Java exception."
+        },
+        {
+          "version": "1.3.4",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.3.4.dll",
+          "changelog": "Update banner (required installs, updates available, Install All, Quit Game) now appears in the Installed tab as well as the Browse tab."
+        },
+        {
+          "version": "1.3.3",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.3.3.dll",
+          "changelog": "Added HasRequiredPending static flag, read by CNRMod to gate multiplayer access. True when any mod with a minVersion is missing or below the required version."
+        },
+        {
+          "version": "1.3.2",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.3.2.dll",
+          "changelog": "Fixed: required mods that are not yet installed on the device are now detected and queued for install on startup (previously only already-installed mods were checked). Banner now shows in red for required installs, lists + for new installs vs arrows for updates, and cannot be dismissed while required mods are missing."
+        },
         {
           "version": "1.3.1",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.3.1.dll",
