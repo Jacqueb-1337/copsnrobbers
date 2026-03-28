@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.1";
+        public  const string Version = "2.0.2";
 
         public static void Load()
         {
@@ -242,9 +242,11 @@ namespace CNRSettingsMod
         private Vector2 _scrollKbm     = Vector2.zero;
         private Vector2 _scrollAccount = Vector2.zero;
         private int     _activeTab  = 0;   // 0 = Settings  1 = KBM  2 = Account
-        private string  _pinInput   = "";
+        private string  _pinInput    = "";
+        private string  _pinPassword = "";
         private string  _claimName  = "";
         private string  _claimPin   = "";
+        private string  _claimPassword = "";
         private string  _accountMsg = "";
         private const float REF_W = 600f;
 
@@ -2265,59 +2267,81 @@ namespace CNRSettingsMod
                 GUILayout.Space(10f);
             }
 
-            // ---- Set recovery PIN -------------------------------------------
-            SectionHeader("Set Recovery PIN");
+            // ---- Set recovery credentials -----------------------------------
+            SectionHeader("Set Recovery Credentials");
             GUILayout.Space(4f);
-            GUILayout.Label("4-8 digits. Used to reclaim your account on a new phone.", HintStyle());
+            GUILayout.Label("Set a password (6+ chars) + 4-8 digit PIN to recover your account on a new phone.", HintStyle());
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
-            GUILayout.Label("PIN:", LabelStyle(), GUILayout.Width(60f));
-            _pinInput = GUILayout.TextField(_pinInput, 8, GUI.skin.textField, GUILayout.Width(pw - 70f));
+            GUILayout.Label("Password:", LabelStyle(), GUILayout.Width(80f));
+            _pinPassword = GUILayout.PasswordField(_pinPassword, '*', 32, GUI.skin.textField, GUILayout.Width(pw - 90f));
+            GUILayout.EndHorizontal();
+            GUILayout.Space(4f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("PIN:", LabelStyle(), GUILayout.Width(80f));
+            _pinInput = GUILayout.TextField(_pinInput, 8, GUI.skin.textField, GUILayout.Width(pw - 90f));
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
-            if (GUILayout.Button("Save PIN", BtnStyle(18, new Color(0.4f, 0.8f, 1f))))
+            if (GUILayout.Button("Save Credentials", BtnStyle(18, new Color(0.4f, 0.8f, 1f))))
             {
-                if (_pinInput.Length >= 4 && _pinInput.Length <= 8)
+                if (_pinPassword.Length < 6)
+                {
+                    _accountMsg = "Password must be at least 6 characters.";
+                }
+                else if (_pinInput.Length < 4 || _pinInput.Length > 8)
+                {
+                    _accountMsg = "PIN must be 4-8 digits.";
+                }
+                else
                 {
                     bool isNum = true;
                     for (int ci = 0; ci < _pinInput.Length; ci++)
                         if (_pinInput[ci] < '0' || _pinInput[ci] > '9') { isNum = false; break; }
                     if (isNum)
                     {
-                        EcoCallStatic("RequestSetPin", new object[]{ _pinInput });
-                        _accountMsg = "PIN saved!";
-                        _pinInput = "";
+                        EcoCallStatic("RequestSetPin", new object[]{ _pinPassword, _pinInput });
+                        _accountMsg = "Credentials saved!";
+                        _pinPassword = ""; _pinInput = "";
                     }
                     else _accountMsg = "PIN must be digits only.";
                 }
-                else _accountMsg = "PIN must be 4-8 digits.";
             }
             GUILayout.Space(10f);
 
             // ---- Transfer account -------------------------------------------
-            SectionHeader("Transfer to This Phone");
+            SectionHeader("Link This Device to Existing Account");
             GUILayout.Space(4f);
-            GUILayout.Label("Enter the Display Name and PIN from your other device to move your account here.", HintStyle());
+            GUILayout.Label("Enter your Display Name, password, and PIN to link this device to your account.", HintStyle());
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Name:", LabelStyle(), GUILayout.Width(60f));
-            _claimName = GUILayout.TextField(_claimName, 32, GUI.skin.textField, GUILayout.Width(pw - 70f));
+            GUILayout.Label("Name:", LabelStyle(), GUILayout.Width(80f));
+            _claimName = GUILayout.TextField(_claimName, 32, GUI.skin.textField, GUILayout.Width(pw - 90f));
             GUILayout.EndHorizontal();
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
-            GUILayout.Label("PIN:", LabelStyle(), GUILayout.Width(60f));
-            _claimPin = GUILayout.PasswordField(_claimPin, '*', 8, GUI.skin.textField, GUILayout.Width(pw - 70f));
+            GUILayout.Label("Password:", LabelStyle(), GUILayout.Width(80f));
+            _claimPassword = GUILayout.PasswordField(_claimPassword, '*', 32, GUI.skin.textField, GUILayout.Width(pw - 90f));
+            GUILayout.EndHorizontal();
+            GUILayout.Space(4f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("PIN:", LabelStyle(), GUILayout.Width(80f));
+            _claimPin = GUILayout.PasswordField(_claimPin, '*', 8, GUI.skin.textField, GUILayout.Width(pw - 90f));
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
-            if (GUILayout.Button("Transfer Account", BtnStyle(18, new Color(1f, 0.7f, 0.3f))))
+            if (GUILayout.Button("Link Device", BtnStyle(18, new Color(1f, 0.7f, 0.3f))))
             {
-                if (_claimName.Length > 0 && _claimPin.Length >= 4)
+                if (_claimName.Length == 0)
+                    _accountMsg = "Enter your display name.";
+                else if (_claimPassword.Length < 6)
+                    _accountMsg = "Password must be at least 6 characters.";
+                else if (_claimPin.Length < 4)
+                    _accountMsg = "Enter your PIN (4-8 digits).";
+                else
                 {
-                    EcoCallStatic("RequestClaim", new object[]{ _claimName, _claimPin });
-                    _accountMsg = "Transfer requested...";
-                    _claimName = ""; _claimPin = "";
+                    EcoCallStatic("RequestClaim", new object[]{ _claimName, _claimPassword, _claimPin });
+                    _accountMsg = "Linking device...";
+                    _claimName = ""; _claimPassword = ""; _claimPin = "";
                 }
-                else _accountMsg = "Enter name and PIN.";
             }
             GUILayout.Space(10f);
 
