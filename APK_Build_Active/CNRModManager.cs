@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.3.1";
+        public  const string Version        = "1.3.5";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -218,6 +218,9 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public class ModManagerHook : MonoBehaviour
     {
+        // Exposed for CNRMod to gate multiplayer: true when any required mod is missing or below minVersion.
+        public static bool HasRequiredPending = false;
+
         // Layout / scaling
         private const float REF_W = 600f;
 
@@ -493,7 +496,11 @@ namespace CNRModManager
             _browseFetching = false;
             if (!string.IsNullOrEmpty(www.error))
             {
-                _browseStatus = "Error: " + www.error;
+                string err = www.error;
+                if (err.Contains("UnknownHost") || err.Contains("Unable to resolve") || err.Contains("No address"))
+                    _browseStatus = "Connection error — check your internet connection.";
+                else
+                    _browseStatus = "Connection error: " + err;
                 ModManagerEntry.Log("FetchBrowse err: " + www.error);
                 yield break;
             }
@@ -740,7 +747,14 @@ namespace CNRModManager
             _pendingUpdates.Clear();
             foreach (RepoMod mod in _browseMods)
             {
-                if (!File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename))) continue;
+                bool installed = File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename));
+                // Required but not installed at all — must download
+                if (!installed)
+                {
+                    if (!string.IsNullOrEmpty(mod.minVersion))
+                        _pendingUpdates.Add(mod);
+                    continue;
+                }
                 string iv = GetInstalledVersion(mod.filename);
                 // Always queue if below minimum version (regardless of auto-update setting)
                 bool belowMin = !string.IsNullOrEmpty(mod.minVersion)
@@ -751,7 +765,18 @@ namespace CNRModManager
                     _pendingUpdates.Add(mod);
             }
             _updateBannerDismissed = false;
-            ModManagerEntry.Log("CheckForUpdates: " + _pendingUpdates.Count + " update(s)");
+            // Update the multiplayer gate flag used by CNRMod
+            HasRequiredPending = false;
+            foreach (RepoMod mod in _pendingUpdates)
+            {
+                bool notInstalled = !File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename));
+                string iv3 = GetInstalledVersion(mod.filename);
+                bool belowMin3 = !string.IsNullOrEmpty(mod.minVersion)
+                                 && !string.IsNullOrEmpty(iv3)
+                                 && CompareVersions(iv3, mod.minVersion) < 0;
+                if (notInstalled || belowMin3) { HasRequiredPending = true; break; }
+            }
+            ModManagerEntry.Log("CheckForUpdates: " + _pendingUpdates.Count + " update(s)  HasRequiredPending=" + HasRequiredPending);
         }
 
         // Returns -1 / 0 / +1  (a < b / a == b / a > b)  for semver strings.
@@ -889,8 +914,74 @@ namespace CNRModManager
             GUILayout.EndArea();
         }
 
+        private void DrawUpdateBanner()
+        {
+            if (_pendingUpdates.Count > 0 && !_batchRunning && !_updateBannerDismissed)
+            {
+                int reqCount  = 0;
+                int optCount  = 0;
+                foreach (RepoMod pu in _pendingUpdates)
+                {
+                    bool notInstalled = !File.Exists(Path.Combine(ModManagerEntry.ModsDir, pu.filename));
+                    string iv2 = GetInstalledVersion(pu.filename);
+                    bool belowMin2 = !string.IsNullOrEmpty(pu.minVersion)
+                                     && !string.IsNullOrEmpty(iv2)
+                                     && CompareVersions(iv2, pu.minVersion) < 0;
+                    if (notInstalled || belowMin2) reqCount++; else optCount++;
+                }
+                string bannerText = reqCount > 0 && optCount == 0
+                    ? reqCount + " required mod(s) to install"
+                    : reqCount > 0
+                        ? _pendingUpdates.Count + " mod(s) need attention"
+                        : _pendingUpdates.Count + " update(s) available";
+
+                GUILayout.BeginVertical(GUI.skin.box);
+                GUILayout.BeginHorizontal();
+                GUIStyle bannerSt = MakeLabelStyle(13, reqCount > 0 ? new Color(1f, 0.35f, 0.35f) : new Color(1f, 0.85f, 0.3f));
+                bannerSt.fontStyle = FontStyle.Bold;
+                GUILayout.Label(bannerText, bannerSt);
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Install All", MakeBtnStyle(13, new Color(0.3f, 0.9f, 0.5f)),
+                    GUILayout.Height(26f), GUILayout.Width(90f)))
+                    StartBatchUpdate();
+                if (reqCount == 0)
+                {
+                    if (GUILayout.Button("x", MakeBtnStyle(13, new Color(0.6f, 0.6f, 0.6f)),
+                        GUILayout.Height(26f), GUILayout.Width(26f)))
+                        _updateBannerDismissed = true;
+                }
+                GUILayout.EndHorizontal();
+                foreach (RepoMod pu in _pendingUpdates)
+                {
+                    bool notInstalled2 = !File.Exists(Path.Combine(ModManagerEntry.ModsDir, pu.filename));
+                    string rowLabel = (notInstalled2 ? "  + " : "  \u2191 ") + pu.name + "  \u2192  v" + pu.latestVersion;
+                    GUILayout.Label(rowLabel, MakeLabelStyle(11, new Color(0.7f, 0.7f, 0.75f)));
+                }
+                GUILayout.EndVertical();
+                GUILayout.Space(6f);
+            }
+            if (_batchRunning)
+            {
+                GUILayout.Label("Updating... (" + _batchDone + " / " + _batchTotal + ")",
+                    MakeLabelStyle(13, new Color(0.4f, 0.8f, 1f)));
+                GUILayout.Space(4f);
+            }
+            if (_batchNeedsRestart && !_batchRunning)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("All mods updated!", MakeLabelStyle(13, new Color(0.4f, 1f, 0.5f)));
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Quit Game", MakeBtnStyle(13, new Color(1f, 0.4f, 0.4f)),
+                    GUILayout.Height(26f), GUILayout.Width(80f)))
+                    Application.Quit();
+                GUILayout.EndHorizontal();
+                GUILayout.Space(4f);
+            }
+        }
+
         private void DrawInstalledTab()
         {
+            DrawUpdateBanner();
             GUILayout.Label("DLLs in /sdcard/CNRMods/",
                 MakeLabelStyle(12, new Color(0.6f, 0.6f, 0.7f)));
             GUILayout.Space(4f);
@@ -999,45 +1090,7 @@ namespace CNRModManager
             GUILayout.EndHorizontal();
             GUILayout.Space(4f);
 
-            // Update available banner
-            if (_pendingUpdates.Count > 0 && !_batchRunning && !_updateBannerDismissed)
-            {
-                GUILayout.BeginVertical(GUI.skin.box);
-                GUILayout.BeginHorizontal();
-                GUIStyle bannerSt = MakeLabelStyle(13, new Color(1f, 0.85f, 0.3f));
-                bannerSt.fontStyle = FontStyle.Bold;
-                GUILayout.Label(_pendingUpdates.Count + " update(s) available", bannerSt);
-                GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Update All", MakeBtnStyle(13, new Color(0.3f, 0.9f, 0.5f)),
-                    GUILayout.Height(26f), GUILayout.Width(90f)))
-                    StartBatchUpdate();
-                if (GUILayout.Button("x", MakeBtnStyle(13, new Color(0.6f, 0.6f, 0.6f)),
-                    GUILayout.Height(26f), GUILayout.Width(26f)))
-                    _updateBannerDismissed = true;
-                GUILayout.EndHorizontal();
-                foreach (RepoMod pu in _pendingUpdates)
-                    GUILayout.Label("  - " + pu.name + "  ->  v" + pu.latestVersion,
-                        MakeLabelStyle(11, new Color(0.7f, 0.7f, 0.75f)));
-                GUILayout.EndVertical();
-                GUILayout.Space(6f);
-            }
-            if (_batchRunning)
-            {
-                GUILayout.Label("Updating... (" + _batchDone + " / " + _batchTotal + ")",
-                    MakeLabelStyle(13, new Color(0.4f, 0.8f, 1f)));
-                GUILayout.Space(4f);
-            }
-            if (_batchNeedsRestart && !_batchRunning)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("All mods updated!", MakeLabelStyle(13, new Color(0.4f, 1f, 0.5f)));
-                GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Quit Game", MakeBtnStyle(13, new Color(1f, 0.4f, 0.4f)),
-                    GUILayout.Height(26f), GUILayout.Width(80f)))
-                    Application.Quit();
-                GUILayout.EndHorizontal();
-                GUILayout.Space(4f);
-            }
+            DrawUpdateBanner();
 
             if (_browseFetching)
             {
