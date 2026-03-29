@@ -82,6 +82,16 @@ webConsole.start({
       actorNr:       s.actorNr,
     })),
   }),
+  getRooms: () => [...rooms.rooms.values()].map(r => ({
+    name:        r.name,
+    playerCount: r.playerCount,
+    maxPlayers:  r.maxPlayers,
+    isOpen:      r.isOpen,
+    isVisible:   r.isVisible,
+    map:         r.map,
+    version:     r.version,
+    mode:        r.mode,
+  })),
 });
 
 module.exports = { master, game, rooms };

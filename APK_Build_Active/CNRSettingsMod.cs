@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.2";
+        public  const string Version = "2.0.3";
 
         public static void Load()
         {
@@ -2231,6 +2231,18 @@ namespace CNRSettingsMod
             FieldInfo fi = t.GetField(field, BindingFlags.Public | BindingFlags.Static);
             return fi != null ? (int)fi.GetValue(null) : 0;
         }
+        private static string EcoGetString(string field)
+        {
+            Type t = EcoType(); if (t == null) return null;
+            FieldInfo fi = t.GetField(field, BindingFlags.Public | BindingFlags.Static);
+            return fi != null ? fi.GetValue(null) as string : null;
+        }
+        private static void EcoSetString(string field, string value)
+        {
+            Type t = EcoType(); if (t == null) return;
+            FieldInfo fi = t.GetField(field, BindingFlags.Public | BindingFlags.Static);
+            if (fi != null) fi.SetValue(null, value);
+        }
         private static void EcoCallStatic(string method, object[] args)
         {
             Type t = EcoType(); if (t == null) return;
@@ -2339,11 +2351,20 @@ namespace CNRSettingsMod
                 else
                 {
                     EcoCallStatic("RequestClaim", new object[]{ _claimName, _claimPassword, _claimPin });
+                    EcoSetString("ClaimResultMsg", null); // clear stale result before new request
                     _accountMsg = "Linking device...";
                     _claimName = ""; _claimPassword = ""; _claimPin = "";
                 }
             }
             GUILayout.Space(10f);
+
+            // Pick up result from DoClaim coroutine running in CNRMod
+            string claimResult = EcoGetString("ClaimResultMsg");
+            if (claimResult != null)
+            {
+                _accountMsg = claimResult;
+                EcoSetString("ClaimResultMsg", null);
+            }
 
             // Status message
             if (_accountMsg.Length > 0)
