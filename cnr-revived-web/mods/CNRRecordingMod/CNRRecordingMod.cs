@@ -13,7 +13,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.4.0";
+        public  const string Version = "1.5.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -483,8 +483,8 @@ namespace CNRRecordingMod
                 if (size > 0 && _muxerStarted)
                 {
                     var outBuf = _codec.Call<AndroidJavaObject>("getOutputBuffer", idx);
-                    outBuf.Call("position", _bufferInfo.Get<int>("offset"));
-                    outBuf.Call("limit",    _bufferInfo.Get<int>("offset") + size);
+                    // Do NOT call position()/limit() - Unity 4.6 JNI can't resolve inherited Buffer methods.
+                    // MediaMuxer.nativeWriteSampleData uses bufferInfo.offset and bufferInfo.size directly.
                     _muxer.Call("writeSampleData", _videoTrackIdx, outBuf, _bufferInfo);
                     written++;
                     if (verbose) RecordingModEntry.Log("  drain: wrote " + size + " bytes to muxer");

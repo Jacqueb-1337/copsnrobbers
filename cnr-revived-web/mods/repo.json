@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.4.0",
+      "latestVersion": "1.5.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.5.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.5.0.dll",
+          "changelog": "Fixed corrupt/short MP4s: removed outBuf.Call(position) and outBuf.Call(limit) calls in DrainEncoder — Unity 4.6 AndroidJavaObject cannot resolve these inherited java.nio.Buffer methods on DirectByteBuffer. MediaMuxer.nativeWriteSampleData uses bufferInfo.offset and bufferInfo.size directly so the calls were unnecessary and were crashing the drain loop before any frames were written to the muxer."
+        },
         {
           "version": "1.4.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.4.0.dll",
