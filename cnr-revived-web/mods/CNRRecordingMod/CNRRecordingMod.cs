@@ -13,7 +13,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.5.0";
+        public  const string Version = "1.6.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -90,7 +90,7 @@ namespace CNRRecordingMod
         private const int    VideoHeight      = 480;
         private const int    VideoBitrate     = 2000000;
         private const int    VideoFps         = 30;
-        private const int    COLOR_FMT_YUV420 = 0x7F420888; // COLOR_FormatYUV420Flexible
+        private const int    COLOR_FMT_YUV420 = 21; // COLOR_FormatYUV420SemiPlanar (NV12: Y plane then interleaved UV)
         private const float  REF_W            = 600f;
 
         public  bool IsCapturing { get; private set; }
@@ -329,9 +329,9 @@ namespace CNRRecordingMod
                 Color32[] px = _readTex.GetPixels32();
                 if (verbose) RecordingModEntry.Log("  GetPixels32 len=" + px.Length);
 
-                // 2. RGBA -> I420
-                RgbaToI420(px, VideoWidth, VideoHeight, _yuvBuf);
-                if (verbose) RecordingModEntry.Log("  RgbaToI420 OK");
+                // 2. RGBA -> NV12
+                RgbaToNV12(px, VideoWidth, VideoHeight, _yuvBuf);
+                if (verbose) RecordingModEntry.Log("  RgbaToNV12 OK");
 
                 // 3. Dequeue input buffer
                 int inIdx = _codec.Call<int>("dequeueInputBuffer", (long)10000);
@@ -398,11 +398,13 @@ namespace CNRRecordingMod
             }
         }
 
-        private static void RgbaToI420(Color32[] px, int w, int h, byte[] yuv)
+        // NV12 (COLOR_FormatYUV420SemiPlanar): Y plane (w*h), then interleaved UV plane (w*h/2).
+        // Total buffer size is the same as I420: w*h*3/2.
+        // UV plane layout: U0,V0,U1,V1,... (2 bytes per 2x2 chroma block, stride=w).
+        private static void RgbaToNV12(Color32[] px, int w, int h, byte[] yuv)
         {
-            int yBase = 0;
-            int uBase = w * h;
-            int vBase = uBase + (w / 2) * (h / 2);
+            int yBase  = 0;
+            int uvBase = w * h;
             for (int row = 0; row < h; row++)
             {
                 int srcRow = h - 1 - row; // ReadPixels is bottom-to-top
@@ -416,9 +418,9 @@ namespace CNRRecordingMod
                     {
                         int U = ((-38 * R -  74 * G + 112 * B + 128) >> 8) + 128;
                         int V = ((112 * R -  94 * G -  18 * B + 128) >> 8) + 128;
-                        int uvIdx = (row / 2) * (w / 2) + (col / 2);
-                        yuv[uBase + uvIdx] = (byte)(U < 0 ? 0 : U > 255 ? 255 : U);
-                        yuv[vBase + uvIdx] = (byte)(V < 0 ? 0 : V > 255 ? 255 : V);
+                        int uvOff = uvBase + (row / 2) * w + col; // col is even; 2 bytes: U then V
+                        yuv[uvOff]     = (byte)(U < 0 ? 0 : U > 255 ? 255 : U);
+                        yuv[uvOff + 1] = (byte)(V < 0 ? 0 : V > 255 ? 255 : V);
                     }
                 }
             }
