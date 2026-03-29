@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.11";
+        public  const string Version = "2.0.12";
 
         public static void Load()
         {
@@ -3108,14 +3108,16 @@ namespace CNRSettingsMod
             // Keep _aimBtn reference up to date from drag cache
             if (_dragGOs[4] != null) _aimBtn = _dragGOs[4];
 
-            // TEST 2.0.11: camera expansion DISABLED to isolate whether it causes
-            // one-finger fire failure.  ExpandNguiCamToFullScreen() changes the NGUI
-            // camera rect, which also changes Camera.ScreenPointToRay() — the function
-            // JoyStickController uses to fire-detect.  With this disabled, buttons dragged
-            // to the left side of the screen will not respond to NGUI touches, but the
-            // fire button's Physics.Raycast detection should be unaffected.
+            // Camera viewport expansion is intentionally NOT done here.
+            // Expanding the NGUI camera rect (e.g. to full screen) changes the camera's
+            // projection matrix, which causes Camera.ScreenPointToRay() to produce a
+            // different ray for the same screen position.  JoyStickController uses that
+            // ray with Physics.Raycast to detect the FireButton collider — when the rect
+            // is expanded the ray misses and one-finger fire stops working entirely.
+            // Consequence: NGUI buttons dragged to the left side of the screen (outside
+            // the original camera viewport) will not respond to touches.  Acceptable
+            // trade-off; the drag editor will constrain buttons to the right half.
             CacheNguiCam();
-            SettingsModEntry.Log("HUD: camera expansion SKIPPED (2.0.11 test)");
         }
 
         private void LogSceneHud()
