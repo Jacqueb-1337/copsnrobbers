@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.3.5";
+        public  const string Version        = "1.3.7";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -297,6 +297,15 @@ namespace CNRModManager
         private string       _newRepoInput = "";
         private const string PREF_REPOS    = "CNRModMgr_Repos";
 
+        // ── Per-mod config panel ──────────────────────────────────────────────
+        private int            _configModIdx       = -1;    // index into _installedMods; -1 = not open
+        private Type           _configType         = null;
+        private List<string[]> _configEntries      = new List<string[]>();
+        private bool           _configDirty        = false;
+        private bool           _configNeedsRestart = false;
+        private readonly Dictionary<string, Type> _configTypeCache   = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string>          _configTypeChecked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         // ─────────────────────────────────────────────────────────────────────
         private void Start()
         {
@@ -411,6 +420,9 @@ namespace CNRModManager
         private void RefreshInstalledMods()
         {
             _installedMods.Clear();
+            _configTypeCache.Clear();
+            _configTypeChecked.Clear();
+            _configModIdx = -1;
             try
             {
                 if (!Directory.Exists(ModManagerEntry.ModsDir)) return;
@@ -981,6 +993,13 @@ namespace CNRModManager
 
         private void DrawInstalledTab()
         {
+            // If a mod's config panel is open, show it instead of the list
+            if (_configModIdx >= 0 && _configModIdx < _installedMods.Count)
+            {
+                DrawConfigPanel();
+                return;
+            }
+
             DrawUpdateBanner();
             GUILayout.Label("DLLs in /sdcard/CNRMods/",
                 MakeLabelStyle(12, new Color(0.6f, 0.6f, 0.7f)));
@@ -996,8 +1015,9 @@ namespace CNRModManager
             }
             else
             {
-                foreach (InstalledMod m in _installedMods)
+                for (int imIdx = 0; imIdx < _installedMods.Count; imIdx++)
                 {
+                    InstalledMod m = _installedMods[imIdx];
                     string latestVer  = GetLatestVersionFromRepo(m.filename);
                     string minVer     = GetMinVersionFromRepo(m.filename);
                     string instdVer   = GetInstalledVersion(m.filename);
@@ -1053,6 +1073,27 @@ namespace CNRModManager
                         bool newAu = GUILayout.Toggle(au, " Auto-update",
                             MakeToggleStyle(11, new Color(0.6f, 0.6f, 0.65f)));
                         if (newAu != au) { SetAutoUpdate(m.filename, newAu); CheckForUpdates(); }
+                    }
+
+                    // Row 3: settings button (shown if mod exposes GetModConfig)
+                    Type cfgType = GetCachedConfigType(m.filename);
+                    if (cfgType != null)
+                    {
+                        GUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        int captureIdx = imIdx;
+                        if (GUILayout.Button("\u2699 Settings",
+                            MakeBtnStyle(11, new Color(0.6f, 0.8f, 1f)),
+                            GUILayout.Height(22f), GUILayout.Width(90f)))
+                        {
+                            _configModIdx       = captureIdx;
+                            _configType         = cfgType;
+                            _configEntries      = LoadConfigEntries(cfgType);
+                            _configDirty        = false;
+                            _configNeedsRestart = false;
+                            _scroll             = Vector2.zero;
+                        }
+                        GUILayout.EndHorizontal();
                     }
 
                     GUILayout.EndVertical();
@@ -1419,6 +1460,202 @@ namespace CNRModManager
             s.normal.textColor   = col;
             s.onNormal.textColor = col;
             return s;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // MOD CONFIG PANEL
+        // ─────────────────────────────────────────────────────────────────────
+        private Type FindConfigType(string filename)
+        {
+            Assembly myAsm = typeof(ModManagerEntry).Assembly;
+            // 1. Scan already-loaded assemblies — handle ReflectionTypeLoadException so game
+            //    assemblies with missing deps don't silently abort the entire scan.
+            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm == myAsm) continue;
+                Type[] types = null;
+                try { types = asm.GetTypes(); }
+                catch (System.Reflection.ReflectionTypeLoadException rtle) { types = rtle.Types; }
+                catch { continue; }
+                if (types == null) continue;
+                foreach (Type t in types)
+                {
+                    if (t == null) continue;
+                    try
+                    {
+                        MethodInfo mi = t.GetMethod("GetModConfig",
+                            BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+                        if (mi != null)
+                        {
+                            ModManagerEntry.Log("FindConfigType: found GetModConfig on " + t.FullName + " in " + asm.GetName().Name);
+                            return t;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            // 2. Fallback: load from disk
+            try
+            {
+                string path = Path.Combine(ModManagerEntry.ModsDir, filename);
+                if (!File.Exists(path)) return null;
+                Assembly asm2 = Assembly.Load(File.ReadAllBytes(path));
+                Type[] types2 = null;
+                try { types2 = asm2.GetTypes(); }
+                catch (System.Reflection.ReflectionTypeLoadException rtle) { types2 = rtle.Types; }
+                catch { return null; }
+                if (types2 == null) return null;
+                foreach (Type t in types2)
+                {
+                    if (t == null) continue;
+                    MethodInfo mi = t.GetMethod("GetModConfig",
+                        BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+                    if (mi != null)
+                    {
+                        ModManagerEntry.Log("FindConfigType(disk): found GetModConfig on " + t.FullName);
+                        return t;
+                    }
+                }
+            }
+            catch (Exception ex) { ModManagerEntry.Log("FindConfigType disk err " + filename + ": " + ex.Message); }
+            ModManagerEntry.Log("FindConfigType: no GetModConfig found for " + filename);
+            return null;
+        }
+
+        private Type GetCachedConfigType(string filename)
+        {
+            if (!_configTypeChecked.Contains(filename))
+            {
+                _configTypeChecked.Add(filename);
+                _configTypeCache[filename] = FindConfigType(filename);
+            }
+            Type t2;
+            _configTypeCache.TryGetValue(filename, out t2);
+            return t2;
+        }
+
+        private List<string[]> LoadConfigEntries(Type t)
+        {
+            var result = new List<string[]>();
+            try
+            {
+                MethodInfo mi = t.GetMethod("GetModConfig",
+                    BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+                if (mi == null) return result;
+                string[][] rows = mi.Invoke(null, null) as string[][];
+                if (rows == null) return result;
+                foreach (string[] row in rows)
+                {
+                    if (row == null || row.Length < 4) continue;
+                    string[] copy = new string[5];
+                    copy[0] = row.Length > 0 ? (row[0] ?? "") : "";
+                    copy[1] = row.Length > 1 ? (row[1] ?? "") : "";
+                    copy[2] = row.Length > 2 ? (row[2] ?? "string") : "string";
+                    copy[3] = row.Length > 3 ? (row[3] ?? "") : "";
+                    copy[4] = row.Length > 4 ? (row[4] ?? "") : "";
+                    result.Add(copy);
+                }
+            }
+            catch (Exception ex) { ModManagerEntry.Log("LoadConfigEntries: " + ex.Message); }
+            return result;
+        }
+
+        private void SaveConfigEntries()
+        {
+            if (_configType == null) return;
+            try
+            {
+                MethodInfo mi = _configType.GetMethod("SetModConfig",
+                    BindingFlags.Public | BindingFlags.Static, null,
+                    new Type[] { typeof(string[][]) }, null);
+                if (mi == null) { ModManagerEntry.Log("SaveConfigEntries: SetModConfig not found"); return; }
+                mi.Invoke(null, new object[] { _configEntries.ToArray() });
+            }
+            catch (Exception ex) { ModManagerEntry.Log("SaveConfigEntries: " + ex.Message); }
+        }
+
+        private void DrawConfigPanel()
+        {
+            if (GUILayout.Button("< Back", MakeBtnStyle(13, new Color(0.55f, 0.7f, 1f)),
+                GUILayout.Height(26f), GUILayout.Width(80f)))
+            {
+                _configModIdx       = -1;
+                _configType         = null;
+                _configEntries.Clear();
+                _configDirty        = false;
+                _configNeedsRestart = false;
+                _scroll             = Vector2.zero;
+                return;
+            }
+            GUILayout.Space(8f);
+
+            string modName = (_configModIdx >= 0 && _configModIdx < _installedMods.Count)
+                ? _installedMods[_configModIdx].displayName : "Mod";
+            GUIStyle titleSt = MakeLabelStyle(15, Color.white);
+            titleSt.fontStyle = FontStyle.Bold;
+            GUILayout.Label("Settings \u2014 " + modName, titleSt);
+            GUILayout.Space(10f);
+
+            GUIStyle inputSt = new GUIStyle(GUI.skin.textField);
+            if (_font != null) inputSt.font = _font;
+            inputSt.fontSize = 12;
+
+            foreach (string[] entry in _configEntries)
+            {
+                string type = entry[2].ToLower();
+                GUILayout.BeginVertical(GUI.skin.box);
+                GUILayout.Label(entry[1], MakeLabelStyle(13, new Color(0.85f, 0.9f, 1f)));
+                if (!string.IsNullOrEmpty(entry[4]))
+                {
+                    GUIStyle descSt = MakeLabelStyle(11, new Color(0.55f, 0.55f, 0.62f));
+                    descSt.wordWrap = true;
+                    GUILayout.Label(entry[4], descSt);
+                }
+                if (type == "bool")
+                {
+                    bool cur  = entry[3].ToLower() == "true" || entry[3] == "1";
+                    bool next = GUILayout.Toggle(cur, cur ? " Enabled" : " Disabled",
+                        MakeToggleStyle(12, new Color(0.75f, 0.85f, 0.75f)));
+                    if (next != cur) { entry[3] = next ? "true" : "false"; _configDirty = true; }
+                }
+                else
+                {
+                    string next = GUILayout.TextField(entry[3], inputSt, GUILayout.Height(26f));
+                    if (next != entry[3]) { entry[3] = next; _configDirty = true; }
+                }
+                GUILayout.EndVertical();
+                GUILayout.Space(4f);
+            }
+
+            GUILayout.Space(8f);
+            if (_configNeedsRestart)
+            {
+                GUIStyle restSt = MakeLabelStyle(13, new Color(1f, 0.85f, 0.3f));
+                restSt.fontStyle = FontStyle.Bold;
+                GUILayout.Label("Changes saved \u2014 restart game to apply!", restSt);
+                GUILayout.Space(4f);
+                GUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Quit Game", MakeBtnStyle(13, new Color(1f, 0.4f, 0.4f)),
+                    GUILayout.Height(28f), GUILayout.Width(90f)))
+                    Application.Quit();
+                GUILayout.EndHorizontal();
+            }
+            else
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                GUI.enabled = _configDirty;
+                if (GUILayout.Button("Save", MakeBtnStyle(13, new Color(0.3f, 0.9f, 0.5f)),
+                    GUILayout.Height(28f), GUILayout.Width(80f)))
+                {
+                    SaveConfigEntries();
+                    _configDirty        = false;
+                    _configNeedsRestart = true;
+                }
+                GUI.enabled = true;
+                GUILayout.EndHorizontal();
+            }
         }
     }
 }
