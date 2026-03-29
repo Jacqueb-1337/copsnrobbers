@@ -21,14 +21,14 @@ namespace CNRMods
         public static int    ServerPort    = 5055;
         public static string AppId         = "CNRLan";
         public static string MapUrl        = "";
-        public static string ModVersion    = "2.0.7";
+        public static string ModVersion    = "2.0.9";
         public static bool   KickNoMod     = true;
         public static string WebUrl        = "";    // http://<host>:1337 for node server; derived from SERVER_IP if not set
         public static string EconomyUrl    = "";    // https://<host>/economy  for PHP economy API
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.11";
+        public const  string Version = "2.0.18";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -231,7 +231,33 @@ namespace CNRMods
 
         private static readonly string[] ConnectScenes = { "MultiplayerSelect", "CNRConnectMenu" };
 
-        private void Awake()  { Application.runInBackground = true; }
+        private void Awake()
+        {
+            Application.runInBackground = true;
+            // 2.0.34 incorrectly wrote CurSettedArmorName="" and CurWeaponEquiped_1..8=""
+            // from server sync.  Empty strings cause GetArmorItemInfoByName("") /
+            // GetWeaponInfoByName("") to throw KeyNotFoundException, crashing the loadout
+            // system and reverting gun selection on the profile screen.
+            // Clean up any poisoned empty-string values left on disk.
+            bool dirtyPrefs = false;
+            if (PlayerPrefs.GetString("CurSettedArmorName", null) == "")
+            {
+                PlayerPrefs.DeleteKey("CurSettedArmorName");
+                ModEntry.Log("Cleaned up empty CurSettedArmorName pref");
+                dirtyPrefs = true;
+            }
+            for (int i = 1; i <= 8; i++)
+            {
+                string key = "CurWeaponEquiped_" + i;
+                if (PlayerPrefs.GetString(key, null) == "")
+                {
+                    PlayerPrefs.DeleteKey(key);
+                    ModEntry.Log("Cleaned up empty " + key + " pref");
+                    dirtyPrefs = true;
+                }
+            }
+            if (dirtyPrefs) PlayerPrefs.Save();
+        }
 
         private static readonly string[] GameScenes =
             { "FreeRun3_1", "FreeRun4_1", "FreeRun5_1", "FreeRun6_1", "FreeRun7_1",
@@ -1003,6 +1029,11 @@ namespace CNRMods
                 string btnName = btnField.GetValue(comp).ToString();
                 if (btnName == "WWMapNext" || btnName == "WWMapPre")
                 {
+                    // Guard: FindObjectsOfTypeAll returns inactive/prefab copies too.
+                    // Only hook buttons that are live in the scene hierarchy, and
+                    // never add a second MapNavButton (that would double every increment).
+                    if (!comp.gameObject.activeInHierarchy) continue;
+                    if (comp.gameObject.GetComponent<MapNavButton>() != null) continue;
                     object nilVal = Enum.Parse(btnField.FieldType, "Nil");
                     btnField.SetValue(comp, nilVal);
                     var nav = comp.gameObject.AddComponent<MapNavButton>();
@@ -1050,7 +1081,9 @@ namespace CNRMods
         {
             var msd = MultiplayerSelectDirector.mInstance;
             if (msd == null) return;
+            int before = _virtualIdx;
             _virtualIdx = (_virtualIdx >= _allMaps.Length - 1) ? 0 : _virtualIdx + 1;
+            ModEntry.Log("OnNextMap: " + before + "->" + _virtualIdx + " (" + _allMaps[_virtualIdx] + ")");
             ApplyMap(msd, _virtualIdx);
         }
 
@@ -1058,7 +1091,9 @@ namespace CNRMods
         {
             var msd = MultiplayerSelectDirector.mInstance;
             if (msd == null) return;
+            int before = _virtualIdx;
             _virtualIdx = (_virtualIdx <= 0) ? _allMaps.Length - 1 : _virtualIdx - 1;
+            ModEntry.Log("OnPreMap: " + before + "->" + _virtualIdx + " (" + _allMaps[_virtualIdx] + ")");
             ApplyMap(msd, _virtualIdx);
         }
 
@@ -1287,7 +1322,17 @@ namespace CNRMods
     {
         public bool isNext;
         public CustomMapsHook hook;
-        void OnClick() { if (hook != null) { if (isNext) hook.OnNextMap(); else hook.OnPreMap(); } }
+        // Per-frame dedup: UICamera.Notify fires OnClick on the clicked GO AND on
+        // genericEventHandler (a second GO in the scene), so we can get 2 OnClick
+        // calls per tap.  _clickPending collapses them to one navigation per frame.
+        private bool _clickPending;
+        void OnClick() { _clickPending = true; }
+        void Update()
+        {
+            if (!_clickPending) return;
+            _clickPending = false;
+            if (hook != null) { if (isNext) hook.OnNextMap(); else hook.OnPreMap(); }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2813,6 +2858,27 @@ namespace CNRMods
         };
 
         // POST local progression to sync.php; apply server's authoritative merged state.
+        // ── Profile equip-tab guard ───────────────────────────────────────────
+        // Returns true while UIProfileDirector's equipment (weapons) tab panel is active.
+        // Uses reflection so we never hard-reference the game type.
+        private bool IsProfileEquipTabOpen()
+        {
+            try
+            {
+                System.Type t = System.Type.GetType("UIProfileDirector");
+                if (t == null) return false;
+                FieldInfo miF = t.GetField("mInstance", BindingFlags.Static | BindingFlags.Public);
+                if (miF == null) return false;
+                object inst = miF.GetValue(null);
+                if (inst == null) return false;
+                FieldInfo panF = t.GetField("equipmentPagePanel", BindingFlags.Instance | BindingFlags.Public);
+                if (panF == null) return false;
+                GameObject panel = panF.GetValue(inst) as GameObject;
+                return panel != null && panel.activeInHierarchy;
+            }
+            catch { return false; }
+        }
+
         private IEnumerator SyncProgression()
         {
             if (!Ready || string.IsNullOrEmpty(ModEntry.EconomyUrl)) yield break;
@@ -2921,27 +2987,11 @@ namespace CNRMods
                 if (val == "1") PlayerPrefs.SetInt(ak, 1);
             }
 
-            // Equipped slots + current skin/armor (server is authoritative for these)
-            for (int i = 1; i <= 8; i++)
-            {
-                string sv = ModEntry.ParseJsonValue(json, "eq_" + i);
-                // Only write non-empty values — empty means "no weapon" which the game
-                // handles via missing/absent prefs, not an empty-string pref value.
-                if (!string.IsNullOrEmpty(sv)) PlayerPrefs.SetString("CurWeaponEquiped_" + i, sv);
-            }
-            string cSkin = ModEntry.ParseJsonStringValue(json, "current_skin");
-            if (!string.IsNullOrEmpty(cSkin)) PlayerPrefs.SetString("CurSettedSkinName", cSkin);
-            string cArmor = ModEntry.ParseJsonStringValue(json, "current_armor");
-            if (cArmor != null)
-            {
-                // GrowthManger.GetArmorItemInfoByName("") throws KeyNotFoundException in
-                // CNRMultiplayerManager.Awake(), breaking the loadout screen.  The original
-                // game uses DeleteKey when armor is empty — mirror that behaviour.
-                if (string.IsNullOrEmpty(cArmor))
-                    PlayerPrefs.DeleteKey("CurSettedArmorName");
-                else
-                    PlayerPrefs.SetString("CurSettedArmorName", cArmor);
-            }
+            // Equipped slots / current skin / current armor are NOT written back from the
+            // server.  Local PlayerPrefs are the authoritative source for the player's
+            // current loadout — the server only stores them as a backup.  Overwriting them
+            // here caused the profile gun-selection screen to revert every change the
+            // player made (sync fires every ~15 s and restores the old server state).
 
             PlayerPrefs.Save();
             ModEntry.Log("SyncProgression applied from server.");
@@ -2983,6 +3033,7 @@ namespace CNRMods
         private string      _ecoAccountMsg    = "";
         private Rect        _ecoMailWinRect;
         private Rect        _ecoAcctWinRect;
+        private int         _mailDeleteConfirmId = -1; // mail id awaiting delete confirmation (-1 = none)
         private UICamera[]  _nguiCameras = null;   // cached for click-through blocking
         private bool        _nguiBlocked = false;
         private GameObject  _goRecordBtn    = null;   // Recordings button GO — anchor for settings btn
@@ -6531,6 +6582,43 @@ namespace CNRMods
             ModEntry.Log("ClaimMail " + mailId + ": " + www.text);
         }
 
+        private void RequestDeleteMail(int mailId)
+        {
+            StartCoroutine(DoDeleteMail(mailId));
+        }
+
+        private IEnumerator DoDeleteMail(int mailId)
+        {
+            string body = "player_id=" + Uri.EscapeDataString(_playerId) +
+                          "&token="    + Uri.EscapeDataString(_token) +
+                          "&action=delete&mail_id=" + mailId;
+            var hdrs = new System.Collections.Hashtable();
+            hdrs["Content-Type"] = "application/x-www-form-urlencoded";
+            var www = new WWW(ModEntry.EconomyUrl + "/mail.php",
+                              System.Text.Encoding.UTF8.GetBytes(body), hdrs);
+            yield return www;
+            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("DeleteMail error: " + www.error); yield break; }
+            // Remove the mail from local arrays
+            var ids  = new System.Collections.Generic.List<int>(MailIds);
+            var subj = new System.Collections.Generic.List<string>(MailSubjects);
+            var bod  = new System.Collections.Generic.List<string>(MailBodies);
+            var coins = new System.Collections.Generic.List<int>(MailCoins);
+            var gems  = new System.Collections.Generic.List<int>(MailGems);
+            var cl   = new System.Collections.Generic.List<bool>(MailClaimed);
+            int idx = ids.IndexOf(mailId);
+            if (idx >= 0) { ids.RemoveAt(idx); subj.RemoveAt(idx); bod.RemoveAt(idx); coins.RemoveAt(idx); gems.RemoveAt(idx); cl.RemoveAt(idx); }
+            MailIds      = ids.ToArray();
+            MailSubjects = subj.ToArray();
+            MailBodies   = bod.ToArray();
+            MailCoins    = coins.ToArray();
+            MailGems     = gems.ToArray();
+            MailClaimed  = cl.ToArray();
+            int unread = 0;
+            for (int i = 0; i < MailClaimed.Length; i++) if (!MailClaimed[i]) unread++;
+            MailUnread = unread;
+            ModEntry.Log("DeleteMail " + mailId + ": " + www.text);
+        }
+
         internal IEnumerator FetchInbox()
         {
             if (!Ready || string.IsNullOrEmpty(_playerId) || string.IsNullOrEmpty(_token)) yield break;
@@ -6878,7 +6966,7 @@ namespace CNRMods
             int unread = MailUnread;
             string mailLabel = unread > 0 ? "Mail (" + unread + ")" : "Mail";
             GUIStyle sbMail = new GUIStyle(sb);
-            if (unread > 0) sbMail.normal.textColor = new Color(1f, 0.5f, 0.3f);
+            if (unread > 0) sbMail.normal.textColor = new Color(1f, 0.15f, 0.15f);
             string acctLabel = SettingsModPresent ? "Settings" : "Account";
 
             const float pad = 6f, textBtnH = 26f;
@@ -6936,7 +7024,7 @@ namespace CNRMods
                 iconSt.active.background  = EcoMkTex(2, 2, new Color(1f, 1f, 1f, 0.4f));
                 iconSt.border  = new RectOffset(0, 0, 0, 0);
                 iconSt.padding = new RectOffset(0, 0, 0, 0);
-                if (unread > 0) GUI.color = new Color(1f, 0.7f, 0.4f);
+                if (unread > 0) GUI.color = new Color(1f, 0.15f, 0.15f);
                 if (GUI.Button(new Rect(mailX, mailY, mailW, mailH),
                                new GUIContent(_texMailIcon), iconSt)) EcoOpenMail();
                 GUI.color = Color.white;
@@ -7167,13 +7255,37 @@ namespace CNRMods
                         GUILayout.Label("Reward: " + rwd, rewardSt);
                     }
                     GUILayout.Space(4f);
+                    int thisMailId = MailIds[i];
+                    bool confirmingThis = _mailDeleteConfirmId == thisMailId;
                     GUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    if (cl)
-                        GUILayout.Label("Claimed", claimedSt, GUILayout.Width(90f));
-                    else if (GUILayout.Button("Claim Reward", EcoBtnSt(14, new Color(0.3f, 1f, 0.5f)),
-                        GUILayout.Width(120f), GUILayout.Height(28f)))
-                        RequestClaimMail(MailIds[i]);
+                    if (confirmingThis)
+                    {
+                        GUIStyle confirmLblSt = EcoHintSt();
+                        confirmLblSt.normal.textColor = new Color(1f, 0.55f, 0.2f);
+                        GUILayout.Label("Delete this mail?", confirmLblSt);
+                        GUILayout.FlexibleSpace();
+                        if (GUILayout.Button("Yes, Delete", EcoBtnSt(13, new Color(1f, 0.3f, 0.3f)),
+                            GUILayout.Width(110f), GUILayout.Height(28f)))
+                        {
+                            _mailDeleteConfirmId = -1;
+                            RequestDeleteMail(thisMailId);
+                        }
+                        if (GUILayout.Button("Cancel", EcoBtnSt(13, new Color(0.55f, 0.55f, 0.55f)),
+                            GUILayout.Width(80f), GUILayout.Height(28f)))
+                            _mailDeleteConfirmId = -1;
+                    }
+                    else
+                    {
+                        GUILayout.FlexibleSpace();
+                        if (cl)
+                            GUILayout.Label("Claimed", claimedSt, GUILayout.Width(90f));
+                        else if (GUILayout.Button("Claim Reward", EcoBtnSt(14, new Color(0.3f, 1f, 0.5f)),
+                            GUILayout.Width(120f), GUILayout.Height(28f)))
+                            RequestClaimMail(thisMailId);
+                        if (GUILayout.Button("Delete", EcoBtnSt(13, new Color(0.7f, 0.35f, 0.35f)),
+                            GUILayout.Width(72f), GUILayout.Height(28f)))
+                            _mailDeleteConfirmId = thisMailId;
+                    }
                     GUILayout.EndHorizontal();
                     GUILayout.Space(4f);
                     GUILayout.EndVertical();
