@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.13";
+        public  const string Version = "2.0.14";
 
         public static void Load()
         {
@@ -1217,6 +1217,11 @@ namespace CNRSettingsMod
             // Write desired scales here so UIPanel.LateUpdate (runs after Update) sees the transform change.
             // LateUpdate will also write to beat UIRoot, but UIPanel has already processed by then.
             EnforceScales();
+
+            // Run jump detection here too (in addition to LateUpdate) so that if our
+            // Update() executes before JoyStickController.Update() we set OnJump=1 in
+            // the same frame and the jump fires immediately on the first press.
+            if (!_hudEditMode) TouchJumpDetect();
 
             // ── KBM input ────────────────────────────────────────────────────
             if (!_kbmEnabled) return;
