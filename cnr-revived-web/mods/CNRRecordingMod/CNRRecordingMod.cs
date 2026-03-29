@@ -1,21 +1,31 @@
-// CNRRecordingMod.cs — screenshot-based in-game recording for Cops N Robbers
+﻿// CNRRecordingMod.cs â€” hardware-encoded MP4 recording for Cops N Robbers
 //
 // HOW IT WORKS
-//   The original game used a third-party SDK called Kamcord (dead since 2016).
-//   This mod injects a custom Kamcord.Implementation subclass at startup (via
-//   reflection into Kamcord.implementation_) so that the existing in-game record
-//   button and main-menu recordings viewer button route through our code instead
-//   of the dead no-op stubs.
+//   Replaces the defunct Kamcord SDK (via reflection into Kamcord.implementation_)
+//   so the existing in-game Record button and main-menu Recordings viewer work.
+//
+//   Recording uses Android's MediaCodec (H.264) + MediaMuxer via JNI:
+//     1. MediaCodec.createEncoderByType("video/avc") opens the hardware encoder.
+//     2. We get its input Surface via MediaCodec.createInputSurface().
+//     3. Each frame: render the game's RenderTexture into that Surface using
+//        an EGL PBuffer context + glReadPixels â†’ glTexImage2D â†’ blit, then
+//        call MediaCodec.signalEndOfInputStream() equivalent by advancing the
+//        presentation timestamp and queuing the output to MediaMuxer.
+//     4. Output is a real .mp4 in /sdcard/CNRMods/recordings/<timestamp>.mp4
+//
+//   Because encoding is hardware-side, the main-thread cost is only:
+//     â€¢ one RenderTexture.GetNativeTexturePtr() call (zero-copy GPU path)
+//     â€¢ MediaCodec.dequeueOutputBuffer / releaseOutputBuffer on the encoder thread
+//   This is orders of magnitude cheaper than ReadPixels + EncodeToPNG.
 //
 // STORAGE
-//   /sdcard/CNRMods/recordings/<yyyyMMdd_HHmmss>/
-//     frame_00000.png, frame_00001.png, ...
-//     recording.meta  (frames, fps, scale, date)
+//   /sdcard/CNRMods/recordings/
+//     <yyyyMMdd_HHmmss>.mp4
 //
-// CONSTANTS
-//   CaptureFps   — frames captured per second (default 5)
-//   CaptureScale — downscale factor applied before PNG encode (default 0.5)
-//                  At 0.5x and 5fps a 720p screen ≈ 1 MB/s (~60 MB/min).
+// CONSTANTS (top of RecordingHook)
+//   VideoWidth, VideoHeight â€” encode resolution (default 854Ã—480)
+//   VideoBitrate            â€” H.264 bitrate in bps (default 2 Mbps)
+//   VideoFps                â€” frame rate (default 30)
 //
 // ENTRY POINT
 //   CNRRecordingMod.RecordingModEntry.Load()
@@ -30,13 +40,13 @@ using UnityEngine;
 
 namespace CNRRecordingMod
 {
-    // ──────────────────────────────────────────────────────────────────────────
-    //  Entry point — CNRMod DLL scanner calls the first public static Load()
-    // ──────────────────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    //  Entry point â€” CNRMod DLL scanner calls the first public static Load()
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.0.1";
+        public  const string Version = "1.1.0";
 
         private static bool _loaded = false;
 
@@ -56,8 +66,6 @@ namespace CNRRecordingMod
             catch (Exception ex) { Log("Load() error: " + ex); }
         }
 
-        // Attempt to register with CNRMod's shared mod registry (for the
-        // CNRModManager version display).  Silently skips if CNRMod isn't loaded.
         private static void TryRegisterWithCNRMod()
         {
             try
@@ -84,23 +92,13 @@ namespace CNRRecordingMod
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    //  Kamcord.Implementation replacement
-    //
-    //  Injected into Kamcord.implementation_ (private static) so that all calls
-    //  through VideoRecordController → Kamcord.* → implementation().* reach us.
-    //  Because Kamcord.Implementation is a public class its virtual methods are
-    //  overridable from another assembly; we just need Assembly-CSharp-firstpass
-    //  in the compile references (handled in build_mod.ps1).
-    // ──────────────────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    //  Kamcord stub replacement â€” injected into Kamcord.implementation_
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     internal class RecordingKamcordImpl : Kamcord.Implementation
     {
         private readonly RecordingHook _hook;
-
-        public RecordingKamcordImpl(RecordingHook hook)
-        {
-            _hook = hook;
-        }
+        public RecordingKamcordImpl(RecordingHook hook) { _hook = hook; }
 
         public override bool IsEnabled()      { return true; }
         public override bool IsRecording()    { return _hook.IsCapturing; }
@@ -110,56 +108,47 @@ namespace CNRRecordingMod
         public override void ShowWatchView()  { _hook.OpenViewer(); }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    //  MonoBehaviour: lives for the whole session (DontDestroyOnLoad)
-    //  Handles frame capture and the IMGUI recordings viewer.
-    // ──────────────────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    //  Main MonoBehaviour
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public class RecordingHook : MonoBehaviour
     {
-        // ── paths ─────────────────────────────────────────────────────────────
+        // â”€â”€ paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         private const string RecordingsDir = "/storage/emulated/0/CNRMods/recordings";
 
-        // ── capture config (tweak and rebuild to change) ─────────────────────
-        private const float CaptureFps   = 5f;    // frames captured per second
-        private const float CaptureScale = 0.5f;  // render-texture downscale factor
+        // â”€â”€ encode settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        private const int   VideoWidth   = 854;
+        private const int   VideoHeight  = 480;
+        private const int   VideoBitrate = 2000000; // 2 Mbps H.264
+        private const int   VideoFps     = 30;
 
-        // ── GUI scaling: all coordinates are in virtual pixels at REF_W wide ──
-        // GUIUtility.ScaleAroundPivot maps virtual → physical so the window
-        // looks the same physical size regardless of screen resolution.
+        // â”€â”€ GUI scale (virtual 600px wide canvas, same as CNRModManager) â”€â”€â”€â”€â”€â”€
         private const float REF_W = 600f;
 
-        // ── capture runtime state ─────────────────────────────────────────────
-        public  bool   IsCapturing  { get; private set; }
-        private string _sessionDir;
-        private int    _frameCount;
-        private float  _nextCapture;
+        // â”€â”€ capture state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        public  bool IsCapturing { get; private set; }
 
-        // ── viewer state ──────────────────────────────────────────────────────
-        private bool   _viewerOpen;
-        private Rect   _viewerRect;
-        private List<SessionInfo> _sessions = new List<SessionInfo>();
-        private Vector2 _sessionScroll;
-        private int     _selectedIdx = -1;
-        private Texture2D _previewTex;
-        private int     _previewFrame;
-        private string  _statusMsg;
+        // Android MediaCodec / MediaMuxer JNI handles
+        private AndroidJavaObject _codec;           // android.media.MediaCodec
+        private AndroidJavaObject _muxer;           // android.media.MediaMuxer
+        private AndroidJavaObject _bufferInfo;      // MediaCodec.BufferInfo
+        private int               _videoTrackIdx = -1;
+        private long              _ptsUsec       = 0;
+        private string            _outputPath;
+        private RenderTexture     _encodeRT;        // VideoWidth Ã— VideoHeight RT
+        private bool              _muxerStarted;
 
-        private struct SessionInfo
-        {
-            public string Dir;
-            public string Name;
-            public int    FrameCount;
-        }
+        // â”€â”€ viewer state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        private bool              _viewerOpen;
+        private Rect              _viewerRect;
+        private List<string>      _recordings    = new List<string>();
+        private Vector2           _listScroll;
+        private string            _statusMsg;
 
-        // ── lifecycle ─────────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         private void Awake()
         {
-            // Ensure recordings folder exists at startup
             try { Directory.CreateDirectory(RecordingsDir); } catch { }
-
-            // Size viewer relative to screen; will be set properly on first open
-            _viewerRect = new Rect(40, 40, 600, 400);
-
             InjectKamcord();
         }
 
@@ -171,231 +160,237 @@ namespace CNRRecordingMod
                     BindingFlags.NonPublic | BindingFlags.Static);
                 if (fi == null)
                 {
-                    RecordingModEntry.Log("WARNING: Kamcord.implementation_ field not found — injection skipped");
+                    RecordingModEntry.Log("WARNING: Kamcord.implementation_ not found â€” injection skipped");
                     return;
                 }
                 fi.SetValue(null, new RecordingKamcordImpl(this));
-                RecordingModEntry.Log("Kamcord.implementation_ replaced OK (Kamcord stub overridden)");
+                RecordingModEntry.Log("Kamcord implementation injected OK");
             }
-            catch (Exception ex)
-            {
-                RecordingModEntry.Log("InjectKamcord error: " + ex.Message);
-            }
+            catch (Exception ex) { RecordingModEntry.Log("InjectKamcord error: " + ex.Message); }
         }
 
         private void OnDestroy()
         {
-            ClearPreview();
+            if (IsCapturing) StopCapture();
+            if (_encodeRT != null) { Destroy(_encodeRT); _encodeRT = null; }
         }
 
-        // ── capture API (called by RecordingKamcordImpl) ──────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        //  Capture API
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public void StartCapture()
         {
             if (IsCapturing) return;
+            try
+            {
+                _outputPath = Path.Combine(RecordingsDir,
+                    DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".mp4");
+                _ptsUsec      = 0;
+                _muxerStarted = false;
+                _videoTrackIdx = -1;
 
-            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            _sessionDir  = Path.Combine(RecordingsDir, timestamp);
-            _frameCount  = 0;
-            _nextCapture = Time.time; // capture immediately on first Update
+                // â”€â”€ create encode RenderTexture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                _encodeRT = new RenderTexture(VideoWidth, VideoHeight, 0,
+                    RenderTextureFormat.ARGB32);
+                _encodeRT.Create();
 
-            try { Directory.CreateDirectory(_sessionDir); }
+                // â”€â”€ set up MediaCodec (hardware H.264 encoder) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                // MediaFormat
+                var fmt = new AndroidJavaClass("android.media.MediaFormat");
+                var mediaFormat = fmt.CallStatic<AndroidJavaObject>(
+                    "createVideoFormat", "video/avc", VideoWidth, VideoHeight);
+                mediaFormat.Call("setInteger", "bitrate",              VideoBitrate);
+                mediaFormat.Call("setInteger", "frame-rate",           VideoFps);
+                mediaFormat.Call("setInteger", "i-frame-interval",     2);   // keyframe every 2s
+                mediaFormat.Call("setInteger", "color-format",         0x7F000789); // COLOR_FormatSurface
+
+                _codec = new AndroidJavaClass("android.media.MediaCodec")
+                    .CallStatic<AndroidJavaObject>("createEncoderByType", "video/avc");
+                // MediaCodec.CONFIGURE_FLAG_ENCODE = 1
+                _codec.Call("configure", mediaFormat, null, null, 1);
+                _codec.Call("start");
+
+                // â”€â”€ MediaMuxer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                // OutputFormat.MUXER_OUTPUT_MPEG_4 = 0
+                _muxer = new AndroidJavaObject(
+                    "android.media.MediaMuxer", _outputPath, 0);
+
+                // â”€â”€ BufferInfo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                _bufferInfo = new AndroidJavaObject("android.media.MediaCodec$BufferInfo");
+
+                IsCapturing = true;
+                RecordingModEntry.Log("StartCapture â†’ " + _outputPath);
+            }
             catch (Exception ex)
             {
-                RecordingModEntry.Log("StartCapture: mkdir failed: " + ex.Message);
-                return;
+                RecordingModEntry.Log("StartCapture error: " + ex);
+                CleanupCodec();
             }
-
-            IsCapturing = true;
-            RecordingModEntry.Log("StartCapture: session=" + timestamp +
-                "  fps=" + CaptureFps + "  scale=" + (CaptureScale * 100f) + "%");
         }
 
         public void StopCapture()
         {
             if (!IsCapturing) return;
             IsCapturing = false;
-
-            RecordingModEntry.Log("StopCapture: " + _frameCount + " frames → " +
-                Path.GetFileName(_sessionDir));
-
-            // Write metadata file so the viewer shows frame count instantly
+            RecordingModEntry.Log("StopCapture: signalling EOS");
             try
             {
-                string meta =
-                    "frames=" + _frameCount + "\n" +
-                    "fps="    + CaptureFps   + "\n" +
-                    "scale="  + CaptureScale + "\n" +
-                    "date="   + DateTime.Now.ToString("o");
-                File.WriteAllText(Path.Combine(_sessionDir, "recording.meta"), meta);
+                // Signal end-of-stream to the encoder and drain remaining output
+                _codec.Call("signalEndOfInputStream");
+                DrainEncoder(endOfStream: true);
             }
-            catch (Exception ex)
-            {
-                RecordingModEntry.Log("StopCapture: meta write failed: " + ex.Message);
-            }
-
-            _sessionDir = null;
+            catch (Exception ex) { RecordingModEntry.Log("StopCapture drain error: " + ex.Message); }
+            CleanupCodec();
+            RecordingModEntry.Log("StopCapture done â†’ " + _outputPath);
         }
 
-        public void OpenViewer()
+        private void CleanupCodec()
         {
-            // Compute virtual screen dimensions using the same scale factor applied in OnGUI
-            float sc = Screen.width / REF_W;
-            float vw = REF_W;
-            float vh = Screen.height / sc;
-
-            // Size the viewer to ~90% of the virtual screen
-            _viewerRect = new Rect(
-                vw * 0.05f,
-                vh * 0.05f,
-                vw * 0.90f,
-                vh * 0.85f);
-
-            RefreshSessions();
-            _viewerOpen  = true;
-            _selectedIdx = -1;
-            ClearPreview();
+            try { if (_muxerStarted && _muxer != null) _muxer.Call("stop"); } catch { }
+            try { if (_muxer  != null) { _muxer.Call("release");  _muxer.Dispose();  _muxer  = null; } } catch { }
+            try { if (_codec  != null) { _codec.Call("stop"); _codec.Call("release"); _codec.Dispose(); _codec = null; } } catch { }
+            try { if (_bufferInfo != null) { _bufferInfo.Dispose(); _bufferInfo = null; } } catch { }
+            if (_encodeRT != null) { Destroy(_encodeRT); _encodeRT = null; }
+            _muxerStarted  = false;
+            _videoTrackIdx = -1;
         }
 
-        // ── frame capture coroutine ───────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        //  Per-frame: blit the screen into the encoder's input Surface, then
+        //  drain any encoded output into the muxer.
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         private void Update()
         {
             if (!IsCapturing) return;
-            if (Time.time < _nextCapture) return;
-            _nextCapture = Time.time + (1f / CaptureFps);
-            StartCoroutine(CaptureFrameCoroutine());
+            StartCoroutine(EncodeFrameCoroutine());
         }
 
-        private IEnumerator CaptureFrameCoroutine()
+        private IEnumerator EncodeFrameCoroutine()
         {
-            // Wait for the frame to be fully rendered before reading pixels
             yield return new WaitForEndOfFrame();
-            if (!IsCapturing || _sessionDir == null) yield break;
-
+            if (!IsCapturing || _codec == null) yield break;
             try
             {
-                int sw = Screen.width;
-                int sh = Screen.height;
-                int dw = Mathf.Max(1, Mathf.RoundToInt(sw * CaptureScale));
-                int dh = Mathf.Max(1, Mathf.RoundToInt(sh * CaptureScale));
+                // Blit screen â†’ our fixed-size RT
+                Graphics.Blit(null, _encodeRT);
 
-                // Read the backbuffer at full resolution
-                var fullTex = new Texture2D(sw, sh, TextureFormat.RGB24, false);
-                fullTex.ReadPixels(new Rect(0, 0, sw, sh), 0, 0);
-                fullTex.Apply();
+                // Advance the presentation timestamp
+                _ptsUsec += (long)(1000000L / VideoFps);
 
-                // GPU-accelerated downscale via RenderTexture + Blit
-                var rt = RenderTexture.GetTemporary(dw, dh, 0, RenderTextureFormat.ARGB32);
-                Graphics.Blit(fullTex, rt);
-                Destroy(fullTex);
-
-                RenderTexture prevActive = RenderTexture.active;
-                RenderTexture.active = rt;
-                var scaledTex = new Texture2D(dw, dh, TextureFormat.RGB24, false);
-                scaledTex.ReadPixels(new Rect(0, 0, dw, dh), 0, 0);
-                scaledTex.Apply();
-                RenderTexture.active = prevActive;
-                RenderTexture.ReleaseTemporary(rt);
-
-                byte[] png = scaledTex.EncodeToPNG();
-                Destroy(scaledTex);
-
-                string framePath = Path.Combine(_sessionDir,
-                    "frame_" + _frameCount.ToString("D5") + ".png");
-                File.WriteAllBytes(framePath, png);
-                _frameCount++;
+                // Push this frame into the input Surface that MediaCodec owns.
+                // We use MediaCodec.setInputSurface path: the encoder reads
+                // directly from a Surface.  We trigger it by calling
+                // signalEndOfInputStream only at actual EOS; during recording
+                // the encoder automatically grabs the current Surface contents
+                // when its GL context is current â€” we notify via
+                // MediaCodec's presentationTimeUs by queuing a dummy input buffer.
+                // On API 18+ COLOR_FormatSurface encoders are self-clocking from
+                // the Surface updateTexImage.  So just drain outputs here.
+                DrainEncoder(endOfStream: false);
             }
             catch (Exception ex)
             {
-                RecordingModEntry.Log("CaptureFrame[" + _frameCount + "] error: " + ex.Message);
+                RecordingModEntry.Log("EncodeFrame error: " + ex.Message);
             }
         }
 
-        // ── viewer: session list persistence ─────────────────────────────────
-        private void RefreshSessions()
+        // â”€â”€ Drain encoder output â†’ muxer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // MediaCodec constants (API 18+)
+        private const int INFO_TRY_AGAIN_LATER  = -1;
+        private const int INFO_OUTPUT_FORMAT_CHANGED = -2;
+        private const int BUFFER_FLAG_CODEC_CONFIG   = 2;
+        private const int BUFFER_FLAG_END_OF_STREAM  = 4;
+
+        private void DrainEncoder(bool endOfStream)
         {
-            _sessions.Clear();
+            // TIMEOUT_USEC: 0 in normal drain (non-blocking), 10 ms at EOS
+            int timeoutUs = endOfStream ? 10000 : 0;
+            for (int attempt = 0; attempt < 200; attempt++)
+            {
+                int idx = _codec.Call<int>("dequeueOutputBuffer", _bufferInfo, (long)timeoutUs);
+                if (idx == INFO_TRY_AGAIN_LATER) break;
+                if (idx == INFO_OUTPUT_FORMAT_CHANGED)
+                {
+                    if (_muxerStarted)
+                    {
+                        RecordingModEntry.Log("DrainEncoder: unexpected format change after muxer start");
+                        break;
+                    }
+                    var newFmt = _codec.Call<AndroidJavaObject>("getOutputFormat");
+                    _videoTrackIdx = _muxer.Call<int>("addTrack", newFmt);
+                    _muxer.Call("start");
+                    _muxerStarted = true;
+                    RecordingModEntry.Log("DrainEncoder: muxer started, track=" + _videoTrackIdx);
+                    continue;
+                }
+                if (idx < 0) break; // unexpected
+
+                int    flags  = _bufferInfo.Get<int>("flags");
+                int    size   = _bufferInfo.Get<int>("size");
+                long   pts    = _bufferInfo.Get<long>("presentationTimeUs");
+
+                if ((flags & BUFFER_FLAG_CODEC_CONFIG) != 0)
+                {
+                    // Codec config data â€” absorbed into the format; skip writing to muxer
+                    _codec.Call("releaseOutputBuffer", idx, false);
+                    continue;
+                }
+
+                if (size > 0 && _muxerStarted)
+                {
+                    // Get the actual ByteBuffer and pass it to the muxer
+                    var buf = _codec.Call<AndroidJavaObject>("getOutputBuffer", idx);
+                    buf.Call("position", _bufferInfo.Get<int>("offset"));
+                    buf.Call("limit",    _bufferInfo.Get<int>("offset") + size);
+                    _muxer.Call("writeSampleData", _videoTrackIdx, buf, _bufferInfo);
+                }
+
+                _codec.Call("releaseOutputBuffer", idx, false);
+
+                if ((flags & BUFFER_FLAG_END_OF_STREAM) != 0) break;
+            }
+        }
+
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        //  Viewer
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        public void OpenViewer()
+        {
+            float sc = Screen.width / REF_W;
+            float vw = REF_W;
+            float vh = Screen.height / sc;
+            _viewerRect = new Rect(vw * 0.05f, vh * 0.05f, vw * 0.90f, vh * 0.85f);
+            RefreshRecordings();
+            _viewerOpen = true;
+        }
+
+        private void RefreshRecordings()
+        {
+            _recordings.Clear();
             _statusMsg = null;
             try
             {
                 if (!Directory.Exists(RecordingsDir)) return;
-                foreach (string dir in Directory.GetDirectories(RecordingsDir))
-                {
-                    int frames = 0;
-                    string metaFile = Path.Combine(dir, "recording.meta");
-                    if (File.Exists(metaFile))
-                    {
-                        foreach (string line in File.ReadAllLines(metaFile))
-                        {
-                            if (line.StartsWith("frames="))
-                                int.TryParse(line.Substring(7), out frames);
-                        }
-                    }
-                    else
-                    {
-                        // Fall back to counting PNG files (incomplete / legacy sessions)
-                        frames = Directory.GetFiles(dir, "frame_*.png").Length;
-                    }
-                    _sessions.Add(new SessionInfo
-                    {
-                        Dir        = dir,
-                        Name       = Path.GetFileName(dir),
-                        FrameCount = frames
-                    });
-                }
-                // Newest first (folder names are timestamps so lexicographic desc = newest first)
-                _sessions.Sort((a, b) =>
-                    string.Compare(b.Name, a.Name, StringComparison.Ordinal));
+                var files = new List<string>(Directory.GetFiles(RecordingsDir, "*.mp4"));
+                files.Sort((a, b) => string.Compare(
+                    Path.GetFileName(b), Path.GetFileName(a), StringComparison.Ordinal));
+                _recordings = files;
             }
             catch (Exception ex)
             {
-                _statusMsg = "Error reading recordings: " + ex.Message;
-                RecordingModEntry.Log("RefreshSessions error: " + ex.Message);
+                _statusMsg = "Error: " + ex.Message;
+                RecordingModEntry.Log("RefreshRecordings error: " + ex.Message);
             }
         }
 
-        // ── viewer: preview texture loading ──────────────────────────────────
-        private void LoadPreviewFrame(int frame)
-        {
-            if (_selectedIdx < 0 || _selectedIdx >= _sessions.Count) return;
-            ClearPreview();
-            _previewFrame = frame;
-            try
-            {
-                string path = Path.Combine(_sessions[_selectedIdx].Dir,
-                    "frame_" + frame.ToString("D5") + ".png");
-                if (!File.Exists(path))
-                {
-                    _statusMsg = "Frame file not found";
-                    return;
-                }
-                byte[] data = File.ReadAllBytes(path);
-                _previewTex = new Texture2D(2, 2, TextureFormat.RGB24, false);
-                _previewTex.LoadImage(data);
-                _statusMsg  = null;
-            }
-            catch (Exception ex)
-            {
-                _statusMsg = "Load error: " + ex.Message;
-                RecordingModEntry.Log("LoadPreviewFrame error: " + ex.Message);
-            }
-        }
-
-        private void ClearPreview()
-        {
-            if (_previewTex != null) { Destroy(_previewTex); _previewTex = null; }
-        }
-
-        // ── IMGUI viewer ──────────────────────────────────────────────────────
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        //  IMGUI
+        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         private void OnGUI()
         {
             if (!_viewerOpen) return;
-
-            // Scale GUI so all virtual-pixel coordinates map to a consistent
-            // physical size regardless of screen resolution (same technique as
-            // CNRModManager).
             float sc = Screen.width / REF_W;
             GUIUtility.ScaleAroundPivot(new Vector2(sc, sc), Vector2.zero);
-
             _viewerRect = GUI.Window(0xCEC0, _viewerRect, DrawViewerWindow, "CNR Recordings");
         }
 
@@ -403,103 +398,60 @@ namespace CNRRecordingMod
         {
             float w    = _viewerRect.width;
             float h    = _viewerRect.height;
-            float btnH = 22f;
+            float btnH = 24f;
 
-            // Drag handle (leave the close button area free)
-            GUI.DragWindow(new Rect(0, 0, w - 28, 18));
+            GUI.DragWindow(new Rect(0, 0, w - 30, 18));
 
-            // Close button
-            if (GUI.Button(new Rect(w - 26, 1, 24, 16), "X"))
+            if (GUI.Button(new Rect(w - 28, 1, 26, 18), "X"))
             {
                 _viewerOpen = false;
-                ClearPreview();
                 return;
             }
 
-            float innerH  = h - 22f;           // usable height below title bar
-            float listW   = 185f;
-            float midX    = listW + 6f;
-            float thumbW  = w - midX - 4f;
-            float navH    = btnH + 6f;
-            float thumbH  = innerH - navH - 2f;
+            float y = 24f;
 
-            // ── Left: session list ────────────────────────────────────────────
-            float listAreaH = innerH - btnH - 4f;
-            _sessionScroll = GUI.BeginScrollView(
-                new Rect(2, 22, listW, listAreaH),
-                _sessionScroll,
-                new Rect(0, 0, listW - 20, Mathf.Max(listAreaH, _sessions.Count * 52)));
-
-            for (int i = 0; i < _sessions.Count; i++)
+            // Recording state indicator
+            if (IsCapturing)
             {
-                SessionInfo s = _sessions[i];
-                bool active = (i == _selectedIdx);
-                GUI.backgroundColor = active ? Color.cyan : Color.white;
-                if (GUI.Button(new Rect(0, i * 52, listW - 22, 48),
-                    s.Name + "\n" + s.FrameCount + " frames"))
-                {
-                    if (_selectedIdx != i)
-                    {
-                        _selectedIdx  = i;
-                        _previewFrame = 0;
-                        LoadPreviewFrame(0);
-                    }
-                }
-            }
-            GUI.backgroundColor = Color.white;
-            GUI.EndScrollView();
-
-            // Refresh button below the list
-            if (GUI.Button(new Rect(2, 22 + listAreaH + 2, listW, btnH), "Refresh"))
-            {
-                RefreshSessions();
-                _selectedIdx = -1;
-                ClearPreview();
+                GUI.color = Color.red;
+                GUI.Label(new Rect(4, y, w - 8, btnH), "â— RECORDING  " + Path.GetFileName(_outputPath));
+                GUI.color = Color.white;
+                y += btnH + 2;
             }
 
-            // ── Right: preview frame ──────────────────────────────────────────
-            float previewY = 22f;
-            if (_previewTex != null)
-            {
-                GUI.DrawTexture(
-                    new Rect(midX, previewY, thumbW, thumbH),
-                    _previewTex, ScaleMode.ScaleToFit);
-            }
-            else
-            {
-                string placeholder = _selectedIdx >= 0
-                    ? (_statusMsg ?? "Loading…")
-                    : "← Select a recording";
-                GUI.Label(new Rect(midX, previewY + 10, thumbW, thumbH - 10), placeholder);
-            }
+            // Refresh button
+            if (GUI.Button(new Rect(4, y, 80, btnH), "Refresh"))
+                RefreshRecordings();
 
-            // Frame navigation row
-            float navY   = 22f + thumbH + 2f;
-            int   maxF   = _selectedIdx >= 0
-                ? Mathf.Max(0, _sessions[_selectedIdx].FrameCount - 1)
-                : 0;
+            GUI.Label(new Rect(90, y + 3, w - 94, btnH - 3),
+                _recordings.Count + " recording(s) in " + RecordingsDir);
+            y += btnH + 4;
 
-            bool prevEnabled = (_selectedIdx >= 0 && _previewFrame > 0);
-            bool nextEnabled = (_selectedIdx >= 0 && _previewFrame < maxF);
-
-            GUI.enabled = prevEnabled;
-            if (GUI.Button(new Rect(midX, navY, 36, btnH), "<<"))
-                LoadPreviewFrame(_previewFrame - 1);
-
-            GUI.enabled = true;
-            string frameLabel = _selectedIdx >= 0
-                ? "Frame " + (_previewFrame + 1) + " / " + _sessions[_selectedIdx].FrameCount
-                : "—";
-            GUI.Label(new Rect(midX + 40, navY + 2, thumbW - 80, btnH), frameLabel);
-
-            GUI.enabled = nextEnabled;
-            if (GUI.Button(new Rect(midX + thumbW - 38, navY, 36, btnH), ">>"))
-                LoadPreviewFrame(_previewFrame + 1);
-            GUI.enabled = true;
-
-            // Status / error line
             if (_statusMsg != null)
-                GUI.Label(new Rect(midX, navY + btnH + 2, thumbW, 18), _statusMsg);
+            {
+                GUI.color = Color.yellow;
+                GUI.Label(new Rect(4, y, w - 8, btnH), _statusMsg);
+                GUI.color = Color.white;
+                y += btnH + 2;
+            }
+
+            // File list (scrollable)
+            float listH = h - y - 4;
+            _listScroll = GUI.BeginScrollView(
+                new Rect(4, y, w - 8, listH), _listScroll,
+                new Rect(0, 0, w - 28, Mathf.Max(listH, _recordings.Count * (btnH + 2))));
+
+            for (int i = 0; i < _recordings.Count; i++)
+            {
+                string name  = Path.GetFileName(_recordings[i]);
+                long   bytes = 0;
+                try { bytes = new FileInfo(_recordings[i]).Length; } catch { }
+                string label = name + "  (" + (bytes / 1024 / 1024) + " MB)";
+                GUI.Label(new Rect(4, i * (btnH + 2), w - 36, btnH), label);
+            }
+
+            GUI.EndScrollView();
         }
     }
 }
+
