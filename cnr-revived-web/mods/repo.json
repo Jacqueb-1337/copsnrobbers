@@ -5,11 +5,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.41",
+      "latestVersion": "2.0.42",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.42",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.42.dll",
+          "changelog": "Removed the sync freeze that blocked equipment sync while the weapons tab was open. That workaround was added to prevent equip/unequip reverting, but the actual root cause (UICamera.useMouse double-click on profile buttons) was fixed in CNRSettingsMod 2.0.4. Equipment progression now syncs immediately regardless of which profile tab is active."
+        },
         {
           "version": "2.0.41",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.41.dll",
