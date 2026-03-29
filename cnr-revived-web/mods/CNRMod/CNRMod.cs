@@ -21,14 +21,13 @@ namespace CNRMods
         public static int    ServerPort    = 5055;
         public static string AppId         = "CNRLan";
         public static string MapUrl        = "";
-        public static string ModVersion    = "2.0.9";
         public static bool   KickNoMod     = true;
         public static string WebUrl        = "";    // http://<host>:1337 for node server; derived from SERVER_IP if not set
         public static string EconomyUrl    = "";    // https://<host>/economy  for PHP economy API
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.45";
+        public const  string Version = "2.0.46";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -69,7 +68,7 @@ namespace CNRMods
                 GameObject.DontDestroyOnLoad(go);
 
                 Log("Mod root created.  IP=" + (ServerIp != "" ? ServerIp : "(none)") +
-                    "  MOD_VERSION=" + ModVersion + "  KICK_NO_MOD=" + KickNoMod);
+                    "  VERSION=" + Version + "  KICK_NO_MOD=" + KickNoMod);
 
             // Clear any stale custom-map prefs from a previous session that ended
             // without a proper OnLeftRoom (crash, force-close, etc.).
@@ -136,7 +135,6 @@ namespace CNRMods
                     File.WriteAllText(ConfigPath,
                         "SERVER_IP=play.jacqueb.me\n" +
                         "SERVER_PORT=5055\n" +
-                        "MOD_VERSION=2.0.0\n" +
                         "KICK_NO_MOD=true\n");
                     Log("Created default server.cfg");
                 }
@@ -156,14 +154,13 @@ namespace CNRMods
                     case "SERVER_PORT": int pp; if (int.TryParse(val, out pp)) ServerPort = pp; break;
                     case "APP_ID":      AppId      = val;   break;
                     case "MAP_URL":     MapUrl     = val;   break;
-                    case "MOD_VERSION": ModVersion = val;   break;
                     case "KICK_NO_MOD":   KickNoMod   = val.ToLower() != "false" && val != "0"; break;
                     case "WEB_URL":       WebUrl      = val; break;
                     case "ECONOMY_URL":   EconomyUrl  = val; break;
                 }
             }
             Log("Config: IP=" + ServerIp + "  PORT=" + ServerPort + "  MAP_URL=" + MapUrl +
-                "  VERSION=" + ModVersion + "  KICK=" + KickNoMod);
+                "  VERSION=" + Version + "  KICK=" + KickNoMod);
             if (string.IsNullOrEmpty(WebUrl) && !string.IsNullOrEmpty(ServerIp))
                 WebUrl = "http://" + ServerIp + ":1337";
             Log("WebUrl=" + (WebUrl != "" ? WebUrl : "(not set)"));
@@ -181,7 +178,6 @@ namespace CNRMods
             {
                 new string[] { "SERVER_IP",   "Server IP",            "string", ServerIp,                     "IP or hostname of the game server" },
                 new string[] { "SERVER_PORT", "Server Port",          "int",    ServerPort.ToString(),         "Port the server listens on (default 5055)" },
-                new string[] { "MOD_VERSION", "Required Mod Version", "string", ModVersion,                   "Min mod version required to join (used in kick message)" },
                 new string[] { "KICK_NO_MOD", "Kick Without Mod",     "bool",   KickNoMod ? "true" : "false", "Kick players who don't have CNRMod installed" },
                 new string[] { "APP_ID",      "Photon App ID",        "string", AppId,                        "Photon App ID — leave as CNRLan unless self-hosting" },
                 new string[] { "MAP_URL",     "Custom Maps URL",      "string", MapUrl,                       "URL to a maps JSON file (blank = default maps)" },
@@ -395,7 +391,7 @@ namespace CNRMods
             string roomName = GetRoomName(pnt);
             ModEntry.Log("Room: " + (roomName ?? "(unknown)"));
 
-            SetRoomProp(pnt, "CNR_MOD_VERSION", ModEntry.ModVersion);
+            SetRoomProp(pnt, "CNR_MOD_VERSION", ModEntry.Version);
 
             if (asMaster)
             {
@@ -569,13 +565,7 @@ namespace CNRMods
 
         private bool VersionOk(string other)
         {
-            try
-            {
-                int a = int.Parse(ModEntry.ModVersion.Trim().Split('.')[0]);
-                int b = int.Parse(other.Trim().Split('.')[0]);
-                return a == b;
-            }
-            catch { return true; }
+            return string.Equals(other.Trim(), ModEntry.Version.Trim(), StringComparison.Ordinal);
         }
 
         // ── Map download ──────────────────────────────────────────────────────
