@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.14";
+        public  const string Version = "2.0.15";
 
         public static void Load()
         {
@@ -1029,6 +1029,9 @@ namespace CNRSettingsMod
         private float _touchFireCooldown = 0f;
         private JoyStickController _joyStickCtrl = null;
         private System.Reflection.FieldInfo _fiFireHoldCount = null;
+        private System.Reflection.FieldInfo _fiJumpIsJumping  = null;
+        private System.Reflection.FieldInfo _fiJumpTime       = null;
+        private System.Reflection.FieldInfo _fiJumpCharCtrl   = null;
 
         // -- Pause panel polling -----------------------------------------------
         private GameObject _pausePanelRef;
@@ -1124,7 +1127,10 @@ namespace CNRSettingsMod
             _chatWasFocused   = false;
             for (int i = 0; i < DRAG_COUNT; i++) { _dragGOs[i] = null; _dragOrigPos[i] = Vector3.zero; /* keep _dragOrigScale so captured baseline survives multiple ApplyHUDOnLoad runs */ }
             for (int i = 0; i < _visGOs.Length;  i++) _visGOs[i]  = null;
-            _joyStickCtrl   = null;
+            _joyStickCtrl    = null;
+            _fiJumpIsJumping  = null;
+            _fiJumpTime       = null;
+            _fiJumpCharCtrl   = null;
             LoadPrefs();
             if (_inGameScene) StartCoroutine(ApplyHUDOnLoad());
             if (_inGameScene && _kbmEnabled) StartCoroutine(AutoLockAfterLoad());
@@ -1583,16 +1589,35 @@ namespace CNRSettingsMod
         }
 
         // Jump-on-press touch detection.
-        // NGUI fires OnClick on finger-up, so the jump button only triggers on release.
-        // This method detects the touch directly from Input.GetTouch and sets
-        // PlayerPrefs OnJump=1 on TouchBegan (and continues while held) so the jump
-        // fires immediately on press.  JoyStickController already guards re-jumping with
-        // !isJumping && isGrounded, so holding the button simply auto-re-jumps on landing.
+        // NGUI fires OnClick on finger-up, so holding the jump button delays the jump
+        // until release.  This method detects the touch directly and bypasses the
+        // PlayerPrefs-based signalling entirely: when the jump button is held and the
+        // player is grounded, we directly write JoyStickController's private isJumping
+        // and jumpTime fields (the same fields its own Update() writes) so a jump fires
+        // in the current frame regardless of script execution order.
+        // While the player is in the air (isJumping=true), we keep OnJump=1 in prefs
+        // so JoyStickController re-jumps the instant it detects landing.
         private void TouchJumpDetect()
         {
             if (_dragGOs[1] == null || _nguiCam == null) return;
             if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
             if (Input.touchCount == 0) return;
+
+            // Cache JoyStickController and its private fields.
+            if ((object)_joyStickCtrl == null)
+                _joyStickCtrl = (JoyStickController)UnityEngine.Object.FindObjectOfType(typeof(JoyStickController));
+            if ((object)_joyStickCtrl != null)
+            {
+                if (_fiJumpIsJumping == null)
+                    _fiJumpIsJumping = typeof(JoyStickController).GetField(
+                        "isJumping", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (_fiJumpTime == null)
+                    _fiJumpTime = typeof(JoyStickController).GetField(
+                        "jumpTime", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (_fiJumpCharCtrl == null)
+                    _fiJumpCharCtrl = typeof(JoyStickController).GetField(
+                        "charactercontroller", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            }
 
             Vector3 worldCenter = _dragGOs[1].transform.position;
             Vector3 scrCenter   = _nguiCam.WorldToScreenPoint(worldCenter);
@@ -1613,7 +1638,27 @@ namespace CNRSettingsMod
                 float dx = t.position.x - scrCenter.x;
                 float dy = t.position.y - scrCenter.y;
                 if (dx * dx + dy * dy > scrRadius2) continue;
-                PlayerPrefs.SetInt("OnJump", 1);
+
+                // Try direct jump: write isJumping + jumpTime into JoyStickController
+                // so the jump fires this frame regardless of script execution order.
+                bool didJump = false;
+                if ((object)_joyStickCtrl != null &&
+                    _fiJumpIsJumping != null && _fiJumpTime != null && _fiJumpCharCtrl != null)
+                {
+                    bool isJumping = (bool)_fiJumpIsJumping.GetValue(_joyStickCtrl);
+                    CharacterController cc = (CharacterController)_fiJumpCharCtrl.GetValue(_joyStickCtrl);
+                    if (!isJumping && cc != null && cc.isGrounded)
+                    {
+                        _fiJumpIsJumping.SetValue(_joyStickCtrl, true);
+                        _fiJumpTime.SetValue(_joyStickCtrl, Time.time);
+                        PlayerPrefs.SetInt("OnJump", 0);
+                        didJump = true;
+                    }
+                }
+                // Fallback / in-air case: keep OnJump=1 so JoyStickController re-jumps
+                // the instant it detects landing (isGrounded becomes true again).
+                if (!didJump)
+                    PlayerPrefs.SetInt("OnJump", 1);
                 break;
             }
         }
