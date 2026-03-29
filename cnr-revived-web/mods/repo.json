@@ -156,12 +156,17 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.11",
+      "latestVersion": "2.0.12",
       "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.12",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.12.dll",
+          "changelog": "Fixed: fire button requires two fingers to activate. Root cause: the NGUI camera viewport was being expanded to full screen, which changed the camera projection matrix. JoyStickController uses Camera.ScreenPointToRay() with Physics.Raycast to detect the FireButton collider — with the modified viewport the ray no longer intersected the collider, so one-finger fire failed silently. Fix: the camera viewport is no longer expanded. Note: HUD buttons dragged to the left quarter of the screen (outside the original NGUI camera viewport) will not respond to touches; all other positions are unaffected."
+        },
         {
           "version": "2.0.11",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.11.dll",
