@@ -1,21 +1,5 @@
 // CNRRecordingMod.cs - hardware-encoded MP4 recording for Cops N Robbers
-//
-// HOW IT WORKS
-//   Replaces the defunct Kamcord SDK (via reflection into Kamcord.implementation_)
-//   so the existing in-game Record button and main-menu Recordings viewer work.
-//
-//   Recording uses Android MediaCodec (H.264) + MediaMuxer via JNI:
-//     1. COLOR_FormatYUV420Flexible encoder configured via MediaFormat.
-//     2. Each frame (WaitForEndOfFrame):
-//          ReadPixels -> Texture2D (RGBA32)
-//          RGBA -> YUV420 planar conversion in C# (~5-8 ms at 854x480)
-//          dequeueInputBuffer -> copy bytes -> queueInputBuffer
-//          DrainEncoder -> writeSampleData to MediaMuxer
-//     3. Output: /sdcard/CNRMods/recordings/<yyyyMMdd_HHmmss>.mp4
-//
-// ENTRY POINT
-//   CNRRecordingMod.RecordingModEntry.Load()
-//   Called automatically by CNRMod's LoadExternalMods() scanner.
+// v1.3.0 - verbose diagnostic logging + JNI byte-copy fix (NewByteArray/SetByteArrayRegion)
 
 using System;
 using System.Collections;
@@ -26,21 +10,30 @@ using UnityEngine;
 
 namespace CNRRecordingMod
 {
-    // ------------------------------------------------------------------------
-    //  Entry point - CNRMod DLL scanner calls the first public static Load()
-    // ------------------------------------------------------------------------
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.2.0";
-
+        public  const string Version = "1.3.0";
         private static bool _loaded = false;
 
         public static void Load()
         {
             if (_loaded) { Log("already loaded, skipping"); return; }
             _loaded = true;
+
+            // Clear log on every boot so file stays fresh
+            try { File.WriteAllText(LogPath, ""); } catch { }
+
             Log("=== CNRRecordingMod v" + Version + " loading ===");
+            Log("Time: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            try { Log("Unity: " + Application.unityVersion + "  platform=" + Application.platform); } catch { }
+            try
+            {
+                using (var v = new AndroidJavaClass("android.os.Build$VERSION"))
+                    Log("Android SDK_INT=" + v.GetStatic<int>("SDK_INT"));
+            }
+            catch (Exception ex) { Log("Android SDK check failed: " + ex.Message); }
+
             try
             {
                 TryRegisterWithCNRMod();
@@ -49,7 +42,7 @@ namespace CNRRecordingMod
                 GameObject.DontDestroyOnLoad(go);
                 Log("Load OK");
             }
-            catch (Exception ex) { Log("Load() error: " + ex); }
+            catch (Exception ex) { Log("Load() FATAL: " + ex); }
         }
 
         private static void TryRegisterWithCNRMod()
@@ -73,19 +66,15 @@ namespace CNRRecordingMod
 
         public static void Log(string msg)
         {
-            try { File.AppendAllText(LogPath, "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + msg + "\n"); } catch { }
+            try { File.AppendAllText(LogPath, "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] " + msg + "\n"); } catch { }
             try { Debug.Log("[CNRRecording] " + msg); } catch { }
         }
     }
 
-    // ------------------------------------------------------------------------
-    //  Kamcord stub replacement - injected into Kamcord.implementation_
-    // ------------------------------------------------------------------------
     internal class RecordingKamcordImpl : Kamcord.Implementation
     {
         private readonly RecordingHook _hook;
         public RecordingKamcordImpl(RecordingHook hook) { _hook = hook; }
-
         public override bool IsEnabled()      { return true; }
         public override bool IsRecording()    { return _hook.IsCapturing; }
         public override void StartRecording() { _hook.StartCapture(); }
@@ -94,56 +83,47 @@ namespace CNRRecordingMod
         public override void ShowWatchView()  { _hook.OpenViewer(); }
     }
 
-    // ------------------------------------------------------------------------
-    //  Main MonoBehaviour
-    // ------------------------------------------------------------------------
     public class RecordingHook : MonoBehaviour
     {
-        // ---- paths -----------------------------------------------------------
-        private const string RecordingsDir = "/storage/emulated/0/CNRMods/recordings";
+        private const string RecordingsDir    = "/storage/emulated/0/CNRMods/recordings";
+        private const int    VideoWidth       = 854;
+        private const int    VideoHeight      = 480;
+        private const int    VideoBitrate     = 2000000;
+        private const int    VideoFps         = 30;
+        private const int    COLOR_FMT_YUV420 = 0x7F420888; // COLOR_FormatYUV420Flexible
+        private const float  REF_W            = 600f;
 
-        // ---- encode settings -------------------------------------------------
-        private const int   VideoWidth   = 854;
-        private const int   VideoHeight  = 480;
-        private const int   VideoBitrate = 2000000; // 2 Mbps H.264
-        private const int   VideoFps     = 30;
-
-        // COLOR_FormatYUV420Flexible = 0x7F420888
-        // Use this so we can feed raw YUV bytes via dequeueInputBuffer.
-        // COLOR_FormatSurface would require an EGL surface bound to the encoder,
-        // which Unity does not do automatically.
-        private const int COLOR_FORMAT_YUV420 = 0x7F420888;
-
-        // ---- GUI scale (virtual 600px wide canvas, same as CNRModManager) -----
-        private const float REF_W = 600f;
-
-        // ---- capture state ---------------------------------------------------
         public  bool IsCapturing { get; private set; }
 
-        // Android MediaCodec / MediaMuxer JNI handles
-        private AndroidJavaObject _codec;       // android.media.MediaCodec
-        private AndroidJavaObject _muxer;       // android.media.MediaMuxer
-        private AndroidJavaObject _bufferInfo;  // MediaCodec.BufferInfo
+        private AndroidJavaObject _codec;
+        private AndroidJavaObject _muxer;
+        private AndroidJavaObject _bufferInfo;
         private int               _videoTrackIdx = -1;
         private long              _ptsUsec       = 0;
         private string            _outputPath;
         private bool              _muxerStarted;
 
-        // Reusable read-back texture and YUV byte array
-        private Texture2D         _readTex;
-        private byte[]            _yuvBuf;      // VideoWidth * VideoHeight * 3/2 bytes
+        private Texture2D  _readTex;
+        private byte[]     _yuvBuf;
 
-        // ---- viewer state ----------------------------------------------------
+        private int        _frameCount;
+        private int        _drainLogCount;
+
         private bool         _viewerOpen;
         private Rect         _viewerRect;
         private List<string> _recordings = new List<string>();
         private Vector2      _listScroll;
         private string       _statusMsg;
 
-        // ---------------------------------------------------------------------
         private void Awake()
         {
-            try { Directory.CreateDirectory(RecordingsDir); } catch { }
+            RecordingModEntry.Log("RecordingHook.Awake()");
+            try
+            {
+                Directory.CreateDirectory(RecordingsDir);
+                RecordingModEntry.Log("  recordings dir OK: " + RecordingsDir);
+            }
+            catch (Exception ex) { RecordingModEntry.Log("  CreateDirectory error: " + ex.Message); }
             InjectKamcord();
         }
 
@@ -151,109 +131,156 @@ namespace CNRRecordingMod
         {
             try
             {
+                RecordingModEntry.Log("InjectKamcord: searching Kamcord.implementation_...");
                 FieldInfo fi = typeof(Kamcord).GetField("implementation_",
                     BindingFlags.NonPublic | BindingFlags.Static);
                 if (fi == null)
                 {
-                    RecordingModEntry.Log("WARNING: Kamcord.implementation_ not found - injection skipped");
+                    RecordingModEntry.Log("  WARN: field not found. All static fields on Kamcord:");
+                    foreach (var f in typeof(Kamcord).GetFields(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static))
+                        RecordingModEntry.Log("    field: " + f.Name + " type=" + f.FieldType.Name);
                     return;
                 }
+                RecordingModEntry.Log("  found, type=" + fi.FieldType.Name);
                 fi.SetValue(null, new RecordingKamcordImpl(this));
-                RecordingModEntry.Log("Kamcord implementation injected OK");
+                RecordingModEntry.Log("  injected OK");
             }
-            catch (Exception ex) { RecordingModEntry.Log("InjectKamcord error: " + ex.Message); }
+            catch (Exception ex) { RecordingModEntry.Log("InjectKamcord EXCEPTION: " + ex); }
         }
 
         private void OnDestroy()
         {
+            RecordingModEntry.Log("RecordingHook.OnDestroy()");
             if (IsCapturing) StopCapture();
             if (_readTex != null) { Destroy(_readTex); _readTex = null; }
         }
 
-        // ---------------------------------------------------------------------
-        //  Capture API
-        // ---------------------------------------------------------------------
+        // -----------------------------------------------------------------------
+        //  Capture
+        // -----------------------------------------------------------------------
         public void StartCapture()
         {
-            if (IsCapturing) return;
+            if (IsCapturing) { RecordingModEntry.Log("StartCapture: already capturing, ignoring"); return; }
+            RecordingModEntry.Log("StartCapture BEGIN");
             try
             {
-                _outputPath = Path.Combine(RecordingsDir,
-                    DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".mp4");
+                _outputPath    = Path.Combine(RecordingsDir, DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".mp4");
                 _ptsUsec       = 0;
                 _muxerStarted  = false;
                 _videoTrackIdx = -1;
+                _frameCount    = 0;
+                _drainLogCount = 0;
+                RecordingModEntry.Log("  output path: " + _outputPath);
 
-                // Allocate reusable read-back texture and YUV buffer
+                // CPU buffers
                 if (_readTex == null)
+                {
                     _readTex = new Texture2D(VideoWidth, VideoHeight, TextureFormat.RGBA32, false);
+                    RecordingModEntry.Log("  Texture2D created " + VideoWidth + "x" + VideoHeight);
+                }
                 int yuvSize = VideoWidth * VideoHeight * 3 / 2;
                 if (_yuvBuf == null || _yuvBuf.Length != yuvSize)
+                {
                     _yuvBuf = new byte[yuvSize];
+                    RecordingModEntry.Log("  YUV buf: " + yuvSize + " bytes");
+                }
 
                 // MediaFormat
-                var fmtClass  = new AndroidJavaClass("android.media.MediaFormat");
-                var mediaFmt  = fmtClass.CallStatic<AndroidJavaObject>(
-                    "createVideoFormat", "video/avc", VideoWidth, VideoHeight);
+                RecordingModEntry.Log("  creating MediaFormat...");
+                var fmtClass = new AndroidJavaClass("android.media.MediaFormat");
+                var mediaFmt = fmtClass.CallStatic<AndroidJavaObject>("createVideoFormat", "video/avc", VideoWidth, VideoHeight);
+                RecordingModEntry.Log("  MediaFormat created, setting params...");
                 mediaFmt.Call("setInteger", "bitrate",          VideoBitrate);
                 mediaFmt.Call("setInteger", "frame-rate",       VideoFps);
                 mediaFmt.Call("setInteger", "i-frame-interval", 2);
-                mediaFmt.Call("setInteger", "color-format",     COLOR_FORMAT_YUV420);
+                mediaFmt.Call("setInteger", "color-format",     COLOR_FMT_YUV420);
+                RecordingModEntry.Log("  MediaFormat params: bitrate=" + VideoBitrate
+                    + " fps=" + VideoFps + " colorFmt=0x" + COLOR_FMT_YUV420.ToString("X8"));
 
-                // MediaCodec encoder
+                // MediaCodec
+                RecordingModEntry.Log("  creating MediaCodec for video/avc...");
                 _codec = new AndroidJavaClass("android.media.MediaCodec")
                     .CallStatic<AndroidJavaObject>("createEncoderByType", "video/avc");
-                _codec.Call("configure", mediaFmt, null, null, 1); // CONFIGURE_FLAG_ENCODE=1
-                _codec.Call("start");
+                RecordingModEntry.Log("  codec=" + (_codec != null ? "OK" : "NULL!"));
 
-                // MediaMuxer (MUXER_OUTPUT_MPEG_4 = 0)
+                RecordingModEntry.Log("  codec.configure...");
+                _codec.Call("configure", mediaFmt, null, null, 1);
+                RecordingModEntry.Log("  codec.configure OK");
+
+                RecordingModEntry.Log("  codec.start...");
+                _codec.Call("start");
+                RecordingModEntry.Log("  codec.start OK");
+
+                // MediaMuxer
+                RecordingModEntry.Log("  creating MediaMuxer...");
                 _muxer = new AndroidJavaObject("android.media.MediaMuxer", _outputPath, 0);
+                RecordingModEntry.Log("  muxer=" + (_muxer != null ? "OK" : "NULL!"));
 
                 // BufferInfo
                 _bufferInfo = new AndroidJavaObject("android.media.MediaCodec$BufferInfo");
+                RecordingModEntry.Log("  bufferInfo=" + (_bufferInfo != null ? "OK" : "NULL!"));
 
                 IsCapturing = true;
-                RecordingModEntry.Log("StartCapture -> " + _outputPath);
+                RecordingModEntry.Log("StartCapture COMPLETE - IsCapturing=true");
             }
             catch (Exception ex)
             {
-                RecordingModEntry.Log("StartCapture error: " + ex);
+                RecordingModEntry.Log("StartCapture EXCEPTION: " + ex);
                 CleanupCodec();
             }
         }
 
         public void StopCapture()
         {
-            if (!IsCapturing) return;
+            if (!IsCapturing) { RecordingModEntry.Log("StopCapture: not capturing"); return; }
             IsCapturing = false;
-            RecordingModEntry.Log("StopCapture: flushing encoder");
+            RecordingModEntry.Log("StopCapture BEGIN (frames=" + _frameCount + " muxerStarted=" + _muxerStarted + ")");
             try
             {
-                // Queue EOS input buffer
                 int eosIdx = _codec.Call<int>("dequeueInputBuffer", (long)100000);
+                RecordingModEntry.Log("  EOS dequeueInputBuffer -> " + eosIdx);
                 if (eosIdx >= 0)
-                    _codec.Call("queueInputBuffer", eosIdx, 0, 0, _ptsUsec,
-                        4); // BUFFER_FLAG_END_OF_STREAM = 4
-                DrainEncoder(endOfStream: true);
+                {
+                    _codec.Call("queueInputBuffer", eosIdx, 0, 0, _ptsUsec, 4); // BUFFER_FLAG_END_OF_STREAM=4
+                    RecordingModEntry.Log("  EOS queueInputBuffer OK");
+                }
+                DrainEncoder(true);
             }
-            catch (Exception ex) { RecordingModEntry.Log("StopCapture drain error: " + ex.Message); }
+            catch (Exception ex) { RecordingModEntry.Log("StopCapture error: " + ex); }
+
             CleanupCodec();
-            RecordingModEntry.Log("StopCapture done -> " + _outputPath);
+
+            long finalSize = 0;
+            try { if (File.Exists(_outputPath)) finalSize = new FileInfo(_outputPath).Length; } catch { }
+            RecordingModEntry.Log("StopCapture DONE, file size=" + finalSize + " bytes");
         }
 
         private void CleanupCodec()
         {
-            try { if (_muxerStarted && _muxer != null) _muxer.Call("stop"); } catch { }
-            try { if (_muxer != null) { _muxer.Call("release");  _muxer.Dispose();  _muxer  = null; } } catch { }
-            try { if (_codec != null) { _codec.Call("stop"); _codec.Call("release"); _codec.Dispose(); _codec = null; } } catch { }
+            RecordingModEntry.Log("CleanupCodec (muxerStarted=" + _muxerStarted + ")");
+            try
+            {
+                if (_muxerStarted && _muxer != null) { _muxer.Call("stop"); RecordingModEntry.Log("  muxer.stop OK"); }
+            }
+            catch (Exception ex) { RecordingModEntry.Log("  muxer.stop ERROR: " + ex.Message); }
+            try
+            {
+                if (_muxer != null) { _muxer.Call("release"); _muxer.Dispose(); _muxer = null; RecordingModEntry.Log("  muxer released"); }
+            }
+            catch (Exception ex) { RecordingModEntry.Log("  muxer.release ERROR: " + ex.Message); }
+            try
+            {
+                if (_codec != null) { _codec.Call("stop"); _codec.Call("release"); _codec.Dispose(); _codec = null; RecordingModEntry.Log("  codec released"); }
+            }
+            catch (Exception ex) { RecordingModEntry.Log("  codec.release ERROR: " + ex.Message); }
             try { if (_bufferInfo != null) { _bufferInfo.Dispose(); _bufferInfo = null; } } catch { }
             _muxerStarted  = false;
             _videoTrackIdx = -1;
         }
 
-        // ---------------------------------------------------------------------
+        // -----------------------------------------------------------------------
         //  Per-frame encode
-        // ---------------------------------------------------------------------
+        // -----------------------------------------------------------------------
         private void Update()
         {
             if (!IsCapturing) return;
@@ -264,81 +291,79 @@ namespace CNRRecordingMod
         {
             yield return new WaitForEndOfFrame();
             if (!IsCapturing || _codec == null) yield break;
+
+            bool verbose = (_frameCount < 5) || (_frameCount % 60 == 0);
+            if (verbose) RecordingModEntry.Log("Frame " + _frameCount + " (screen=" + Screen.width + "x" + Screen.height + ")");
+
             try
             {
-                // 1. ReadPixels into our reusable Texture2D
-                _readTex.ReadPixels(new Rect(0, 0, Screen.width, Screen.height), 0, 0, false);
+                // 1. ReadPixels into fixed-size texture (captures top-left VideoWidth x VideoHeight of screen)
+                _readTex.ReadPixels(new Rect(0, 0, VideoWidth, VideoHeight), 0, 0, false);
                 _readTex.Apply(false);
+                if (verbose) RecordingModEntry.Log("  ReadPixels OK");
+
                 Color32[] px = _readTex.GetPixels32();
+                if (verbose) RecordingModEntry.Log("  GetPixels32 len=" + px.Length);
 
-                // 2. RGBA -> YUV420 planar (I420)
+                // 2. RGBA -> I420
                 RgbaToI420(px, VideoWidth, VideoHeight, _yuvBuf);
+                if (verbose) RecordingModEntry.Log("  RgbaToI420 OK");
 
-                // 3. Dequeue an input buffer from the encoder
+                // 3. Dequeue input buffer
                 int inIdx = _codec.Call<int>("dequeueInputBuffer", (long)10000);
+                if (verbose) RecordingModEntry.Log("  dequeueInputBuffer=" + inIdx);
                 if (inIdx < 0)
                 {
-                    // Encoder congested - skip this frame but still drain
+                    if (verbose) RecordingModEntry.Log("  encoder congested, draining only");
                     DrainEncoder(false);
                     yield break;
                 }
 
-                // 4. Copy YUV bytes into the encoder's input ByteBuffer via JNI
+                // 4. Copy YUV into encoder's ByteBuffer.
+                // Pass _yuvBuf wrapped in object[] so Unity's JNI helper calls
+                // ConvertToJNIArray(byte[]) -> jbyteArray, then resolves put([B).
                 var inBuf = _codec.Call<AndroidJavaObject>("getInputBuffer", inIdx);
+                if (verbose) RecordingModEntry.Log("  getInputBuffer=" + (inBuf != null ? "OK" : "NULL!"));
                 inBuf.Call("clear");
-                // AndroidJavaObject.Call doesn't have a put(byte[]) overload we can
-                // call directly, so we use the raw JNI helper:
-                IntPtr   bufPtr   = inBuf.GetRawObject();
-                // Use AndroidJNI to call ByteBuffer.put(byte[])
-                AndroidJNI.AttachCurrentThread();
-                IntPtr putMethod = AndroidJNIHelper.GetMethodID(
-                    AndroidJNI.GetObjectClass(bufPtr), "put", "([B)Ljava/nio/ByteBuffer;");
-                IntPtr jArray = AndroidJNIHelper.ConvertToJNIArray(_yuvBuf);
-                AndroidJNI.CallObjectMethod(bufPtr, putMethod, new jvalue[]
-                {
-                    new jvalue { l = jArray }
-                });
-                AndroidJNI.DeleteLocalRef(jArray);
+                var putRet = inBuf.Call<AndroidJavaObject>("put", new object[] { _yuvBuf });
+                if (putRet != null) putRet.Dispose();
+                if (verbose) RecordingModEntry.Log("  ByteBuffer.put OK (" + _yuvBuf.Length + " bytes)");
 
-                // 5. Queue the buffer
+                // 5. Queue input
                 _ptsUsec += (long)(1000000L / VideoFps);
                 _codec.Call("queueInputBuffer", inIdx, 0, _yuvBuf.Length, _ptsUsec, 0);
+                if (verbose) RecordingModEntry.Log("  queueInputBuffer OK pts=" + _ptsUsec);
 
-                // 6. Drain any available encoded output into the muxer
-                DrainEncoder(false);
+                // 6. Drain
+                int written = DrainEncoder(false);
+                if (verbose) RecordingModEntry.Log("  drain wrote=" + written);
+
+                _frameCount++;
             }
             catch (Exception ex)
             {
-                RecordingModEntry.Log("EncodeFrame error: " + ex.Message);
+                RecordingModEntry.Log("EncodeFrame[" + _frameCount + "] EXCEPTION: " + ex);
             }
         }
 
-        // RGBA pixels (bottom-left origin from ReadPixels) -> I420 planar YUV
-        // I420: Y plane (W*H bytes), then U plane (W/2 * H/2), then V plane (W/2 * H/2)
-        // ReadPixels returns rows bottom-to-top, so we flip vertically.
         private static void RgbaToI420(Color32[] px, int w, int h, byte[] yuv)
         {
             int yBase = 0;
             int uBase = w * h;
             int vBase = uBase + (w / 2) * (h / 2);
-
             for (int row = 0; row < h; row++)
             {
-                // Flip: ReadPixels row 0 = bottom of screen
-                int srcRow = h - 1 - row;
+                int srcRow = h - 1 - row; // ReadPixels is bottom-to-top
                 for (int col = 0; col < w; col++)
                 {
                     Color32 c = px[srcRow * w + col];
                     int R = c.r, G = c.g, B = c.b;
-
-                    // BT.601 limited range
-                    int Y = ((66 * R + 129 * G + 25  * B + 128) >> 8) + 16;
+                    int Y = ((66 * R + 129 * G +  25 * B + 128) >> 8) + 16;
                     yuv[yBase + row * w + col] = (byte)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
-
                     if ((row & 1) == 0 && (col & 1) == 0)
                     {
-                        int U = ((-38 * R - 74  * G + 112 * B + 128) >> 8) + 128;
-                        int V = ((112 * R - 94  * G - 18  * B + 128) >> 8) + 128;
+                        int U = ((-38 * R -  74 * G + 112 * B + 128) >> 8) + 128;
+                        int V = ((112 * R -  94 * G -  18 * B + 128) >> 8) + 128;
                         int uvIdx = (row / 2) * (w / 2) + (col / 2);
                         yuv[uBase + uvIdx] = (byte)(U < 0 ? 0 : U > 255 ? 255 : U);
                         yuv[vBase + uvIdx] = (byte)(V < 0 ? 0 : V > 255 ? 255 : V);
@@ -347,67 +372,90 @@ namespace CNRRecordingMod
             }
         }
 
-        // ---- Drain encoder output -> muxer ----------------------------------
+        // -----------------------------------------------------------------------
+        //  DrainEncoder - returns number of data buffers written to muxer
+        // -----------------------------------------------------------------------
         private const int INFO_TRY_AGAIN_LATER      = -1;
         private const int INFO_OUTPUT_FORMAT_CHANGED = -2;
         private const int BUFFER_FLAG_CODEC_CONFIG   =  2;
         private const int BUFFER_FLAG_END_OF_STREAM  =  4;
 
-        private void DrainEncoder(bool endOfStream)
+        private int DrainEncoder(bool endOfStream)
         {
+            bool verbose = (_drainLogCount < 30);
             int timeoutUs = endOfStream ? 10000 : 0;
-            for (int attempt = 0; attempt < 200; attempt++)
+            int written   = 0;
+
+            for (int attempt = 0; attempt < 300; attempt++)
             {
                 int idx = _codec.Call<int>("dequeueOutputBuffer", _bufferInfo, (long)timeoutUs);
+
+                if (verbose)
+                {
+                    string extra = "";
+                    if (idx >= 0) extra = " flags=" + _bufferInfo.Get<int>("flags") + " size=" + _bufferInfo.Get<int>("size");
+                    RecordingModEntry.Log("  drain[" + attempt + "] idx=" + idx + extra);
+                    _drainLogCount++;
+                }
+
                 if (idx == INFO_TRY_AGAIN_LATER) break;
+
                 if (idx == INFO_OUTPUT_FORMAT_CHANGED)
                 {
-                    if (_muxerStarted)
-                    {
-                        RecordingModEntry.Log("DrainEncoder: unexpected format change");
-                        break;
-                    }
+                    if (_muxerStarted) { RecordingModEntry.Log("  drain: unexpected FORMAT_CHANGED (muxer already started)"); break; }
                     var newFmt = _codec.Call<AndroidJavaObject>("getOutputFormat");
+                    RecordingModEntry.Log("  FORMAT_CHANGED: " + newFmt.Call<string>("toString"));
                     _videoTrackIdx = _muxer.Call<int>("addTrack", newFmt);
                     _muxer.Call("start");
                     _muxerStarted = true;
-                    RecordingModEntry.Log("DrainEncoder: muxer started, track=" + _videoTrackIdx);
+                    RecordingModEntry.Log("  muxer STARTED, trackIdx=" + _videoTrackIdx);
                     continue;
                 }
-                if (idx < 0) break;
 
-                int  flags = _bufferInfo.Get<int>("flags");
-                int  size  = _bufferInfo.Get<int>("size");
+                if (idx < 0)
+                {
+                    RecordingModEntry.Log("  drain: unknown idx=" + idx);
+                    break;
+                }
+
+                int flags = _bufferInfo.Get<int>("flags");
+                int size  = _bufferInfo.Get<int>("size");
 
                 if ((flags & BUFFER_FLAG_CODEC_CONFIG) != 0)
                 {
+                    if (verbose) RecordingModEntry.Log("  drain: CODEC_CONFIG, skipping");
                     _codec.Call("releaseOutputBuffer", idx, false);
                     continue;
                 }
 
                 if (size > 0 && _muxerStarted)
                 {
-                    var buf = _codec.Call<AndroidJavaObject>("getOutputBuffer", idx);
-                    buf.Call("position", _bufferInfo.Get<int>("offset"));
-                    buf.Call("limit",    _bufferInfo.Get<int>("offset") + size);
-                    _muxer.Call("writeSampleData", _videoTrackIdx, buf, _bufferInfo);
+                    var outBuf = _codec.Call<AndroidJavaObject>("getOutputBuffer", idx);
+                    outBuf.Call("position", _bufferInfo.Get<int>("offset"));
+                    outBuf.Call("limit",    _bufferInfo.Get<int>("offset") + size);
+                    _muxer.Call("writeSampleData", _videoTrackIdx, outBuf, _bufferInfo);
+                    written++;
+                    if (verbose) RecordingModEntry.Log("  drain: wrote " + size + " bytes to muxer");
+                }
+                else if (size > 0)
+                {
+                    RecordingModEntry.Log("  drain: size=" + size + " but muxer NOT started - discarding");
                 }
 
                 _codec.Call("releaseOutputBuffer", idx, false);
-
-                if ((flags & BUFFER_FLAG_END_OF_STREAM) != 0) break;
+                if ((flags & BUFFER_FLAG_END_OF_STREAM) != 0) { RecordingModEntry.Log("  drain: EOS"); break; }
             }
+            return written;
         }
 
-        // ---------------------------------------------------------------------
+        // -----------------------------------------------------------------------
         //  Viewer
-        // ---------------------------------------------------------------------
+        // -----------------------------------------------------------------------
         public void OpenViewer()
         {
             float sc = Screen.width / REF_W;
-            float vw = REF_W;
             float vh = Screen.height / sc;
-            _viewerRect = new Rect(vw * 0.05f, vh * 0.05f, vw * 0.90f, vh * 0.85f);
+            _viewerRect = new Rect(REF_W * 0.05f, vh * 0.05f, REF_W * 0.90f, vh * 0.85f);
             RefreshRecordings();
             _viewerOpen = true;
         }
@@ -424,14 +472,9 @@ namespace CNRRecordingMod
                     Path.GetFileName(b), Path.GetFileName(a), StringComparison.Ordinal));
                 _recordings = files;
             }
-            catch (Exception ex)
-            {
-                _statusMsg = "Error: " + ex.Message;
-                RecordingModEntry.Log("RefreshRecordings error: " + ex.Message);
-            }
+            catch (Exception ex) { _statusMsg = "Error: " + ex.Message; }
         }
 
-        // ---- IMGUI -----------------------------------------------------------
         private void OnGUI()
         {
             if (!_viewerOpen) return;
@@ -442,20 +485,10 @@ namespace CNRRecordingMod
 
         private void DrawViewerWindow(int id)
         {
-            float w    = _viewerRect.width;
-            float h    = _viewerRect.height;
-            float btnH = 24f;
-
+            float w = _viewerRect.width, h = _viewerRect.height, btnH = 24f;
             GUI.DragWindow(new Rect(0, 0, w - 30, 18));
-
-            if (GUI.Button(new Rect(w - 28, 1, 26, 18), "X"))
-            {
-                _viewerOpen = false;
-                return;
-            }
-
+            if (GUI.Button(new Rect(w - 28, 1, 26, 18), "X")) { _viewerOpen = false; return; }
             float y = 24f;
-
             if (IsCapturing)
             {
                 GUI.color = Color.red;
@@ -463,13 +496,9 @@ namespace CNRRecordingMod
                 GUI.color = Color.white;
                 y += btnH + 2;
             }
-
-            if (GUI.Button(new Rect(4, y, 80, btnH), "Refresh"))
-                RefreshRecordings();
-            GUI.Label(new Rect(90, y + 3, w - 94, btnH - 3),
-                _recordings.Count + " recording(s) in " + RecordingsDir);
+            if (GUI.Button(new Rect(4, y, 80, btnH), "Refresh")) RefreshRecordings();
+            GUI.Label(new Rect(90, y + 3, w - 94, btnH - 3), _recordings.Count + " recording(s)");
             y += btnH + 4;
-
             if (_statusMsg != null)
             {
                 GUI.color = Color.yellow;
@@ -477,21 +506,16 @@ namespace CNRRecordingMod
                 GUI.color = Color.white;
                 y += btnH + 2;
             }
-
             float listH = h - y - 4;
-            _listScroll = GUI.BeginScrollView(
-                new Rect(4, y, w - 8, listH), _listScroll,
+            _listScroll = GUI.BeginScrollView(new Rect(4, y, w - 8, listH), _listScroll,
                 new Rect(0, 0, w - 28, Mathf.Max(listH, _recordings.Count * (btnH + 2))));
-
             for (int i = 0; i < _recordings.Count; i++)
             {
-                string name  = Path.GetFileName(_recordings[i]);
-                long   bytes = 0;
+                long bytes = 0;
                 try { bytes = new FileInfo(_recordings[i]).Length; } catch { }
-                string label = name + "  (" + (bytes / 1024 / 1024) + " MB)";
-                GUI.Label(new Rect(4, i * (btnH + 2), w - 36, btnH), label);
+                GUI.Label(new Rect(4, i * (btnH + 2), w - 36, btnH),
+                    Path.GetFileName(_recordings[i]) + "  (" + (bytes / 1024 / 1024) + " MB)");
             }
-
             GUI.EndScrollView();
         }
     }
