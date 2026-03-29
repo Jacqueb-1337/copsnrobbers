@@ -41,6 +41,17 @@ class GameServer {
     this.port = port;
     this.rooms = rooms;
     this.sessions = new Set();
+    // Sweep idle sessions every 10s; drop any that haven't sent data in 60s.
+    // Keeps the Set clean and prevents accumulation of ghost sockets.
+    this.idleTimer = setInterval(() => {
+      const now = Date.now();
+      for (const session of this.sessions) {
+        if (now - session.lastDataTime > 60000) {
+          console.log(`[Game] Session ${session.id} (${session.userId || 'anon'}) idle >60s, closing`);
+          session.socket.destroy();
+        }
+      }
+    }, 10000);
   }
   start() {
     this.server = net.createServer(sock => this.handleConnect(sock));
@@ -49,13 +60,21 @@ class GameServer {
     });
   }
   stop() {
+    clearInterval(this.idleTimer);
     this.server.close();
   }
   handleConnect(sock) {
+    // Keep NAT entries alive and prevent Nagle-induced latency spikes on small frames.
+    sock.setKeepAlive(true, 10000);
+    sock.setNoDelay(true);
     const session = new PlayerSession(sock);
+    session.lastDataTime = Date.now();
     this.sessions.add(session);
     console.log(`[Game] Client ${session.id} connected from ${sock.remoteAddress}`);
-    sock.on('data', data => this.handleData(session, data));
+    sock.on('data', data => {
+      session.lastDataTime = Date.now();
+      this.handleData(session, data);
+    });
     sock.on('close', () => {
       console.log(`[Game] Client ${session.id} (${session.userId || 'anon'}) disconnected`);
       this.sessions.delete(session);
