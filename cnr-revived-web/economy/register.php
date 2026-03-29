@@ -4,10 +4,9 @@
 // Re-login if token valid; register fresh if new device.
 // Returns: token, coins, gems, display_name (canonical from server), new (bool)
 //
-// Name sync: on re-login the server's canonical display_name is authoritative.
-// The client must update its local name if the server returns a different value.
-// To set a new display name the player must use a dedicated update endpoint;
-// re-registering does NOT overwrite the server's stored name.
+// Name sync: on re-login, if the client sends a real name (not "Player" / "New Player" / "")
+// that differs from the stored name, the stored name is updated.  This fixes accounts that
+// registered before the player had set their nickname.
 
 require __DIR__ . '/_db.php';
 
@@ -36,15 +35,26 @@ $device = $stmt->fetch();
 if ($device) {
     // Known device: token must match
     if ($token_in !== '' && $token_in === $device['token']) {
-        // Valid re-login — touch timestamps; server's name is authoritative
+        // Valid re-login — touch timestamps.
+        // If the client sent a real name (not a placeholder) that differs from the
+        // stored name, update the stored name.  This fixes the "Player" display name
+        // that was registered before the player set their nickname.
         $now = time();
-        $pdo->prepare("UPDATE accounts SET last_seen=? WHERE id=?")->execute([$now, $device['account_id']]);
-        $pdo->prepare("UPDATE devices  SET last_seen=? WHERE android_id=?")->execute([$now, $android_id]);
+        $canonical_name = $device['acct_name'];
+        $placeholders = ['Player', 'New Player', ''];
+        if (!in_array($display_name, $placeholders, true) && $display_name !== $canonical_name) {
+            $pdo->prepare("UPDATE accounts SET display_name=?, last_seen=? WHERE id=?")
+                ->execute([$display_name, $now, $device['account_id']]);
+            $canonical_name = $display_name;
+        } else {
+            $pdo->prepare("UPDATE accounts SET last_seen=? WHERE id=?")->execute([$now, $device['account_id']]);
+        }
+        $pdo->prepare("UPDATE devices SET last_seen=? WHERE android_id=?")->execute([$now, $android_id]);
         ok([
             'token'        => $device['token'],
             'coins'        => (int)$device['coins'],
             'gems'         => (int)$device['gems'],
-            'display_name' => $device['acct_name'],   // client should sync to this value
+            'display_name' => $canonical_name,
             'new'          => false,
         ]);
     }
