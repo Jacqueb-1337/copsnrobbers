@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.3.9";
+        public  const string Version        = "1.4.0";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -763,19 +763,22 @@ namespace CNRModManager
             _pendingUpdates.Clear();
             foreach (RepoMod mod in _browseMods)
             {
+                // Effective minimum: explicit minVersion, or latestVersion when latestOnly=true
+                string effectiveMin = !string.IsNullOrEmpty(mod.minVersion) ? mod.minVersion
+                                    : (mod.latestOnly ? mod.latestVersion ?? "" : "");
                 bool installed = File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename));
                 // Required but not installed at all — must download
                 if (!installed)
                 {
-                    if (!string.IsNullOrEmpty(mod.minVersion))
+                    if (!string.IsNullOrEmpty(effectiveMin))
                         _pendingUpdates.Add(mod);
                     continue;
                 }
                 string iv = GetInstalledVersion(mod.filename);
-                // Always queue if below minimum version (regardless of auto-update setting)
-                bool belowMin = !string.IsNullOrEmpty(mod.minVersion)
+                // Always queue if below effective minimum (regardless of auto-update setting)
+                bool belowMin = !string.IsNullOrEmpty(effectiveMin)
                                 && !string.IsNullOrEmpty(iv)
-                                && CompareVersions(iv, mod.minVersion) < 0;
+                                && CompareVersions(iv, effectiveMin) < 0;
                 bool outdated = !string.IsNullOrEmpty(iv) && iv != mod.latestVersion;
                 if (belowMin || (outdated && GetAutoUpdate(mod.filename)))
                     _pendingUpdates.Add(mod);
@@ -785,11 +788,13 @@ namespace CNRModManager
             HasRequiredPending = false;
             foreach (RepoMod mod in _pendingUpdates)
             {
+                string effectiveMin3 = !string.IsNullOrEmpty(mod.minVersion) ? mod.minVersion
+                                     : (mod.latestOnly ? mod.latestVersion ?? "" : "");
                 bool notInstalled = !File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename));
                 string iv3 = GetInstalledVersion(mod.filename);
-                bool belowMin3 = !string.IsNullOrEmpty(mod.minVersion)
+                bool belowMin3 = !string.IsNullOrEmpty(effectiveMin3)
                                  && !string.IsNullOrEmpty(iv3)
-                                 && CompareVersions(iv3, mod.minVersion) < 0;
+                                 && CompareVersions(iv3, effectiveMin3) < 0;
                 if (notInstalled || belowMin3) { HasRequiredPending = true; break; }
             }
             ModManagerEntry.Log("CheckForUpdates: " + _pendingUpdates.Count + " update(s)  HasRequiredPending=" + HasRequiredPending);
@@ -940,9 +945,11 @@ namespace CNRModManager
                 {
                     bool notInstalled = !File.Exists(Path.Combine(ModManagerEntry.ModsDir, pu.filename));
                     string iv2 = GetInstalledVersion(pu.filename);
-                    bool belowMin2 = !string.IsNullOrEmpty(pu.minVersion)
+                    string effectiveMin2 = !string.IsNullOrEmpty(pu.minVersion) ? pu.minVersion
+                                         : (pu.latestOnly ? pu.latestVersion ?? "" : "");
+                    bool belowMin2 = !string.IsNullOrEmpty(effectiveMin2)
                                      && !string.IsNullOrEmpty(iv2)
-                                     && CompareVersions(iv2, pu.minVersion) < 0;
+                                     && CompareVersions(iv2, effectiveMin2) < 0;
                     if (notInstalled || belowMin2) reqCount++; else optCount++;
                 }
                 string bannerText = reqCount > 0 && optCount == 0
