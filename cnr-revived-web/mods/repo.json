@@ -156,12 +156,17 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.14",
+      "latestVersion": "2.0.15",
       "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.15",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.15.dll",
+          "changelog": "Fixed intermittent first-jump delay. Instead of signalling via PlayerPrefs (which has a script execution-order race), jump detection now directly writes JoyStickController's private isJumping and jumpTime fields when grounded, firing the jump in the current frame regardless of script order. Falls back to the PlayerPrefs path when airborne (to auto-re-jump on landing)."
+        },
         {
           "version": "2.0.14",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.14.dll",
