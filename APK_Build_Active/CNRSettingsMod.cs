@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.10";
+        public  const string Version = "2.0.11";
 
         public static void Load()
         {
@@ -3108,57 +3108,14 @@ namespace CNRSettingsMod
             // Keep _aimBtn reference up to date from drag cache
             if (_dragGOs[4] != null) _aimBtn = _dragGOs[4];
 
-            // Expand NGUI camera viewport to full screen so repositioned buttons
-            // work anywhere — see ExpandNguiCamToFullScreen() for full explanation.
-            // If the viewport was previously restricted we capture each button's
-            // screen-pixel position BEFORE expanding, then remap its world position
-            // AFTER so the button stays at the same pixel.
-            {
-                bool wasRestricted = false;
-                Vector3[] scrBefore  = null;
-                bool[]    hadBefore  = null;
-                CacheNguiCam();
-                if (_nguiCam != null)
-                {
-                    Rect r0 = _nguiCam.rect;
-                    wasRestricted = r0.x > 0.001f || r0.y > 0.001f || r0.width < 0.999f || r0.height < 0.999f;
-                    if (wasRestricted)
-                    {
-                        scrBefore = new Vector3[DRAG_COUNT];
-                        hadBefore  = new bool[DRAG_COUNT];
-                        for (int ri = 0; ri < DRAG_COUNT; ri++)
-                            if (_dragGOs[ri] != null)
-                            {
-                                scrBefore[ri] = _nguiCam.WorldToScreenPoint(_dragGOs[ri].transform.position);
-                                hadBefore[ri]  = true;
-                            }
-                    }
-                }
-                ExpandNguiCamToFullScreen();
-                if (wasRestricted && scrBefore != null && _nguiCam != null)
-                {
-                    bool anySaved = false;
-                    for (int ri = 0; ri < DRAG_COUNT; ri++)
-                    {
-                        if (!hadBefore[ri] || _dragGOs[ri] == null) continue;
-                        float origZ = _dragGOs[ri].transform.position.z;
-                        float camZ  = _nguiCam.transform.position.z;
-                        float dist  = Mathf.Abs(origZ - camZ);
-                        if (dist < 0.01f) dist = 18f;
-                        Vector3 nw = _nguiCam.ScreenToWorldPoint(
-                            new Vector3(scrBefore[ri].x, scrBefore[ri].y, dist));
-                        _dragGOs[ri].transform.position = new Vector3(nw.x, nw.y, origZ);
-                        if (DRAG_ITEMS[ri].prefPX != null)
-                        {
-                            Vector3 lp = _dragGOs[ri].transform.localPosition;
-                            HudCfgSetFloat(DRAG_ITEMS[ri].prefPX, lp.x);
-                            HudCfgSetFloat(DRAG_ITEMS[ri].prefPY, lp.y);
-                            anySaved = true;
-                        }
-                    }
-                    if (anySaved) { HudCfgSave(); SettingsModEntry.Log("HUD: remapped button positions for expanded camera"); }
-                }
-            }
+            // TEST 2.0.11: camera expansion DISABLED to isolate whether it causes
+            // one-finger fire failure.  ExpandNguiCamToFullScreen() changes the NGUI
+            // camera rect, which also changes Camera.ScreenPointToRay() — the function
+            // JoyStickController uses to fire-detect.  With this disabled, buttons dragged
+            // to the left side of the screen will not respond to NGUI touches, but the
+            // fire button's Physics.Raycast detection should be unaffected.
+            CacheNguiCam();
+            SettingsModEntry.Log("HUD: camera expansion SKIPPED (2.0.11 test)");
         }
 
         private void LogSceneHud()
