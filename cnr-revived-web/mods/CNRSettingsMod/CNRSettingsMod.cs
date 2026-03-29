@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.18";
+        public  const string Version = "2.0.19";
 
         public static void Load()
         {
@@ -1043,11 +1043,13 @@ namespace CNRSettingsMod
         // As a result, we need _ownJumpVelY > 9.81 to rise and < 9.81 to fall.
         // Asymmetric gravity (faster fall) gives the classic snappy platformer feel.
         //
-        // Tuned for ~2.5 m peak height, ~0.35 s rise, ~0.30 s fall (0.65 s total).
+        // Tuned for ~1.3 m peak height, ~0.25 s rise, ~0.25 s fall (0.50 s total).
         // Compare: original arc was ~0.9 m peak, 1.0 s total, uniform/flat.
+        // Peak formula: h = (JumpInitialVel - 9.81)² / (2 * |JumpAscendGrav|)
+        //   JumpInitialVel=24 → ~2.5 m,  =22 → ~1.8 m,  =20 → ~1.3 m,  =18 → ~0.8 m
         private bool  _ownJumpActive = false;
         private float _ownJumpVelY   = 0f;
-        private const float JumpInitialVel  = 24f;   // m/s our upward vel at takeoff
+        private const float JumpInitialVel  = 20f;   // m/s our upward vel at takeoff
         private const float JumpAscendGrav  = -41f;  // d/dt(_ownJumpVelY) while rising
         private const float JumpDescendGrav = -56f;  // d/dt(_ownJumpVelY) while falling
 
