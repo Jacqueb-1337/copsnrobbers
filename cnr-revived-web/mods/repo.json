@@ -156,12 +156,17 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.5",
+      "latestVersion": "2.0.6",
       "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.6",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.6.dll",
+          "changelog": "Fixed firing/aiming issues introduced by the 2.0.5 camera viewport expansion. Expanding the NGUI camera rect changes the camera aspect ratio, which shifts the fire button's Physics.Raycast hit zone away from its visual, causing fire to fail on the first touch and joystick touches to hit the fire collider accidentally. Fix 1 (remap): when the camera rect is expanded, each button's world position is recalculated so it projects to the exact same screen pixel as before — keeping Physics.Raycast aligned with the visual. The corrected positions are persisted so future loads need no remap. Fix 2 (fallback): a supplemental screen-space fire detector runs in LateUpdate; if any touch falls inside the fire button's projected screen bounds it directly sets the fire status, bypassing Physics.Raycast entirely as a safety net."
+        },
         {
           "version": "2.0.5",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.5.dll",
