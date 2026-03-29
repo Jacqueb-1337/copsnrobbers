@@ -4,12 +4,17 @@
     {
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
-      "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.1.0",
+      "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
+      "latestVersion": "1.2.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.2.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.2.0.dll",
+          "changelog": "Fixed: 0-byte MP4 files. COLOR_FormatSurface requires the encoder's EGL surface to be bound as the render target, which Unity does not do. Switched to COLOR_FormatYUV420Flexible with dequeueInputBuffer: each frame ReadPixels -> RGBA->I420 conversion -> queueInputBuffer. Hardware H.264 encoder still does compression; CPU cost is ~5-8ms per frame for the colour-space conversion."
+        },
         {
           "version": "1.1.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.1.0.dll",
