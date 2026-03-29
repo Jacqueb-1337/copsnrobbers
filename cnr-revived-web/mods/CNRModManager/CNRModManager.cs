@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.3.7";
+        public  const string Version        = "1.3.8";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -1467,12 +1467,14 @@ namespace CNRModManager
         // ─────────────────────────────────────────────────────────────────────
         private Type FindConfigType(string filename)
         {
+            string asmBase = Path.GetFileNameWithoutExtension(filename);
             Assembly myAsm = typeof(ModManagerEntry).Assembly;
-            // 1. Scan already-loaded assemblies — handle ReflectionTypeLoadException so game
-            //    assemblies with missing deps don't silently abort the entire scan.
+            // 1. Scan already-loaded assemblies that match this mod's filename.
+            //    ReflectionTypeLoadException handler ensures missing-dep assemblies don't abort the scan.
             foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 if (asm == myAsm) continue;
+                if (!asm.GetName().Name.Equals(asmBase, StringComparison.OrdinalIgnoreCase)) continue;
                 Type[] types = null;
                 try { types = asm.GetTypes(); }
                 catch (System.Reflection.ReflectionTypeLoadException rtle) { types = rtle.Types; }
