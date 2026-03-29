@@ -36,7 +36,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.0.0";
+        public  const string Version = "1.0.1";
 
         private static bool _loaded = false;
 
@@ -122,6 +122,11 @@ namespace CNRRecordingMod
         // ── capture config (tweak and rebuild to change) ─────────────────────
         private const float CaptureFps   = 5f;    // frames captured per second
         private const float CaptureScale = 0.5f;  // render-texture downscale factor
+
+        // ── GUI scaling: all coordinates are in virtual pixels at REF_W wide ──
+        // GUIUtility.ScaleAroundPivot maps virtual → physical so the window
+        // looks the same physical size regardless of screen resolution.
+        private const float REF_W = 600f;
 
         // ── capture runtime state ─────────────────────────────────────────────
         public  bool   IsCapturing  { get; private set; }
@@ -233,12 +238,17 @@ namespace CNRRecordingMod
 
         public void OpenViewer()
         {
-            // Size the viewer to ~70% of the current screen on first open
+            // Compute virtual screen dimensions using the same scale factor applied in OnGUI
+            float sc = Screen.width / REF_W;
+            float vw = REF_W;
+            float vh = Screen.height / sc;
+
+            // Size the viewer to ~90% of the virtual screen
             _viewerRect = new Rect(
-                Screen.width  * 0.05f,
-                Screen.height * 0.05f,
-                Screen.width  * 0.70f,
-                Screen.height * 0.75f);
+                vw * 0.05f,
+                vh * 0.05f,
+                vw * 0.90f,
+                vh * 0.85f);
 
             RefreshSessions();
             _viewerOpen  = true;
@@ -379,6 +389,13 @@ namespace CNRRecordingMod
         private void OnGUI()
         {
             if (!_viewerOpen) return;
+
+            // Scale GUI so all virtual-pixel coordinates map to a consistent
+            // physical size regardless of screen resolution (same technique as
+            // CNRModManager).
+            float sc = Screen.width / REF_W;
+            GUIUtility.ScaleAroundPivot(new Vector2(sc, sc), Vector2.zero);
+
             _viewerRect = GUI.Window(0xCEC0, _viewerRect, DrawViewerWindow, "CNR Recordings");
         }
 
