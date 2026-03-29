@@ -13,7 +13,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.3.0";
+        public  const string Version = "1.4.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -105,6 +105,7 @@ namespace CNRRecordingMod
 
         private Texture2D  _readTex;
         private byte[]     _yuvBuf;
+        private sbyte[]    _sbyteTemp;  // reused for JNI byte copy (Unity maps Java byte -> C# sbyte)
 
         private int        _frameCount;
         private int        _drainLogCount;
@@ -181,7 +182,8 @@ namespace CNRRecordingMod
                 int yuvSize = VideoWidth * VideoHeight * 3 / 2;
                 if (_yuvBuf == null || _yuvBuf.Length != yuvSize)
                 {
-                    _yuvBuf = new byte[yuvSize];
+                    _yuvBuf    = new byte[yuvSize];
+                    _sbyteTemp = new sbyte[yuvSize];
                     RecordingModEntry.Log("  YUV buf: " + yuvSize + " bytes");
                 }
 
@@ -210,6 +212,28 @@ namespace CNRRecordingMod
                 RecordingModEntry.Log("  codec.start...");
                 _codec.Call("start");
                 RecordingModEntry.Log("  codec.start OK");
+
+                // Prime: drain immediately after start to consume FORMAT_CHANGED.
+                // Encoders typically emit this right away. If we miss it here, the
+                // muxer can't be started and every frame is discarded.
+                RecordingModEntry.Log("  priming output drain...");
+                for (int p = 0; p < 30; p++)
+                {
+                    int pidx = _codec.Call<int>("dequeueOutputBuffer", _bufferInfo, (long)5000);
+                    RecordingModEntry.Log("  prime[" + p + "] idx=" + pidx);
+                    if (pidx == INFO_OUTPUT_FORMAT_CHANGED)
+                    {
+                        var fmt = _codec.Call<AndroidJavaObject>("getOutputFormat");
+                        RecordingModEntry.Log("  prime FORMAT_CHANGED: " + fmt.Call<string>("toString"));
+                        _videoTrackIdx = _muxer.Call<int>("addTrack", fmt);
+                        _muxer.Call("start");
+                        _muxerStarted = true;
+                        RecordingModEntry.Log("  prime muxer STARTED, track=" + _videoTrackIdx);
+                        break;
+                    }
+                    if (pidx == INFO_TRY_AGAIN_LATER) break;
+                    if (pidx >= 0) { _codec.Call("releaseOutputBuffer", pidx, false); }
+                }
 
                 // MediaMuxer
                 RecordingModEntry.Log("  creating MediaMuxer...");
@@ -320,19 +344,47 @@ namespace CNRRecordingMod
                 }
 
                 // 4. Copy YUV into encoder's ByteBuffer.
-                // Pass _yuvBuf wrapped in object[] so Unity's JNI helper calls
-                // ConvertToJNIArray(byte[]) -> jbyteArray, then resolves put([B).
+                // IMPORTANT: Do NOT call inBuf.Call("clear") - Unity 4.6's AndroidJavaObject
+                // can't resolve inherited methods on DirectByteBuffer (e.g. clear() lives on
+                // java.nio.Buffer, not DirectByteBuffer). getInputBuffer() already returns a
+                // reset buffer (position=0, limit=capacity).
+                //
+                // We use raw JNI, explicitly finding put([B) on java.nio.ByteBuffer so JNI
+                // walks the superclass chain correctly instead of failing on DirectByteBuffer.
                 var inBuf = _codec.Call<AndroidJavaObject>("getInputBuffer", inIdx);
                 if (verbose) RecordingModEntry.Log("  getInputBuffer=" + (inBuf != null ? "OK" : "NULL!"));
-                inBuf.Call("clear");
-                var putRet = inBuf.Call<AndroidJavaObject>("put", new object[] { _yuvBuf });
-                if (putRet != null) putRet.Dispose();
-                if (verbose) RecordingModEntry.Log("  ByteBuffer.put OK (" + _yuvBuf.Length + " bytes)");
 
-                // 5. Queue input
+                bool bufWritten = false;
+                try
+                {
+                    // byte[] -> sbyte[] (same bits; Unity JNI maps Java byte -> C# sbyte)
+                    Buffer.BlockCopy(_yuvBuf, 0, _sbyteTemp, 0, _yuvBuf.Length);
+
+                    IntPtr rawBuf = inBuf.GetRawObject();
+                    // Look up put([B) on ByteBuffer (superclass), not DirectByteBuffer
+                    IntPtr bbCls  = AndroidJNI.FindClass("java/nio/ByteBuffer");
+                    IntPtr midPut = AndroidJNI.GetMethodID(bbCls, "put", "([B)Ljava/nio/ByteBuffer;");
+                    AndroidJNI.DeleteLocalRef(bbCls);
+                    // ConvertToJNIArray handles sbyte[] -> jbyteArray correctly
+                    IntPtr jbArr  = AndroidJNIHelper.ConvertToJNIArray(_sbyteTemp);
+                    var jniArgs   = new jvalue[1];
+                    jniArgs[0].l  = jbArr;
+                    AndroidJNI.CallObjectMethod(rawBuf, midPut, jniArgs);
+                    AndroidJNI.DeleteLocalRef(jbArr);
+                    bufWritten = true;
+                    if (verbose) RecordingModEntry.Log("  ByteBuffer.put OK (" + _yuvBuf.Length + " bytes)");
+                }
+                catch (Exception ex)
+                {
+                    RecordingModEntry.Log("  ByteBuffer write FAILED: " + ex.Message);
+                }
+
+                // 5. Always queue the input buffer back so the encoder gets it returned.
+                // Pass 0 size if we failed to write - encoder will produce no output for
+                // this slot but won't stall from unreturned buffers.
                 _ptsUsec += (long)(1000000L / VideoFps);
-                _codec.Call("queueInputBuffer", inIdx, 0, _yuvBuf.Length, _ptsUsec, 0);
-                if (verbose) RecordingModEntry.Log("  queueInputBuffer OK pts=" + _ptsUsec);
+                _codec.Call("queueInputBuffer", inIdx, 0, bufWritten ? _yuvBuf.Length : 0, _ptsUsec, 0);
+                if (verbose) RecordingModEntry.Log("  queueInputBuffer OK (pts=" + _ptsUsec + " written=" + bufWritten + ")");
 
                 // 6. Drain
                 int written = DrainEncoder(false);
