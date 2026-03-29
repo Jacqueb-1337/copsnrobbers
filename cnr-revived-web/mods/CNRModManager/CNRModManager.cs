@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.3.8";
+        public  const string Version        = "1.3.9";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -742,7 +742,11 @@ namespace CNRModManager
         {
             foreach (RepoMod rm in _browseMods)
                 if (rm.filename.Equals(filename, StringComparison.OrdinalIgnoreCase))
-                    return rm.minVersion ?? "";
+                {
+                    if (!string.IsNullOrEmpty(rm.minVersion)) return rm.minVersion;
+                    if (rm.latestOnly) return rm.latestVersion ?? "";
+                    return "";
+                }
             return "";
         }
 
