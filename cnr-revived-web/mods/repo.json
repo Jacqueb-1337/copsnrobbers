@@ -156,12 +156,17 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.15",
+      "latestVersion": "2.0.16",
       "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.16",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.16.dll",
+          "changelog": "Fixed jump detection area not matching the button's actual size when resized in the HUD editor. Now uses Physics.Raycast from the NGUI camera (same method UICamera uses internally) so the hit area always matches the button's real collider regardless of scale."
+        },
         {
           "version": "2.0.15",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.15.dll",

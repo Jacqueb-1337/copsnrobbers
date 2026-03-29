@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.15";
+        public  const string Version = "2.0.16";
 
         public static void Load()
         {
@@ -1597,6 +1597,10 @@ namespace CNRSettingsMod
         // in the current frame regardless of script execution order.
         // While the player is in the air (isJumping=true), we keep OnJump=1 in prefs
         // so JoyStickController re-jumps the instant it detects landing.
+        //
+        // Hit-testing uses Physics.Raycast from the NGUI camera — exactly what UICamera
+        // does internally — so the detection correctly respects the button's actual
+        // collider size regardless of any HUD-editor rescaling.
         private void TouchJumpDetect()
         {
             if (_dragGOs[1] == null || _nguiCam == null) return;
@@ -1619,25 +1623,28 @@ namespace CNRSettingsMod
                         "charactercontroller", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             }
 
-            Vector3 worldCenter = _dragGOs[1].transform.position;
-            Vector3 scrCenter   = _nguiCam.WorldToScreenPoint(worldCenter);
-            float   halfW       = _dragGOs[1].transform.lossyScale.x * 0.5f;
-            if (halfW < 0.001f) return;
-            Vector3 scrEdge = _nguiCam.WorldToScreenPoint(
-                worldCenter + _nguiCam.transform.right * halfW);
-            float scrRadius = Mathf.Abs(scrEdge.x - scrCenter.x);
-            if (scrRadius < 30f) scrRadius = 30f;
-            float scrRadius2 = scrRadius * scrRadius;
-
             for (int i = 0; i < Input.touchCount; i++)
             {
                 Touch t = Input.GetTouch(i);
                 if (t.phase != TouchPhase.Began &&
                     t.phase != TouchPhase.Stationary &&
                     t.phase != TouchPhase.Moved) continue;
-                float dx = t.position.x - scrCenter.x;
-                float dy = t.position.y - scrCenter.y;
-                if (dx * dx + dy * dy > scrRadius2) continue;
+
+                // Raycast from the NGUI camera through the touch position.
+                // This respects the button's actual BoxCollider size (including HUD rescaling).
+                Ray ray = _nguiCam.ScreenPointToRay(t.position);
+                RaycastHit hit;
+                if (!Physics.Raycast(ray, out hit, 100f)) continue;
+                // Walk up the hierarchy to see if we hit the jump button (or a child of it).
+                Transform hitT = hit.collider.transform;
+                Transform jumpT = _dragGOs[1].transform;
+                bool onJumpButton = false;
+                while (hitT != null)
+                {
+                    if (hitT == jumpT) { onJumpButton = true; break; }
+                    hitT = hitT.parent;
+                }
+                if (!onJumpButton) continue;
 
                 // Try direct jump: write isJumping + jumpTime into JoyStickController
                 // so the jump fires this frame regardless of script execution order.
