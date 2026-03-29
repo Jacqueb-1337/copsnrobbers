@@ -8,6 +8,7 @@
     "start:bg": "node start-bg.js",
     "dev": "NODE_ENV=development node index.js play.jacqueb.me",
     "stop": "node stop.js",
+    "killorphan": "pkill -f 'node index.js play.jacqueb.me' ; echo done",
     "restart": "node stop.js ; sleep 1 ; node start-bg.js",
     "status": "node status.js",
     "logs": "node logs.js"

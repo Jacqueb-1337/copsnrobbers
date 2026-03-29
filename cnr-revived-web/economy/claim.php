@@ -23,11 +23,6 @@ if (strlen($password) < 6)                            fail('password must be at 
 
 $pdo = db();
 
-// Refuse if this device is already linked to any account
-$stmt = $pdo->prepare("SELECT android_id FROM devices WHERE android_id=?");
-$stmt->execute([$android_id]);
-if ($stmt->fetch()) fail('device already linked to an account — use register.php to re-login');
-
 // Find account by display_name with a set recovery credential
 $stmt = $pdo->prepare("SELECT * FROM accounts WHERE display_name=? AND pin_hash IS NOT NULL");
 $stmt->execute([$display_name]);
@@ -40,19 +35,28 @@ foreach ($candidates as $c) {
     }
 }
 
-if (count($matches) === 0) fail('no account found with that name and credentials', 404);
-if (count($matches) >   1) fail('multiple_match', 409);
+if (count($matches) === 0) fail('no account found with that name and credentials');
+if (count($matches) >   1) fail('multiple_match');
 
 $account = $matches[0];
 
-// Link the new device
+// Link (or re-link) the device — if already registered to a different account, move it.
 $new_token = bin2hex(random_bytes(32));
 $now       = time();
 
 $pdo->beginTransaction();
 try {
-    $pdo->prepare("INSERT INTO devices (android_id,account_id,token,last_seen) VALUES (?,?,?,?)")
-        ->execute([$android_id, $account['id'], $new_token, $now]);
+    $existing = $pdo->prepare("SELECT account_id FROM devices WHERE android_id=?");
+    $existing->execute([$android_id]);
+    $row = $existing->fetch();
+    if ($row) {
+        // Device exists — update its account link and token
+        $pdo->prepare("UPDATE devices SET account_id=?,token=?,last_seen=? WHERE android_id=?")
+            ->execute([$account['id'], $new_token, $now, $android_id]);
+    } else {
+        $pdo->prepare("INSERT INTO devices (android_id,account_id,token,last_seen) VALUES (?,?,?,?)")
+            ->execute([$android_id, $account['id'], $new_token, $now]);
+    }
     $pdo->prepare("UPDATE accounts SET last_seen=? WHERE id=?")->execute([$now, $account['id']]);
     $pdo->commit();
 } catch (Exception $e) {

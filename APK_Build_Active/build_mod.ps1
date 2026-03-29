@@ -4,7 +4,7 @@ param(
 
     [string]$OutName = "",     # output DLL name; defaults to source file basename
 
-    [string]$Device = "10.182.18.201:39573",  # adb device serial
+    [string]$Device = "",      # adb device serial; leave empty to use default connected device
 
     [switch]$NoDeploy          # pass -NoDeploy to skip adb push
 )
@@ -64,8 +64,20 @@ if ($NoDeploy) {
     exit 0
 }
 
-Write-Host "Deploying to $Device ..." -ForegroundColor Cyan
-adb -s $Device push $OutDll /sdcard/CNRMods/$OutName
+Write-Host "Deploying ..." -ForegroundColor Cyan
+
+# Auto-connect to WSA/device over TCP if no device is currently attached
+$adbDevices = & adb devices 2>&1
+if (-not ($adbDevices | Where-Object { $_ -match "device$" })) {
+    $wsa_addr = "127.0.0.1:58526"
+    Write-Host "No adb device found - connecting to $wsa_addr ..." -ForegroundColor Yellow
+    & adb connect $wsa_addr
+    Start-Sleep -Seconds 1
+}
+
+$adbArgs = @("push", $OutDll, "/sdcard/CNRMods/$OutName")
+if ($Device -ne "") { $adbArgs = @("-s", $Device) + $adbArgs }
+& adb @adbArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "DEPLOY FAILED" -ForegroundColor Red
     exit 1

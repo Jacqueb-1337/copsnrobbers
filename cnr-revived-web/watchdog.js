@@ -12,11 +12,19 @@ let lastStartTime = 0;
 
 fs.writeFileSync(pidFile, process.pid.toString());
 
+let currentChild = null;
+
 process.on('exit', () => {
   try { fs.unlinkSync(pidFile); } catch (_) {}
 });
-process.on('SIGTERM', () => process.exit(0));
-process.on('SIGINT', () => process.exit(0));
+process.on('SIGTERM', () => {
+  if (currentChild) currentChild.kill('SIGTERM');
+  process.exit(0);
+});
+process.on('SIGINT', () => {
+  if (currentChild) currentChild.kill('SIGTERM');
+  process.exit(0);
+});
 
 function startServer() {
   lastStartTime = Date.now();
@@ -25,11 +33,13 @@ function startServer() {
   const child = spawn('node', ['index.js', 'play.jacqueb.me'], {
     stdio: ['ignore', logFd, logFd]
   });
+  currentChild = child;
 
   const ts = new Date().toISOString();
   fs.appendFileSync(logFile, `[${ts}] [watchdog] server started (PID ${child.pid})\n`);
 
   child.on('close', (code) => {
+    currentChild = null;
     fs.closeSync(logFd);
     const ts2 = new Date().toISOString();
     fs.appendFileSync(logFile, `[${ts2}] [watchdog] server exited (code ${code}), restarting in ${restartDelay}ms\n`);
