@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.19";
+        public const  string Version = "2.0.44";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -117,7 +117,7 @@ namespace CNRMods
             catch (Exception ex) { Log("LoadExternalMods: " + ex.Message); }
         }
 
-        private static void ReadConfig()
+        public static void ReadConfig()
         {
             // Ensure the directory exists regardless of whether the cfg is there.
             string dir = System.IO.Path.GetDirectoryName(ConfigPath);
@@ -171,6 +171,39 @@ namespace CNRMods
             if (string.IsNullOrEmpty(EconomyUrl))
                 EconomyUrl = "https://play.jacqueb.me/economy";
             Log("EconomyUrl=" + EconomyUrl);
+        }
+
+        // ── Config UI protocol — called by CNRModManager via reflection ─────────────
+        // Returns rows of [key, label, type, currentValue, description]
+        public static string[][] GetModConfig()
+        {
+            return new string[][]
+            {
+                new string[] { "SERVER_IP",   "Server IP",            "string", ServerIp,                     "IP or hostname of the game server" },
+                new string[] { "SERVER_PORT", "Server Port",          "int",    ServerPort.ToString(),         "Port the server listens on (default 5055)" },
+                new string[] { "MOD_VERSION", "Required Mod Version", "string", ModVersion,                   "Min mod version required to join (used in kick message)" },
+                new string[] { "KICK_NO_MOD", "Kick Without Mod",     "bool",   KickNoMod ? "true" : "false", "Kick players who don't have CNRMod installed" },
+                new string[] { "APP_ID",      "Photon App ID",        "string", AppId,                        "Photon App ID — leave as CNRLan unless self-hosting" },
+                new string[] { "MAP_URL",     "Custom Maps URL",      "string", MapUrl,                       "URL to a maps JSON file (blank = default maps)" },
+                new string[] { "WEB_URL",     "Web Server URL",       "string", WebUrl,                       "Node.js server URL, e.g. http://host:1337 (auto-derived if blank)" },
+                new string[] { "ECONOMY_URL", "Economy API URL",      "string", EconomyUrl,                   "Economy API URL (blank = default)" },
+            };
+        }
+
+        // Called by CNRModManager to write changed config back to server.cfg
+        public static void SetModConfig(string[][] entries)
+        {
+            try
+            {
+                var lines = new List<string>();
+                foreach (string[] entry in entries)
+                    if (entry != null && entry.Length >= 4 && !string.IsNullOrEmpty(entry[0]))
+                        lines.Add(entry[0] + "=" + (entry[3] ?? ""));
+                File.WriteAllText(ConfigPath, string.Join("\n", lines.ToArray()) + "\n");
+                Log("Config saved via ModManager");
+                ReadConfig();
+            }
+            catch (Exception ex) { Log("SetModConfig error: " + ex.Message); }
         }
 
         public static void Log(string msg)

@@ -5,11 +5,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.19",
+      "latestVersion": "2.0.44",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.44",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.44.dll",
+          "changelog": "Added in-game config editor support. GetModConfig() exposes all server.cfg fields (SERVER_IP, SERVER_PORT, MOD_VERSION, KICK_NO_MOD, APP_ID, MAP_URL, WEB_URL, ECONOMY_URL) to CNRModManager's per-mod Settings panel. SetModConfig() writes changes back to server.cfg and reloads config in-memory."
+        },
         {
           "version": "2.0.19",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.19.dll",
@@ -268,12 +273,22 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.3.5",
+      "latestVersion": "1.3.7",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.3.7",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.3.7.dll",
+          "changelog": "Fixed: Settings gear button not appearing. ReflectionTypeLoadException on game assemblies was silently aborting the entire assembly scan. Now catches ReflectionTypeLoadException and continues with partial type list. Removed strict return-type check on GetModConfig discovery. Added diagnostic logging to /sdcard/CNRMods/modmanager.log."
+        },
+        {
+          "version": "1.3.6",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.3.6.dll",
+          "changelog": "Per-mod Settings panel. Any installed mod that exposes GetModConfig()/SetModConfig() gets a gear button in the Installed tab. CNRMod now shows all server.cfg fields as editable text fields and toggles. Changes are written back to server.cfg on Save with a restart-required notice."
+        },
         {
           "version": "1.3.5",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.3.5.dll",
