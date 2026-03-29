@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.3";
+        public  const string Version = "2.0.7";
 
         public static void Load()
         {
@@ -1025,6 +1025,11 @@ namespace CNRSettingsMod
         // Enforced scales applied every LateUpdate to prevent game resets
         private float[] _savedScales = new float[DRAG_COUNT];
 
+        // Supplemental screen-space fire-button detection (see TouchFireDetect)
+        private float _touchFireCooldown = 0f;
+        private JoyStickController _joyStickCtrl = null;
+        private System.Reflection.FieldInfo _fiFireHoldCount = null;
+
         // -- Pause panel polling -----------------------------------------------
         private GameObject _pausePanelRef;
         private UIPanel    _pauseUIPanel;
@@ -1119,6 +1124,7 @@ namespace CNRSettingsMod
             _chatWasFocused   = false;
             for (int i = 0; i < DRAG_COUNT; i++) { _dragGOs[i] = null; _dragOrigPos[i] = Vector3.zero; /* keep _dragOrigScale so captured baseline survives multiple ApplyHUDOnLoad runs */ }
             for (int i = 0; i < _visGOs.Length;  i++) _visGOs[i]  = null;
+            _joyStickCtrl   = null;
             LoadPrefs();
             if (_inGameScene) StartCoroutine(ApplyHUDOnLoad());
             if (_inGameScene && _kbmEnabled) StartCoroutine(AutoLockAfterLoad());
@@ -1149,8 +1155,13 @@ namespace CNRSettingsMod
 
         private void Update()
         {
+            if (!_inGameScene) return;
+
             // Persistently keep UICamera.useMouse=true — UICamera.Start() on Android
             // hardcodes it to false every scene, breaking hardware mouse clicks.
+            // Only applied in game scenes; forcing it in menu/profile scenes causes
+            // UICamera to generate extra OnClick events on NGUI buttons (e.g. equip
+            // toggles), making equip/unequip immediately reverse itself.
             // Cache is refreshed every 2 seconds to catch UICamera instances that
             // Start() after the scene loads (multiplayer lobby, room browser, etc.).
             _uiCamCacheAge -= Time.deltaTime;
@@ -1161,8 +1172,6 @@ namespace CNRSettingsMod
             }
             foreach (UICamera cam in _uiCamCache)
                 if (cam != null) cam.useMouse = true;
-
-            if (!_inGameScene) return;
 
             if (_pausePanelRef == null)
             {
@@ -1454,6 +1463,8 @@ namespace CNRSettingsMod
             // Beat UIRoot (which also runs in LateUpdate and resets scales).
             EnforceScales();
             if (_hudEditMode) return;
+            // Supplemental fire-button touch detection (bypasses Physics.Raycast).
+            TouchFireDetect();
             ApplySensitivity();
             // KBM mouse look — use mousePosition delta because Input.GetAxis("Mouse X/Y")
             // returns 0 on old Unity/Android for hardware mouse. Without requestPointerCapture,
@@ -1474,6 +1485,85 @@ namespace CNRSettingsMod
             else
             {
                 _lastMousePosValid = false;
+            }
+        }
+
+        // Supplemental fire-button touch detection.
+        // The game detects the fire button via Physics.Raycast from the NGUI camera.
+        // When we expand the camera rect (to make NGUI accept touches anywhere), the
+        // camera's aspect ratio changes, which can shift the camera's coordinate mapping
+        // so the Physics.Raycast misses the FireButton collider for the first touch.
+        // This method independently checks whether any active touch lands within the
+        // FireButton's projected screen bounds, and if so directly sets the fire status.
+        // It runs in LateUpdate (after JoyStickController.Update) so it can't be
+        // overridden by the walk/idle logic for the same frame.
+        private void TouchFireDetect()
+        {
+            _touchFireCooldown -= Time.deltaTime;
+            if (_touchFireCooldown < 0f) _touchFireCooldown = 0f;
+            if (_touchFireCooldown > 0f) return;
+
+            if (_dragGOs[0] == null || _nguiCam == null) return;
+            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
+            if (NGUI.mInstance != null && NGUI.mInstance.noClips) return;
+            if (Input.touchCount == 0) return;
+
+            // Cache JoyStickController on ExampleCharacter so we can keep
+            // its private fireStatusHoldTimeCount > 0, which prevents it from
+            // resetting mStatus to "walk" every frame when the NGUI raycast misses.
+            if ((object)_joyStickCtrl == null)
+            {
+                GameObject exChar = GameObject.Find("ExampleCharacter");
+                if (exChar != null) _joyStickCtrl = exChar.GetComponent<JoyStickController>();
+            }
+            if (_fiFireHoldCount == null && (object)_joyStickCtrl != null)
+            {
+                _fiFireHoldCount = typeof(JoyStickController).GetField(
+                    "fireStatusHoldTimeCount",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            }
+
+            // Project fire-button center and edge to screen space to get tap radius.
+            Vector3 worldCenter = _dragGOs[0].transform.position;
+            Vector3 scrCenter   = _nguiCam.WorldToScreenPoint(worldCenter);
+            float   halfW       = _dragGOs[0].transform.lossyScale.x * 0.5f;
+            if (halfW < 0.001f) return;
+            Vector3 scrEdge = _nguiCam.WorldToScreenPoint(
+                worldCenter + _nguiCam.transform.right * halfW);
+            float scrRadius = Mathf.Abs(scrEdge.x - scrCenter.x);
+            if (scrRadius < 30f) scrRadius = 30f;   // minimum 30 px tap area
+            float scrRadius2 = scrRadius * scrRadius;
+
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch t = Input.GetTouch(i);
+                if (t.phase != TouchPhase.Began &&
+                    t.phase != TouchPhase.Stationary &&
+                    t.phase != TouchPhase.Moved) continue;
+                float dx = t.position.x - scrCenter.x;
+                float dy = t.position.y - scrCenter.y;
+                if (dx * dx + dy * dy > scrRadius2) continue;
+
+                WeaponType wt = PlayerLogic.mInstance.mWeaponType;
+                PlayerLogic.mInstance.mStatus =
+                    (wt == WeaponType.BallisticKnife || wt == WeaponType.GingerbreadKnife)
+                    ? PlayerStatus.knifeFire : PlayerStatus.fire;
+
+                // KEY FIX: keep JoyStickController.fireStatusHoldTimeCount > 0 so its
+                // "if (!flag && holdCount <= 0) mStatus = walk" guard stays FALSE.
+                // Use 0.235f (same value JoyStickController sets internally on fire).
+                // Our cooldown is 0.2f, so we re-fire while holdCount ≈ 0.035 — it
+                // never reaches 0 while the button is held, preventing walk resets.
+                if ((object)_joyStickCtrl != null && _fiFireHoldCount != null)
+                    _fiFireHoldCount.SetValue(_joyStickCtrl, 0.235f);
+
+                // Safety net: trigger UIMenuDirector fire event in case there are
+                // any game-mode-specific subscribers (e.g. CRUIEventInteract).
+                if ((object)UIMenuDirector.mInstance != null)
+                    UIMenuDirector.mInstance.GenFireEvent();
+
+                _touchFireCooldown = 0.2f;  // slightly less than 0.235f — expires first
+                break;
             }
         }
 
@@ -1687,6 +1777,31 @@ namespace CNRSettingsMod
             {
                 GameObject g = GameObject.Find(p);
                 if (g != null) { _nguiCam = g.GetComponent<Camera>(); if (_nguiCam != null) break; }
+            }
+        }
+
+        // NGUI UICamera.Raycast() rejects touches whose ScreenToViewportPoint falls outside
+        // [0,1].  If the HUD camera's rect is constrained to the original button region
+        // (e.g. right ~65% of screen, with the left reserved for the virtual joystick),
+        // buttons dragged into the other region never fire.  Expanding the rect to the full
+        // screen costs nothing — the joystick uses VCTouchController, not NGUI, so it is
+        // completely unaffected.
+        private void ExpandNguiCamToFullScreen()
+        {
+            CacheNguiCam();
+            if (_nguiCam == null) return;
+            Rect r = _nguiCam.rect;
+            if (r.x > 0.001f || r.y > 0.001f || r.width < 0.999f || r.height < 0.999f)
+            {
+                _nguiCam.rect = new Rect(0f, 0f, 1f, 1f);
+                SettingsModEntry.Log("HUD: NGUI cam viewport expanded to full screen (was " + r + ")");
+            }
+            // Also ensure the UICamera component on this camera covers the full
+            // eventReceiverMask (-1 = all layers) so widgets on any layer get events.
+            UICamera uiCam = _nguiCam.GetComponent<UICamera>();
+            if (uiCam != null && uiCam.eventReceiverMask != (LayerMask)(-1))
+            {
+                SettingsModEntry.Log("HUD: UICamera eventReceiverMask was " + (int)uiCam.eventReceiverMask + ", leaving as-is (not -1)");
             }
         }
 
@@ -2987,6 +3102,65 @@ namespace CNRSettingsMod
 
             // Keep _aimBtn reference up to date from drag cache
             if (_dragGOs[4] != null) _aimBtn = _dragGOs[4];
+
+            // Expand NGUI camera viewport to full screen so repositioned buttons
+            // work anywhere — see ExpandNguiCamToFullScreen() for full explanation.
+            // If the viewport was previously restricted we capture each button's
+            // screen-pixel position BEFORE expanding, then remap its world position
+            // AFTER so the button stays at the same pixel.  Without this remap,
+            // changing camera.aspect (a side-effect of changing camera.rect) shifts
+            // every button's visual AND its Physics.Raycast hit zone, causing the
+            // fire-button Physics.Raycast to miss the repositioned collider even when
+            // the user taps the visual, and causing the joystick-area touch to
+            // accidentally hit the fire-button collider at its new world position.
+            {
+                bool wasRestricted = false;
+                Vector3[] scrBefore  = null;
+                bool[]    hadBefore  = null;
+                CacheNguiCam();
+                if (_nguiCam != null)
+                {
+                    Rect r0 = _nguiCam.rect;
+                    wasRestricted = r0.x > 0.001f || r0.y > 0.001f || r0.width < 0.999f || r0.height < 0.999f;
+                    if (wasRestricted)
+                    {
+                        scrBefore = new Vector3[DRAG_COUNT];
+                        hadBefore  = new bool[DRAG_COUNT];
+                        for (int ri = 0; ri < DRAG_COUNT; ri++)
+                            if (_dragGOs[ri] != null)
+                            {
+                                scrBefore[ri] = _nguiCam.WorldToScreenPoint(_dragGOs[ri].transform.position);
+                                hadBefore[ri]  = true;
+                            }
+                    }
+                }
+                ExpandNguiCamToFullScreen();
+                if (wasRestricted && scrBefore != null && _nguiCam != null)
+                {
+                    bool anySaved = false;
+                    for (int ri = 0; ri < DRAG_COUNT; ri++)
+                    {
+                        if (!hadBefore[ri] || _dragGOs[ri] == null) continue;
+                        float origZ = _dragGOs[ri].transform.position.z;
+                        float camZ  = _nguiCam.transform.position.z;
+                        float dist  = Mathf.Abs(origZ - camZ);
+                        if (dist < 0.01f) dist = 18f;
+                        Vector3 nw = _nguiCam.ScreenToWorldPoint(
+                            new Vector3(scrBefore[ri].x, scrBefore[ri].y, dist));
+                        _dragGOs[ri].transform.position = new Vector3(nw.x, nw.y, origZ);
+                        // Persist the corrected local position so future loads are already
+                        // in the expanded-camera coordinate frame (no remap needed next time).
+                        if (DRAG_ITEMS[ri].prefPX != null)
+                        {
+                            Vector3 lp = _dragGOs[ri].transform.localPosition;
+                            HudCfgSetFloat(DRAG_ITEMS[ri].prefPX, lp.x);
+                            HudCfgSetFloat(DRAG_ITEMS[ri].prefPY, lp.y);
+                            anySaved = true;
+                        }
+                    }
+                    if (anySaved) { HudCfgSave(); SettingsModEntry.Log("HUD: remapped button positions for expanded camera"); }
+                }
+            }
         }
 
         private void LogSceneHud()
