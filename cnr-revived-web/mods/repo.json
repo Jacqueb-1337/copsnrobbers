@@ -146,12 +146,17 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.3",
-      "minVersion": "2.0.3",
+      "latestVersion": "2.0.4",
+      "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.4",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.4.dll",
+          "changelog": "Fixed: equipping/unequipping weapons on the profile screen would immediately reverse itself. Root cause: UICamera.useMouse was being forced true globally (including in the main menu/profile scene), causing NGUI to fire extra OnClick events on profile buttons. useMouse is now only forced in in-game scenes where KBM input is active."
+        },
         {
           "version": "2.0.3",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.3.dll",
