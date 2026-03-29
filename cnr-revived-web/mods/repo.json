@@ -5,11 +5,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.42",
+      "latestVersion": "2.0.43",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.43",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.43.dll",
+          "changelog": "Players can now delete individual mail messages with a confirmation prompt. Inbox is auto-purged to 35 messages on load (oldest claimed first, then oldest no-reward unclaimed)."
+        },
         {
           "version": "2.0.42",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.42.dll",
