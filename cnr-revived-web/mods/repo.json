@@ -5,12 +5,17 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.38",
+      "latestVersion": "2.0.39",
       "minVersion": "2.0.16",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.39",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.39.dll",
+          "changelog": "Fixed map selector showing every other map (again). NGUI UICamera.Notify fires OnClick on both the clicked GO and genericEventHandler, causing two OnClick calls per tap. MapNavButton now uses a per-frame pending flag: all OnClick calls within the same Update frame collapse into a single navigation increment."
+        },
         {
           "version": "2.0.38",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.38.dll",
