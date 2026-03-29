@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.17";
+        public  const string Version = "2.0.18";
 
         public static void Load()
         {
@@ -1035,6 +1035,22 @@ namespace CNRSettingsMod
         private System.Collections.Generic.HashSet<int> _jumpTouchIds =
             new System.Collections.Generic.HashSet<int>();
 
+        // Our own jump arc — replaces JoyStickController's clunky 5-segment arc.
+        // The game permanently applies Physics.gravity (-9.81 m/s Y) to the
+        // CharacterController via cc.Move in its own Update().  We add our Y on top
+        // in LateUpdate.  Net Y per frame = (_ownJumpVelY + (-9.81)) * dt.
+        //
+        // As a result, we need _ownJumpVelY > 9.81 to rise and < 9.81 to fall.
+        // Asymmetric gravity (faster fall) gives the classic snappy platformer feel.
+        //
+        // Tuned for ~2.5 m peak height, ~0.35 s rise, ~0.30 s fall (0.65 s total).
+        // Compare: original arc was ~0.9 m peak, 1.0 s total, uniform/flat.
+        private bool  _ownJumpActive = false;
+        private float _ownJumpVelY   = 0f;
+        private const float JumpInitialVel  = 24f;   // m/s our upward vel at takeoff
+        private const float JumpAscendGrav  = -41f;  // d/dt(_ownJumpVelY) while rising
+        private const float JumpDescendGrav = -56f;  // d/dt(_ownJumpVelY) while falling
+
         // -- Pause panel polling -----------------------------------------------
         private GameObject _pausePanelRef;
         private UIPanel    _pauseUIPanel;
@@ -1134,6 +1150,8 @@ namespace CNRSettingsMod
             _fiJumpTime       = null;
             _fiJumpCharCtrl   = null;
             _jumpTouchIds.Clear();
+            _ownJumpActive = false;
+            _ownJumpVelY   = 0f;
             LoadPrefs();
             if (_inGameScene) StartCoroutine(ApplyHUDOnLoad());
             if (_inGameScene && _kbmEnabled) StartCoroutine(AutoLockAfterLoad());
@@ -1497,6 +1515,7 @@ namespace CNRSettingsMod
             // and sets OnJump=1 on Began so the jump triggers immediately, and again
             // each frame while held so the player auto-re-jumps on landing.
             TouchJumpDetect();
+            OwnJumpPhysics();
             ApplySensitivity();
             // KBM mouse look — use mousePosition delta because Input.GetAxis("Mouse X/Y")
             // returns 0 on old Unity/Android for hardware mouse. Without requestPointerCapture,
@@ -1664,27 +1683,67 @@ namespace CNRSettingsMod
                     _jumpTouchIds.Add(t.fingerId);
                 }
 
-                // Try direct jump: write isJumping + jumpTime into JoyStickController
-                // so the jump fires this frame regardless of script execution order.
-                bool didJump = false;
-                if ((object)_joyStickCtrl != null &&
-                    _fiJumpIsJumping != null && _fiJumpTime != null && _fiJumpCharCtrl != null)
-                {
-                    bool isJumping = (bool)_fiJumpIsJumping.GetValue(_joyStickCtrl);
-                    CharacterController cc = (CharacterController)_fiJumpCharCtrl.GetValue(_joyStickCtrl);
-                    if (!isJumping && cc != null && cc.isGrounded)
-                    {
-                        _fiJumpIsJumping.SetValue(_joyStickCtrl, true);
-                        _fiJumpTime.SetValue(_joyStickCtrl, Time.time);
-                        PlayerPrefs.SetInt("OnJump", 0);
-                        didJump = true;
-                    }
-                }
-                // Fallback / in-air case: keep OnJump=1 so JoyStickController re-jumps
-                // the instant it detects landing (isGrounded becomes true again).
-                if (!didJump)
-                    PlayerPrefs.SetInt("OnJump", 1);
+                // Hand off to TriggerOwnJump which decides whether to start a new arc.
+                TriggerOwnJump();
                 break;
+            }
+        }
+
+        // Starts our custom jump arc if the player is grounded and not already jumping.
+        // Called from TouchJumpDetect when a claimed finger is on the button.
+        // While in the air (_ownJumpActive=true) this is a no-op; when the player
+        // lands and the finger is still held, TouchJumpDetect calls this again and
+        // it re-triggers automatically (auto-re-jump on landing).
+        private void TriggerOwnJump()
+        {
+            if (_ownJumpActive) return;
+            if ((object)_joyStickCtrl == null || _fiJumpCharCtrl == null) return;
+            CharacterController cc = (CharacterController)_fiJumpCharCtrl.GetValue(_joyStickCtrl);
+            if (cc == null || !cc.isGrounded) return;
+
+            // Prevent JoyStickController's own arc from ever starting.
+            if (_fiJumpIsJumping != null) _fiJumpIsJumping.SetValue(_joyStickCtrl, false);
+            PlayerPrefs.SetInt("OnJump", 0);
+
+            _ownJumpVelY   = JumpInitialVel;
+            _ownJumpActive = true;
+        }
+
+        // Applies our own jump Y velocity each LateUpdate, AFTER JoyStickController
+        // has already called cc.Move(horizontal + gravity) in its Update().
+        // Unity CharacterController.Move() calls in the same frame are additive, so
+        // net Y displacement = (-9.81 + _ownJumpVelY) * dt.
+        //
+        // Arc: _ownJumpVelY starts at JumpInitialVel (24), decelerates at JumpAscendGrav
+        // (-41 m/s²) until net Y crosses zero (peak ≈ 2.5 m), then accelerates down via
+        // JumpDescendGrav (-56 m/s²) for a snap-fast landing (~0.3 s fall).
+        private void OwnJumpPhysics()
+        {
+            if (!_ownJumpActive) return;
+            if ((object)_joyStickCtrl == null || _fiJumpCharCtrl == null)
+            {
+                _ownJumpActive = false;
+                return;
+            }
+            CharacterController cc = (CharacterController)_fiJumpCharCtrl.GetValue(_joyStickCtrl);
+            if (cc == null) { _ownJumpActive = false; return; }
+
+            // Keep game's arc suppressed every frame.
+            if (_fiJumpIsJumping != null) _fiJumpIsJumping.SetValue(_joyStickCtrl, false);
+            PlayerPrefs.SetInt("OnJump", 0);
+
+            // Add our Y displacement on top of the game's horizontal+gravity move.
+            cc.Move(new Vector3(0f, _ownJumpVelY * Time.deltaTime, 0f));
+
+            // Asymmetric gravity: decelerate quickly on the way up, fall snap-fast.
+            float grav = (_ownJumpVelY > 0f) ? JumpAscendGrav : JumpDescendGrav;
+            _ownJumpVelY += grav * Time.deltaTime;
+
+            // End on confirmed landing (after our move so isGrounded reflects latest pos).
+            if (cc.isGrounded && _ownJumpVelY < 0f)
+            {
+                _ownJumpActive = false;
+                _ownJumpVelY   = 0f;
             }
         }
 

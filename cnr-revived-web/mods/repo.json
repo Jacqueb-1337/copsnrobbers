@@ -156,12 +156,17 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.17",
+      "latestVersion": "2.0.18",
       "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.18",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.18.dll",
+          "changelog": "Overhauled jump physics. The original arc was a clunky 5-segment constant-velocity staircase (~0.9 m peak, 1.0 s total, flat/symmetric feel). Replaced with a proper asymmetric arc: fast snap upward (~2.5 m peak in ~0.35 s) then snappy fast fall (~0.3 s), total ~0.65 s. Since position streams to all clients at 100 Hz, other players see the improved arc too."
+        },
         {
           "version": "2.0.17",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.17.dll",
