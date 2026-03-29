@@ -5,12 +5,17 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.36",
+      "latestVersion": "2.0.37",
       "minVersion": "2.0.16",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.37",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.37.dll",
+          "changelog": "Fixed gun selection on profile screen. 2.0.34 wrote CurWeaponEquiped_1..8='' for empty server slots. Empty strings cause the game's weapon-lookup to throw KeyNotFoundException, crashing the loadout UI and reverting every tap. On startup, any CurWeaponEquiped_N key holding an empty string is now deleted (same logic already applied to CurSettedArmorName in 2.0.36)."
+        },
         {
           "version": "2.0.36",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.36.dll",
