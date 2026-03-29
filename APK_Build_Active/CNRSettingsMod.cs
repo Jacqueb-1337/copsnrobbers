@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.9";
+        public  const string Version = "2.0.10";
 
         public static void Load()
         {
@@ -1157,21 +1157,34 @@ namespace CNRSettingsMod
         {
             if (!_inGameScene) return;
 
-            // Persistently keep UICamera.useMouse=true — UICamera.Start() on Android
-            // hardcodes it to false every scene, breaking hardware mouse clicks.
-            // Only applied in game scenes; forcing it in menu/profile scenes causes
-            // UICamera to generate extra OnClick events on NGUI buttons (e.g. equip
-            // toggles), making equip/unequip immediately reverse itself.
-            // Cache is refreshed every 2 seconds to catch UICamera instances that
-            // Start() after the scene loads (multiplayer lobby, room browser, etc.).
+            // Conditionally set UICamera.useMouse.
+            // On Android, UICamera.Start() hardcodes useMouse=false.
+            // We only re-enable it when KBM mode is active AND the cursor is
+            // unlocked (i.e. the user has the pointer visible and needs to click
+            // HUD elements with a hardware mouse).
+            //
+            // Forcing useMouse=true unconditionally causes ProcessMouse() to fire
+            // on every frame alongside ProcessTouches().  On Android,
+            // simulateMouseWithTouches maps touch[0] → mouse button 0, so
+            // ProcessMouse routes NGUI events to whatever widget is under touch[0].
+            // When touch[0] IS the fire button, this NGUI processing interferes
+            // with JoyStickController's Physics.Raycast-based fire detection,
+            // preventing one-finger firing.  With touch[1] as fire (and touch[0]
+            // on a non-fire area) the interference doesn't affect the fire button,
+            // which is why two-finger fire worked even with the bug.
+            //
+            // With useMouse=false (Android default), ProcessMouse() never runs and
+            // touch events flow exclusively through ProcessTouches() — hardware
+            // mouse clicks still work via Unity's simulateMouseWithTouches.
             _uiCamCacheAge -= Time.deltaTime;
             if (_uiCamCache.Length == 0 || _uiCamCacheAge <= 0f)
             {
                 _uiCamCache    = (UICamera[])FindObjectsOfType(typeof(UICamera));
                 _uiCamCacheAge = 2f;
             }
+            bool wantMouse = _kbmEnabled && !_cursorLocked;
             foreach (UICamera cam in _uiCamCache)
-                if (cam != null) cam.useMouse = true;
+                if (cam != null) cam.useMouse = wantMouse;
 
             if (_pausePanelRef == null)
             {
