@@ -278,12 +278,17 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.3.7",
+      "latestVersion": "1.3.8",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.3.8",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.3.8.dll",
+          "changelog": "Fixed: Settings gear button showed on all mods with same config values. Assembly scan now filters by filename so only the mod whose DLL actually contains GetModConfig gets a gear button."
+        },
         {
           "version": "1.3.7",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.3.7.dll",
