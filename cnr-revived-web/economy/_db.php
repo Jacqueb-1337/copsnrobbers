@@ -170,7 +170,7 @@ function ok(array $data = []): never {
     exit;
 }
 
-function fail(string $msg, int $http = 400): never {
+function fail(string $msg, int $http = 200): never {
     http_response_code($http);
     header('Content-Type: application/json');
     echo json_encode(['ok' => false, 'error' => $msg, 'v' => API_VERSION]);

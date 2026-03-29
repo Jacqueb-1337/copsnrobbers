@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-using System.Text;
 using UnityEngine;
 using Pathfinding.Serialization.JsonFx;
 
@@ -26,11 +25,10 @@ namespace CNRMods
         public static bool   KickNoMod     = true;
         public static string WebUrl        = "";    // http://<host>:1337 for node server; derived from SERVER_IP if not set
         public static string EconomyUrl    = "";    // https://<host>/economy  for PHP economy API
-        public static bool   IsMaster         = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
-        public static bool   FetchingRoomMap  = false;  // true while a client is awaiting FetchAndCacheMap result
+        public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.34";
+        public const  string Version = "2.0.11";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -67,7 +65,7 @@ namespace CNRMods
                 go.AddComponent<CustomMapsHook>();
                 go.AddComponent<MapLoader>();
                 go.AddComponent<ContentManager>();
-                // go.AddComponent<EconomyHook>(); // TEMP DISABLED FOR FREEZE TEST
+                go.AddComponent<EconomyHook>();
                 GameObject.DontDestroyOnLoad(go);
 
                 Log("Mod root created.  IP=" + (ServerIp != "" ? ServerIp : "(none)") +
@@ -336,13 +334,7 @@ namespace CNRMods
             {
                 if (!string.IsNullOrEmpty(ModEntry.WebUrl) && !string.IsNullOrEmpty(roomName))
                 {
-                    // Fetch URL from node server, then cache + MapLoader polling will spawn it.
-                    // Set FetchingRoomMap=true BEFORE EnsureHolding so WaitAndSpawn won't release early.
-                    ModEntry.FetchingRoomMap = true;
-                    // If OnEnteredRoom fires AFTER OnLevelWasLoaded (Photon confirms room entry late),
-                    // MapLoader will have already bailed. EnsureHolding restarts the hold in that case.
-                    var ml = GetComponent<MapLoader>();
-                    if (ml != null) ml.EnsureHolding();
+                    // Fetch URL from node server, then cache + MapLoader polling will spawn it
                     StartCoroutine(FetchAndCacheMap(roomName));
                 }
                 else
@@ -357,14 +349,17 @@ namespace CNRMods
         private void OnLeftRoom()
         {
             ModEntry.Log("Left room");
-            // Clear FetchingRoomMap so the next room's OnLevelWasLoaded doesn't hang
-            // waiting for a fetch that will never complete.
-            ModEntry.FetchingRoomMap = false;
-            // Stop MapLoader from holding the player at the loading position.
-            var ml = GetComponent<MapLoader>();
-            if (ml != null) ml.AbortHold();
             _pendingVerify.Clear();
             _pollDebugCount = 0; // re-enable verbose logging for next room
+            // Don't clear map prefs if we're transitioning into a game scene —
+            // Photon briefly reports inRoom=false during the level load, so
+            // clearing here would wipe the pending custom map before MapLoader reads it.
+            string currentScene = Application.loadedLevelName ?? "";
+            if (Array.IndexOf(GameScenes, currentScene) >= 0)
+            {
+                ModEntry.Log("OnLeftRoom: in game scene (" + currentScene + "), keeping map prefs");
+                return;
+            }
             // Clear custom map state so a subsequent vanilla room doesn't load stale map data.
             PlayerPrefs.SetString("CNRMod_ActiveMapURL", "");
             PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
@@ -403,55 +398,19 @@ namespace CNRMods
         }
 
         // GET /rooms/<roomName> from node server, cache the map URL, start download
-        // Called by MapLoader.WaitAndSpawn at the 3s mark.
-        // Polls CNR_MAP_URL Photon room prop until master sets it (up to 25s), then falls back to HTTP.
-        public void TriggerClientFetch()
-        {
-            StartCoroutine(RoomPropPollCoroutine());
-        }
-
-        private IEnumerator RoomPropPollCoroutine()
-        {
-            Type pnt = GetPhotonNetType();
-            float elapsed = 0f;
-            while (elapsed < 25f)
-            {
-                string roomUrl = pnt != null ? GetRoomPropStr(pnt, "CNR_MAP_URL") : null;
-                if (!string.IsNullOrEmpty(roomUrl))
-                {
-                    ModEntry.Log("TriggerClientFetch: room prop found after " + elapsed.ToString("F1") + "s: " + roomUrl);
-                    PlayerPrefs.SetString("CNRMod_ActiveMapURL", roomUrl);
-                    PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
-                    PlayerPrefs.Save();
-                    ModEntry.FetchingRoomMap = false;  // WaitAndSpawn sees ActiveMapURL on next tick
-                    yield break;
-                }
-                yield return new WaitForSeconds(0.5f);
-                elapsed += 0.5f;
-            }
-            // Prop not found after 25s — fall back to HTTP
-            string roomName = pnt != null ? GetRoomName(pnt) : null;
-            ModEntry.Log("TriggerClientFetch: prop not found after 25s, HTTP fallback (roomName=" + (roomName ?? "(null)") + ")");
-            if (!string.IsNullOrEmpty(ModEntry.WebUrl) && !string.IsNullOrEmpty(roomName))
-                yield return StartCoroutine(FetchAndCacheMap(roomName));
-            else
-                ModEntry.FetchingRoomMap = false;
-        }
-
         private IEnumerator FetchAndCacheMap(string roomName)
         {
             string fetchUrl = ModEntry.SanitizeUrl(ModEntry.WebUrl + "/rooms/" + Uri.EscapeDataString(roomName));
             ModEntry.Log("Client: GET " + fetchUrl);
             var www = new WWW(fetchUrl);
             yield return www;
-            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("FetchRoom error: " + www.error); ModEntry.FetchingRoomMap = false; yield break; }
+            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("FetchRoom error: " + www.error); yield break; }
             string mapUrl = ModEntry.ParseJsonStringValue(www.text, "mapUrl");
-            if (string.IsNullOrEmpty(mapUrl)) { ModEntry.Log("FetchRoom: no mapUrl in: " + www.text); ModEntry.FetchingRoomMap = false; yield break; }
+            if (string.IsNullOrEmpty(mapUrl)) { ModEntry.Log("FetchRoom: no mapUrl in: " + www.text); yield break; }
             ModEntry.Log("Client: got mapUrl=" + mapUrl);
             PlayerPrefs.SetString("CNRMod_ActiveMapURL", mapUrl);
             PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
             PlayerPrefs.Save();
-            ModEntry.FetchingRoomMap = false;  // URL is now set; MapLoader's WaitAndSpawn will proceed
             StartCoroutine(DownloadMap(mapUrl));
         }
 
@@ -563,72 +522,21 @@ namespace CNRMods
         }
 
         // ── Photon prop helpers ───────────────────────────────────────────────
-        public void SetRoomProp(Type pnt, string key, string value)
+        private void SetRoomProp(Type pnt, string key, string value)
         {
             try
             {
                 PropertyInfo rp = pnt.GetProperty("room", BindingFlags.Static | BindingFlags.Public);
-                if (rp == null) { ModEntry.Log("SetRoomProp: no 'room' prop"); return; }
+                if (rp == null) return;
                 object room = rp.GetValue(null, null);
-                if (room == null) { ModEntry.Log("SetRoomProp: room is null"); return; }
-
-                // Get customProperties to determine the Photon.Hashtable concrete type.
-                PropertyInfo cp = room.GetType().GetProperty("customProperties",
-                    BindingFlags.Instance | BindingFlags.Public);
-                if (cp == null) { ModEntry.Log("SetRoomProp: no customProperties"); return; }
-                object rawHt = cp.GetValue(room, null);
-                if (rawHt == null) { ModEntry.Log("SetRoomProp: customProperties is null"); return; }
-
-                // CRITICAL: create a NEW empty Photon.Hashtable - do NOT pass existing one back.
-                // SetCustomProperties does MergeStringKeys(propertiesToSet) into customProperties.
-                // If they are the same object, that loops forever -> ANR.
-                Type htType = rawHt.GetType();
-                object newHt = Activator.CreateInstance(htType);
-                var newDict = newHt as System.Collections.IDictionary;
-                if (newDict == null) { ModEntry.Log("SetRoomProp: new Hashtable not IDictionary, type=" + htType.FullName); return; }
-                newDict[(object)key] = (object)value;
-
-                // Find Room.SetCustomProperties(Hashtable) - single param overload confirmed in decompile
-                MethodInfo setMethod = null;
-                foreach (var mi in room.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public))
-                {
-                    if (mi.Name != "SetCustomProperties") continue;
-                    if (mi.GetParameters().Length == 1) { setMethod = mi; break; }
-                }
-                if (setMethod == null) { ModEntry.Log("SetRoomProp: no SetCustomProperties(1 param) on " + room.GetType().Name); return; }
-                setMethod.Invoke(room, new object[] { newHt });
-                ModEntry.Log("SetRoomProp OK: " + key + "=" + value);
+                if (room == null) return;
+                var ht = new System.Collections.Hashtable();
+                ht[key] = value;
+                MethodInfo m = room.GetType().GetMethod("SetCustomProperties",
+                    new Type[] { typeof(System.Collections.Hashtable) });
+                if (m != null) m.Invoke(room, new object[] { ht });
             }
-            catch (Exception ex) { ModEntry.Log("SetRoomProp error: " + ex.Message + "\n" + ex.StackTrace); }
-        }
-
-        // Called by MapLoader on master side to broadcast the map URL so joining clients can poll it.
-        // Returns a coroutine so MapLoader can retry if room is not available yet.
-        public IEnumerator PublishMapUrlRetry(string url)
-        {
-            // Yield one frame so SetCustomProperties runs AFTER all OnLevelWasLoaded
-            // handlers complete — prevents a Photon send-queue flush from blocking
-            // the main thread during scene startup on WSA.
-            yield return null;
-            float elapsed = 0f;
-            while (elapsed < 10f)
-            {
-                Type pnt = GetPhotonNetType();
-                if (pnt != null)
-                {
-                    PropertyInfo rp = pnt.GetProperty("room", BindingFlags.Static | BindingFlags.Public);
-                    object room = rp != null ? rp.GetValue(null, null) : null;
-                    if (room != null)
-                    {
-                        ModEntry.Log("PublishMapUrl: room available after " + elapsed.ToString("F1") + "s, publishing");
-                        SetRoomProp(pnt, "CNR_MAP_URL", url);
-                        yield break;
-                    }
-                }
-                yield return new WaitForSeconds(0.5f);
-                elapsed += 0.5f;
-            }
-            ModEntry.Log("PublishMapUrl: room still null after 10s — giving up");
+            catch (Exception ex) { ModEntry.Log("SetRoomProp error: " + ex.Message); }
         }
 
         private void SetPlayerProp(Type pnt, string key, string value)
@@ -659,11 +567,8 @@ namespace CNRMods
                 PropertyInfo cp = room.GetType().GetProperty("customProperties",
                     BindingFlags.Instance | BindingFlags.Public);
                 if (cp == null) return null;
-                object raw = cp.GetValue(room, null);
-                if (raw == null) return null;
-                var ht = raw as System.Collections.IDictionary;
-                if (ht == null) return null;
-                return ht.Contains(key) ? ht[key] as string : null;
+                var ht = cp.GetValue(room, null) as System.Collections.Hashtable;
+                return (ht != null && ht.ContainsKey(key)) ? ht[key] as string : null;
             }
             catch { return null; }
         }
@@ -788,18 +693,6 @@ namespace CNRMods
             }
             catch { }
             return false;
-        }
-
-        // Public helper so MapLoader can check master status without duplicating reflection code.
-        public static bool IsPhotonMasterClient()
-        {
-            try
-            {
-                Type pnt = GetPhotonNetType();
-                if (pnt == null) return false;
-                return GetStaticBool(pnt, "isMasterClient");
-            }
-            catch { return false; }
         }
 
         private static object GetPhotonServerSettings()
@@ -1239,10 +1132,7 @@ namespace CNRMods
                         File.Copy(cachePath, stdCachePath, true);
                         PlayerPrefs.SetInt("CNRMod_MapCacheReady", 1);
                         PlayerPrefs.SetString("CNRMod_DonorScene", loadScene);
-                        // Keep ActiveMapURL set so MapLoader.OnLevelWasLoaded can publish it
-                        // to the Photon room prop for joining clients. WaitAndSpawn's immediate
-                        // cache-ready check fires before the 3s re-download path, so no redundant fetch.
-                        PlayerPrefs.SetString("CNRMod_ActiveMapURL", om.Url);
+                        PlayerPrefs.SetString("CNRMod_ActiveMapURL", "");
                         ModEntry.Log("Official map '" + om.Name + "': used pre-cached JSON (donor=" + loadScene + ")");
                     }
                     catch (Exception copyEx)
@@ -1420,30 +1310,6 @@ namespace CNRMods
     {
         private const string CachePath = "/storage/emulated/0/CNRMods/custom_map_cache.json";
 
-        // Called by RedirectHook.OnEnteredRoom (client path) to restart hold if Photon confirmed
-        // room entry AFTER OnLevelWasLoaded — i.e. MapLoader already bailed, but we still need to load.
-        public void EnsureHolding()
-        {
-            if (Array.IndexOf(BASE_SCENES, Application.loadedLevelName) < 0) return;
-            if (_holdingPlayer) return;  // already holding, nothing to do
-            _spawnRunning = false;       // allow WaitAndSpawn to start fresh
-            _holdingPlayer = true;
-            StartCoroutine(HoldAtLoadingPos());
-            ModEntry.Log("MapLoader: EnsureHolding — late OnEnteredRoom, restarting hold");
-            StartCoroutine(WaitAndSpawn());
-        }
-
-        // Called by RedirectHook.OnLeftRoom to cancel any in-progress hold/spawn.
-        public void AbortHold()
-        {
-            if (!_holdingPlayer && !_spawnRunning) return;
-            ModEntry.Log("MapLoader: aborting hold (left room)");
-            StopAllCoroutines();
-            _holdingPlayer = false;
-            _spawnRunning  = false;
-            if (_loadingRoom != null) { Destroy(_loadingRoom); _loadingRoom = null; }
-        }
-
         // Base scenes used for custom map slots
         private static readonly string[] BASE_SCENES = { "FreeRun3_1", "FreeRun5_1", "FreeRun8_1" };
 
@@ -1462,7 +1328,7 @@ namespace CNRMods
         private GameObject _mapRoot = null;
         private bool _spawnRunning = false;
         private bool _holdingPlayer = false;
-        private bool _clientFetchStarted = false;
+
         // Loading room — sealed collision cage far outside all donor maps.
         // Player is moved here before map geometry is built so they never see
         // the donor scene or the in-progress custom-map clone pass.
@@ -1488,10 +1354,14 @@ namespace CNRMods
         {
             GameObject player = GameObject.Find("ExampleCharacter");
             if (player == null) return;
-            CharacterController cc = player.GetComponent<CharacterController>();
+            var cc = player.GetComponent<CharacterController>();
             if (cc != null) cc.enabled = false;
             player.transform.position = pos;
-            if (cc != null) cc.enabled = true;
+            // NOTE: Do NOT re-enable CC here.  Calling cc.enabled = true at Y=4800
+            // (outside scene physics bounds) deadlocks PhysX — all UnityWorker threads
+            // block on the same physics job and UnityMain never processes the next frame.
+            // TeleportToSpawn (and RespawnWatcher.DoTeleport) re-enable CC at the normal
+            // in-scene spawn position once the map is built.
         }
 
         void OnLevelWasLoaded(int level)
@@ -1499,31 +1369,25 @@ namespace CNRMods
             if (Array.IndexOf(BASE_SCENES, Application.loadedLevelName) < 0) return;
             if (_mapRoot != null) { Destroy(_mapRoot); _mapRoot = null; }
             _spawnRunning = false;
-            _clientFetchStarted = false;
+            // Only hold the player if a custom map is actually pending.
+            // On vanilla map loads (no active URL), let the game run normally.
             string activeUrl  = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
             bool   cacheReady = PlayerPrefs.GetInt("CNRMod_MapCacheReady", 0) == 1 && File.Exists(CachePath);
-            if (string.IsNullOrEmpty(activeUrl) && !cacheReady && !ModEntry.FetchingRoomMap)
+            if (string.IsNullOrEmpty(activeUrl) && !cacheReady)
             {
-                if (string.IsNullOrEmpty(ModEntry.WebUrl))
-                {
-                    ModEntry.Log("MapLoader: vanilla map load, no custom map pending - skipping hold");
-                    return;
-                }
-                ModEntry.FetchingRoomMap = true;
-                ModEntry.Log("MapLoader: WebUrl configured - pre-holding for potential custom map join");
+                ModEntry.Log("MapLoader: vanilla map load, no custom map pending — skipping hold");
+                return;
             }
-            if (!string.IsNullOrEmpty(activeUrl))
-            {
-                var rh = GetComponent<RedirectHook>();
-                if (rh != null) StartCoroutine(rh.PublishMapUrlRetry(activeUrl));
-            }
+            // Start holding the player at the loading position immediately so they
+            // never see or interact with the donor scene while the map builds.
             _holdingPlayer = true;
             StartCoroutine(HoldAtLoadingPos());
             ModEntry.Log("MapLoader: entered base scene, waiting for map data...");
             StartCoroutine(WaitAndSpawn());
         }
 
-        private IEnumerator HoldAtLoadingPos()
+        // Teleports the player to LOADING_POS every frame until _holdingPlayer is cleared.
+        IEnumerator HoldAtLoadingPos()
         {
             Vector3 holdPos = new Vector3(LOADING_POS.x, LOADING_POS.y, LOADING_POS.z);
             while (_holdingPlayer)
@@ -1539,23 +1403,30 @@ namespace CNRMods
         {
             if (_spawnRunning) yield break;
             _spawnRunning = true;
+
+            // Immediate: cache already written from a previous room session
             if (PlayerPrefs.GetInt("CNRMod_MapCacheReady", 0) == 1 && File.Exists(CachePath))
             {
                 ModEntry.Log("MapLoader: cache ready immediately");
                 StartCoroutine(SpawnAfterDelay());
                 yield break;
             }
+
             float waited = 0f;
             while (waited < 30f)
             {
                 yield return new WaitForSeconds(0.5f);
                 waited += 0.5f;
+
                 if (PlayerPrefs.GetInt("CNRMod_MapCacheReady", 0) == 1 && File.Exists(CachePath))
                 {
                     ModEntry.Log("MapLoader: cache ready after " + waited.ToString("F1") + "s");
                     StartCoroutine(SpawnAfterDelay());
                     yield break;
                 }
+
+                // After 3s, if RedirectHook hasn’t kicked off a download yet,
+                // try downloading directly from the URL the map picker saved
                 if (waited >= 3f)
                 {
                     string url = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
@@ -1564,31 +1435,6 @@ namespace CNRMods
                         ModEntry.Log("MapLoader: 3s timeout, direct download from " + url);
                         StartCoroutine(DownloadAndSpawn(url));
                         yield break;
-                    }
-                    if (!ModEntry.FetchingRoomMap)
-                    {
-                        ModEntry.Log("MapLoader: room fetch completed with no custom map -- releasing hold");
-                        _holdingPlayer = false;
-                        _spawnRunning  = false;
-                        yield break;
-                    }
-                    if (!_clientFetchStarted)
-                    {
-                        _clientFetchStarted = true;
-                        var rh = GetComponent<RedirectHook>();
-                        if (rh != null)
-                        {
-                            ModEntry.Log("MapLoader: 3s -- proactively calling TriggerClientFetch");
-                            rh.TriggerClientFetch();
-                        }
-                        else
-                        {
-                            ModEntry.Log("MapLoader: no RedirectHook -- releasing hold");
-                            ModEntry.FetchingRoomMap = false;
-                            _holdingPlayer = false;
-                            _spawnRunning  = false;
-                            yield break;
-                        }
                     }
                 }
             }
@@ -1602,9 +1448,9 @@ namespace CNRMods
             url = ModEntry.SanitizeUrl(url);
             var www = new WWW(url);
             yield return www;
-            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("MapLoader download error: " + www.error); _spawnRunning = false; yield break; }
+            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("MapLoader download error: " + www.error); _holdingPlayer = false; _spawnRunning = false; yield break; }
             string json = www.text;
-            if (string.IsNullOrEmpty(json)) { ModEntry.Log("MapLoader: empty response"); _spawnRunning = false; yield break; }
+            if (string.IsNullOrEmpty(json)) { ModEntry.Log("MapLoader: empty response"); _holdingPlayer = false; _spawnRunning = false; yield break; }
             try
             {
                 File.WriteAllText(CachePath, json);
@@ -1612,83 +1458,102 @@ namespace CNRMods
                 PlayerPrefs.Save();
                 ModEntry.Log("MapLoader: cached (" + json.Length + " bytes)");
             }
-            catch (Exception ex) { ModEntry.Log("MapLoader cache error: " + ex.Message); _spawnRunning = false; yield break; }
+            catch (Exception ex) { ModEntry.Log("MapLoader cache error: " + ex.Message); _holdingPlayer = false; _spawnRunning = false; yield break; }
             StartCoroutine(SpawnAfterDelay());
         }
 
         IEnumerator SpawnAfterDelay()
         {
             yield return new WaitForSeconds(0.5f);
+
             ModEntry.Log("MapLoader: building map (player held at loading pos)");
+
             try
             {
-                string text = File.ReadAllText(CachePath);
-                ModEntry.Log("MapLoader: parsing " + text.Length + " bytes");
-                string text2 = text.Trim();
-                MapObjData[] array;
-                if (text2.StartsWith("{"))
+                string json = File.ReadAllText(CachePath);
+                ModEntry.Log("MapLoader: parsing " + json.Length + " bytes");
+                string trimmedJson = json.Trim();
+                MapObjData[] items;
+                if (trimmedJson.StartsWith("{"))
                 {
-                    string donor = ModEntry.ParseJsonStringValue(text2, "donor");
+                    // Wrapper format: {"donor":"FreeRun8_1","objects":[...]}
+                    string donor = ModEntry.ParseJsonStringValue(trimmedJson, "donor");
                     if (!string.IsNullOrEmpty(donor)) ModEntry.Log("MapLoader: donor=" + donor);
-                    int as2 = text2.IndexOf("\"objects\"");
-                    as2 = as2 >= 0 ? text2.IndexOf('[', as2) : -1;
-                    if (as2 < 0)
+                    int arrStart = trimmedJson.IndexOf("\"objects\"");
+                    arrStart = arrStart >= 0 ? trimmedJson.IndexOf('[', arrStart) : -1;
+                    if (arrStart < 0) { ModEntry.Log("MapLoader: no objects array in wrapper"); yield break; }
+                    int depth = 0, arrEnd = arrStart;
+                    for (int ci = arrStart; ci < trimmedJson.Length; ci++)
                     {
-                        ModEntry.Log("MapLoader: no objects array in wrapper");
-                        _holdingPlayer = false;
-                        _spawnRunning = false;
-                        yield break;
+                        if (trimmedJson[ci] == '[') depth++;
+                        else if (trimmedJson[ci] == ']') { depth--; if (depth == 0) { arrEnd = ci; break; } }
                     }
-                    int dep = 0, ae = as2;
-                    for (int ci = as2; ci < text2.Length; ci++)
-                    {
-                        if (text2[ci] == '[') dep++;
-                        else if (text2[ci] == ']') { dep--; if (dep == 0) { ae = ci; break; } }
-                    }
-                    array = JsonReader.Deserialize<MapObjData[]>(text2.Substring(as2, ae - as2 + 1));
+                    items = JsonReader.Deserialize<MapObjData[]>(trimmedJson.Substring(arrStart, arrEnd - arrStart + 1));
                 }
                 else
                 {
-                    array = JsonReader.Deserialize<MapObjData[]>(text2);
+                    items = JsonReader.Deserialize<MapObjData[]>(trimmedJson);
                 }
-                if (array == null || array.Length == 0)
+                if (items == null || items.Length == 0)
                 {
                     ModEntry.Log("MapLoader: JSON parse failed or empty");
-                    _holdingPlayer = false;
-                    _spawnRunning = false;
                     yield break;
                 }
 
-                var dictionary = new Dictionary<string, Material>(StringComparer.OrdinalIgnoreCase);
-                foreach (Renderer r in (Renderer[])FindObjectsOfType(typeof(Renderer)))
+                // Collect material cache (fallback for objects not found in donor)
+                var sceneMatCache = new Dictionary<string, Material>(StringComparer.OrdinalIgnoreCase);
+                foreach (Renderer sr in (Renderer[])FindObjectsOfType(typeof(Renderer)))
                 {
-                    if (r == null || r.sharedMaterial == null) continue;
-                    string mn = r.sharedMaterial.name;
+                    if (sr == null || sr.sharedMaterial == null) continue;
+                    string mn = sr.sharedMaterial.name;
                     if (string.IsNullOrEmpty(mn)) continue;
-                    int pi = mn.IndexOf(" (Instance)", StringComparison.OrdinalIgnoreCase);
-                    if (pi >= 0) mn = mn.Substring(0, pi);
+                    // Strip Unity's " (Instance)" suffix so keys match map builder texture names
+                    int parenIdx = mn.IndexOf(" (Instance)", StringComparison.OrdinalIgnoreCase);
+                    if (parenIdx >= 0) mn = mn.Substring(0, parenIdx);
                     mn = mn.Trim();
-                    if (!string.IsNullOrEmpty(mn) && !dictionary.ContainsKey(mn))
-                        dictionary[mn] = r.sharedMaterial;
+                    if (!string.IsNullOrEmpty(mn) && !sceneMatCache.ContainsKey(mn))
+                        sceneMatCache[mn] = sr.sharedMaterial;
                 }
-                ModEntry.Log("MapLoader: " + dictionary.Count + " scene materials: " + string.Join(", ", new List<string>(dictionary.Keys).ToArray()));
+                ModEntry.Log("MapLoader: " + sceneMatCache.Count + " scene materials: " + string.Join(", ", new List<string>(sceneMatCache.Keys).ToArray()));
 
+                // Create mapRoot NOW (before ClearBaseScene) so clones parented here are preserved
                 _mapRoot = new GameObject("[CustomMap]");
                 int spawned = 0;
                 var clonedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (MapObjData obj in array)
+                // Pass 1 — clone actual donor GameObjects while scene is still intact
+                foreach (MapObjData obj in items)
                 {
                     if (ShouldSkip(obj.path)) continue;
-                    if (obj.path.Contains("EscapePosition") || obj.path.Contains("EnemyPosition") || obj.path.Contains("PlayerPosition")) continue;
-                    if (!string.IsNullOrEmpty(obj.mesh) && obj.mesh.IndexOf("Combined", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    // Markers are tiny — handle them in pass 2 as primitives
+                    bool isMarker = obj.path.Contains("EscapePosition") ||
+                                    obj.path.Contains("EnemyPosition")  ||
+                                    obj.path.Contains("PlayerPosition");
+                    if (isMarker) continue;
 
+                    // Skip "Combined Mesh (root: scene)" objects in Pass 1.
+                    // Statically batched meshes have their geometry moved into a batch buffer;
+                    // Instantiate() produces a clone with no visible geometry.
+                    // Let them fall through to Pass 2 where CreatePrimitive gives a real mesh.
+                    if (!string.IsNullOrEmpty(obj.mesh) &&
+                        obj.mesh.IndexOf("Combined", StringComparison.OrdinalIgnoreCase) >= 0)
+                        continue;
+
+                    // GameObject.Find requires exact full hierarchy path.
+                    // Fall back to searching by leaf name alone so objects nested deeper
+                    // than expected (e.g. SnowGround/Terrain/Box021) are still found.
                     GameObject donor = GameObject.Find(obj.path);
                     if (donor == null)
                     {
-                        string leafName = obj.path.Contains("/") ? obj.path.Substring(obj.path.LastIndexOf('/') + 1) : obj.path;
-                        foreach (GameObject gox in (GameObject[])FindObjectsOfType(typeof(GameObject)))
-                            if (string.Equals(gox.name, leafName, StringComparison.OrdinalIgnoreCase)) { donor = gox; break; }
+                        string leafName = obj.path.Contains("/")
+                            ? obj.path.Substring(obj.path.LastIndexOf('/') + 1)
+                            : obj.path;
+                        GameObject[] all = (GameObject[])FindObjectsOfType(typeof(GameObject));
+                        foreach (GameObject go in all)
+                        {
+                            if (string.Equals(go.name, leafName, StringComparison.OrdinalIgnoreCase))
+                            { donor = go; break; }
+                        }
                     }
                     if (donor == null) { ModEntry.Log("MapLoader: not found in scene: " + obj.path); continue; }
                     try
@@ -1697,124 +1562,210 @@ namespace CNRMods
                         clone.name = obj.path.Replace("/", "_");
                         clone.transform.parent = _mapRoot.transform;
                         clone.SetActive(true);
-                        foreach (Renderer cr in clone.GetComponentsInChildren<Renderer>(true)) cr.enabled = true;
-                        foreach (Collider cc in clone.GetComponentsInChildren<Collider>(true)) UnityEngine.Object.Destroy(cc);
+                        // Ensure all renderers visible
+                        foreach (Renderer r in clone.GetComponentsInChildren<Renderer>(true))
+                            r.enabled = true;
+                        // Destroy ALL colliders — they either reference the static batch mesh
+                        // (MeshColliders) or have a pivot-relative center that becomes wrong
+                        // once we reposition the clone to the JSON bounding-box center.
+                        foreach (Collider c in clone.GetComponentsInChildren<Collider>(true))
+                            UnityEngine.Object.Destroy(c);
                         if (obj.pos != null && obj.pos.Length == 3)
                             clone.transform.position = new Vector3(obj.pos[0], obj.pos[1], obj.pos[2]);
                         if (obj.rot != null && obj.rot.Length >= 3)
                             clone.transform.rotation = Quaternion.Euler(obj.rot[0], obj.rot[1], obj.rot[2]);
-                        Material matOverride = null;
-                        if (!string.IsNullOrEmpty(obj.mat)) dictionary.TryGetValue(obj.mat, out matOverride);
-                        foreach (Renderer cr in clone.GetComponentsInChildren<Renderer>(true))
+
+                        // Apply JSON material / colour to every renderer on the clone.
+                        // This ensures the user-chosen texture is always visible even when the
+                        // donor material name doesn't match or the mesh was statically batched.
                         {
-                            if (matOverride != null) cr.material = matOverride;
-                            else if (obj.color != null && obj.color.Length >= 3)
-                                cr.material.color = new Color(obj.color[0]/255f, obj.color[1]/255f, obj.color[2]/255f, obj.color.Length>=4 ? obj.color[3]/255f : 1f);
+                            Material matOverride = null;
+                            if (!string.IsNullOrEmpty(obj.mat))
+                                sceneMatCache.TryGetValue(obj.mat, out matOverride);
+                            foreach (Renderer cr in clone.GetComponentsInChildren<Renderer>(true))
+                            {
+                                if (matOverride != null)
+                                    cr.material = matOverride;
+                                else if (obj.color != null && obj.color.Length >= 3)
+                                    cr.material.color = new Color(
+                                        obj.color[0] / 255f, obj.color[1] / 255f, obj.color[2] / 255f,
+                                        obj.color.Length >= 4 ? obj.color[3] / 255f : 1f);
+                            }
                         }
+
+                        // Try MeshCollider.convex for objects that are NOT part of Unity's
+                        // static batch (individually authored meshes, e.g. props/stairs).
+                        // Statically batched objects have sharedMesh == null or named "Combined Mesh…"
+                        // and will fall through to the 6-face hollow-shell below.
                         bool colliderAdded = false;
                         if (obj.collidable)
                         {
-                            foreach (MeshFilter mf in clone.GetComponentsInChildren<MeshFilter>(true))
+                        foreach (MeshFilter mf in clone.GetComponentsInChildren<MeshFilter>(true))
+                        {
+                            if (mf.sharedMesh == null || mf.sharedMesh.vertexCount < 4) continue;
+                            string mn = mf.sharedMesh.name ?? "";
+                            if (mn.IndexOf("Combined", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                            if (mf.sharedMesh.vertexCount > 8000) continue;
+                            try
                             {
-                                if (mf.sharedMesh == null || mf.sharedMesh.vertexCount < 4) continue;
-                                string sfn = mf.sharedMesh.name ?? "";
-                                if (sfn.IndexOf("Combined", StringComparison.OrdinalIgnoreCase) >= 0 || mf.sharedMesh.vertexCount > 8000) continue;
-                                try {
-                                    var mc = mf.gameObject.AddComponent<MeshCollider>();
-                                    mc.sharedMesh = mf.sharedMesh; mc.convex = true; colliderAdded = true;
-                                } catch (Exception mcEx) {
-                                    ModEntry.Log("MeshCollider failed for " + obj.path + ": " + mcEx.Message);
-                                    var bad = mf.gameObject.GetComponent<MeshCollider>();
-                                    if (bad != null) UnityEngine.Object.Destroy(bad);
-                                }
+                                var mc = mf.gameObject.AddComponent<MeshCollider>();
+                                mc.sharedMesh = mf.sharedMesh;
+                                mc.convex     = true;
+                                colliderAdded = true;
                             }
-                            if (!colliderAdded && obj.size != null && obj.size.Length == 3 && obj.pos != null && obj.pos.Length == 3)
+                            catch (Exception mcEx)
                             {
-                                float wx = obj.size[0], wy = obj.size[1], wz = obj.size[2];
-                                float cx = obj.pos[0],  cy = obj.pos[1],  cz = obj.pos[2];
-                                AddFaceSlab(_mapRoot, new Vector3(cx, cy+wy*0.5f, cz), new Vector3(wx, 0.15f, wz));
-                                AddFaceSlab(_mapRoot, new Vector3(cx, cy-wy*0.5f, cz), new Vector3(wx, 0.15f, wz));
-                                AddFaceSlab(_mapRoot, new Vector3(cx+wx*0.5f, cy, cz), new Vector3(0.15f, wy, wz));
-                                AddFaceSlab(_mapRoot, new Vector3(cx-wx*0.5f, cy, cz), new Vector3(0.15f, wy, wz));
-                                AddFaceSlab(_mapRoot, new Vector3(cx, cy, cz+wz*0.5f), new Vector3(wx, wy, 0.15f));
-                                AddFaceSlab(_mapRoot, new Vector3(cx, cy, cz-wz*0.5f), new Vector3(wx, wy, 0.15f));
+                                ModEntry.Log("MeshCollider failed for " + obj.path + ": " + mcEx.Message);
+                                var bad = mf.gameObject.GetComponent<MeshCollider>();
+                                if (bad != null) UnityEngine.Object.Destroy(bad);
                             }
                         }
+
+                        // 6-face hollow-shell fallback — thin BoxCollider slabs parented to
+                        // _mapRoot (always scale 1,1,1) so bc.size == world size exactly,
+                        // regardless of the clone's pivot offset or donor scale.
+                        if (!colliderAdded && obj.size != null && obj.size.Length == 3
+                                          && obj.pos  != null && obj.pos.Length  == 3)
+                        {
+                            float wx = obj.size[0], wy = obj.size[1], wz = obj.size[2];
+                            float cx = obj.pos[0],  cy = obj.pos[1],  cz = obj.pos[2];
+                            const float T = 0.15f;
+                            AddFaceSlab(_mapRoot, new Vector3(cx,           cy + wy*0.5f, cz          ), new Vector3(wx, T,  wz));
+                            AddFaceSlab(_mapRoot, new Vector3(cx,           cy - wy*0.5f, cz          ), new Vector3(wx, T,  wz));
+                            AddFaceSlab(_mapRoot, new Vector3(cx + wx*0.5f, cy,           cz          ), new Vector3(T,  wy, wz));
+                            AddFaceSlab(_mapRoot, new Vector3(cx - wx*0.5f, cy,           cz          ), new Vector3(T,  wy, wz));
+                            AddFaceSlab(_mapRoot, new Vector3(cx,           cy,           cz + wz*0.5f), new Vector3(wx, wy, T ));
+                            AddFaceSlab(_mapRoot, new Vector3(cx,           cy,           cz - wz*0.5f), new Vector3(wx, wy, T ));
+                        }
+                        } // end if (obj.collidable)
                         clonedPaths.Add(obj.path);
                         spawned++;
                     }
                     catch (Exception cloneEx) { ModEntry.Log("Clone failed: " + obj.path + " err: " + cloneEx.Message); }
                 }
                 ModEntry.Log("MapLoader: cloned " + clonedPaths.Count + " donor objects");
+
+                // Now hide original scene geometry (clones under [CustomMap] are safe)
                 ClearBaseScene();
-                foreach (MapObjData obj in array)
+
+                // Pass 2 — primitive fallback for anything not found in the donor
+                foreach (MapObjData obj in items)
                 {
-                    if (ShouldSkip(obj.path) || clonedPaths.Contains(obj.path)) continue;
+                    if (ShouldSkip(obj.path)) continue;
+                    if (clonedPaths.Contains(obj.path)) continue;  // already cloned
+
                     PrimitiveType ptype = MeshToPrimitive(obj.mesh);
-                    GameObject pgo = GameObject.CreatePrimitive(ptype);
-                    pgo.name = obj.path.Replace("/", "_");
-                    pgo.transform.parent = _mapRoot.transform;
+                    var go = GameObject.CreatePrimitive(ptype);
+                    go.name = obj.path.Replace("/", "_");
+                    go.transform.parent = _mapRoot.transform;
+
+                    // Bake per-face UVs BEFORE we set localScale, while the mesh is still unit-sized.
                     if (ptype == PrimitiveType.Cube && obj.size != null && obj.size.Length == 3)
                     {
-                        MeshFilter mfp = pgo.GetComponent<MeshFilter>();
-                        if (mfp != null) ApplyBoxUVs(mfp, Mathf.Max(0.01f,obj.size[0]), Mathf.Max(0.01f,obj.size[1]), Mathf.Max(0.01f,obj.size[2]));
+                        var mf = go.GetComponent<MeshFilter>();
+                        if (mf != null)
+                            ApplyBoxUVs(mf,
+                                Mathf.Max(0.01f, obj.size[0]),
+                                Mathf.Max(0.01f, obj.size[1]),
+                                Mathf.Max(0.01f, obj.size[2]));
                     }
-                    if (obj.pos  != null && obj.pos.Length  == 3) pgo.transform.position  = new Vector3(obj.pos[0], obj.pos[1], obj.pos[2]);
-                    if (obj.size != null && obj.size.Length == 3) pgo.transform.localScale = new Vector3(Mathf.Max(0.01f,obj.size[0]), Mathf.Max(0.01f,obj.size[1]), Mathf.Max(0.01f,obj.size[2]));
-                    if (obj.rot  != null && obj.rot.Length  >= 3) pgo.transform.rotation   = Quaternion.Euler(obj.rot[0], obj.rot[1], obj.rot[2]);
-                    Renderer ren = pgo.GetComponent<Renderer>();
-                    if (ren != null)
+
+                    if (obj.pos != null && obj.pos.Length == 3)
+                        go.transform.position = new Vector3(obj.pos[0], obj.pos[1], obj.pos[2]);
+                    if (obj.size != null && obj.size.Length == 3)
+                        go.transform.localScale = new Vector3(
+                            Mathf.Max(0.01f, obj.size[0]),
+                            Mathf.Max(0.01f, obj.size[1]),
+                            Mathf.Max(0.01f, obj.size[2]));
+                    if (obj.rot != null && obj.rot.Length >= 3)
+                        go.transform.rotation = Quaternion.Euler(obj.rot[0], obj.rot[1], obj.rot[2]);
+
+                    var renderer = go.GetComponent<Renderer>();
+                    if (renderer != null)
                     {
                         Material mat = null;
-                        if (!string.IsNullOrEmpty(obj.mat)) dictionary.TryGetValue(obj.mat, out mat);
-                        if (mat != null) { ren.material = mat; ren.material.mainTextureScale = Vector2.one; }
+                        if (!string.IsNullOrEmpty(obj.mat))
+                            sceneMatCache.TryGetValue(obj.mat, out mat);
+                        if (mat != null)
+                        {
+                            renderer.material = mat;
+                            // UVs are baked per-face by ApplyBoxUVs above, so reset any
+                            // tiling the source material might carry (creates a per-instance copy).
+                            renderer.material.mainTextureScale = Vector2.one;
+                        }
                         else if (obj.color != null && obj.color.Length >= 3)
-                            ren.material.color = new Color(obj.color[0]/255f, obj.color[1]/255f, obj.color[2]/255f, obj.color.Length>=4 ? obj.color[3]/255f : 1f);
+                            renderer.material.color = new Color(
+                                obj.color[0] / 255f, obj.color[1] / 255f, obj.color[2] / 255f,
+                                obj.color.Length >= 4 ? obj.color[3] / 255f : 1f);
                     }
-                    bool isMarker = obj.path.Contains("EscapePosition") || obj.path.Contains("EnemyPosition") || obj.path.Contains("PlayerPosition");
-                    if (isMarker) { if (ren != null) ren.enabled = false; var col = pgo.GetComponent<Collider>(); if (col != null) col.enabled = false; }
-                    else if (obj.isColBox) { if (ren != null) ren.enabled = false; }
-                    else if (!obj.collidable) { var col = pgo.GetComponent<Collider>(); if (col != null) col.enabled = false; }
+
+                    // Markers: invisible, no collision
+                    bool isMarker2 = obj.path.Contains("EscapePosition") ||
+                                     obj.path.Contains("EnemyPosition")  ||
+                                     obj.path.Contains("PlayerPosition");
+                    if (isMarker2)
+                    {
+                        if (renderer != null) renderer.enabled = false;
+                        var col = go.GetComponent<Collider>();
+                        if (col != null) col.enabled = false;
+                    }
+                    else if (obj.isColBox)
+                    {
+                        // Collision box: invisible but physically solid
+                        if (renderer != null) renderer.enabled = false;
+                        // BoxCollider from CreatePrimitive is already solid — leave it enabled
+                    }
+                    else if (!obj.collidable)
+                    {
+                        var col = go.GetComponent<Collider>();
+                        if (col != null) col.enabled = false;
+                    }
                     spawned++;
                 }
+
                 ModEntry.Log("MapLoader: spawned " + spawned + " (" + clonedPaths.Count + " cloned, " + (spawned - clonedPaths.Count) + " primitives)");
 
+                // ── Step 4: collect spawn positions and hand off to RespawnWatcher ──
                 Vector3? escSpawn = null, enmSpawn = null;
-                foreach (MapObjData obj in array)
+                foreach (MapObjData obj in items)
                 {
                     if (obj.path == null || obj.pos == null || obj.pos.Length < 3) continue;
-                    Vector3 p = new Vector3(obj.pos[0], obj.pos[1]+1f, obj.pos[2]);
+                    Vector3 p = new Vector3(obj.pos[0], obj.pos[1] + 1f, obj.pos[2]);
                     if (escSpawn == null && obj.path.Contains("EscapePosition")) escSpawn = p;
                     if (enmSpawn == null && obj.path.Contains("EnemyPosition"))  enmSpawn = p;
                 }
-                float cx2 = 0, cz2 = 0; int cn = 0; float floorY = float.MaxValue;
-                foreach (MapObjData obj in array)
+
+                // Compute centroid for facing direction
+                float _cx = 0, _cz = 0; int _cn = 0; float _floorY = float.MaxValue;
+                foreach (MapObjData _o in items)
                 {
-                    if (obj.pos == null || obj.pos.Length < 3 || ShouldSkip(obj.path)) continue;
-                    if (obj.path != null && obj.path.Contains("Position")) continue;
-                    cx2 += obj.pos[0]; cz2 += obj.pos[2]; cn++;
-                    float halfH = (obj.size != null && obj.size.Length >= 2) ? Mathf.Abs(obj.size[1])*0.5f : 0.5f;
-                    float topY = obj.pos[1] + halfH;
-                    if (topY < floorY) floorY = topY;
+                    if (_o.pos == null || _o.pos.Length < 3) continue;
+                    if (ShouldSkip(_o.path)) continue;
+                    if (_o.path != null && _o.path.Contains("Position")) continue;
+                    _cx += _o.pos[0]; _cz += _o.pos[2]; _cn++;
+                    float _halfH = (_o.size != null && _o.size.Length >= 2) ? Mathf.Abs(_o.size[1]) * 0.5f : 0.5f;
+                    float _top = _o.pos[1] + _halfH;
+                    if (_top < _floorY) _floorY = _top;
                 }
-                float spawnY = (floorY < float.MaxValue ? floorY : 0f) + 1.8f;
-                Vector3 centroid = cn > 0 ? new Vector3(cx2/cn, spawnY, cz2/cn) : Vector3.zero;
+                float _spawnY = (_floorY < float.MaxValue ? _floorY : 0f) + 1.8f;
+                Vector3 watcherCentroid = _cn > 0 ? new Vector3(_cx / _cn, _spawnY, _cz / _cn) : Vector3.zero;
+
+                // Attach watcher to _mapRoot so it dies if the map is reloaded
                 var watcher = _mapRoot.AddComponent<RespawnWatcher>();
                 if (escSpawn.HasValue) { watcher.EscapeSpawn = escSpawn.Value; watcher.HasEscape = true; }
                 if (enmSpawn.HasValue) { watcher.EnemySpawn  = enmSpawn.Value;  watcher.HasEnemy  = true; }
-                watcher.MapCentroid = centroid;
+                watcher.MapCentroid = watcherCentroid;
 
+                // ── Step 5: release hold and teleport to spawn ───────────────
                 _holdingPlayer = false;
-                TeleportToSpawn(array);
+                TeleportToSpawn(items);
             }
-            catch (Exception ex)
-            {
-                ModEntry.Log("MapLoader error: " + ex.Message);
-                _holdingPlayer = false;
-            }
+            catch (Exception ex) { ModEntry.Log("MapLoader error: " + ex.Message); _holdingPlayer = false; }
         }
 
-
+        // Move all in-scene EscapePosition / EnemyPosition / SpawnPoint GameObjects
+        // to the positions defined in the custom-map JSON, so the game's built-in
+        // after-death respawn system uses the correct locations.
         private static void UpdateRespawnPoints(MapObjData[] items)
         {
             try
@@ -1837,7 +1788,8 @@ namespace CNRMods
                 }
 
                 int escIdx = 0, enmIdx = 0;
-                foreach (GameObject go in (GameObject[])UnityEngine.Object.FindObjectsOfType(typeof(GameObject)))
+                GameObject[] all = (GameObject[])UnityEngine.Object.FindObjectsOfType(typeof(GameObject));
+                foreach (GameObject go in all)
                 {
                     if (go == null) continue;
                     string name = go.name ?? "";
@@ -1854,22 +1806,28 @@ namespace CNRMods
                     else if ((name.Contains("SpawnPoint") || name.Contains("Spawn_Point"))
                              && (escapePositions.Count > 0 || enemyPositions.Count > 0))
                     {
+                        // Generic spawn point — assign escape or enemy pool round-robin
                         var pool = escapePositions.Count > 0 ? escapePositions : enemyPositions;
                         int idx  = escIdx + enmIdx;
                         go.transform.position = pool[idx % pool.Count];
                         escIdx++;
                     }
                 }
-                ModEntry.Log("UpdateRespawnPoints: escape=" + escapePositions.Count + " enemy=" + enemyPositions.Count);
+                ModEntry.Log("UpdateRespawnPoints: escape=" + escapePositions.Count + " enemy=" + enemyPositions.Count
+                             + " moved esc=" + escIdx + " enmIdx=" + enmIdx);
             }
             catch (Exception ex) { ModEntry.Log("UpdateRespawnPoints error: " + ex.Message); }
         }
 
+        // Teleport the local player to the most appropriate spawn in the map data.
+        // Prefers team-specific markers (EscapePosition for master, EnemyPosition for others).
+        // Falls back to any PlayerPosition marker, then to geometry centroid.
         private static void TeleportToSpawn(MapObjData[] items)
         {
             try
             {
-                string prefer   = ModEntry.IsMaster ? "EscapePosition" : "EnemyPosition";
+                // Collect all spawn candidates for this player's team
+                string prefer  = ModEntry.IsMaster ? "EscapePosition" : "EnemyPosition";
                 string fallback = "PlayerPosition";
 
                 Vector3? teamSpawn    = null;
@@ -1883,6 +1841,7 @@ namespace CNRMods
                     if (genericSpawn == null && obj.path.Contains(fallback)) genericSpawn = p;
                 }
 
+                // Compute geometry centroid as last-resort fallback
                 float sx = 0, sz = 0; int cnt = 0;
                 float floorY = float.MaxValue;
                 foreach (MapObjData obj in items)
@@ -1905,50 +1864,63 @@ namespace CNRMods
 
                 GameObject player = GameObject.Find("ExampleCharacter");
                 if (player == null) { ModEntry.Log("TeleportToSpawn: ExampleCharacter not found"); return; }
-                CharacterController component = player.GetComponent<CharacterController>();
-                if (component != null) component.enabled = false;
+                var cc = player.GetComponent<CharacterController>();
+                if (cc != null) cc.enabled = false;
                 player.transform.position = pos;
+                // Face toward the map's geometry centre so the view matches the editor's camera.
                 Vector3 lookDir = new Vector3(centroid.x - pos.x, 0f, centroid.z - pos.z);
                 if (lookDir.sqrMagnitude > 1f)
                     player.transform.rotation = Quaternion.LookRotation(lookDir.normalized, Vector3.up);
-                if (component != null) component.enabled = true;
+                if (cc != null) cc.enabled = true;
             }
             catch (Exception ex) { ModEntry.Log("TeleportToSpawn error: " + ex.Message); }
         }
 
+        // Disable all renderers + colliders on base scene geometry, leaving
+        // cameras, lights, directors, audio, players, and UI intact.
         private static void ClearBaseScene()
         {
-            string[] keywords = new string[45]
+            // Name fragments that identify non-geometry roots to preserve
+            string[] preserve = new string[]
             {
-                "Camera", "camera", "Light", "light", "Sun", "Sky", "Fog", "Director", "Manager", "Controller",
-                "Audio", "Sound", "Player", "Character", "Spawn", "SpawnPoint", "Canvas", "EventSystem", "UI", "UIRoot",
-                "NGUI", "_UIDrawCall", "UIPanel", "UICamera", "UISprite", "UILabel", "Photon", "CNRMod", "[CustomMap]", "ExampleCharacter",
-                "IsDied", "IsPause", "InGameMenu", "VCAnalog", "Joystick", "HUD", "Hud", "MainScene", "KamcordPrefab", "CNRSettings",
-                "Environment", "Ambient", "Render", "Skybox", "Directional"
+                "Camera", "camera", "Light", "light", "Sun", "Sky", "Fog",
+                "Director", "Manager", "Controller", "Audio", "Sound",
+                "Player", "Character", "Spawn", "SpawnPoint",
+                "Canvas", "EventSystem", "UI", "UIRoot", "NGUI",
+                "_UIDrawCall", "UIPanel", "UICamera", "UISprite", "UILabel",
+                "Photon", "CNRMod", "[CustomMap]",
+                "ExampleCharacter", "IsDied", "IsPause",
+                // In-game HUD, controls, settings, skybox — must not lose colliders
+                "InGameMenu", "VCAnalog", "Joystick", "HUD", "Hud",
+                "MainScene", "KamcordPrefab", "CNRSettings",
+                // Environment / lighting roots
+                "Environment", "Ambient", "Render", "Skybox", "Directional",
             };
-            int num = 0;
-            StringBuilder stringBuilder = new StringBuilder();
-            StringBuilder stringBuilder2 = new StringBuilder();
-            GameObject[] array = (GameObject[])UnityEngine.Object.FindObjectsOfType(typeof(GameObject));
-            foreach (GameObject val in array)
+
+            int cleared = 0;
+            System.Text.StringBuilder clearedNames = new System.Text.StringBuilder();
+            System.Text.StringBuilder preservedNames = new System.Text.StringBuilder();
+            GameObject[] roots = (GameObject[])GameObject.FindObjectsOfType(typeof(GameObject));
+            foreach (GameObject go in roots)
             {
-                if (val.transform.parent != null) continue;
-                if (ShouldPreserveRoot(val.name, keywords))
+                if (go.transform.parent != null) continue;  // only root objects
+                if (ShouldPreserveRoot(go.name, preserve))
                 {
-                    if (stringBuilder2.Length < 300)
-                        stringBuilder2.Append(val.name).Append("|");
+                    if (preservedNames.Length < 300) preservedNames.Append(go.name).Append("|");
                     continue;
                 }
-                if (stringBuilder.Length < 300)
-                    stringBuilder.Append(val.name).Append("|");
-                foreach (Renderer val2 in val.GetComponentsInChildren<Renderer>(true))
-                    val2.enabled = false;
-                foreach (Collider val3 in val.GetComponentsInChildren<Collider>(true))
-                    val3.enabled = false;
-                num++;
+
+                if (clearedNames.Length < 300) clearedNames.Append(go.name).Append("|");
+                // Disable Renderers and Colliders. NGUI button colliders are safe
+                // because UIRoot/_UIDrawCall/UIPanel etc. are all in the preserve list.
+                foreach (Renderer r in go.GetComponentsInChildren<Renderer>(true))
+                    r.enabled = false;
+                foreach (Collider c in go.GetComponentsInChildren<Collider>(true))
+                    c.enabled = false;
+                cleared++;
             }
-            ModEntry.Log("ClearBaseScene: cleared " + num + " | CLEARED: " + stringBuilder);
-            ModEntry.Log("ClearBaseScene: PRESERVED: " + stringBuilder2);
+            ModEntry.Log("ClearBaseScene: cleared " + cleared + " | CLEARED: " + clearedNames);
+            ModEntry.Log("ClearBaseScene: PRESERVED: " + preservedNames);
         }
 
         private static bool ShouldPreserveRoot(string name, string[] keywords)
@@ -1959,16 +1931,19 @@ namespace CNRMods
             return false;
         }
 
+        // Creates a thin BoxCollider slab as a child of 'parent', positioned at an
+        // exact world-space centre with world-space extents.  Because the child starts
+        // with scale (1,1,1), local units == world units and the math is trivial.
         private static void AddFaceSlab(GameObject parent, Vector3 worldCenter, Vector3 worldSize)
         {
             GameObject slab = new GameObject("_col");
-            slab.transform.parent        = parent.transform;
-            slab.transform.position      = worldCenter;
+            slab.transform.parent   = parent.transform;
+            slab.transform.position = worldCenter;           // Unity auto-converts to localPosition
             slab.transform.localRotation = Quaternion.identity;
             slab.transform.localScale    = Vector3.one;
             BoxCollider bc = slab.AddComponent<BoxCollider>();
             bc.center = Vector3.zero;
-            bc.size   = worldSize;
+            bc.size   = worldSize;  // scale is (1,1,1) so local == world
         }
 
         private static bool ShouldSkip(string path)
@@ -2007,13 +1982,13 @@ namespace CNRMods
             {
                 GameObject player = GameObject.Find("ExampleCharacter");
                 if (player == null) return;
-                CharacterController component = player.GetComponent<CharacterController>();
-                if (component != null) component.enabled = false;
+                var cc = player.GetComponent<CharacterController>();
+                if (cc != null) cc.enabled = false;
                 player.transform.position = pos;
                 Vector3 lookDir = new Vector3(MapCentroid.x - pos.x, 0f, MapCentroid.z - pos.z);
                 if (lookDir.sqrMagnitude > 1f)
                     player.transform.rotation = Quaternion.LookRotation(lookDir.normalized, Vector3.up);
-                if (component != null) component.enabled = true;
+                if (cc != null) cc.enabled = true;
             }
 
             private void Update()
@@ -2599,8 +2574,6 @@ namespace CNRMods
         public static bool          SettingsModPresent     = false;
         /// <summary>Registered by CNRSettingsMod; called when Account/Settings button is tapped.</summary>
         public static System.Action OnAccountButtonClicked = null;
-        /// <summary>Set by DoClaim/DoSetPin so CNRSettingsMod can display the result in its own UI.</summary>
-        public static string        ClaimResultMsg         = null;
 
         private const string PREF_PLAYER_ID      = "CNRMod_EcoPlayerId";
         private const string PREF_TOKEN          = "CNRMod_EcoToken";
@@ -2839,27 +2812,6 @@ namespace CNRMods
             "BodyArmor_1", "HeadArmor_1", "HeadNBodyArmor_1"
         };
 
-        // Compute a compact snapshot string of all tracked progression keys for change detection.
-        private string ComputeProgSnapshot()
-        {
-            var sb = new System.Text.StringBuilder();
-            sb.Append(PlayerPrefs.GetInt("CharacterLevel", 1)).Append(',');
-            sb.Append(PlayerPrefs.GetInt("CharacterExp", 0)).Append(',');
-            foreach (var wk in _upgradeWeapons)
-                sb.Append(PlayerPrefs.GetInt(wk, 1)).Append(',');
-            foreach (var wk in _unlockWeapons)
-                sb.Append(PlayerPrefs.GetInt(wk, 0)).Append(',');
-            for (int i = 1; i <= 33; i++)
-                sb.Append(PlayerPrefs.GetInt("Skin_" + i, 0)).Append(',');
-            foreach (var ak in _armorKeys)
-                sb.Append(PlayerPrefs.GetInt(ak, 0)).Append(',');
-            for (int i = 1; i <= 8; i++)
-                sb.Append(PlayerPrefs.GetString("CurWeaponEquiped_" + i, "")).Append(',');
-            sb.Append(PlayerPrefs.GetString("CurSettedSkinName", "")).Append(',');
-            sb.Append(PlayerPrefs.GetString("CurSettedArmorName", ""));
-            return sb.ToString();
-        }
-
         // POST local progression to sync.php; apply server's authoritative merged state.
         private IEnumerator SyncProgression()
         {
@@ -2973,17 +2925,23 @@ namespace CNRMods
             for (int i = 1; i <= 8; i++)
             {
                 string sv = ModEntry.ParseJsonValue(json, "eq_" + i);
-                if (sv != null) PlayerPrefs.SetString("CurWeaponEquiped_" + i, sv);
+                // Only write non-empty values — empty means "no weapon" which the game
+                // handles via missing/absent prefs, not an empty-string pref value.
+                if (!string.IsNullOrEmpty(sv)) PlayerPrefs.SetString("CurWeaponEquiped_" + i, sv);
             }
             string cSkin = ModEntry.ParseJsonStringValue(json, "current_skin");
             if (!string.IsNullOrEmpty(cSkin)) PlayerPrefs.SetString("CurSettedSkinName", cSkin);
             string cArmor = ModEntry.ParseJsonStringValue(json, "current_armor");
-            if (!string.IsNullOrEmpty(cArmor)) PlayerPrefs.SetString("CurSettedArmorName", cArmor);
-
-            // Sanitize: if CurSettedArmorName is explicitly "" (written by a prior buggy sync),
-            // delete it so the game's own default "BodyArmor_1" is used by GetString().
-            if (string.IsNullOrEmpty(PlayerPrefs.GetString("CurSettedArmorName", "")))
-                PlayerPrefs.DeleteKey("CurSettedArmorName");
+            if (cArmor != null)
+            {
+                // GrowthManger.GetArmorItemInfoByName("") throws KeyNotFoundException in
+                // CNRMultiplayerManager.Awake(), breaking the loadout screen.  The original
+                // game uses DeleteKey when armor is empty — mirror that behaviour.
+                if (string.IsNullOrEmpty(cArmor))
+                    PlayerPrefs.DeleteKey("CurSettedArmorName");
+                else
+                    PlayerPrefs.SetString("CurSettedArmorName", cArmor);
+            }
 
             PlayerPrefs.Save();
             ModEntry.Log("SyncProgression applied from server.");
@@ -3003,10 +2961,6 @@ namespace CNRMods
         private string _connectError    = "";   // last connection error to show in UI
         private float _inboxTimer = 0f;
         private const float InboxInterval = 60f;
-        private string _progSnapshot     = null;   // last seen progression snapshot
-        private bool   _progDirty        = false;  // progression changed since last sync
-        private float  _progSyncDebounce = 0f;     // countdown after last change before uploading
-        private const float ProgSyncDelay = 10f;   // seconds of quiet before auto-sync fires
 
         // ── Main-menu IMGUI overlay ───────────────────────────────────────────
         private const float ECO_REF_W   = 600f;
@@ -6372,34 +6326,6 @@ namespace CNRMods
 
             if (_queue.Count > 0 && !_sending)
                 StartCoroutine(FlushQueue());
-
-            // ── Progression change detection ──────────────────────────────────
-            if (ServerUp)
-            {
-                string snap = ComputeProgSnapshot();
-                if (_progSnapshot == null)
-                {
-                    _progSnapshot = snap;  // baseline on first poll
-                }
-                else if (snap != _progSnapshot)
-                {
-                    _progSnapshot     = snap;
-                    _progDirty        = true;
-                    _progSyncDebounce = ProgSyncDelay;
-                    ModEntry.Log("EcoHook: progression changed, sync in " + ProgSyncDelay + "s");
-                }
-
-                if (_progDirty)
-                {
-                    _progSyncDebounce -= WatchInterval;  // subtract one poll interval per tick
-                    if (_progSyncDebounce <= 0f)
-                    {
-                        _progDirty = false;
-                        StartCoroutine(SyncProgression());
-                        ModEntry.Log("EcoHook: auto-sync progression triggered");
-                    }
-                }
-            }
         }
 
         // ── Queue flush ───────────────────────────────────────────────────────
@@ -6516,7 +6442,6 @@ namespace CNRMods
             if (!string.IsNullOrEmpty(www.error))
             {
                 _ecoAccountMsg = "Network error. Try again.";
-                ClaimResultMsg = _ecoAccountMsg;
                 ModEntry.Log("Claim error: " + www.error);
                 yield break;
             }
@@ -6533,7 +6458,6 @@ namespace CNRMods
                     _ecoAccountMsg = "This device is already linked to an account. Use register to re-login.";
                 else
                     _ecoAccountMsg = "Transfer failed: " + errCode;
-                ClaimResultMsg = _ecoAccountMsg;
                 yield break;
             }
             string newToken = ModEntry.ParseJsonStringValue(www.text, "token");
@@ -6553,12 +6477,10 @@ namespace CNRMods
                 ApplyProgression(www.text);
                 Ready = true;
                 _ecoAccountMsg = "Account linked! Welcome back.";
-                ClaimResultMsg = _ecoAccountMsg;
             }
             else
             {
                 _ecoAccountMsg = "Transfer failed. Try again.";
-                ClaimResultMsg = _ecoAccountMsg;
             }
         }
 
@@ -7548,5 +7470,4 @@ namespace CNRMods
                 hook.ShowMpMissingDialog(cnrOk, stgOk, mgrOk);
         }
     }
-
 }

@@ -5,12 +5,117 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.11",
-      "minVersion": "2.0.11",
+      "latestVersion": "2.0.35",
+      "minVersion": "2.0.16",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.35",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.35.dll",
+          "changelog": "Fixed gun selection reverting in profile screen. ApplyProgression was overwriting CurWeaponEquiped_1..8, CurSettedSkinName, and CurSettedArmorName from the server on every sync (~15s), undoing any changes the player made. Local PlayerPrefs are now authoritative for equipped loadout; the server still receives and stores them as backup but never pushes them back down."
+        },
+        {
+          "version": "2.0.34",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.34.dll",
+          "changelog": "Fixed gun/armor selection broken in profile screen. ApplyProgression was writing CurSettedArmorName='' when server returned empty current_armor, causing GrowthManger.GetArmorItemInfoByName('') KeyNotFoundException in CNRMultiplayerManager.Awake() on every scene load — crashing the loadout manager. Empty armor now calls DeleteKey (matching original game behaviour). Also fixed: sync no longer overwrites CurWeaponEquiped_N slots with empty strings from server."
+        },
+        {
+          "version": "2.0.33",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.33.dll",
+          "changelog": "Fixed WSA ANR freeze root cause: removed CharacterController.enabled=false from HoldAtLoadingPos. On WSA x86_64, disabling a CC triggers a synchronous physics broad-phase rebuild that stalls the main thread >5s. Setting transform.position directly works on old Unity without disabling CC, and during team-select the game's own cc.Move() is not running so nothing fights the hold."
+        },
+        {
+          "version": "2.0.32",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.32.dll",
+          "changelog": "Added verbose checkpoint logging throughout SpawnAfterDelay to pinpoint ANR freeze location: SpawnAfterDelay:enter, post-wait, starting bg thread, bg thread done, scanning renderers, renderers scanned, scanning GOs, GOs scanned."
+        },
+        {
+          "version": "2.0.31",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.31.dll",
+          "changelog": "Fixed ANR root cause: HoldAtLoadingPos was calling TeleportPlayer every frame which did GameObject.Find('ExampleCharacter') O(n) scan + CharacterController.enabled=false/true toggle on every single frame. In a physics-heavy scene like FreeRun5_1, re-adding the CharacterController to the physics engine 60x/sec blocked the main thread >5s triggering ANR. Fix: cache the player GO once, disable CC once at hold start, set transform.position each frame (cheap), re-enable CC when hold is released."
+        },
+        {
+          "version": "2.0.30",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.30.dll",
+          "changelog": "Fixed 3 bugs: (1) WSA ANR freeze: SpawnAfterDelay now reads the map JSON file and runs JsonReader.Deserialize on a background thread, releasing the main thread between yields so Android's 5s ANR watchdog is never triggered. (2) Vanilla map host pre-hold: OnLevelWasLoaded was pre-holding even for vanilla room hosts because WebUrl is set; now checks isMasterClient first — only joining clients get the pre-hold. (3) Map URL 'none' in web console: was a cascade of #1 (freeze blocked OnEnteredRoom from firing), PostRoomToServer now gets a chance to complete."
+        },
+        {
+          "version": "2.0.29",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.29.dll",
+          "changelog": "Fixed ANR on WSA host: SpawnAfterDelay had long synchronous stretches blocking the main thread for >5s when team-select appeared. Added yield return null after sceneMatCache scan, after goByName scan, every 10 roots in ClearBaseScene (now inline loop), and every 20 items in Pass 2."
+        },
+        {
+          "version": "2.0.28",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.28.dll",
+          "changelog": "Fixed: map build blocking main thread on WSA (ANR when window loses focus). Pass 1 was calling FindObjectsOfType per item on fallback O(n*scene). Now pre-builds a name->GO dict once before the loop. Also split SpawnAfterDelay outer try/catch into a plain block so yield return null every 20 items is valid C#, giving the main thread regular breathing room."
+        },
+        {
+          "version": "2.0.27",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.27.dll",
+          "changelog": "Fixed ANR crash on master host: SetRoomProp was passing room.customProperties back to Room.SetCustomProperties, which internally calls MergeStringKeys(propertiesToSet) into customProperties — same object — causing an infinite loop and ANR. Fix: create a fresh Photon.Hashtable via Activator.CreateInstance(rawHt.GetType()) containing only CNR_MAP_URL, pass that to SetCustomProperties."
+        },
+        {
+          "version": "2.0.26",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.26.dll",
+          "changelog": "Fixed: master never published map URL to Photon room prop for joining clients. When using an official map with pre-cached JSON, CustomMapsHook was setting CNRMod_ActiveMapURL='' — so MapLoader.OnLevelWasLoaded saw an empty URL and skipped PublishMapUrlRetry. Fix: keep CNRMod_ActiveMapURL=om.Url even when cache is ready; WaitAndSpawn's immediate cache-ready check fires before the 3s re-download path so no redundant download occurs."
+        },
+        {
+          "version": "2.0.25",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.25.dll",
+          "changelog": "Fixed SetRoomProp: instead of Activator.CreateInstance(photonHashtableType) (which may fail), now reads the room's existing customProperties Photon.Hashtable, modifies it in-place via IDictionary (confirmed working), then passes that same object to Room.SetCustomProperties. Room code does StripToStringKeys() internally so our string key CNR_MAP_URL survives. Also logs all existing room prop keys for diagnostics."
+        },
+        {
+          "version": "2.0.24",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.24.dll",
+          "changelog": "Fixed SetRoomProp write: htType.GetProperty(Item).SetValue(...) was silently failing. Switched to IDictionary indexer (same pattern confirmed working on read side). Added PublishMapUrlRetry coroutine with 10s retry loop so room prop is published even if PhotonNetwork.room is null at the moment OnLevelWasLoaded fires."
+        },
+        {
+          "version": "2.0.23",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.23.dll",
+          "changelog": "Fixed custom map loading for joining clients. Three root bugs: (1) SetRoomProp silently did nothing — GetMethod with typeof(System.Collections.Hashtable) returns null because Photon uses ExitGames.Client.Photon.Hashtable; fixed by reflecting the actual parameter type dynamically. (2) Master never called SetRoomProp — OnEnteredRoom never fires due to inRoom polling issue; fixed by calling PublishMapUrl from MapLoader.OnLevelWasLoaded when activeUrl is set. (3) TriggerClientFetch was one-shot at 3s — now polls the room prop every 0.5s for up to 25s, then falls back to HTTP."
+        },
+        {
+          "version": "2.0.22",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.22.dll",
+          "changelog": "Diagnostic: added detailed logging to GetRoomPropStr to trace exactly why CNR_MAP_URL room prop is not being read (null room, null props, wrong type, empty dict, key missing)."
+        },
+        {
+          "version": "2.0.21",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.21.dll",
+          "changelog": "Fixed: TriggerClientFetch room prop read always returned null. Photon's Room.customProperties is ExitGames.Client.Photon.Hashtable, not System.Collections.Hashtable — the as-cast silently failed. Fixed by casting to IDictionary instead, which both types implement."
+        },
+        {
+          "version": "2.0.20",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.20.dll",
+          "changelog": "Fixed: joining clients fail to load custom map on devices with Android cleartext HTTP restrictions (WSA, newer Android). TriggerClientFetch now reads the CNR_MAP_URL Photon room property (set by the master at room creation) as its primary path — no HTTP required. Falls back to node-server HTTP fetch only if the room prop is absent."
+        },
+        {
+          "version": "2.0.16",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.16.dll",
+          "changelog": "Fixed: joining clients load donor map instead of custom map. FetchAndCacheMap (HTTP GET to node server) completed after MapLoader.OnLevelWasLoaded already bailed out. Fix: RedirectHook sets ModEntry.FetchingRoomMap=true before starting the fetch; MapLoader skips the vanilla bail-out while fetch is in flight; WaitAndSpawn exits early once fetch completes with no map (vanilla room)."
+        },
+        {
+          "version": "2.0.15",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.15.dll",
+          "changelog": "Fixed: room creation still crashed after 2.0.14. CurSettedArmorName was already stored as empty string in PlayerPrefs from a prior 2.0.13 run; GetString() returned the stored empty value instead of the game default 'BodyArmor_1'. Now deletes the key if empty so the game default is used."
+        },
+        {
+          "version": "2.0.14",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.14.dll",
+          "changelog": "Fixed: room creation crash. ApplyProgression was writing empty string to CurSettedArmorName when server returned no armor; GrowthManger.GetCurSettedArmorInfo() threw KeyNotFoundException in CNRMultiplayerManager.Awake() causing immediate room exit. Now skips writing CurSettedArmorName if server value is empty."
+        },
+        {
+          "version": "2.0.13",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.13.dll",
+          "changelog": "Added automatic mid-session progression sync: EconomyHook now snapshots all progression keys (level, XP, weapon levels/unlocks, skins, armor, equipped slots) every 0.5s and triggers SyncProgression() after a 10s debounce whenever any key changes."
+        },
+        {
+          "version": "2.0.12",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.12.dll",
+          "changelog": "Fixed: 'Linking device...' message never updated after DoClaim completed. DoClaim now writes its result to a public static ClaimResultMsg bridge field on EconomyHook; CNRSettingsMod polls and displays it in the Account tab."
+        },
         {
           "version": "2.0.11",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.11.dll",
@@ -77,12 +182,17 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.2",
-      "minVersion": "2.0.2",
+      "latestVersion": "2.0.3",
+      "minVersion": "2.0.3",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "2.0.3",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.3.dll",
+          "changelog": "Fixed: Link Device result never appeared in the Account tab. The result was being written to EconomyHook._ecoAccountMsg (CNRMod-internal) and never reaching CNRSettingsMod's display. Now polls EconomyHook.ClaimResultMsg via reflection and copies it to the Account tab message field."
+        },
         {
           "version": "2.0.2",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.2.dll",

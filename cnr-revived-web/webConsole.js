@@ -29,6 +29,7 @@ const logBuffer    = [];
 const sseClients   = new Set();
 let   statsGetter  = () => ({});
 let   clientGetter = () => ({ master: [], game: [] });
+let   roomsGetter  = () => ([]);
 
 function broadcast(line) {
   const data = `event: log\ndata: ${JSON.stringify(line)}\n\n`;
@@ -131,6 +132,11 @@ header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;disp
 .tag{font-size:10px;padding:1px 6px;border-radius:10px;font-weight:600}
 .tag-m{background:#1a2a3a;color:#39d0d9}.tag-g{background:#3a2a0a;color:#d29922}
 .sec-lbl{font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.6px;padding:4px 2px 2px}
+.cp-tabs{display:flex;border-bottom:1px solid #30363d;flex-shrink:0}
+.cp-tab{flex:1;background:none;border:none;color:#6e7681;padding:7px 0;font-size:12px;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
+.cp-tab:hover{color:#c9d1d9}.cp-tab.active{color:#3fb950;border-bottom-color:#3fb950;font-weight:600}
+.cp-panel{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.tag-open{background:#1a3a20;color:#3fb950}.tag-closed{background:#3a1a1a;color:#f85149}
 </style>
 </head>
 <body>
@@ -160,11 +166,21 @@ header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;disp
   </div>
   <div class="cp">
     <div class="cp-head">
-      <h3>Connected Clients</h3>
+      <h3>Server Info</h3>
       <span class="badge" id="cnt">0</span>
     </div>
-    <div class="cp-list" id="cp-list"></div>
-    <div class="cp-det" id="cp-det"><div class="ph">Select a client to view details</div></div>
+    <div class="cp-tabs">
+      <button class="cp-tab active" onclick="switchTab('clients')">Clients</button>
+      <button class="cp-tab" onclick="switchTab('rooms')">Rooms</button>
+    </div>
+    <div id="pnl-clients" class="cp-panel">
+      <div class="cp-list" id="cp-list"></div>
+      <div class="cp-det" id="cp-det"><div class="ph">Select a client to view details</div></div>
+    </div>
+    <div id="pnl-rooms" class="cp-panel" style="display:none">
+      <div class="cp-list" id="rp-list"></div>
+      <div class="cp-det" id="rp-det"><div class="ph">Select a room to view details</div></div>
+    </div>
   </div>
 </div>
 
@@ -292,6 +308,83 @@ header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;disp
     }).catch(function(){});
   }
   setInterval(fetchClients, 3000); fetchClients();
+
+  // ── Rooms ─────────────────────────────────────────────────────────────────
+  var activeTab   = 'clients';
+  var roomsData   = [];
+  var selRoomKey  = null;
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function switchTab(tab) {
+    activeTab = tab;
+    document.getElementById('pnl-clients').style.display = tab === 'clients' ? 'flex' : 'none';
+    document.getElementById('pnl-rooms').style.display   = tab === 'rooms'   ? 'flex' : 'none';
+    document.querySelectorAll('.cp-tab').forEach(function(b) {
+      b.classList.toggle('active', b.textContent.toLowerCase() === tab);
+    });
+  }
+
+  function renderRooms() {
+    var list = document.getElementById('rp-list');
+    if (roomsData.length === 0) { list.innerHTML = '<div class="ph">No rooms active</div>'; return; }
+    var html = '';
+    for (var i = 0; i < roomsData.length; i++) {
+      var r = roomsData[i];
+      var key = 'r:' + r.name;
+      var sel = selRoomKey === key ? ' sel' : '';
+      var openTag = r.isOpen ? '<span class="tag tag-open">OPEN</span>' : '<span class="tag tag-closed">CLOSED</span>';
+      html += '<div class="cc' + sel + '" data-key="' + key + '">'
+            + '<div class="cc-name">' + escHtml(r.name) + '</div>'
+            + '<div class="cc-sub">' + openTag + ' ' + r.playerCount + '/' + r.maxPlayers + ' players</div>'
+            + (r.map ? '<div class="cc-room">Map: ' + escHtml(r.map) + '</div>' : '')
+            + (r.mapUrl ? '<div class="cc-room" style="color:#3fb950">&#x2713; map URL set</div>' : '<div class="cc-room" style="color:#6e7681">no map URL</div>')
+            + '</div>';
+    }
+    list.innerHTML = html;
+  }
+
+  document.getElementById('rp-list').addEventListener('click', function(e) {
+    var card = e.target.closest('.cc');
+    if (!card) return;
+    selRoomKey = card.dataset.key;
+    renderRooms();
+    renderRoomDetail();
+  });
+
+  function renderRoomDetail() {
+    var det = document.getElementById('rp-det');
+    if (!selRoomKey) { det.innerHTML = '<div class="ph">Select a room to view details</div>'; return; }
+    var name = selRoomKey.slice(2);
+    var r = null;
+    for (var k = 0; k < roomsData.length; k++) { if (roomsData[k].name === name) { r = roomsData[k]; break; } }
+    if (!r) { selRoomKey = null; det.innerHTML = '<div class="ph">Room no longer active</div>'; renderRooms(); return; }
+    var html = '<h4>Room Details</h4>';
+    html += '<div class="dr"><span class="dk">Name</span><span class="dv">'    + escHtml(r.name)    + '</span></div>';
+    html += '<div class="dr"><span class="dk">Players</span><span class="dv">' + r.playerCount + ' / ' + r.maxPlayers + '</span></div>';
+    html += '<div class="dr"><span class="dk">Status</span><span class="dv">'  + (r.isOpen ? 'Open' : 'Closed') + '</span></div>';
+    html += '<div class="dr"><span class="dk">Visible</span><span class="dv">' + (r.isVisible ? 'Yes' : 'No') + '</span></div>';
+    if (r.map)     html += '<div class="dr"><span class="dk">Map</span><span class="dv">'     + escHtml(r.map)     + '</span></div>';
+    if (r.version) html += '<div class="dr"><span class="dk">Version</span><span class="dv">' + escHtml(r.version) + '</span></div>';
+    if (r.mode)    html += '<div class="dr"><span class="dk">Mode</span><span class="dv">'    + escHtml(r.mode)    + '</span></div>';
+    html += '<div class="dr"><span class="dk">Map URL</span><span class="dv">'
+          + (r.mapUrl
+              ? '<a href="' + escHtml(r.mapUrl) + '" target="_blank" rel="noopener" style="color:#58a6ff;word-break:break-all">' + escHtml(r.mapUrl) + '</a>'
+              : '<span style="color:#6e7681">none</span>')
+          + '</span></div>';
+    det.innerHTML = html;
+  }
+
+  function fetchRooms() {
+    fetch('/api/rooms').then(function(r) { return r.json(); }).then(function(d) {
+      roomsData = d;
+      renderRooms();
+      if (selRoomKey) renderRoomDetail();
+    }).catch(function(){});
+  }
+  setInterval(fetchRooms, 3000); fetchRooms();
 </script>
 </body>
 </html>`;
@@ -302,6 +395,7 @@ let httpServer = null;
 function start(opts = {}) {
   if (opts.getStats)   statsGetter  = opts.getStats;
   if (opts.getClients) clientGetter = opts.getClients;
+  if (opts.getRooms)   roomsGetter  = opts.getRooms;
 
   httpServer = http.createServer((req, res) => {
     const url = req.url.split('?')[0];
@@ -321,6 +415,13 @@ function start(opts = {}) {
     if (url === '/api/clients') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(clientGetter()));
+      return;
+    }
+
+    if (url === '/api/rooms') {
+      const list = roomsGetter().map(r => ({ ...r, mapUrl: roomMapUrls[r.name] || null }));
+      res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+      res.end(JSON.stringify(list));
       return;
     }
 
