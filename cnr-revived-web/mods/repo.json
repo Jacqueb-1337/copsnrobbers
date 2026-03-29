@@ -2,6 +2,22 @@
   "name": "Official CNR Mods",
   "mods": [
     {
+      "id": "CNRRecordingMod",
+      "name": "CNR Recording Mod",
+      "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with local PNG frame capture saved to /sdcard/CNRMods/recordings/. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse and preview sessions frame-by-frame.",
+      "latestVersion": "1.0.0",
+      "filename": "CNRRecordingMod.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
+      "latestOnly": false,
+      "versions": [
+        {
+          "version": "1.0.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.0.0.dll",
+          "changelog": "Initial release. Injects a custom Kamcord.Implementation via reflection to intercept StartRecording/StopRecording/ShowView. Captures frames at 5fps @ 50% scale (GPU-accelerated RenderTexture blit) and saves as PNG to /sdcard/CNRMods/recordings/<timestamp>/. IMGUI viewer shows session list with frame counts and frame-by-frame preview."
+        }
+      ]
+    },
+    {
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
