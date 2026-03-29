@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.16";
+        public  const string Version = "2.0.17";
 
         public static void Load()
         {
@@ -1032,6 +1032,8 @@ namespace CNRSettingsMod
         private System.Reflection.FieldInfo _fiJumpIsJumping  = null;
         private System.Reflection.FieldInfo _fiJumpTime       = null;
         private System.Reflection.FieldInfo _fiJumpCharCtrl   = null;
+        private System.Collections.Generic.HashSet<int> _jumpTouchIds =
+            new System.Collections.Generic.HashSet<int>();
 
         // -- Pause panel polling -----------------------------------------------
         private GameObject _pausePanelRef;
@@ -1131,6 +1133,7 @@ namespace CNRSettingsMod
             _fiJumpIsJumping  = null;
             _fiJumpTime       = null;
             _fiJumpCharCtrl   = null;
+            _jumpTouchIds.Clear();
             LoadPrefs();
             if (_inGameScene) StartCoroutine(ApplyHUDOnLoad());
             if (_inGameScene && _kbmEnabled) StartCoroutine(AutoLockAfterLoad());
@@ -1626,25 +1629,40 @@ namespace CNRSettingsMod
             for (int i = 0; i < Input.touchCount; i++)
             {
                 Touch t = Input.GetTouch(i);
+
+                // Remove ended/cancelled touches from the claimed set.
+                if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
+                {
+                    _jumpTouchIds.Remove(t.fingerId);
+                    continue;
+                }
+
                 if (t.phase != TouchPhase.Began &&
                     t.phase != TouchPhase.Stationary &&
                     t.phase != TouchPhase.Moved) continue;
+
+                // For Stationary/Moved, only act if this finger began on the button.
+                if (t.phase != TouchPhase.Began && !_jumpTouchIds.Contains(t.fingerId)) continue;
 
                 // Raycast from the NGUI camera through the touch position.
                 // This respects the button's actual BoxCollider size (including HUD rescaling).
                 Ray ray = _nguiCam.ScreenPointToRay(t.position);
                 RaycastHit hit;
-                if (!Physics.Raycast(ray, out hit, 100f)) continue;
-                // Walk up the hierarchy to see if we hit the jump button (or a child of it).
-                Transform hitT = hit.collider.transform;
-                Transform jumpT = _dragGOs[1].transform;
-                bool onJumpButton = false;
-                while (hitT != null)
+                if (t.phase == TouchPhase.Began)
                 {
-                    if (hitT == jumpT) { onJumpButton = true; break; }
-                    hitT = hitT.parent;
+                    // On Began we must raycast to confirm the touch started on the button.
+                    if (!Physics.Raycast(ray, out hit, 100f)) continue;
+                    Transform hitT = hit.collider.transform;
+                    Transform jumpT = _dragGOs[1].transform;
+                    bool onJumpButton = false;
+                    while (hitT != null)
+                    {
+                        if (hitT == jumpT) { onJumpButton = true; break; }
+                        hitT = hitT.parent;
+                    }
+                    if (!onJumpButton) continue;
+                    _jumpTouchIds.Add(t.fingerId);
                 }
-                if (!onJumpButton) continue;
 
                 // Try direct jump: write isJumping + jumpTime into JoyStickController
                 // so the jump fires this frame regardless of script execution order.
