@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.12";
+        public  const string Version = "2.0.13";
 
         public static void Load()
         {
@@ -1478,6 +1478,11 @@ namespace CNRSettingsMod
             if (_hudEditMode) return;
             // Supplemental fire-button touch detection (bypasses Physics.Raycast).
             TouchFireDetect();
+            // Jump-on-press: NGUI's OnClick fires on finger-up, so holding the jump
+            // button delays the jump until release.  This detects the touch directly
+            // and sets OnJump=1 on Began so the jump triggers immediately, and again
+            // each frame while held so the player auto-re-jumps on landing.
+            TouchJumpDetect();
             ApplySensitivity();
             // KBM mouse look — use mousePosition delta because Input.GetAxis("Mouse X/Y")
             // returns 0 on old Unity/Android for hardware mouse. Without requestPointerCapture,
@@ -1568,6 +1573,42 @@ namespace CNRSettingsMod
                     UIMenuDirector.mInstance.GenFireEvent();
 
                 _touchFireCooldown = 0.2f;  // slightly less than 0.235f — expires first
+                break;
+            }
+        }
+
+        // Jump-on-press touch detection.
+        // NGUI fires OnClick on finger-up, so the jump button only triggers on release.
+        // This method detects the touch directly from Input.GetTouch and sets
+        // PlayerPrefs OnJump=1 on TouchBegan (and continues while held) so the jump
+        // fires immediately on press.  JoyStickController already guards re-jumping with
+        // !isJumping && isGrounded, so holding the button simply auto-re-jumps on landing.
+        private void TouchJumpDetect()
+        {
+            if (_dragGOs[1] == null || _nguiCam == null) return;
+            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
+            if (Input.touchCount == 0) return;
+
+            Vector3 worldCenter = _dragGOs[1].transform.position;
+            Vector3 scrCenter   = _nguiCam.WorldToScreenPoint(worldCenter);
+            float   halfW       = _dragGOs[1].transform.lossyScale.x * 0.5f;
+            if (halfW < 0.001f) return;
+            Vector3 scrEdge = _nguiCam.WorldToScreenPoint(
+                worldCenter + _nguiCam.transform.right * halfW);
+            float scrRadius = Mathf.Abs(scrEdge.x - scrCenter.x);
+            if (scrRadius < 30f) scrRadius = 30f;
+            float scrRadius2 = scrRadius * scrRadius;
+
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch t = Input.GetTouch(i);
+                if (t.phase != TouchPhase.Began &&
+                    t.phase != TouchPhase.Stationary &&
+                    t.phase != TouchPhase.Moved) continue;
+                float dx = t.position.x - scrCenter.x;
+                float dy = t.position.y - scrCenter.y;
+                if (dx * dx + dy * dy > scrRadius2) continue;
+                PlayerPrefs.SetInt("OnJump", 1);
                 break;
             }
         }
