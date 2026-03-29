@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with local PNG frame capture saved to /sdcard/CNRMods/recordings/. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse and preview sessions frame-by-frame.",
-      "latestVersion": "1.0.0",
+      "latestVersion": "1.0.1",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.0.1",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.0.1.dll",
+          "changelog": "Fixed: recordings viewer window and all IMGUI controls were tiny on high-resolution screens. Applied GUIUtility.ScaleAroundPivot with REF_W=600 virtual-pixel scaling (same as CNRModManager) so the viewer uses consistent physical size at any screen resolution."
+        },
         {
           "version": "1.0.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.0.0.dll",
