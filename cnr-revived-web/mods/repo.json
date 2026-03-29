@@ -5,12 +5,17 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.37",
+      "latestVersion": "2.0.38",
       "minVersion": "2.0.16",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.38",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.38.dll",
+          "changelog": "Fixed map selection only showing every other map (7 instead of 14). Resources.FindObjectsOfTypeAll returns inactive prefab copies of scene objects; the nav button was being hooked twice per tap, doubling _virtualIdx increments. Fixed by skipping inactive GameObjects and guarding against a second MapNavButton on the same GO."
+        },
         {
           "version": "2.0.37",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.37.dll",
