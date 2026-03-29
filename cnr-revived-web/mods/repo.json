@@ -5,11 +5,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.40",
+      "latestVersion": "2.0.41",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.41",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.41.dll",
+          "changelog": "Mail unread count badge is now red instead of orange."
+        },
         {
           "version": "2.0.40",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.40.dll",
