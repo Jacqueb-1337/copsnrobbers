@@ -1,31 +1,17 @@
-﻿// CNRRecordingMod.cs â€” hardware-encoded MP4 recording for Cops N Robbers
+// CNRRecordingMod.cs - hardware-encoded MP4 recording for Cops N Robbers
 //
 // HOW IT WORKS
 //   Replaces the defunct Kamcord SDK (via reflection into Kamcord.implementation_)
 //   so the existing in-game Record button and main-menu Recordings viewer work.
 //
-//   Recording uses Android's MediaCodec (H.264) + MediaMuxer via JNI:
-//     1. MediaCodec.createEncoderByType("video/avc") opens the hardware encoder.
-//     2. We get its input Surface via MediaCodec.createInputSurface().
-//     3. Each frame: render the game's RenderTexture into that Surface using
-//        an EGL PBuffer context + glReadPixels â†’ glTexImage2D â†’ blit, then
-//        call MediaCodec.signalEndOfInputStream() equivalent by advancing the
-//        presentation timestamp and queuing the output to MediaMuxer.
-//     4. Output is a real .mp4 in /sdcard/CNRMods/recordings/<timestamp>.mp4
-//
-//   Because encoding is hardware-side, the main-thread cost is only:
-//     â€¢ one RenderTexture.GetNativeTexturePtr() call (zero-copy GPU path)
-//     â€¢ MediaCodec.dequeueOutputBuffer / releaseOutputBuffer on the encoder thread
-//   This is orders of magnitude cheaper than ReadPixels + EncodeToPNG.
-//
-// STORAGE
-//   /sdcard/CNRMods/recordings/
-//     <yyyyMMdd_HHmmss>.mp4
-//
-// CONSTANTS (top of RecordingHook)
-//   VideoWidth, VideoHeight â€” encode resolution (default 854Ã—480)
-//   VideoBitrate            â€” H.264 bitrate in bps (default 2 Mbps)
-//   VideoFps                â€” frame rate (default 30)
+//   Recording uses Android MediaCodec (H.264) + MediaMuxer via JNI:
+//     1. COLOR_FormatYUV420Flexible encoder configured via MediaFormat.
+//     2. Each frame (WaitForEndOfFrame):
+//          ReadPixels -> Texture2D (RGBA32)
+//          RGBA -> YUV420 planar conversion in C# (~5-8 ms at 854x480)
+//          dequeueInputBuffer -> copy bytes -> queueInputBuffer
+//          DrainEncoder -> writeSampleData to MediaMuxer
+//     3. Output: /sdcard/CNRMods/recordings/<yyyyMMdd_HHmmss>.mp4
 //
 // ENTRY POINT
 //   CNRRecordingMod.RecordingModEntry.Load()
@@ -40,13 +26,13 @@ using UnityEngine;
 
 namespace CNRRecordingMod
 {
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    //  Entry point â€” CNRMod DLL scanner calls the first public static Load()
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ------------------------------------------------------------------------
+    //  Entry point - CNRMod DLL scanner calls the first public static Load()
+    // ------------------------------------------------------------------------
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.1.0";
+        public  const string Version = "1.2.0";
 
         private static bool _loaded = false;
 
@@ -92,9 +78,9 @@ namespace CNRRecordingMod
         }
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    //  Kamcord stub replacement â€” injected into Kamcord.implementation_
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ------------------------------------------------------------------------
+    //  Kamcord stub replacement - injected into Kamcord.implementation_
+    // ------------------------------------------------------------------------
     internal class RecordingKamcordImpl : Kamcord.Implementation
     {
         private readonly RecordingHook _hook;
@@ -108,44 +94,53 @@ namespace CNRRecordingMod
         public override void ShowWatchView()  { _hook.OpenViewer(); }
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ------------------------------------------------------------------------
     //  Main MonoBehaviour
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ------------------------------------------------------------------------
     public class RecordingHook : MonoBehaviour
     {
-        // â”€â”€ paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ---- paths -----------------------------------------------------------
         private const string RecordingsDir = "/storage/emulated/0/CNRMods/recordings";
 
-        // â”€â”€ encode settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ---- encode settings -------------------------------------------------
         private const int   VideoWidth   = 854;
         private const int   VideoHeight  = 480;
         private const int   VideoBitrate = 2000000; // 2 Mbps H.264
         private const int   VideoFps     = 30;
 
-        // â”€â”€ GUI scale (virtual 600px wide canvas, same as CNRModManager) â”€â”€â”€â”€â”€â”€
+        // COLOR_FormatYUV420Flexible = 0x7F420888
+        // Use this so we can feed raw YUV bytes via dequeueInputBuffer.
+        // COLOR_FormatSurface would require an EGL surface bound to the encoder,
+        // which Unity does not do automatically.
+        private const int COLOR_FORMAT_YUV420 = 0x7F420888;
+
+        // ---- GUI scale (virtual 600px wide canvas, same as CNRModManager) -----
         private const float REF_W = 600f;
 
-        // â”€â”€ capture state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ---- capture state ---------------------------------------------------
         public  bool IsCapturing { get; private set; }
 
         // Android MediaCodec / MediaMuxer JNI handles
-        private AndroidJavaObject _codec;           // android.media.MediaCodec
-        private AndroidJavaObject _muxer;           // android.media.MediaMuxer
-        private AndroidJavaObject _bufferInfo;      // MediaCodec.BufferInfo
+        private AndroidJavaObject _codec;       // android.media.MediaCodec
+        private AndroidJavaObject _muxer;       // android.media.MediaMuxer
+        private AndroidJavaObject _bufferInfo;  // MediaCodec.BufferInfo
         private int               _videoTrackIdx = -1;
         private long              _ptsUsec       = 0;
         private string            _outputPath;
-        private RenderTexture     _encodeRT;        // VideoWidth Ã— VideoHeight RT
         private bool              _muxerStarted;
 
-        // â”€â”€ viewer state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        private bool              _viewerOpen;
-        private Rect              _viewerRect;
-        private List<string>      _recordings    = new List<string>();
-        private Vector2           _listScroll;
-        private string            _statusMsg;
+        // Reusable read-back texture and YUV byte array
+        private Texture2D         _readTex;
+        private byte[]            _yuvBuf;      // VideoWidth * VideoHeight * 3/2 bytes
 
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ---- viewer state ----------------------------------------------------
+        private bool         _viewerOpen;
+        private Rect         _viewerRect;
+        private List<string> _recordings = new List<string>();
+        private Vector2      _listScroll;
+        private string       _statusMsg;
+
+        // ---------------------------------------------------------------------
         private void Awake()
         {
             try { Directory.CreateDirectory(RecordingsDir); } catch { }
@@ -160,7 +155,7 @@ namespace CNRRecordingMod
                     BindingFlags.NonPublic | BindingFlags.Static);
                 if (fi == null)
                 {
-                    RecordingModEntry.Log("WARNING: Kamcord.implementation_ not found â€” injection skipped");
+                    RecordingModEntry.Log("WARNING: Kamcord.implementation_ not found - injection skipped");
                     return;
                 }
                 fi.SetValue(null, new RecordingKamcordImpl(this));
@@ -172,12 +167,12 @@ namespace CNRRecordingMod
         private void OnDestroy()
         {
             if (IsCapturing) StopCapture();
-            if (_encodeRT != null) { Destroy(_encodeRT); _encodeRT = null; }
+            if (_readTex != null) { Destroy(_readTex); _readTex = null; }
         }
 
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ---------------------------------------------------------------------
         //  Capture API
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ---------------------------------------------------------------------
         public void StartCapture()
         {
             if (IsCapturing) return;
@@ -185,41 +180,40 @@ namespace CNRRecordingMod
             {
                 _outputPath = Path.Combine(RecordingsDir,
                     DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".mp4");
-                _ptsUsec      = 0;
-                _muxerStarted = false;
+                _ptsUsec       = 0;
+                _muxerStarted  = false;
                 _videoTrackIdx = -1;
 
-                // â”€â”€ create encode RenderTexture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                _encodeRT = new RenderTexture(VideoWidth, VideoHeight, 0,
-                    RenderTextureFormat.ARGB32);
-                _encodeRT.Create();
+                // Allocate reusable read-back texture and YUV buffer
+                if (_readTex == null)
+                    _readTex = new Texture2D(VideoWidth, VideoHeight, TextureFormat.RGBA32, false);
+                int yuvSize = VideoWidth * VideoHeight * 3 / 2;
+                if (_yuvBuf == null || _yuvBuf.Length != yuvSize)
+                    _yuvBuf = new byte[yuvSize];
 
-                // â”€â”€ set up MediaCodec (hardware H.264 encoder) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 // MediaFormat
-                var fmt = new AndroidJavaClass("android.media.MediaFormat");
-                var mediaFormat = fmt.CallStatic<AndroidJavaObject>(
+                var fmtClass  = new AndroidJavaClass("android.media.MediaFormat");
+                var mediaFmt  = fmtClass.CallStatic<AndroidJavaObject>(
                     "createVideoFormat", "video/avc", VideoWidth, VideoHeight);
-                mediaFormat.Call("setInteger", "bitrate",              VideoBitrate);
-                mediaFormat.Call("setInteger", "frame-rate",           VideoFps);
-                mediaFormat.Call("setInteger", "i-frame-interval",     2);   // keyframe every 2s
-                mediaFormat.Call("setInteger", "color-format",         0x7F000789); // COLOR_FormatSurface
+                mediaFmt.Call("setInteger", "bitrate",          VideoBitrate);
+                mediaFmt.Call("setInteger", "frame-rate",       VideoFps);
+                mediaFmt.Call("setInteger", "i-frame-interval", 2);
+                mediaFmt.Call("setInteger", "color-format",     COLOR_FORMAT_YUV420);
 
+                // MediaCodec encoder
                 _codec = new AndroidJavaClass("android.media.MediaCodec")
                     .CallStatic<AndroidJavaObject>("createEncoderByType", "video/avc");
-                // MediaCodec.CONFIGURE_FLAG_ENCODE = 1
-                _codec.Call("configure", mediaFormat, null, null, 1);
+                _codec.Call("configure", mediaFmt, null, null, 1); // CONFIGURE_FLAG_ENCODE=1
                 _codec.Call("start");
 
-                // â”€â”€ MediaMuxer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                // OutputFormat.MUXER_OUTPUT_MPEG_4 = 0
-                _muxer = new AndroidJavaObject(
-                    "android.media.MediaMuxer", _outputPath, 0);
+                // MediaMuxer (MUXER_OUTPUT_MPEG_4 = 0)
+                _muxer = new AndroidJavaObject("android.media.MediaMuxer", _outputPath, 0);
 
-                // â”€â”€ BufferInfo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                // BufferInfo
                 _bufferInfo = new AndroidJavaObject("android.media.MediaCodec$BufferInfo");
 
                 IsCapturing = true;
-                RecordingModEntry.Log("StartCapture â†’ " + _outputPath);
+                RecordingModEntry.Log("StartCapture -> " + _outputPath);
             }
             catch (Exception ex)
             {
@@ -232,33 +226,34 @@ namespace CNRRecordingMod
         {
             if (!IsCapturing) return;
             IsCapturing = false;
-            RecordingModEntry.Log("StopCapture: signalling EOS");
+            RecordingModEntry.Log("StopCapture: flushing encoder");
             try
             {
-                // Signal end-of-stream to the encoder and drain remaining output
-                _codec.Call("signalEndOfInputStream");
+                // Queue EOS input buffer
+                int eosIdx = _codec.Call<int>("dequeueInputBuffer", (long)100000);
+                if (eosIdx >= 0)
+                    _codec.Call("queueInputBuffer", eosIdx, 0, 0, _ptsUsec,
+                        4); // BUFFER_FLAG_END_OF_STREAM = 4
                 DrainEncoder(endOfStream: true);
             }
             catch (Exception ex) { RecordingModEntry.Log("StopCapture drain error: " + ex.Message); }
             CleanupCodec();
-            RecordingModEntry.Log("StopCapture done â†’ " + _outputPath);
+            RecordingModEntry.Log("StopCapture done -> " + _outputPath);
         }
 
         private void CleanupCodec()
         {
             try { if (_muxerStarted && _muxer != null) _muxer.Call("stop"); } catch { }
-            try { if (_muxer  != null) { _muxer.Call("release");  _muxer.Dispose();  _muxer  = null; } } catch { }
-            try { if (_codec  != null) { _codec.Call("stop"); _codec.Call("release"); _codec.Dispose(); _codec = null; } } catch { }
+            try { if (_muxer != null) { _muxer.Call("release");  _muxer.Dispose();  _muxer  = null; } } catch { }
+            try { if (_codec != null) { _codec.Call("stop"); _codec.Call("release"); _codec.Dispose(); _codec = null; } } catch { }
             try { if (_bufferInfo != null) { _bufferInfo.Dispose(); _bufferInfo = null; } } catch { }
-            if (_encodeRT != null) { Destroy(_encodeRT); _encodeRT = null; }
             _muxerStarted  = false;
             _videoTrackIdx = -1;
         }
 
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        //  Per-frame: blit the screen into the encoder's input Surface, then
-        //  drain any encoded output into the muxer.
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ---------------------------------------------------------------------
+        //  Per-frame encode
+        // ---------------------------------------------------------------------
         private void Update()
         {
             if (!IsCapturing) return;
@@ -271,22 +266,46 @@ namespace CNRRecordingMod
             if (!IsCapturing || _codec == null) yield break;
             try
             {
-                // Blit screen â†’ our fixed-size RT
-                Graphics.Blit(null, _encodeRT);
+                // 1. ReadPixels into our reusable Texture2D
+                _readTex.ReadPixels(new Rect(0, 0, Screen.width, Screen.height), 0, 0, false);
+                _readTex.Apply(false);
+                Color32[] px = _readTex.GetPixels32();
 
-                // Advance the presentation timestamp
+                // 2. RGBA -> YUV420 planar (I420)
+                RgbaToI420(px, VideoWidth, VideoHeight, _yuvBuf);
+
+                // 3. Dequeue an input buffer from the encoder
+                int inIdx = _codec.Call<int>("dequeueInputBuffer", (long)10000);
+                if (inIdx < 0)
+                {
+                    // Encoder congested - skip this frame but still drain
+                    DrainEncoder(false);
+                    yield break;
+                }
+
+                // 4. Copy YUV bytes into the encoder's input ByteBuffer via JNI
+                var inBuf = _codec.Call<AndroidJavaObject>("getInputBuffer", inIdx);
+                inBuf.Call("clear");
+                // AndroidJavaObject.Call doesn't have a put(byte[]) overload we can
+                // call directly, so we use the raw JNI helper:
+                IntPtr   bufPtr   = inBuf.GetRawObject();
+                // Use AndroidJNI to call ByteBuffer.put(byte[])
+                AndroidJNI.AttachCurrentThread();
+                IntPtr putMethod = AndroidJNIHelper.GetMethodID(
+                    AndroidJNI.GetObjectClass(bufPtr), "put", "([B)Ljava/nio/ByteBuffer;");
+                IntPtr jArray = AndroidJNIHelper.ConvertToJNIArray(_yuvBuf);
+                AndroidJNI.CallObjectMethod(bufPtr, putMethod, new jvalue[]
+                {
+                    new jvalue { l = jArray }
+                });
+                AndroidJNI.DeleteLocalRef(jArray);
+
+                // 5. Queue the buffer
                 _ptsUsec += (long)(1000000L / VideoFps);
+                _codec.Call("queueInputBuffer", inIdx, 0, _yuvBuf.Length, _ptsUsec, 0);
 
-                // Push this frame into the input Surface that MediaCodec owns.
-                // We use MediaCodec.setInputSurface path: the encoder reads
-                // directly from a Surface.  We trigger it by calling
-                // signalEndOfInputStream only at actual EOS; during recording
-                // the encoder automatically grabs the current Surface contents
-                // when its GL context is current â€” we notify via
-                // MediaCodec's presentationTimeUs by queuing a dummy input buffer.
-                // On API 18+ COLOR_FormatSurface encoders are self-clocking from
-                // the Surface updateTexImage.  So just drain outputs here.
-                DrainEncoder(endOfStream: false);
+                // 6. Drain any available encoded output into the muxer
+                DrainEncoder(false);
             }
             catch (Exception ex)
             {
@@ -294,16 +313,48 @@ namespace CNRRecordingMod
             }
         }
 
-        // â”€â”€ Drain encoder output â†’ muxer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        // MediaCodec constants (API 18+)
-        private const int INFO_TRY_AGAIN_LATER  = -1;
+        // RGBA pixels (bottom-left origin from ReadPixels) -> I420 planar YUV
+        // I420: Y plane (W*H bytes), then U plane (W/2 * H/2), then V plane (W/2 * H/2)
+        // ReadPixels returns rows bottom-to-top, so we flip vertically.
+        private static void RgbaToI420(Color32[] px, int w, int h, byte[] yuv)
+        {
+            int yBase = 0;
+            int uBase = w * h;
+            int vBase = uBase + (w / 2) * (h / 2);
+
+            for (int row = 0; row < h; row++)
+            {
+                // Flip: ReadPixels row 0 = bottom of screen
+                int srcRow = h - 1 - row;
+                for (int col = 0; col < w; col++)
+                {
+                    Color32 c = px[srcRow * w + col];
+                    int R = c.r, G = c.g, B = c.b;
+
+                    // BT.601 limited range
+                    int Y = ((66 * R + 129 * G + 25  * B + 128) >> 8) + 16;
+                    yuv[yBase + row * w + col] = (byte)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
+
+                    if ((row & 1) == 0 && (col & 1) == 0)
+                    {
+                        int U = ((-38 * R - 74  * G + 112 * B + 128) >> 8) + 128;
+                        int V = ((112 * R - 94  * G - 18  * B + 128) >> 8) + 128;
+                        int uvIdx = (row / 2) * (w / 2) + (col / 2);
+                        yuv[uBase + uvIdx] = (byte)(U < 0 ? 0 : U > 255 ? 255 : U);
+                        yuv[vBase + uvIdx] = (byte)(V < 0 ? 0 : V > 255 ? 255 : V);
+                    }
+                }
+            }
+        }
+
+        // ---- Drain encoder output -> muxer ----------------------------------
+        private const int INFO_TRY_AGAIN_LATER      = -1;
         private const int INFO_OUTPUT_FORMAT_CHANGED = -2;
-        private const int BUFFER_FLAG_CODEC_CONFIG   = 2;
-        private const int BUFFER_FLAG_END_OF_STREAM  = 4;
+        private const int BUFFER_FLAG_CODEC_CONFIG   =  2;
+        private const int BUFFER_FLAG_END_OF_STREAM  =  4;
 
         private void DrainEncoder(bool endOfStream)
         {
-            // TIMEOUT_USEC: 0 in normal drain (non-blocking), 10 ms at EOS
             int timeoutUs = endOfStream ? 10000 : 0;
             for (int attempt = 0; attempt < 200; attempt++)
             {
@@ -313,7 +364,7 @@ namespace CNRRecordingMod
                 {
                     if (_muxerStarted)
                     {
-                        RecordingModEntry.Log("DrainEncoder: unexpected format change after muxer start");
+                        RecordingModEntry.Log("DrainEncoder: unexpected format change");
                         break;
                     }
                     var newFmt = _codec.Call<AndroidJavaObject>("getOutputFormat");
@@ -323,22 +374,19 @@ namespace CNRRecordingMod
                     RecordingModEntry.Log("DrainEncoder: muxer started, track=" + _videoTrackIdx);
                     continue;
                 }
-                if (idx < 0) break; // unexpected
+                if (idx < 0) break;
 
-                int    flags  = _bufferInfo.Get<int>("flags");
-                int    size   = _bufferInfo.Get<int>("size");
-                long   pts    = _bufferInfo.Get<long>("presentationTimeUs");
+                int  flags = _bufferInfo.Get<int>("flags");
+                int  size  = _bufferInfo.Get<int>("size");
 
                 if ((flags & BUFFER_FLAG_CODEC_CONFIG) != 0)
                 {
-                    // Codec config data â€” absorbed into the format; skip writing to muxer
                     _codec.Call("releaseOutputBuffer", idx, false);
                     continue;
                 }
 
                 if (size > 0 && _muxerStarted)
                 {
-                    // Get the actual ByteBuffer and pass it to the muxer
                     var buf = _codec.Call<AndroidJavaObject>("getOutputBuffer", idx);
                     buf.Call("position", _bufferInfo.Get<int>("offset"));
                     buf.Call("limit",    _bufferInfo.Get<int>("offset") + size);
@@ -351,9 +399,9 @@ namespace CNRRecordingMod
             }
         }
 
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ---------------------------------------------------------------------
         //  Viewer
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ---------------------------------------------------------------------
         public void OpenViewer()
         {
             float sc = Screen.width / REF_W;
@@ -383,9 +431,7 @@ namespace CNRRecordingMod
             }
         }
 
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        //  IMGUI
-        // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ---- IMGUI -----------------------------------------------------------
         private void OnGUI()
         {
             if (!_viewerOpen) return;
@@ -410,19 +456,16 @@ namespace CNRRecordingMod
 
             float y = 24f;
 
-            // Recording state indicator
             if (IsCapturing)
             {
                 GUI.color = Color.red;
-                GUI.Label(new Rect(4, y, w - 8, btnH), "â— RECORDING  " + Path.GetFileName(_outputPath));
+                GUI.Label(new Rect(4, y, w - 8, btnH), "* RECORDING  " + Path.GetFileName(_outputPath));
                 GUI.color = Color.white;
                 y += btnH + 2;
             }
 
-            // Refresh button
             if (GUI.Button(new Rect(4, y, 80, btnH), "Refresh"))
                 RefreshRecordings();
-
             GUI.Label(new Rect(90, y + 3, w - 94, btnH - 3),
                 _recordings.Count + " recording(s) in " + RecordingsDir);
             y += btnH + 4;
@@ -435,7 +478,6 @@ namespace CNRRecordingMod
                 y += btnH + 2;
             }
 
-            // File list (scrollable)
             float listH = h - y - 4;
             _listScroll = GUI.BeginScrollView(
                 new Rect(4, y, w - 8, listH), _listScroll,
@@ -454,4 +496,3 @@ namespace CNRRecordingMod
         }
     }
 }
-
