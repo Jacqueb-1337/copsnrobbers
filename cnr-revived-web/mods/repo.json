@@ -5,81 +5,20 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.39",
-      "minVersion": "2.0.16",
+      "latestVersion": "2.0.40",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
         {
+          "version": "2.0.40",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.40.dll",
+          "changelog": "Disabled progression sync while the profile weapons/equipment tab is open. SyncProgression now skips if UIProfileDirector.equipmentPagePanel is active; a deferred sync fires automatically once the player leaves the tab, uploading the final loadout choice cleanly."
+        },
+        {
           "version": "2.0.39",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.39.dll",
           "changelog": "Fixed map selector showing every other map (again). NGUI UICamera.Notify fires OnClick on both the clicked GO and genericEventHandler, causing two OnClick calls per tap. MapNavButton now uses a per-frame pending flag: all OnClick calls within the same Update frame collapse into a single navigation increment."
-        },
-        {
-          "version": "2.0.38",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.38.dll",
-          "changelog": "Fixed map selection only showing every other map (7 instead of 14). Resources.FindObjectsOfTypeAll returns inactive prefab copies of scene objects; the nav button was being hooked twice per tap, doubling _virtualIdx increments. Fixed by skipping inactive GameObjects and guarding against a second MapNavButton on the same GO."
-        },
-        {
-          "version": "2.0.37",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.37.dll",
-          "changelog": "Fixed gun selection on profile screen. 2.0.34 wrote CurWeaponEquiped_1..8='' for empty server slots. Empty strings cause the game's weapon-lookup to throw KeyNotFoundException, crashing the loadout UI and reverting every tap. On startup, any CurWeaponEquiped_N key holding an empty string is now deleted (same logic already applied to CurSettedArmorName in 2.0.36)."
-        },
-        {
-          "version": "2.0.36",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.36.dll",
-          "changelog": "Fixed persistent gun selection breakage caused by 2.0.34 writing CurSettedArmorName='' to PlayerPrefs. On startup, if CurSettedArmorName is an empty string it is now deleted (GrowthManger.GetArmorItemInfoByName('') throws KeyNotFoundException in CNRMultiplayerManager.Awake, crashing the loadout system on every scene load)."
-        },
-        {
-          "version": "2.0.35",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.35.dll",
-          "changelog": "Fixed gun selection reverting in profile screen. ApplyProgression was overwriting CurWeaponEquiped_1..8, CurSettedSkinName, and CurSettedArmorName from the server on every sync (~15s), undoing any changes the player made. Local PlayerPrefs are now authoritative for equipped loadout; the server still receives and stores them as backup but never pushes them back down."
-        },
-        {
-          "version": "2.0.34",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.34.dll",
-          "changelog": "Fixed gun/armor selection broken in profile screen. ApplyProgression was writing CurSettedArmorName='' when server returned empty current_armor, causing GrowthManger.GetArmorItemInfoByName('') KeyNotFoundException in CNRMultiplayerManager.Awake() on every scene load — crashing the loadout manager. Empty armor now calls DeleteKey (matching original game behaviour). Also fixed: sync no longer overwrites CurWeaponEquiped_N slots with empty strings from server."
-        },
-        {
-          "version": "2.0.33",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.33.dll",
-          "changelog": "Fixed WSA ANR freeze root cause: removed CharacterController.enabled=false from HoldAtLoadingPos. On WSA x86_64, disabling a CC triggers a synchronous physics broad-phase rebuild that stalls the main thread >5s. Setting transform.position directly works on old Unity without disabling CC, and during team-select the game's own cc.Move() is not running so nothing fights the hold."
-        },
-        {
-          "version": "2.0.32",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.32.dll",
-          "changelog": "Added verbose checkpoint logging throughout SpawnAfterDelay to pinpoint ANR freeze location: SpawnAfterDelay:enter, post-wait, starting bg thread, bg thread done, scanning renderers, renderers scanned, scanning GOs, GOs scanned."
-        },
-        {
-          "version": "2.0.31",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.31.dll",
-          "changelog": "Fixed ANR root cause: HoldAtLoadingPos was calling TeleportPlayer every frame which did GameObject.Find('ExampleCharacter') O(n) scan + CharacterController.enabled=false/true toggle on every single frame. In a physics-heavy scene like FreeRun5_1, re-adding the CharacterController to the physics engine 60x/sec blocked the main thread >5s triggering ANR. Fix: cache the player GO once, disable CC once at hold start, set transform.position each frame (cheap), re-enable CC when hold is released."
-        },
-        {
-          "version": "2.0.30",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.30.dll",
-          "changelog": "Fixed 3 bugs: (1) WSA ANR freeze: SpawnAfterDelay now reads the map JSON file and runs JsonReader.Deserialize on a background thread, releasing the main thread between yields so Android's 5s ANR watchdog is never triggered. (2) Vanilla map host pre-hold: OnLevelWasLoaded was pre-holding even for vanilla room hosts because WebUrl is set; now checks isMasterClient first — only joining clients get the pre-hold. (3) Map URL 'none' in web console: was a cascade of #1 (freeze blocked OnEnteredRoom from firing), PostRoomToServer now gets a chance to complete."
-        },
-        {
-          "version": "2.0.29",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.29.dll",
-          "changelog": "Fixed ANR on WSA host: SpawnAfterDelay had long synchronous stretches blocking the main thread for >5s when team-select appeared. Added yield return null after sceneMatCache scan, after goByName scan, every 10 roots in ClearBaseScene (now inline loop), and every 20 items in Pass 2."
-        },
-        {
-          "version": "2.0.28",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.28.dll",
-          "changelog": "Fixed: map build blocking main thread on WSA (ANR when window loses focus). Pass 1 was calling FindObjectsOfType per item on fallback O(n*scene). Now pre-builds a name->GO dict once before the loop. Also split SpawnAfterDelay outer try/catch into a plain block so yield return null every 20 items is valid C#, giving the main thread regular breathing room."
-        },
-        {
-          "version": "2.0.27",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.27.dll",
-          "changelog": "Fixed ANR crash on master host: SetRoomProp was passing room.customProperties back to Room.SetCustomProperties, which internally calls MergeStringKeys(propertiesToSet) into customProperties — same object — causing an infinite loop and ANR. Fix: create a fresh Photon.Hashtable via Activator.CreateInstance(rawHt.GetType()) containing only CNR_MAP_URL, pass that to SetCustomProperties."
-        },
-        {
-          "version": "2.0.26",
-          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.26.dll",
-          "changelog": "Fixed: master never published map URL to Photon room prop for joining clients. When using an official map with pre-cached JSON, CustomMapsHook was setting CNRMod_ActiveMapURL='' — so MapLoader.OnLevelWasLoaded saw an empty URL and skipped PublishMapUrlRetry. Fix: keep CNRMod_ActiveMapURL=om.Url even when cache is ready; WaitAndSpawn's immediate cache-ready check fires before the 3s re-download path so no redundant download occurs."
         },
         {
           "version": "2.0.25",
@@ -206,7 +145,7 @@
       "minVersion": "2.0.3",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
-      "latestOnly": false,
+      "latestOnly": true,
       "versions": [
         {
           "version": "2.0.3",
