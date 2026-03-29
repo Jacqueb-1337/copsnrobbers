@@ -156,12 +156,17 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.9",
+      "latestVersion": "2.0.10",
       "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.10",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.10.dll",
+          "changelog": "Fixed: fire button requires two fingers to activate. Root cause: UICamera.useMouse was forced to true on every frame, causing UICamera.ProcessMouse() to run alongside ProcessTouches() on Android. On Android, Unity's simulateMouseWithTouches maps touch[0] to mouse button 0, so ProcessMouse routed NGUI events to whatever widget was under touch[0]. When touch[0] was the fire button this NGUI processing interfered with JoyStickController's Physics.Raycast-based fire detection, causing one-finger fire to fail. With a second non-fire touch held (touch[0] elsewhere) the interference didn't hit the fire button, which is why two-finger fire still worked. Fix: useMouse is now only set to true when KBM mode is active and the cursor is visible (not locked). In all other states useMouse stays false (Android default), letting fire detection work with a single touch as intended."
+        },
         {
           "version": "2.0.9",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.9.dll",
