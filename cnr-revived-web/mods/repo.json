@@ -146,12 +146,17 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.4",
+      "latestVersion": "2.0.5",
       "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.5",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.5.dll",
+          "changelog": "Fixed: HUD buttons moved to the left side of the screen with the drag editor did not respond to touches at their new position. Root cause: the game's NGUI HUD camera had its viewport rect restricted to the right portion of the screen (the virtual joystick area on the left uses a separate input system and never needed NGUI). UICamera.Raycast() rejects any touch whose ScreenToViewportPoint result falls outside [0,1], so left-side touches were silently skipped. Fix: CNRSettingsMod now expands the NGUI camera viewport to the full screen (0,0,1,1) after applying saved HUD positions, making all repositioned buttons respond correctly regardless of where they are dragged."
+        },
         {
           "version": "2.0.4",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.4.dll",
