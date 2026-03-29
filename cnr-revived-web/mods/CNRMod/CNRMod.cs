@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.18";
+        public const  string Version = "2.0.19";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -119,7 +119,29 @@ namespace CNRMods
 
         private static void ReadConfig()
         {
-            if (!File.Exists(ConfigPath)) { Log("No server.cfg found"); return; }
+            // Ensure the directory exists regardless of whether the cfg is there.
+            string dir = System.IO.Path.GetDirectoryName(ConfigPath);
+            if (!Directory.Exists(dir))
+            {
+                try { Directory.CreateDirectory(dir); }
+                catch (Exception ex) { Log("ReadConfig: could not create dir: " + ex.Message); }
+            }
+
+            if (!File.Exists(ConfigPath))
+            {
+                // Write a default config pointing at the production server so the
+                // mod works out-of-the-box without the user having to create the file.
+                try
+                {
+                    File.WriteAllText(ConfigPath,
+                        "SERVER_IP=play.jacqueb.me\n" +
+                        "SERVER_PORT=5055\n" +
+                        "MOD_VERSION=2.0.0\n" +
+                        "KICK_NO_MOD=true\n");
+                    Log("Created default server.cfg");
+                }
+                catch (Exception ex) { Log("ReadConfig: could not write default cfg: " + ex.Message); }
+            }
             foreach (string raw in File.ReadAllLines(ConfigPath))
             {
                 string line = raw.Trim();
