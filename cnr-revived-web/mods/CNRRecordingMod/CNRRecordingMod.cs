@@ -38,7 +38,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.37.0";
+        public  const string Version = "1.38.0";
 
         private static bool _loaded = false;
 
@@ -160,8 +160,10 @@ namespace CNRRecordingMod
         internal Texture2D     _readTex;
         internal int           _scrW, _scrH;
         private byte[]        _nv12Buf;       // pre-allocated NV12 scratch for Phase 1 writes
-        private GameObject    _captureCamGo;  // depth-1000 no-render camera; OnPostRender fires before eglSwapBuffers
-        internal bool          _pixelsReady;   // set by CaptureCam.OnPostRender, consumed in CaptureFrameCoroutine
+        internal RenderTexture _captureRT;    // game cameras redirect here; RT reads are reliable on Android
+        private Camera[]      _hookedCameras; // cameras whose targetTexture we overrode
+        private RenderTexture[] _savedTargets;// original targetTexture values to restore on StopCapture
+        private GameObject    _displayCamGo;  // depth-1000 camera that blits captureRT to screen
         // Tightly packed NV12 — no alignment padding in capture files.
         // EncodeThread reads the real encoder stride via getInputFormat and re-strides.
         private const int CaptureStride = VideoWidth;   // 854, no padding
@@ -216,6 +218,9 @@ namespace CNRRecordingMod
             _btnHooked = false;
             if (System.Array.IndexOf(GameScenes, Application.loadedLevelName) >= 0)
                 StartCoroutine(HookRecordButton());
+            // Re-hook cameras to captureRT — scene load destroys old cameras and creates new ones.
+            if (IsCapturing)
+                StartCoroutine(RehookCameras());
         }
 
         private IEnumerator HookRecordButton()
@@ -264,8 +269,9 @@ namespace CNRRecordingMod
         private void OnDestroy()
         {
             if (IsCapturing) StopCapture();
-            if (_captureCamGo != null) { Destroy(_captureCamGo); _captureCamGo = null; }
-            if (_readTex != null) { Destroy(_readTex); _readTex = null; }
+            if (_displayCamGo != null) { Destroy(_displayCamGo); _displayCamGo = null; }
+            if (_captureRT   != null) { Destroy(_captureRT);   _captureRT   = null; }
+            if (_readTex     != null) { Destroy(_readTex);     _readTex     = null; }
         }
 
         // -----------------------------------------------------------------------
@@ -296,33 +302,34 @@ namespace CNRRecordingMod
             if (_nv12Buf == null || _nv12Buf.Length != nv12Size)
                 _nv12Buf = new byte[nv12Size];
 
-            // Create a depth-1000 camera that renders nothing.
-            // Its OnPostRender fires after ALL game cameras have composited into the backbuffer
-            // but BEFORE eglSwapBuffers — so ReadPixels there gets the full composited frame.
-            // (WaitForEndOfFrame fires AFTER eglSwapBuffers, so the backbuffer is already cleared.)
-            _pixelsReady = false;
-            if (_captureCamGo == null)
+            // Create captureRT — game cameras render into this instead of the screen.
+            // ReadPixels from an RT is reliable on Android; ReadPixels from the backbuffer
+            // (null RT) always returns grey because Unity renders to an intermediate FBO, not FBO 0.
+            if (_captureRT != null && (_captureRT.width != scrW || _captureRT.height != scrH))
+            { Destroy(_captureRT); _captureRT = null; }
+            if (_captureRT == null)
             {
-                var camGo = new GameObject("__CNRCaptureCam__");
-                GameObject.DontDestroyOnLoad(camGo);
-                var capCam = camGo.AddComponent<Camera>();
-                capCam.depth = 1000f;
-                capCam.clearFlags = CameraClearFlags.Nothing;
-                capCam.cullingMask = 0;
-                var comp = camGo.AddComponent<CaptureCam>();
-                comp.hook = this;
-                _captureCamGo = camGo;
-                RecordingModEntry.Log("StartCapture: CaptureCam created (depth=1000)");
+                _captureRT = new RenderTexture(scrW, scrH, 24, RenderTextureFormat.ARGB32);
+                _captureRT.Create();
             }
-            // Log camera depths so we can verify our camera is last
-            try
+
+            // Redirect all active cameras to captureRT and log their properties.
+            // A depth-1000 CaptureDisplay camera will blit captureRT to screen each frame.
+            HookAllCameras();
+
+            // Create the display camera if needed
+            if (_displayCamGo == null)
             {
-                Camera[] cams = Camera.allCameras;
-                System.Array.Sort(cams, (a, b) => a.depth.CompareTo(b.depth));
-                string cs = "";
-                foreach (Camera c in cams) cs += c.name + "(d=" + c.depth + ") ";
-                RecordingModEntry.Log("  cameras: " + cs.Trim());
-            } catch { }
+                _displayCamGo = new GameObject("__CNRDisplayCam__");
+                GameObject.DontDestroyOnLoad(_displayCamGo);
+                var dCam = _displayCamGo.AddComponent<Camera>();
+                dCam.depth       = 1000f;
+                dCam.clearFlags  = CameraClearFlags.Nothing;
+                dCam.cullingMask = 0;
+                var disp = _displayCamGo.AddComponent<CaptureDisplay>();
+                disp.hook = this;
+                RecordingModEntry.Log("StartCapture: CaptureDisplay created (depth=1000)");
+            }
 
             IsCapturing = true;
             RecordingModEntry.Log("StartCapture: session=" + timestamp
@@ -335,7 +342,10 @@ namespace CNRRecordingMod
         {
             if (!IsCapturing) { RecordingModEntry.Log("StopCapture: not capturing"); return; }
             IsCapturing = false;
-            if (_captureCamGo != null) { Destroy(_captureCamGo); _captureCamGo = null; }
+            // Restore all camera targetTextures to what they were before capture started.
+            RestoreAllCameras();
+            if (_displayCamGo != null) { Destroy(_displayCamGo); _displayCamGo = null; }
+            if (_captureRT    != null) { Destroy(_captureRT);    _captureRT    = null; }
             RecordingModEntry.Log("StopCapture: " + _capturedFrames + " frames captured -> starting encode thread");
 
             // Spawn background encode thread now that capture is done.
@@ -344,6 +354,50 @@ namespace CNRRecordingMod
             var t = new Thread(EncodeThread);
             t.IsBackground = true;
             t.Start();
+        }
+
+        // Redirect all active (non-our) cameras to _captureRT.
+        private void HookAllCameras()
+        {
+            Camera[] cams = Camera.allCameras;
+            // Filter out our own display camera
+            int count = 0;
+            foreach (Camera c in cams)
+                if (c.gameObject != _displayCamGo) count++;
+            _hookedCameras = new Camera[count];
+            _savedTargets  = new RenderTexture[count];
+            int idx = 0;
+            System.Array.Sort(cams, (a, b) => a.depth.CompareTo(b.depth));
+            foreach (Camera c in cams)
+            {
+                if (c.gameObject == _displayCamGo) continue;
+                _hookedCameras[idx] = c;
+                _savedTargets[idx]  = c.targetTexture;
+                c.targetTexture     = _captureRT;
+                RecordingModEntry.Log("  hooked cam: " + c.name
+                    + " d=" + c.depth + " cf=" + c.clearFlags
+                    + " mask=" + c.cullingMask);
+                idx++;
+            }
+        }
+
+        private void RestoreAllCameras()
+        {
+            if (_hookedCameras == null) return;
+            for (int i = 0; i < _hookedCameras.Length; i++)
+                if (_hookedCameras[i] != null)
+                    _hookedCameras[i].targetTexture = _savedTargets[i];
+            _hookedCameras = null;
+            _savedTargets  = null;
+        }
+
+        private IEnumerator RehookCameras()
+        {
+            yield return new WaitForSeconds(0.5f); // let scene cameras initialise
+            if (!IsCapturing) yield break;
+            RestoreAllCameras();
+            HookAllCameras();
+            RecordingModEntry.Log("RehookCameras: re-hooked after scene load");
         }
 
         public void OpenViewer()
@@ -375,16 +429,20 @@ namespace CNRRecordingMod
 
             try
             {
-                // Pixels were read by CaptureCam.OnPostRender (before eglSwapBuffers).
-                // WaitForEndOfFrame fires after the swap, so _pixelsReady should be true here.
-                if (!_pixelsReady)
+                // Read from captureRT — game cameras render into it every frame.
+                // RT readback is reliable on Android; backbuffer readback always returns grey.
+                bool rtReady = _captureRT != null && _captureRT.IsCreated();
+                if (!rtReady)
                 {
-                    if (verbose) RecordingModEntry.Log("  WARN: pixelsReady=false (CaptureCam.OnPostRender didn't fire)");
+                    if (verbose) RecordingModEntry.Log("  WARN: captureRT not ready");
                     _encodingFrame = false; yield break;
                 }
-                _pixelsReady = false;
+                RenderTexture.active = _captureRT;
+                _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
+                RenderTexture.active = null;
+                _readTex.Apply(false);
 
-                // First-frame diagnostic PNG (reads CPU-side data from ReadPixels in OnPostRender)
+                // First-frame diagnostic PNG
                 if (_capturedFrames == 0)
                 {
                     try
@@ -728,20 +786,17 @@ namespace CNRRecordingMod
         }
     }
 
-    // Depth-1000 no-render camera component.
-    // OnPostRender fires after all game cameras composite into the backbuffer,
-    // but BEFORE eglSwapBuffers — giving us the full composited frame to read.
-    internal class CaptureCam : MonoBehaviour
+    // Depth-1000 display camera — blits captureRT to the screen so the game looks normal
+    // while game cameras are redirected to captureRT.
+    internal class CaptureDisplay : MonoBehaviour
     {
         public RecordingHook hook;
-        private void OnPostRender()
+        private void OnRenderImage(RenderTexture src, RenderTexture dest)
         {
-            if (hook == null || !hook.IsCapturing) return;
-            // Read the composited backbuffer now (before eglSwapBuffers clears it).
-            RenderTexture.active = null;
-            hook._readTex.ReadPixels(new Rect(0, 0, hook._scrW, hook._scrH), 0, 0, false);
-            RenderTexture.active = null;
-            hook._pixelsReady = true;
+            if (hook != null && hook._captureRT != null && hook._captureRT.IsCreated())
+                Graphics.Blit(hook._captureRT, dest);
+            else
+                Graphics.Blit(src, dest);
         }
     }
 
