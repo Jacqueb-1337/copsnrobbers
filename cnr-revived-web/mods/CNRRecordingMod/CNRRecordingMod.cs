@@ -13,7 +13,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.10.0";
+        public  const string Version = "1.11.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -104,6 +104,7 @@ namespace CNRRecordingMod
         private bool              _muxerStarted;
 
         private Texture2D  _readTex;
+        private int        _scrW, _scrH;  // screen dims at capture start (readtex size)
         private byte[]     _yuvBuf;
         private sbyte[]    _sbyteTemp;  // Unity JNI maps Java byte -> C# sbyte
         private int        _encStride;  // actual encoder row stride (may be > VideoWidth due to alignment)
@@ -175,12 +176,18 @@ namespace CNRRecordingMod
                 _drainLogCount = 0;
                 RecordingModEntry.Log("  output path: " + _outputPath);
 
-                // CPU buffers
+                // CPU buffers — capture full screen, scale down during conversion
+                int scrW = Screen.width, scrH = Screen.height;
+                if (_readTex != null && (_readTex.width != scrW || _readTex.height != scrH))
+                {
+                    Destroy(_readTex); _readTex = null;
+                }
                 if (_readTex == null)
                 {
-                    _readTex = new Texture2D(VideoWidth, VideoHeight, TextureFormat.RGBA32, false);
-                    RecordingModEntry.Log("  Texture2D created " + VideoWidth + "x" + VideoHeight);
+                    _readTex = new Texture2D(scrW, scrH, TextureFormat.RGBA32, false);
+                    RecordingModEntry.Log("  Texture2D created " + scrW + "x" + scrH + " (full screen)");
                 }
+                _scrW = scrW; _scrH = scrH;
 
 
                 // MediaFormat
@@ -336,26 +343,19 @@ namespace CNRRecordingMod
 
             try
             {
-                // 1. ReadPixels into fixed-size texture.
-                // Capture the centre of the screen so we sample actual game content
-                // regardless of screen size (e.g. 2256x1032 → centre of game view).
-                float _rx = Mathf.Max(0f, (Screen.width  - VideoWidth)  * 0.5f);
-                float _ry = Mathf.Max(0f, (Screen.height - VideoHeight) * 0.5f);
-                if (verbose) RecordingModEntry.Log("  ReadPixels rect=(" + _rx + "," + _ry + "," + VideoWidth + "x" + VideoHeight + ") screen=" + Screen.width + "x" + Screen.height);
-                _readTex.ReadPixels(new Rect(_rx, _ry, VideoWidth, VideoHeight), 0, 0, false);
+                // 1. ReadPixels full screen into full-size texture.
+                // Scale down to VideoWidth x VideoHeight during the RGB→NV12 conversion below.
+                if (verbose) RecordingModEntry.Log("  ReadPixels full screen " + _scrW + "x" + _scrH);
+                _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
                 _readTex.Apply(false);
                 if (verbose) RecordingModEntry.Log("  ReadPixels OK");
 
                 Color32[] px = _readTex.GetPixels32();
                 if (verbose)
                 {
-                    Color32 p0   = px[0];
-                    Color32 pMid = px[VideoWidth / 2 + (VideoHeight / 2) * VideoWidth];
-                    Color32 pTR  = px[VideoWidth - 1 + (VideoHeight - 1) * VideoWidth];
+                    Color32 pMid = px[(_scrH / 2) * _scrW + _scrW / 2];
                     RecordingModEntry.Log("  GetPixels32 len=" + px.Length
-                        + "  px[BL]=(" + p0.r + "," + p0.g + "," + p0.b + ")"
-                        + " px[C]=(" + pMid.r + "," + pMid.g + "," + pMid.b + ")"
-                        + " px[TR]=(" + pTR.r + "," + pTR.g + "," + pTR.b + ")");
+                        + " px[scrC]=(" + pMid.r + "," + pMid.g + "," + pMid.b + ")");
                 }
 
                 // 2. Convert RGBA -> NV12 into _yuvBuf at actual encoder strides.
@@ -366,10 +366,12 @@ namespace CNRRecordingMod
                 int _uvBase = _encStride * _encSliceH;
                 for (int row = 0; row < VideoHeight; row++)
                 {
-                    int srcRow = VideoHeight - 1 - row;
+                    // nearest-neighbour scale: map output row/col to source pixel
+                    int srcRow = ((VideoHeight - 1 - row) * _scrH) / VideoHeight;
                     for (int col = 0; col < VideoWidth; col++)
                     {
-                        Color32 c = px[srcRow * VideoWidth + col];
+                        int srcCol = (col * _scrW) / VideoWidth;
+                        Color32 c = px[srcRow * _scrW + srcCol];
                         int R = c.r, G = c.g, B = c.b;
                         int Y = ((66 * R + 129 * G + 25 * B + 128) >> 8) + 16;
                         _yuvBuf[_yBase + row * _encStride + col] = (byte)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
