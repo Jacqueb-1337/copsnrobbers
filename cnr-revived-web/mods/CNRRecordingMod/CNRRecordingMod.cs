@@ -38,7 +38,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.35.0";
+        public  const string Version = "1.36.0";
 
         private static bool _loaded = false;
 
@@ -158,8 +158,6 @@ namespace CNRRecordingMod
         private int           _capturedFrames;
         private bool          _encodingFrame;
         private Texture2D     _readTex;
-        private RenderTexture _captureRT;     // populated by FrameCapture.OnRenderImage each frame
-        private FrameCapture  _frameCapture;  // image-effect component on Camera.main
         private int           _scrW, _scrH;
         private byte[]        _nv12Buf;       // pre-allocated NV12 scratch for Phase 1 writes
         // Tightly packed NV12 — no alignment padding in capture files.
@@ -264,9 +262,7 @@ namespace CNRRecordingMod
         private void OnDestroy()
         {
             if (IsCapturing) StopCapture();
-            if (_frameCapture != null) { Destroy(_frameCapture); _frameCapture = null; }
-            if (_readTex   != null) { Destroy(_readTex);   _readTex   = null; }
-            if (_captureRT != null) { Destroy(_captureRT); _captureRT = null; }
+            if (_readTex != null) { Destroy(_readTex); _readTex = null; }
         }
 
         // -----------------------------------------------------------------------
@@ -291,26 +287,7 @@ namespace CNRRecordingMod
             { Destroy(_readTex); _readTex = null; }
             if (_readTex == null)
                 _readTex = new Texture2D(scrW, scrH, TextureFormat.RGBA32, false);
-            if (_captureRT != null && (_captureRT.width != scrW || _captureRT.height != scrH))
-            { Destroy(_captureRT); _captureRT = null; }
-            if (_captureRT == null)
-                _captureRT = new RenderTexture(scrW, scrH, 0, RenderTextureFormat.ARGB32);
             _scrW = scrW; _scrH = scrH;
-
-            // Attach FrameCapture image-effect to Camera.main so OnRenderImage fires
-            // inside the camera's own pipeline — before Kamcord's EGL redirect touches it.
-            Camera cam = Camera.main;
-            if (cam != null)
-            {
-                _frameCapture = cam.gameObject.GetComponent<FrameCapture>()
-                    ?? cam.gameObject.AddComponent<FrameCapture>();
-                _frameCapture.target = _captureRT;
-                RecordingModEntry.Log("StartCapture: FrameCapture attached to " + cam.name);
-            }
-            else
-            {
-                RecordingModEntry.Log("StartCapture: WARN Camera.main is null, will fallback");
-            }
 
             int nv12Size = CaptureStride * CaptureSliceH * 3 / 2;
             if (_nv12Buf == null || _nv12Buf.Length != nv12Size)
@@ -327,8 +304,6 @@ namespace CNRRecordingMod
         {
             if (!IsCapturing) { RecordingModEntry.Log("StopCapture: not capturing"); return; }
             IsCapturing = false;
-            // Remove the image-effect component so we stop paying render cost.
-            if (_frameCapture != null) { Destroy(_frameCapture); _frameCapture = null; }
             RecordingModEntry.Log("StopCapture: " + _capturedFrames + " frames captured -> starting encode thread");
 
             // Spawn background encode thread now that capture is done.
@@ -368,23 +343,24 @@ namespace CNRRecordingMod
 
             try
             {
-                // Read from _captureRT — populated by FrameCapture.OnRenderImage which fires
-                // inside Camera.main's pipeline before Kamcord's EGL redirect.
-                bool hasCaptureRT = _captureRT != null && _captureRT.IsCreated();
-                if (verbose) RecordingModEntry.Log("  captureRT=" + hasCaptureRT);
-                if (hasCaptureRT)
-                {
-                    RenderTexture.active = _captureRT;
-                    _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
-                    RenderTexture.active = null;
-                }
-                else
-                {
-                    if (verbose) RecordingModEntry.Log("  WARN: captureRT not ready, fallback to EGL surface");
-                    RenderTexture.active = null;
-                    _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
-                }
+                // Read the fully composited screen — WaitForEndOfFrame guarantees all cameras
+                // (including NGUI UI camera) have finished rendering to the framebuffer.
+                RenderTexture.active = null;
+                _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
                 _readTex.Apply(false);
+
+                // First-frame diagnostic: PNG lets us visually verify the readback without logcat.
+                if (_capturedFrames == 0)
+                {
+                    try
+                    {
+                        byte[] png = _readTex.EncodeToPNG();
+                        string pngPath = Path.Combine(_sessionDir, "frame0_screen.png");
+                        File.WriteAllBytes(pngPath, png);
+                        RecordingModEntry.Log("  diag PNG -> " + pngPath);
+                    }
+                    catch (Exception pex) { RecordingModEntry.Log("  diag PNG err: " + pex.Message); }
+                }
 
                 Color32[] px = _readTex.GetPixels32();
                 int texW = _readTex.width;
@@ -714,20 +690,6 @@ namespace CNRRecordingMod
                 RefreshRecordings();
             if (_statusMsg != null)
                 GUI.Label(new Rect(110, h - btnH - 4, w - 114, btnH), _statusMsg);
-        }
-    }
-
-    // Image-effect component attached to Camera.main during recording.
-    // OnRenderImage fires inside the camera's own render pipeline — before Kamcord's
-    // EGL/pbuffer redirect — so src contains real rendered pixels.
-    internal class FrameCapture : MonoBehaviour
-    {
-        public RenderTexture target;
-        private void OnRenderImage(RenderTexture src, RenderTexture dest)
-        {
-            Graphics.Blit(src, dest);   // required pass-through — don't break normal rendering
-            if (target != null)
-                Graphics.Blit(src, target);
         }
     }
 
