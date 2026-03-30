@@ -22,53 +22,45 @@ Archive/              Old backups, earlier attempts, docs
 
 ### 1 — APK patch (Assembly-CSharp.dll)
 
-`target_modloader.apk` contains a patched `Extensions` class whose **static constructor** was modified to act as a generic mod loader:
+`target_modloader.apk` contains two patched game classes that act as the mod loader. No patching of `Extensions` or any other class is needed — only these two:
+
+**`MainMenuDirector.Awake()`** calls `MainMenuDirector.LoadMods()` (static, also callable from elsewhere):
 
 ```csharp
-static Extensions()
+public static void LoadMods()
 {
-    try
+    string dir = "/storage/emulated/0/CNRMods";
+    Directory.CreateDirectory(dir);
+    foreach (string path in Directory.GetFiles(dir, "*.dll"))
     {
-        Debug.Log("[CNRModLoader] Initializing mod system (from Extensions static constructor)...");
-        string text = "/storage/emulated/0/CNRMods";
-        if (!Directory.Exists(text))
-        {
-            Debug.Log("[CNRModLoader] Creating mod directory: " + text);
-            Directory.CreateDirectory(text);
-        }
-        try
-        {
-            string[] files = Directory.GetFiles(text, "*.dll");
-            Debug.Log("[CNRModLoader] Found " + files.Length + " mod DLLs");
-            foreach (string path in files)
-            {
-                try
-                {
-                    Debug.Log("[CNRModLoader] Loading mod: " + Path.GetFileName(path));
-                    Assembly.Load(File.ReadAllBytes(path))
-                        .GetType("CNRMods.ModEntry")
-                        ?.GetMethod("Load", BindingFlags.Static | BindingFlags.Public)
-                        ?.Invoke(null, null);
-                    Debug.Log("[CNRModLoader] Successfully loaded: " + Path.GetFileName(path));
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError("[CNRModLoader] Failed to load " + Path.GetFileName(path) + ": " + ex.Message);
-                }
-            }
-        }
-        catch (Exception ex2)
-        {
-            Debug.LogError("[CNRModLoader] Error scanning mod directory: " + ex2.Message);
-        }
-        Debug.Log("[CNRModLoader] Mod system initialization complete");
-    }
-    catch (Exception ex3)
-    {
-        Debug.LogError("[CNRModLoader] Critical error in mod loader: " + ex3.Message);
+        Type t = Assembly.Load(File.ReadAllBytes(path)).GetType("CNRMods.ModEntry");
+        t?.GetMethod("Load", BindingFlags.Static | BindingFlags.Public)?.Invoke(null, null);
     }
 }
 ```
+
+This loads any DLL that exposes `CNRMods.ModEntry.Load()` — that's `CNRMod.dll`.
+
+**`CNRMod.LoadExternalMods()`** is called from `CNRMods.ModEntry.Load()` and does a second pass over the folder, finding **the first `public static void Load()` in any type** in each remaining DLL:
+
+```csharp
+private static void LoadExternalMods()
+{
+    foreach (string path in Directory.GetFiles("/storage/emulated/0/CNRMods", "*.dll"))
+    {
+        if (Path.GetFileName(path).Equals("CNRMod.dll", StringComparison.OrdinalIgnoreCase)) continue;
+        Assembly asm = Assembly.Load(File.ReadAllBytes(path));
+        foreach (Type t in asm.GetTypes())
+        {
+            MethodInfo m = t.GetMethod("Load", BindingFlags.Public | BindingFlags.Static,
+                                       null, Type.EmptyTypes, null);
+            if (m != null) { m.Invoke(null, null); break; }
+        }
+    }
+}
+```
+
+This means extra mods (`CNRSettingsMod`, `CNRRecordingMod`, etc.) don't need to follow the `CNRMods.ModEntry` naming convention — **any public static `Load()` method in any class will be found and called**.
 
 This means the APK itself never needs to be replaced again — you add or update mods by pushing DLLs to the device.
 
@@ -78,9 +70,10 @@ Drop compiled mod DLLs here. The loader finds them automatically on the next gam
 
 | File | Purpose |
 |------|---------|
-| `IPRedirectMod.dll` | **Required.** Redirects all Photon traffic to your custom server. Also calls `LoadExternalMods()` which scans the folder a second time and loads any DLL exposing a `public static void Load()` method (broader than the static-ctor convention, catches mods that don't use the `CNRMods.ModEntry` class name). |
+| `CNRMod.dll` | **Required.** Redirects all Photon traffic to your custom server, reads `server.cfg`, and calls `LoadExternalMods()` to chain-load other mods. |
 | `CNRSettingsMod.dll` | Optional. Adds an in-game settings overlay and HUD position/scale editor. |
-| `server.cfg` | Plain-text config read by `IPRedirectMod`. |
+| `CNRRecordingMod.dll` | Optional. Restores the in-game record button with real H.264 MP4 output via Android MediaCodec. |
+| `server.cfg` | Plain-text config read by `CNRMod`. |
 
 **server.cfg format:**
 
@@ -93,12 +86,14 @@ Set this to the IP address of the machine running the Node.js server.
 ### 3 — Mod loading chain (summary)
 
 ```
-Game starts
-  └─ Extensions static ctor
-       └─ loads IPRedirectMod.dll  →  CNRMods.ModEntry.Load()
-            ├─ patches Photon connection target (reads server.cfg)
+Game starts  →  MainMenuDirector.Awake()
+  └─ MainMenuDirector.LoadMods()
+       └─ finds CNRMod.dll  →  CNRMods.ModEntry.Load()
+            ├─ reads server.cfg, patches Photon connection target
             └─ LoadExternalMods()
-                 └─ loads CNRSettingsMod.dll  →  SettingsModEntry.Load()
+                 ├─ finds CNRSettingsMod.dll  →  SettingsModEntry.Load()
+                 ├─ finds CNRRecordingMod.dll →  RecordingModEntry.Load()
+                 └─ finds any other *.dll     →  first public static Load()
 ```
 
 ---
@@ -151,20 +146,22 @@ The console will print the `SERVER_IP` value to use in `server.cfg`.
 # 1. Install the patched APK
 adb install -r APK_Build_Active\target_modloader.apk
 
-# 2. Push IPRedirectMod and point it at your server
+# 2. Push CNRMod and point it at your server
 adb shell mkdir -p /sdcard/CNRMods
-adb push APK_Build_Active\bin\csc_build\IPRedirectMod.dll  /sdcard/CNRMods/IPRedirectMod.dll
-adb push APK_Build_Active\server.cfg                       /sdcard/CNRMods/server.cfg
+adb push cnr-revived-web/mods/CNRMod/CNRMod.dll  /sdcard/CNRMods/CNRMod.dll
+adb push APK_Build_Active\server.cfg              /sdcard/CNRMods/server.cfg
 
-# 3. (Optional) Push the settings/HUD mod
-adb push APK_Build_Active\bin\csc_build\CNRSettingsMod.dll /sdcard/CNRMods/CNRSettingsMod.dll
+# 3. (Optional) Push extra mods
+adb push cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod.dll   /sdcard/CNRMods/CNRSettingsMod.dll
+adb push cnr-revived-web/mods/CNRRecordingMod/CNRRecordingMod.dll /sdcard/CNRMods/CNRRecordingMod.dll
 ```
 
 After launch, mod logs are written to:
 
 ```
-/sdcard/CNRMods/redir.log      # IPRedirectMod
-/sdcard/CNRMods/settings.log   # CNRSettingsMod
+/sdcard/CNRMods/cnrmod.log        # CNRMod
+/sdcard/CNRMods/settings.log      # CNRSettingsMod
+/sdcard/CNRMods/recording.log     # CNRRecordingMod
 ```
 
 Pull them with `adb pull /sdcard/CNRMods/redir.log`.
@@ -176,25 +173,65 @@ Pull them with `adb pull /sdcard/CNRMods/redir.log`.
 Mods are plain C# class libraries targeting **.NET 3.5 / Unity 4 Mono**. The compiler used is the one shipped with .NET Framework 4 (`csc.exe /nostdlib`).
 
 ```powershell
-cd APK_Build_Active
-.\compile_mod_loader.ps1    # compiles IPRedirectMod.dll + pushes to device
+# From the repo root:
+.\build.ps1 mod           # CNRMod.dll
+.\build.ps1 settings      # CNRSettingsMod.dll
+.\build.ps1 recording     # CNRRecordingMod.dll
+.\build.ps1 all           # all of the above
+.\build.ps1 recording -NoDeploy   # build only, don't push to device
 ```
 
-Reference DLLs are taken from the extracted APK at `assets/bin/Data/Managed/`.
+Source files live in `cnr-revived-web/mods/<ModName>/<ModName>.cs`. Reference DLLs are taken from the extracted APK at `APK_Build_Active/apk_source/assets/bin/Data/Managed/`.
 
-### Mod entry-point convention
+### Writing a new mod
+
+The only requirement is **a public static `Load()` method somewhere in your DLL**. Class name and namespace don't matter for the secondary loader. Convention used by existing mods:
 
 ```csharp
-namespace CNRMods          // must match for static-ctor loader
+// MyMod.cs
+using UnityEngine;
+
+namespace MyModNamespace
 {
-    public static class ModEntry
+    public static class MyModEntry
     {
-        public static void Load() { /* ... */ }
+        public static void Load()
+        {
+            var go = new GameObject("MyMod_Root");
+            go.AddComponent<MyModBehaviour>();
+            GameObject.DontDestroyOnLoad(go);
+        }
+    }
+
+    public class MyModBehaviour : MonoBehaviour
+    {
+        private void Awake() { /* runs once */ }
+        private void Update() { /* runs every frame */ }
+        private void OnGUI() { /* IMGUI overlay */ }
     }
 }
 ```
 
-`IPRedirectMod`'s secondary loader (`LoadExternalMods`) is more permissive — it finds the first `public static void Load()` in any type, so additional mods (like `CNRSettingsMod`) don't need to follow the `CNRMods.ModEntry` naming convention.
+Drop the compiled DLL into `/sdcard/CNRMods/` and it will be loaded automatically on next launch by `CNRMod.LoadExternalMods()`.
+
+**Optionally register with CNRMod** so your version appears in the in-game mod manager:
+
+```csharp
+// In Load(), after the GameObject is created:
+try
+{
+    foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+    {
+        if (!asm.GetName().Name.Equals("CNRMod", StringComparison.OrdinalIgnoreCase)) continue;
+        var t = asm.GetType("CNRMods.ModEntry");
+        var m = t?.GetMethod("RegisterMod", BindingFlags.Public | BindingFlags.Static,
+                              null, new[] { typeof(string), typeof(string) }, null);
+        m?.Invoke(null, new object[] { "MyMod", "1.0.0" });
+        break;
+    }
+}
+catch { }
+```
 
 ---
 
