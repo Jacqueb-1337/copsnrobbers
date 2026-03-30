@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.24.0",
+      "latestVersion": "1.25.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.25.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.25.0.dll",
+          "changelog": "Fix grey frames root cause: MediaCodec.configure/start on the Unity GL thread steals the EGL context, making subsequent ReadPixels read grey. Fix: run all codec init (configure, start, muxer create, prime drain) on a background thread via System.Threading.Thread + AndroidJNI.AttachCurrentThread. WaitForEndOfFrame + ReadPixels stays on Unity main thread. Frame coroutine skips until _codecReady is set by the background thread. _encodingFrame guard prevents coroutine pileup."
+        },
         {
           "version": "1.24.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.24.0.dll",
