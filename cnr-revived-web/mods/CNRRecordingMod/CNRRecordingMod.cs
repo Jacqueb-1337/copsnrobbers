@@ -38,7 +38,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.34.0";
+        public  const string Version = "1.35.0";
 
         private static bool _loaded = false;
 
@@ -192,6 +192,23 @@ namespace CNRRecordingMod
             RecordingModEntry.Log("RecordingHook.Awake()");
             try { Directory.CreateDirectory(RecordingsDir); RecordingModEntry.Log("  recordings dir OK"); }
             catch (Exception ex) { RecordingModEntry.Log("  CreateDirectory error: " + ex.Message); }
+            // Auto-record 5 seconds immediately on load for diagnostics:
+            // if pixels are grey here (main menu, no Kamcord active) then the problem
+            // is not Kamcord at all and we need a different approach.
+            StartCoroutine(AutoRecordDiagnostic());
+        }
+
+        private IEnumerator AutoRecordDiagnostic()
+        {
+            yield return new WaitForSeconds(1f); // let scene finish initialising
+            RecordingModEntry.Log("AutoRecord: starting 5s diagnostic capture (scene=" + Application.loadedLevelName + ")");
+            StartCapture();
+            yield return new WaitForSeconds(5f);
+            if (IsCapturing)
+            {
+                RecordingModEntry.Log("AutoRecord: stopping");
+                StopCapture();
+            }
         }
 
         private void OnLevelWasLoaded(int level)
