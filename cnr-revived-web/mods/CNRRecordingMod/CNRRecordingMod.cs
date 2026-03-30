@@ -1,4 +1,4 @@
-// CNRRecordingMod.cs GÇö screenshot-based in-game recording for Cops N Robbers
+// CNRRecordingMod.cs Gï¿½ï¿½ screenshot-based in-game recording for Cops N Robbers
 //
 // HOW IT WORKS
 //   The original game used a third-party SDK called Kamcord (dead since 2016).
@@ -13,9 +13,9 @@
 //     recording.meta  (frames, fps, scale, date)
 //
 // CONSTANTS
-//   CaptureFps   GÇö frames captured per second (default 5)
-//   CaptureScale GÇö downscale factor applied before PNG encode (default 0.5)
-//                  At 0.5x and 5fps a 720p screen Gëê 1 MB/s (~60 MB/min).
+//   CaptureFps   Gï¿½ï¿½ frames captured per second (default 5)
+//   CaptureScale Gï¿½ï¿½ downscale factor applied before PNG encode (default 0.5)
+//                  At 0.5x and 5fps a 720p screen Gï¿½ï¿½ 1 MB/s (~60 MB/min).
 //
 // ENTRY POINT
 //   CNRRecordingMod.RecordingModEntry.Load()
@@ -32,9 +32,9 @@ using UnityEngine;
 
 namespace CNRRecordingMod
 {
-    // GöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇ
-    //  Entry point GÇö CNRMod DLL scanner calls the first public static Load()
-    // GöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇ
+    // Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½
+    //  Entry point Gï¿½ï¿½ CNRMod DLL scanner calls the first public static Load()
+    // Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
@@ -98,15 +98,15 @@ namespace CNRRecordingMod
         }
     }
 
-    // GöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇ
+    // Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½
     //  Kamcord.Implementation replacement
     //
     //  Injected into Kamcord.implementation_ (private static) so that all calls
-    //  through VideoRecordController GåÆ Kamcord.* GåÆ implementation().* reach us.
+    //  through VideoRecordController Gï¿½ï¿½ Kamcord.* Gï¿½ï¿½ implementation().* reach us.
     //  Because Kamcord.Implementation is a public class its virtual methods are
     //  overridable from another assembly; we just need Assembly-CSharp-firstpass
     //  in the compile references (handled in build_mod.ps1).
-    // GöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇ
+    // Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½
     internal class RecordingKamcordImpl : Kamcord.Implementation
     {
         private readonly RecordingHook _hook;
@@ -124,10 +124,10 @@ namespace CNRRecordingMod
         public override void ShowWatchView()  { _hook.OpenViewer(); }
     }
 
-    // GöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇ
+    // Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½
     //  MonoBehaviour: lives for the whole session (DontDestroyOnLoad)
     //  Handles frame capture and the IMGUI recordings viewer.
-    // GöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇGöÇ
+    // Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½Gï¿½ï¿½
     public class RecordingHook : MonoBehaviour
     {
         // Phase 1: capture raw NV12 frames to disk (no MediaCodec, no EGL interference)
@@ -156,8 +156,10 @@ namespace CNRRecordingMod
         private Texture2D _readTex;
         private int       _scrW, _scrH;
         private byte[]    _nv12Buf;       // pre-allocated NV12 scratch for Phase 1 writes
-        private int       _encStride = (VideoWidth  + 15) & ~15;
-        private int       _encSliceH = (VideoHeight + 15) & ~15;
+        // Tightly packed NV12 â€” no alignment padding in capture files.
+        // EncodeThread reads the real encoder stride via getInputFormat and re-strides.
+        private const int CaptureStride = VideoWidth;   // 854, no padding
+        private const int CaptureSliceH = VideoHeight;  // 480
 
         // Phase 2 state (background encode thread)
         private string    _encodeOutputPath;
@@ -223,7 +225,7 @@ namespace CNRRecordingMod
                 _readTex = new Texture2D(scrW, scrH, TextureFormat.RGBA32, false);
             _scrW = scrW; _scrH = scrH;
 
-            int nv12Size = _encStride * _encSliceH * 3 / 2;
+            int nv12Size = CaptureStride * CaptureSliceH * 3 / 2;
             if (_nv12Buf == null || _nv12Buf.Length != nv12Size)
                 _nv12Buf = new byte[nv12Size];
 
@@ -231,7 +233,7 @@ namespace CNRRecordingMod
             RecordingModEntry.Log("StartCapture: session=" + timestamp
                 + " scrn=" + scrW + "x" + scrH
                 + " enc=" + VideoWidth + "x" + VideoHeight + "@" + VideoFps
-                + " stride=" + _encStride + " sliceH=" + _encSliceH);
+                + " captureStride=" + CaptureStride + " captureSliceH=" + CaptureSliceH);
         }
 
         public void StopCapture()
@@ -294,10 +296,10 @@ namespace CNRRecordingMod
                         + " pBR=(" + pBR.r + "," + pBR.g + "," + pBR.b + ")");
                 }
 
-                // Convert RGBA -> NV12 into _nv12Buf
+                // Convert RGBA -> NV12 into _nv12Buf (tightly packed, stride=VideoWidth)
                 for (int i = 0; i < _nv12Buf.Length; i++) _nv12Buf[i] = 128;
                 int yBase  = 0;
-                int uvBase = _encStride * _encSliceH;
+                int uvBase = CaptureStride * CaptureSliceH;
                 for (int row = 0; row < VideoHeight; row++)
                 {
                     int srcRow = ((VideoHeight - 1 - row) * _scrH) / VideoHeight;
@@ -307,12 +309,12 @@ namespace CNRRecordingMod
                         Color32 c  = px[srcRow * texW + srcCol];
                         int R = c.r, G = c.g, B = c.b;
                         int Y  = ((66 * R + 129 * G +  25 * B + 128) >> 8) + 16;
-                        _nv12Buf[yBase + row * _encStride + col] = (byte)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
+                        _nv12Buf[yBase + row * CaptureStride + col] = (byte)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
                         if ((row & 1) == 0 && (col & 1) == 0)
                         {
                             int U = ((-38 * R -  74 * G + 112 * B + 128) >> 8) + 128;
                             int V = ((112 * R -  94 * G -  18 * B + 128) >> 8) + 128;
-                            int off = uvBase + (row / 2) * _encStride + col;
+                            int off = uvBase + (row / 2) * CaptureStride + col;
                             _nv12Buf[off]     = (byte)(U < 0 ? 0 : U > 255 ? 255 : U);
                             _nv12Buf[off + 1] = (byte)(V < 0 ? 0 : V > 255 ? 255 : V);
                         }
@@ -357,7 +359,7 @@ namespace CNRRecordingMod
                 codec.Call("start");
                 RecordingModEntry.Log("  codec.start OK");
 
-                int stride = _encStride, sliceH = _encSliceH;
+                int stride = CaptureStride, sliceH = CaptureSliceH;
                 try
                 {
                     var inFmt = codec.Call<AndroidJavaObject>("getInputFormat");
@@ -373,9 +375,13 @@ namespace CNRRecordingMod
                 int  videoTrackIdx = -1;
                 long ptsUsec       = 0;
 
-                int nv12Size = stride * sliceH * 3 / 2;
+                int encBufSize = stride * sliceH * 3 / 2;
                 var bufCls  = AndroidJNI.FindClass("java/nio/Buffer");
                 var fidAddr = AndroidJNI.GetFieldID(bufCls, "address", "J");
+
+                // Pre-allocate a re-stride buffer if encoder stride differs from capture stride
+                byte[] strideBuf = (stride != CaptureStride || sliceH != CaptureSliceH)
+                    ? new byte[encBufSize] : null;
 
                 for (int f = 0; f < _capturedFrames; f++)
                 {
@@ -387,8 +393,43 @@ namespace CNRRecordingMod
                         continue;
                     }
                     byte[] nv12 = File.ReadAllBytes(framePath);
-                    if (f < 3) RecordingModEntry.Log("  encoding frame " + f + " (" + nv12.Length + " bytes)"
-                        + " Y[0]=" + nv12[0] + " UV=(" + nv12[stride * sliceH] + "," + nv12[stride * sliceH + 1] + ")");
+
+                    // Re-stride: expand tightly-packed capture rows to encoder-expected stride
+                    byte[] feedBuf;
+                    if (strideBuf != null)
+                    {
+                        // Fill UV plane with neutral (128); Y plane with 0 (black for any uncovered rows)
+                        System.Array.Clear(strideBuf, 0, encBufSize);
+                        int uvDst = stride * sliceH;
+                        for (int i = uvDst; i < encBufSize; i++) strideBuf[i] = 128;
+                        // Copy Y rows
+                        for (int row = 0; row < VideoHeight; row++)
+                        {
+                            int src = row * CaptureStride;
+                            int dst = row * stride;
+                            if (src + VideoWidth <= nv12.Length)
+                                Buffer.BlockCopy(nv12, src, strideBuf, dst, VideoWidth);
+                        }
+                        // Copy UV rows
+                        int uvSrc = CaptureStride * CaptureSliceH;
+                        for (int row = 0; row < VideoHeight / 2; row++)
+                        {
+                            int src = uvSrc + row * CaptureStride;
+                            int dst = uvDst + row * stride;
+                            if (src + VideoWidth <= nv12.Length)
+                                Buffer.BlockCopy(nv12, src, strideBuf, dst, VideoWidth);
+                        }
+                        feedBuf = strideBuf;
+                    }
+                    else
+                    {
+                        feedBuf = nv12;
+                    }
+
+                    if (f < 3) RecordingModEntry.Log("  encoding frame " + f
+                        + " captureLen=" + nv12.Length + " feedLen=" + feedBuf.Length
+                        + " Y[0]=" + feedBuf[0]
+                        + " UV=(" + feedBuf[stride * sliceH] + "," + feedBuf[stride * sliceH + 1] + ")");
 
                     ptsUsec += (long)(1000000L / VideoFps);
 
@@ -398,9 +439,9 @@ namespace CNRRecordingMod
                         var rawBufs  = codec.Call<AndroidJavaObject[]>("getInputBuffers");
                         var rawBuf   = rawBufs[inIdx];
                         int bufCap   = rawBuf.Call<int>("capacity");
-                        int putLen   = System.Math.Min(bufCap, nv12.Length);
+                        int putLen   = System.Math.Min(bufCap, feedBuf.Length);
                         long nAddr   = AndroidJNI.GetLongField(rawBuf.GetRawObject(), fidAddr);
-                        Marshal.Copy(nv12, 0, new IntPtr(nAddr), putLen);
+                        Marshal.Copy(feedBuf, 0, new IntPtr(nAddr), putLen);
                         codec.Call("queueInputBuffer", inIdx, 0, putLen, ptsUsec, 0);
                     }
 
