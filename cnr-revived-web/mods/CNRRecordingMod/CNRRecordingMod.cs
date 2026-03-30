@@ -38,7 +38,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.31.0";
+        public  const string Version = "1.32.0";
 
         private static bool _loaded = false;
 
@@ -201,29 +201,44 @@ namespace CNRRecordingMod
 
         private IEnumerator HookRecordButton()
         {
-            // Wait a frame for the scene's GameObjects to be fully active.
-            yield return new WaitForSeconds(0.1f);
-            MonoBehaviour[] all = (MonoBehaviour[])(object)Resources.FindObjectsOfTypeAll(typeof(MonoBehaviour));
+            // Retry for up to 5 seconds — the HUD spawns asynchronously after scene load.
             int hooked = 0;
-            foreach (MonoBehaviour mb in all)
+            float waited = 0f;
+            while (hooked == 0 && waited < 5f)
             {
-                if (mb.GetType().Name != "UIButtonEventKit") continue;
-                FieldInfo fi = mb.GetType().GetField("buttonName",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (fi == null) continue;
-                // RecordBtnInGame == 22 in the ButtonName enum
-                int val = (int)(object)fi.GetValue(mb);
-                if (val != 22) continue;
-                // Disable the original handler so it can't call VideoRecordController / Kamcord
-                ((Behaviour)mb).enabled = false;
-                RecordBtnClick proxy = ((Component)mb).gameObject.GetComponent<RecordBtnClick>()
-                    ?? ((Component)mb).gameObject.AddComponent<RecordBtnClick>();
-                proxy.hook = this;
-                hooked++;
-                RecordingModEntry.Log("HookRecordButton: hooked " + ((Component)mb).gameObject.name);
+                yield return new WaitForSeconds(0.25f);
+                waited += 0.25f;
+                MonoBehaviour[] all = (MonoBehaviour[])(object)Resources.FindObjectsOfTypeAll(typeof(MonoBehaviour));
+                // Log all UIButtonEventKit values once so we can verify the names on device.
+                if (waited <= 0.26f)
+                {
+                    foreach (MonoBehaviour mb in all)
+                    {
+                        if (mb.GetType().Name != "UIButtonEventKit") continue;
+                        FieldInfo fi = mb.GetType().GetField("buttonName",
+                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (fi == null) continue;
+                        RecordingModEntry.Log("  btn: " + fi.GetValue(mb) + " go=" + ((Component)mb).gameObject.name);
+                    }
+                }
+                foreach (MonoBehaviour mb in all)
+                {
+                    if (mb.GetType().Name != "UIButtonEventKit") continue;
+                    FieldInfo fi = mb.GetType().GetField("buttonName",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (fi == null) continue;
+                    // Compare by enum name — robust against enum integer value changes.
+                    if (fi.GetValue(mb).ToString() != "RecordBtnInGame") continue;
+                    ((Behaviour)mb).enabled = false;
+                    RecordBtnClick proxy = ((Component)mb).gameObject.GetComponent<RecordBtnClick>()
+                        ?? ((Component)mb).gameObject.AddComponent<RecordBtnClick>();
+                    proxy.hook = this;
+                    hooked++;
+                    RecordingModEntry.Log("HookRecordButton: hooked " + ((Component)mb).gameObject.name);
+                }
             }
             if (hooked == 0)
-                RecordingModEntry.Log("HookRecordButton: no RecordBtnInGame buttons found in " + Application.loadedLevelName);
+                RecordingModEntry.Log("HookRecordButton: no RecordBtnInGame buttons found after " + waited + "s in " + Application.loadedLevelName);
             _btnHooked = hooked > 0;
         }
 
