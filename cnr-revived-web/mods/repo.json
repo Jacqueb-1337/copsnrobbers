@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.11.0",
+      "latestVersion": "1.12.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.12.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.12.0.dll",
+          "changelog": "Diagnostic + fix attempt for green frames: (1) Switched encoder to COLOR_FormatYUV420SemiPlanar/21 (concrete NV12 format) - on Android SDK 36, COLOR_FormatYUV420Flexible getInputBuffer() may return a stub buffer not backed by real encoder memory. (2) Added Buffer.rewind() before ByteBuffer.put so position is guaranteed 0. (3) Added Buffer.position() log before and after put - posAfter=0 means write silently failed (buffer stays zeroed = green), posAfter=putLen means write worked. (4) Logs NV12 Y[0] and UV[0,1] values to confirm conversion output."
+        },
         {
           "version": "1.11.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.11.0.dll",
