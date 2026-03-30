@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.8.0",
+      "latestVersion": "1.9.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.9.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.9.0.dll",
+          "changelog": "Fixed 0-byte MP4s: queueInputBuffer was throwing IllegalArgumentException (offset=0 size=645120 cap=645078) because getInputFormat() reported stride=896 giving 645120 bytes but the encoder's actual ByteBuffer capacity is slightly less. Now queries real capacity via raw JNI on Buffer.capacity() and clamps both the ByteBuffer.put array and queueInputBuffer size to that value. The 42-byte difference is end-of-UV-plane padding which the encoder ignores."
+        },
         {
           "version": "1.8.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.8.0.dll",
