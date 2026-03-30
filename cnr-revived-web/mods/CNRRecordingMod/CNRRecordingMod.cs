@@ -38,7 +38,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.26.0";
+        public  const string Version = "1.29.0";
 
         private static bool _loaded = false;
 
@@ -279,11 +279,15 @@ namespace CNRRecordingMod
 
             try
             {
-                // Do NOT set RenderTexture.active = null here.
-                // The game renders into a RenderTexture (Kamcord path); at WaitForEndOfFrame
-                // that RT is the active target. Resetting to null would make ReadPixels read
-                // the raw backbuffer which is blank on this device.
+                // At WaitForEndOfFrame, kamcordPostCamera has already blitted the pbuffer
+                // to the EGL window surface.  Read from the window surface (active=null).
+                // Log whatever RT was active so we can diagnose if something else is bound.
+                var rtBefore = RenderTexture.active;
+                if (verbose) RecordingModEntry.Log("  RT.active before null: "
+                    + (rtBefore == null ? "null" : rtBefore.name + " " + rtBefore.width + "x" + rtBefore.height));
+                RenderTexture.active = null;
                 _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
+                RenderTexture.active = rtBefore; // restore
                 _readTex.Apply(false);
 
                 Color32[] px = _readTex.GetPixels32();
@@ -361,6 +365,26 @@ namespace CNRRecordingMod
                 codec.Call("configure", mediaFmt, null, null, 1);
                 codec.Call("start");
                 RecordingModEntry.Log("  codec.start OK");
+                // Query which color formats this device's encoder actually supports.
+                try
+                {
+                    var mcInfo = new AndroidJavaClass("android.media.MediaCodecInfo");
+                    var mcList = new AndroidJavaClass("android.media.MediaCodecList");
+                    var infos  = mcList.CallStatic<AndroidJavaObject[]>("getCodecs");
+                    foreach (var info in infos)
+                    {
+                        if (!info.Call<bool>("isEncoder")) continue;
+                        string name = info.Call<string>("getName");
+                        if (!name.ToLower().Contains("avc")) continue;
+                        var caps  = info.Call<AndroidJavaObject>("getCapabilitiesForType", "video/avc");
+                        int[] fmts = caps.Get<int[]>("colorFormats");
+                        string s = "";
+                        foreach (int f in fmts) s += f + " ";
+                        RecordingModEntry.Log("  encoder " + name + " colorFormats: " + s.Trim());
+                        break; // only log first AVC encoder
+                    }
+                }
+                catch (Exception ex) { RecordingModEntry.Log("  colorFormat query: " + ex.Message); }
 
                 int stride = CaptureStride, sliceH = CaptureSliceH;
                 try
