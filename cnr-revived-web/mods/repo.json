@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.28.0",
+      "latestVersion": "1.29.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.29.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.29.0.dll",
+          "changelog": "Fix version string stuck at 1.26.0 in log (RecordingModEntry.Version const was never bumped). Restore RenderTexture.active=null before ReadPixels - confirmed correct per v1.22.0: at WaitForEndOfFrame, kamcordPostCamera has already blitted the pbuffer to the EGL window surface; we must read from there. Log which RT was active before nulling it. Query and log the AVC encoder's reported colorFormats so we can confirm what format is actually expected. Yes it expects NV12 YUV (format 21) - the v1.26.0 diagonal grid proved data was flowing through correctly."
+        },
         {
           "version": "1.28.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.28.0.dll",
