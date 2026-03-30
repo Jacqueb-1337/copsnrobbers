@@ -5,15 +5,20 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.7.0",
+      "latestVersion": "1.8.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
         {
+          "version": "1.8.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.8.0.dll",
+          "changelog": "Fixed crash on record: dropped getInputImage JNI approach (raw AndroidJNI calls on null pointers cause fatal JVM crashes uncatchable by C# try/catch). Reverted to proven getInputBuffer+ByteBuffer.put path. Fixed green frames: query actual encoder row stride from getInputFormat() after codec.start() (typically 864 for 854px due to 16-byte alignment) and write NV12 with correct stride offsets so UV lands at encStride*encSliceH not width*height. Also fixed initialization order bug: muxer and bufferInfo are now created before the prime drain loop so FORMAT_CHANGED can be handled correctly during priming."
+        },
+        {
           "version": "1.7.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.7.0.dll",
-          "changelog": "Fixed green frames: switched from getInputBuffer+ByteBuffer.put to getInputImage+Image.Plane JNI. The root cause was that COLOR_FormatYUV420Flexible encoders use a row stride aligned to 16 (e.g. 864 for 854px width), so UV data written at offset width*height was misread at rowStride*height — the gap was zero-filled giving U=0,V=0 (green). getInputImage exposes actual plane strides so we write Y and UV at the correct offsets. Handles both interleaved NV12/NV21 (uvPixelStride=2) and planar I420 (uvPixelStride=1)."
+          "changelog": "Attempted fix: switched to getInputImage+Image.Plane JNI to read actual encoder strides. Caused immediate crash on record button press because raw AndroidJNI calls (GetObjectArrayElement etc.) are fatal when any intermediate pointer is null — not catchable by C# exceptions."
         },
         {
           "version": "1.6.0",
