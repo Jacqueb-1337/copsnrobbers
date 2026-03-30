@@ -19,7 +19,10 @@
 //
 // ENTRY POINT
 //   CNRRecordingMod.RecordingModEntry.Load()
-//   Called automatically by CNRMod's LoadExternalMods() scanner.
+//   Chain: MainMenuDirector.Awake() -> MainMenuDirector.LoadMods() finds CNRMods.ModEntry (CNRMod.dll)
+//          -> CNRMod.LoadExternalMods() scans /sdcard/CNRMods/*.dll for the first public static Load()
+//          -> RecordingModEntry.Load() is found and called automatically.
+//   No patching or subclassing of game classes required.
 
 using System;
 using System.Collections;
