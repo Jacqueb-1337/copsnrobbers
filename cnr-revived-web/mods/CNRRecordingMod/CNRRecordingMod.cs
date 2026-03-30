@@ -14,7 +14,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.17.0";
+        public  const string Version = "1.18.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -118,12 +118,25 @@ namespace CNRRecordingMod
         {
             internal Texture2D Tex;
             internal bool      Ready;
-            void OnPostRender()
+            internal int       CapW, CapH; // actual captured dimensions
+            // OnRenderImage fires with src = the real render target (Kamcord pbuffer),
+            // bypassing the grey EGL window surface that ReadPixels/OnPostRender always reads.
+            void OnRenderImage(RenderTexture src, RenderTexture dst)
             {
-                if (Tex == null) return;
-                Tex.ReadPixels(new Rect(0, 0, Screen.width, Screen.height), 0, 0, false);
-                Tex.Apply(false);
-                Ready = true;
+                if (Tex != null && !Ready)
+                {
+                    int rw = System.Math.Min(src.width,  Tex.width);
+                    int rh = System.Math.Min(src.height, Tex.height);
+                    RenderTexture prev = RenderTexture.active;
+                    RenderTexture.active = src;
+                    Tex.ReadPixels(new Rect(0, 0, rw, rh), 0, 0, false);
+                    Tex.Apply(false);
+                    RenderTexture.active = prev;
+                    CapW  = rw;
+                    CapH  = rh;
+                    Ready = true;
+                }
+                UnityEngine.Graphics.Blit(src, dst); // required pass-through
             }
         }
         private FrameGrabber  _grabber;
@@ -409,9 +422,11 @@ namespace CNRRecordingMod
                 }
 
                 Color32[] px = _readTex.GetPixels32();
+                int capW = (_grabber != null) ? _grabber.CapW : _scrW;
+                int capH = (_grabber != null) ? _grabber.CapH : _scrH;
                 if (verbose)
                 {
-                    Color32 pMid = px[(_scrH / 2) * _scrW + _scrW / 2];
+                    Color32 pMid = px[(capH / 2) * capW + capW / 2];
                     RecordingModEntry.Log("  GetPixels32 len=" + px.Length
                         + " px[scrC]=(" + pMid.r + "," + pMid.g + "," + pMid.b + ")");
                 }
@@ -425,11 +440,11 @@ namespace CNRRecordingMod
                 for (int row = 0; row < VideoHeight; row++)
                 {
                     // nearest-neighbour scale: map output row/col to source pixel
-                    int srcRow = ((VideoHeight - 1 - row) * _scrH) / VideoHeight;
+                    int srcRow = ((VideoHeight - 1 - row) * capH) / VideoHeight;
                     for (int col = 0; col < VideoWidth; col++)
                     {
-                        int srcCol = (col * _scrW) / VideoWidth;
-                        Color32 c = px[srcRow * _scrW + srcCol];
+                        int srcCol = (col * capW) / VideoWidth;
+                        Color32 c = px[srcRow * capW + srcCol];
                         int R = c.r, G = c.g, B = c.b;
                         int Y = ((66 * R + 129 * G + 25 * B + 128) >> 8) + 16;
                         _yuvBuf[_yBase + row * _encStride + col] = (byte)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
