@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.14.0",
+      "latestVersion": "1.15.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.15.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.15.0.dll",
+          "changelog": "Fix grey/white frames: ReadPixels after WaitForEndOfFrame reads undefined content on Android because the GLES back buffer has already been submitted to the display by that point. Fix: attach a FrameGrabber MonoBehaviour to Camera.main that captures pixels in OnPostRender, which fires before the buffer swap while the rendered frame is still live. The encode coroutine still yields WaitForEndOfFrame (OnPostRender has already fired by then) and reads the pixels captured by the grabber."
+        },
         {
           "version": "1.14.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.14.0.dll",
