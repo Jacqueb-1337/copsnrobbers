@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.10.0",
+      "latestVersion": "1.11.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.11.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.11.0.dll",
+          "changelog": "Fix green frames: capture full screen (Screen.width x Screen.height) into ReadPixels texture instead of a fixed 854x480 sub-rect. Scale down to 854x480 using nearest-neighbour integer mapping during the RGB-to-NV12 conversion loop, so the entire game viewport is encoded regardless of device screen resolution."
+        },
         {
           "version": "1.10.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.10.0.dll",
