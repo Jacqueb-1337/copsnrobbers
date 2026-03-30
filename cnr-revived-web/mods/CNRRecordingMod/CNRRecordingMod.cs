@@ -14,7 +14,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.19.0";
+        public  const string Version = "1.20.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -114,6 +114,35 @@ namespace CNRRecordingMod
         // Captures one frame per camera render in OnPostRender (before GLES back-buffer swap).
         // WaitForEndOfFrame fires AFTER the swap so ReadPixels from the coroutine reads undefined
         // (grey/black) content on Android. OnPostRender fires while the rendered frame is still live.
+        // Captures one PNG per camera on first fire, then removes itself.
+        private class DiagGrabber : MonoBehaviour
+        {
+            internal string SavePath;
+            void OnRenderImage(RenderTexture src, RenderTexture dst)
+            {
+                UnityEngine.Graphics.Blit(src, dst);
+                if (SavePath == null) return;
+                string path = SavePath;
+                SavePath = null;
+                if (src == null || src.width <= 0 || src.height <= 0) { Destroy(this); return; }
+                try
+                {
+                    var tex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false);
+                    RenderTexture prev = RenderTexture.active;
+                    RenderTexture.active = src;
+                    tex.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0, false);
+                    tex.Apply(false);
+                    RenderTexture.active = prev;
+                    byte[] png = tex.EncodeToPNG();
+                    Destroy(tex);
+                    System.IO.File.WriteAllBytes(path, png);
+                    RecordingModEntry.Log("  DiagShot: " + path + " (" + src.width + "x" + src.height + ")");
+                }
+                catch (Exception ex) { RecordingModEntry.Log("  DiagShot ERR " + name + ": " + ex.Message); }
+                Destroy(this);
+            }
+        }
+
         private class FrameGrabber : MonoBehaviour
         {
             internal Texture2D Tex;
@@ -253,6 +282,16 @@ namespace CNRRecordingMod
                     RecordingModEntry.Log("  FrameGrabber attached to: " + captureFrom.name + " (depth=" + captureFrom.depth + ")");
                 }
                 else RecordingModEntry.Log("  WARNING: no suitable camera found");
+
+                // Attach a DiagGrabber to every camera: saves one PNG per camera on the first
+                // rendered frame so we can see which cameras have real content vs grey.
+                foreach (Camera c in Camera.allCameras)
+                {
+                    string safeName = c.name.Replace(' ', '_').Replace('/', '_').Replace('\\', '_');
+                    string diagPath = System.IO.Path.Combine(RecordingsDir, "diag_" + safeName + ".png");
+                    c.gameObject.AddComponent<DiagGrabber>().SavePath = diagPath;
+                    RecordingModEntry.Log("  DiagGrabber -> " + c.name);
+                }
 
 
                 // MediaFormat
