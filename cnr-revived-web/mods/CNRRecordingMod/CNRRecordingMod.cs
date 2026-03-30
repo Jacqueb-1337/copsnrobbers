@@ -38,7 +38,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.36.0";
+        public  const string Version = "1.37.0";
 
         private static bool _loaded = false;
 
@@ -157,9 +157,11 @@ namespace CNRRecordingMod
         private string        _sessionDir;
         private int           _capturedFrames;
         private bool          _encodingFrame;
-        private Texture2D     _readTex;
-        private int           _scrW, _scrH;
+        internal Texture2D     _readTex;
+        internal int           _scrW, _scrH;
         private byte[]        _nv12Buf;       // pre-allocated NV12 scratch for Phase 1 writes
+        private GameObject    _captureCamGo;  // depth-1000 no-render camera; OnPostRender fires before eglSwapBuffers
+        internal bool          _pixelsReady;   // set by CaptureCam.OnPostRender, consumed in CaptureFrameCoroutine
         // Tightly packed NV12 — no alignment padding in capture files.
         // EncodeThread reads the real encoder stride via getInputFormat and re-strides.
         private const int CaptureStride = VideoWidth;   // 854, no padding
@@ -262,6 +264,7 @@ namespace CNRRecordingMod
         private void OnDestroy()
         {
             if (IsCapturing) StopCapture();
+            if (_captureCamGo != null) { Destroy(_captureCamGo); _captureCamGo = null; }
             if (_readTex != null) { Destroy(_readTex); _readTex = null; }
         }
 
@@ -293,6 +296,34 @@ namespace CNRRecordingMod
             if (_nv12Buf == null || _nv12Buf.Length != nv12Size)
                 _nv12Buf = new byte[nv12Size];
 
+            // Create a depth-1000 camera that renders nothing.
+            // Its OnPostRender fires after ALL game cameras have composited into the backbuffer
+            // but BEFORE eglSwapBuffers — so ReadPixels there gets the full composited frame.
+            // (WaitForEndOfFrame fires AFTER eglSwapBuffers, so the backbuffer is already cleared.)
+            _pixelsReady = false;
+            if (_captureCamGo == null)
+            {
+                var camGo = new GameObject("__CNRCaptureCam__");
+                GameObject.DontDestroyOnLoad(camGo);
+                var capCam = camGo.AddComponent<Camera>();
+                capCam.depth = 1000f;
+                capCam.clearFlags = CameraClearFlags.Nothing;
+                capCam.cullingMask = 0;
+                var comp = camGo.AddComponent<CaptureCam>();
+                comp.hook = this;
+                _captureCamGo = camGo;
+                RecordingModEntry.Log("StartCapture: CaptureCam created (depth=1000)");
+            }
+            // Log camera depths so we can verify our camera is last
+            try
+            {
+                Camera[] cams = Camera.allCameras;
+                System.Array.Sort(cams, (a, b) => a.depth.CompareTo(b.depth));
+                string cs = "";
+                foreach (Camera c in cams) cs += c.name + "(d=" + c.depth + ") ";
+                RecordingModEntry.Log("  cameras: " + cs.Trim());
+            } catch { }
+
             IsCapturing = true;
             RecordingModEntry.Log("StartCapture: session=" + timestamp
                 + " scrn=" + scrW + "x" + scrH
@@ -304,6 +335,7 @@ namespace CNRRecordingMod
         {
             if (!IsCapturing) { RecordingModEntry.Log("StopCapture: not capturing"); return; }
             IsCapturing = false;
+            if (_captureCamGo != null) { Destroy(_captureCamGo); _captureCamGo = null; }
             RecordingModEntry.Log("StopCapture: " + _capturedFrames + " frames captured -> starting encode thread");
 
             // Spawn background encode thread now that capture is done.
@@ -343,13 +375,16 @@ namespace CNRRecordingMod
 
             try
             {
-                // Read the fully composited screen — WaitForEndOfFrame guarantees all cameras
-                // (including NGUI UI camera) have finished rendering to the framebuffer.
-                RenderTexture.active = null;
-                _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
-                _readTex.Apply(false);
+                // Pixels were read by CaptureCam.OnPostRender (before eglSwapBuffers).
+                // WaitForEndOfFrame fires after the swap, so _pixelsReady should be true here.
+                if (!_pixelsReady)
+                {
+                    if (verbose) RecordingModEntry.Log("  WARN: pixelsReady=false (CaptureCam.OnPostRender didn't fire)");
+                    _encodingFrame = false; yield break;
+                }
+                _pixelsReady = false;
 
-                // First-frame diagnostic: PNG lets us visually verify the readback without logcat.
+                // First-frame diagnostic PNG (reads CPU-side data from ReadPixels in OnPostRender)
                 if (_capturedFrames == 0)
                 {
                     try
@@ -690,6 +725,23 @@ namespace CNRRecordingMod
                 RefreshRecordings();
             if (_statusMsg != null)
                 GUI.Label(new Rect(110, h - btnH - 4, w - 114, btnH), _statusMsg);
+        }
+    }
+
+    // Depth-1000 no-render camera component.
+    // OnPostRender fires after all game cameras composite into the backbuffer,
+    // but BEFORE eglSwapBuffers — giving us the full composited frame to read.
+    internal class CaptureCam : MonoBehaviour
+    {
+        public RecordingHook hook;
+        private void OnPostRender()
+        {
+            if (hook == null || !hook.IsCapturing) return;
+            // Read the composited backbuffer now (before eglSwapBuffers clears it).
+            RenderTexture.active = null;
+            hook._readTex.ReadPixels(new Rect(0, 0, hook._scrW, hook._scrH), 0, 0, false);
+            RenderTexture.active = null;
+            hook._pixelsReady = true;
         }
     }
 
