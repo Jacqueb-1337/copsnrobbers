@@ -14,7 +14,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.15.0";
+        public  const string Version = "1.16.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -208,16 +208,27 @@ namespace CNRRecordingMod
                 }
                 _scrW = scrW; _scrH = scrH;
 
-                // Attach FrameGrabber to Camera.main so OnPostRender captures before buffer swap
+                // Attach FrameGrabber to the highest-depth camera that renders to screen.
+                // Camera.main (tagged "MainCamera") may not be the last camera — the 3D game
+                // scene is often rendered by a camera with a higher depth on top of it.
+                // OnPostRender fires per-camera in depth order; attaching to the deepest
+                // screen camera gives us the fully-composited frame before the buffer swap.
                 if (_grabber != null) { Destroy(_grabber); _grabber = null; }
-                Camera cam = Camera.main;
-                if (cam != null)
+                Camera bestCam = null;
+                foreach (Camera c in Camera.allCameras)
                 {
-                    _grabber = cam.gameObject.AddComponent<FrameGrabber>();
-                    _grabber.Tex = _readTex;
-                    RecordingModEntry.Log("  FrameGrabber attached to: " + cam.name);
+                    if (c.targetTexture != null) continue; // skip render-to-texture cameras
+                    if (bestCam == null || c.depth > bestCam.depth) bestCam = c;
+                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + " rt=" + (c.targetTexture != null ? c.targetTexture.name : "null") + " tag=" + c.tag);
                 }
-                else RecordingModEntry.Log("  WARNING: Camera.main is null");
+                if (bestCam == null) bestCam = Camera.main;
+                if (bestCam != null)
+                {
+                    _grabber = bestCam.gameObject.AddComponent<FrameGrabber>();
+                    _grabber.Tex = _readTex;
+                    RecordingModEntry.Log("  FrameGrabber attached to: " + bestCam.name + " (depth=" + bestCam.depth + ")");
+                }
+                else RecordingModEntry.Log("  WARNING: no suitable camera found");
 
 
                 // MediaFormat
