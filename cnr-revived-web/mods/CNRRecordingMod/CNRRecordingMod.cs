@@ -279,7 +279,10 @@ namespace CNRRecordingMod
 
             try
             {
-                RenderTexture.active = null;
+                // Do NOT set RenderTexture.active = null here.
+                // The game renders into a RenderTexture (Kamcord path); at WaitForEndOfFrame
+                // that RT is the active target. Resetting to null would make ReadPixels read
+                // the raw backbuffer which is blank on this device.
                 _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
                 _readTex.Apply(false);
 
@@ -436,8 +439,9 @@ namespace CNRRecordingMod
                     int inIdx = codec.Call<int>("dequeueInputBuffer", (long)100000);
                     if (inIdx >= 0)
                     {
-                        var rawBufs  = codec.Call<AndroidJavaObject[]>("getInputBuffers");
-                        var rawBuf   = rawBufs[inIdx];
+                        // getInputBuffer(idx) is the modern API 21+ single-buffer call.
+                        // getInputBuffers() is deprecated and may return detached buffers on API 36.
+                        var rawBuf   = codec.Call<AndroidJavaObject>("getInputBuffer", inIdx);
                         int bufCap   = rawBuf.Call<int>("capacity");
                         int putLen   = System.Math.Min(bufCap, feedBuf.Length);
                         long nAddr   = AndroidJNI.GetLongField(rawBuf.GetRawObject(), fidAddr);
@@ -467,8 +471,11 @@ namespace CNRRecordingMod
                         int size  = bufferInfo.Get<int>("size");
                         if ((flags & 2) == 0 && size > 0 && muxerStarted)
                         {
-                            var outBufs = codec.Call<AndroidJavaObject[]>("getOutputBuffers");
-                            muxer.Call("writeSampleData", videoTrackIdx, outBufs[outIdx], bufferInfo);
+                            // getOutputBuffer(idx) returns a properly-positioned ByteBuffer for
+                            // this specific frame. getOutputBuffers() array is deprecated API 21+
+                            // and on API 36 the buffers may be detached/invalid.
+                            var outBuf = codec.Call<AndroidJavaObject>("getOutputBuffer", outIdx);
+                            muxer.Call("writeSampleData", videoTrackIdx, outBuf, bufferInfo);
                         }
                         codec.Call("releaseOutputBuffer", outIdx, false);
                         if ((flags & 4) != 0) break;
@@ -490,11 +497,11 @@ namespace CNRRecordingMod
                     int size  = bufferInfo.Get<int>("size");
                     if ((flags & 2) == 0 && size > 0 && muxerStarted)
                     {
-                        var outBufs = codec.Call<AndroidJavaObject[]>("getOutputBuffers");
-                        muxer.Call("writeSampleData", videoTrackIdx, outBufs[outIdx], bufferInfo);
+                        var outBuf = codec.Call<AndroidJavaObject>("getOutputBuffer", outIdx);
+                        muxer.Call("writeSampleData", videoTrackIdx, outBuf, bufferInfo);
                     }
                     codec.Call("releaseOutputBuffer", outIdx, false);
-                    if ((flags & 4) != 0) break;
+                    if ((flags & 4) != 0) { RecordingModEntry.Log("  final drain: EOS flag seen"); break; }
                 }
 
                 if (muxerStarted) muxer.Call("stop");

@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.27.0",
+      "latestVersion": "1.28.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.28.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.28.0.dll",
+          "changelog": "Fix grey capture and invalid MP4. Grey fix: remove RenderTexture.active=null before ReadPixels - the game renders into a RenderTexture (Kamcord path) and that RT is the active target at WaitForEndOfFrame; resetting to null caused ReadPixels to read the blank raw backbuffer. MP4 fix: switch from deprecated getInputBuffers/getOutputBuffers (API 21 deprecated, broken on API 36) to single-buffer getInputBuffer(idx)/getOutputBuffer(idx) which return properly-positioned ByteBuffers."
+        },
         {
           "version": "1.27.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.27.0.dll",
