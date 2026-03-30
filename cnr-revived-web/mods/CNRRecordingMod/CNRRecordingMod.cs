@@ -38,7 +38,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.30.0";
+        public  const string Version = "1.31.0";
 
         private static bool _loaded = false;
 
@@ -176,27 +176,55 @@ namespace CNRRecordingMod
         private Vector2      _listScroll;
         private string       _statusMsg;
 
+        // Game scenes that have the in-game HUD (and the record button).
+        private static readonly string[] GameScenes = new string[]
+        {
+            "FreeRun3_1","FreeRun4_1","FreeRun5_1","FreeRun6_1","FreeRun7_1",
+            "FreeRun8_1","FreeRun9_1","FreeRun10_1","FreeRun11_1","FreeRun12_1",
+            "FreeRun13_1","FreeRun14_1","FreeRun15_1","CRScene1"
+        };
+        private bool _btnHooked = false;
+
         private void Awake()
         {
             RecordingModEntry.Log("RecordingHook.Awake()");
             try { Directory.CreateDirectory(RecordingsDir); RecordingModEntry.Log("  recordings dir OK"); }
             catch (Exception ex) { RecordingModEntry.Log("  CreateDirectory error: " + ex.Message); }
-            InjectKamcord();
         }
 
-        private void InjectKamcord()
+        private void OnLevelWasLoaded(int level)
         {
-            try
+            _btnHooked = false;
+            if (System.Array.IndexOf(GameScenes, Application.loadedLevelName) >= 0)
+                StartCoroutine(HookRecordButton());
+        }
+
+        private IEnumerator HookRecordButton()
+        {
+            // Wait a frame for the scene's GameObjects to be fully active.
+            yield return new WaitForSeconds(0.1f);
+            MonoBehaviour[] all = (MonoBehaviour[])(object)Resources.FindObjectsOfTypeAll(typeof(MonoBehaviour));
+            int hooked = 0;
+            foreach (MonoBehaviour mb in all)
             {
-                RecordingModEntry.Log("InjectKamcord: searching Kamcord.implementation_...");
-                FieldInfo fi = typeof(Kamcord).GetField("implementation_",
-                    BindingFlags.NonPublic | BindingFlags.Static);
-                if (fi == null) { RecordingModEntry.Log("  WARN: field not found"); return; }
-                RecordingModEntry.Log("  found, type=" + fi.FieldType.Name);
-                fi.SetValue(null, new RecordingKamcordImpl(this));
-                RecordingModEntry.Log("  injected OK");
+                if (mb.GetType().Name != "UIButtonEventKit") continue;
+                FieldInfo fi = mb.GetType().GetField("buttonName",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (fi == null) continue;
+                // RecordBtnInGame == 22 in the ButtonName enum
+                int val = (int)(object)fi.GetValue(mb);
+                if (val != 22) continue;
+                // Disable the original handler so it can't call VideoRecordController / Kamcord
+                ((Behaviour)mb).enabled = false;
+                RecordBtnClick proxy = ((Component)mb).gameObject.GetComponent<RecordBtnClick>()
+                    ?? ((Component)mb).gameObject.AddComponent<RecordBtnClick>();
+                proxy.hook = this;
+                hooked++;
+                RecordingModEntry.Log("HookRecordButton: hooked " + ((Component)mb).gameObject.name);
             }
-            catch (Exception ex) { RecordingModEntry.Log("InjectKamcord EXCEPTION: " + ex); }
+            if (hooked == 0)
+                RecordingModEntry.Log("HookRecordButton: no RecordBtnInGame buttons found in " + Application.loadedLevelName);
+            _btnHooked = hooked > 0;
         }
 
         private void OnDestroy()
@@ -578,8 +606,19 @@ namespace CNRRecordingMod
 
         private void OnGUI()
         {
-            if (!_viewerOpen) return;
-            _viewerRect = GUI.Window(0xCEC0, _viewerRect, DrawViewerWindow, "CNR Recordings");
+            // Status indicator (top-right). Read-only — start/stop come from the
+            // existing Kamcord "Start Recording" / "Stop Recording" OnGUI buttons.
+            if (IsCapturing || IsEncoding)
+            {
+                float bw = Screen.width  * 0.09f;
+                float bh = Screen.height * 0.06f;
+                GUI.Label(new Rect(Screen.width - bw - 8f, 8f, bw, bh),
+                    IsEncoding ? "[Encoding]" : "\u25cf REC");
+            }
+
+            // Recordings viewer overlay
+            if (_viewerOpen)
+                _viewerRect = GUI.Window(0xCEC0, _viewerRect, DrawViewerWindow, "CNR Recordings");
         }
 
         private void DrawViewerWindow(int id)
@@ -611,6 +650,57 @@ namespace CNRRecordingMod
                 RefreshRecordings();
             if (_statusMsg != null)
                 GUI.Label(new Rect(110, h - btnH - 4, w - 114, btnH), _statusMsg);
+        }
+    }
+
+    // Proxy component added to the RecordBtnInGame GameObject.
+    // Replaces the disabled UIButtonEventKit; NGUI calls OnClick() via SendMessage.
+    public class RecordBtnClick : MonoBehaviour
+    {
+        public RecordingHook hook;
+
+        private void OnClick()
+        {
+            if (hook == null) return;
+            if (hook.IsCapturing)
+            {
+                hook.StopCapture();
+                // Reset sprite back to "start" state
+                var imgBtn = GetComponent("UIImageButton");
+                if (imgBtn != null)
+                {
+                    var t = imgBtn.GetType();
+                    var f1 = t.GetField("normalSprite",  System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                    var f2 = t.GetField("hoverSprite",   System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                    var f3 = t.GetField("pressedSprite", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                    if (f1 != null) f1.SetValue(imgBtn, "VideoRecord_Start");
+                    if (f2 != null) f2.SetValue(imgBtn, "VideoRecord_Start");
+                    if (f3 != null) f3.SetValue(imgBtn, "VideoRecord_Start");
+                }
+                var sprite = GetComponentInChildren<UISprite>();
+                if (sprite != null) { sprite.spriteName = "VideoRecord_Start"; sprite.MarkAsChanged(); }
+                var label = GetComponentInChildren<UILabel>();
+                if (label != null) label.text = string.Empty;
+            }
+            else if (!hook.IsEncoding)
+            {
+                hook.StartCapture();
+                var imgBtn = GetComponent("UIImageButton");
+                if (imgBtn != null)
+                {
+                    var t = imgBtn.GetType();
+                    var f1 = t.GetField("normalSprite",  System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                    var f2 = t.GetField("hoverSprite",   System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                    var f3 = t.GetField("pressedSprite", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                    if (f1 != null) f1.SetValue(imgBtn, "VideoRecord_Stop");
+                    if (f2 != null) f2.SetValue(imgBtn, "VideoRecord_Stop");
+                    if (f3 != null) f3.SetValue(imgBtn, "VideoRecord_Stop");
+                }
+                var sprite = GetComponentInChildren<UISprite>();
+                if (sprite != null) { sprite.spriteName = "VideoRecord_Stop"; sprite.MarkAsChanged(); }
+                var label = GetComponentInChildren<UILabel>();
+                if (label != null) label.text = ".REC";
+            }
         }
     }
 }
