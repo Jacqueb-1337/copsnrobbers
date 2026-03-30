@@ -38,7 +38,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.32.0";
+        public  const string Version = "1.33.0";
 
         private static bool _loaded = false;
 
@@ -157,9 +157,10 @@ namespace CNRRecordingMod
         private string    _sessionDir;
         private int       _capturedFrames;
         private bool      _encodingFrame;
-        private Texture2D _readTex;
-        private int       _scrW, _scrH;
-        private byte[]    _nv12Buf;       // pre-allocated NV12 scratch for Phase 1 writes
+        private Texture2D     _readTex;
+        private RenderTexture _captureRT;  // Camera renders here — bypasses Kamcord's EGL redirect
+        private int           _scrW, _scrH;
+        private byte[]        _nv12Buf;    // pre-allocated NV12 scratch for Phase 1 writes
         // Tightly packed NV12 — no alignment padding in capture files.
         // EncodeThread reads the real encoder stride via getInputFormat and re-strides.
         private const int CaptureStride = VideoWidth;   // 854, no padding
@@ -245,7 +246,8 @@ namespace CNRRecordingMod
         private void OnDestroy()
         {
             if (IsCapturing) StopCapture();
-            if (_readTex != null) { Destroy(_readTex); _readTex = null; }
+            if (_readTex   != null) { Destroy(_readTex);   _readTex   = null; }
+            if (_captureRT != null) { Destroy(_captureRT); _captureRT = null; }
         }
 
         // -----------------------------------------------------------------------
@@ -270,6 +272,10 @@ namespace CNRRecordingMod
             { Destroy(_readTex); _readTex = null; }
             if (_readTex == null)
                 _readTex = new Texture2D(scrW, scrH, TextureFormat.RGBA32, false);
+            if (_captureRT != null && (_captureRT.width != scrW || _captureRT.height != scrH))
+            { Destroy(_captureRT); _captureRT = null; }
+            if (_captureRT == null)
+                _captureRT = new RenderTexture(scrW, scrH, 0, RenderTextureFormat.ARGB32);
             _scrW = scrW; _scrH = scrH;
 
             int nv12Size = CaptureStride * CaptureSliceH * 3 / 2;
@@ -326,15 +332,29 @@ namespace CNRRecordingMod
 
             try
             {
-                // At WaitForEndOfFrame, kamcordPostCamera has already blitted the pbuffer
-                // to the EGL window surface.  Read from the window surface (active=null).
-                // Log whatever RT was active so we can diagnose if something else is bound.
-                var rtBefore = RenderTexture.active;
-                if (verbose) RecordingModEntry.Log("  RT.active before null: "
-                    + (rtBefore == null ? "null" : rtBefore.name + " " + rtBefore.width + "x" + rtBefore.height));
-                RenderTexture.active = null;
-                _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
-                RenderTexture.active = rtBefore; // restore
+                // Kamcord's kamcordPreCamera clears the EGL window surface to grey every
+                // frame (active on this device regardless of recording state). Bypass it
+                // by rendering Camera.main directly to our own RenderTexture — Kamcord's
+                // EGL pbuffer redirect does not affect FBO-based RenderTextures.
+                Camera cam = Camera.main;
+                if (verbose) RecordingModEntry.Log("  cam=" + (cam != null ? cam.name + " depth=" + cam.depth : "null"));
+                if (cam != null && _captureRT != null)
+                {
+                    RenderTexture prevTarget = cam.targetTexture;
+                    cam.targetTexture = _captureRT;
+                    cam.Render();
+                    cam.targetTexture = prevTarget;
+                    RenderTexture.active = _captureRT;
+                    _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
+                    RenderTexture.active = null;
+                }
+                else
+                {
+                    // Fallback: read EGL surface directly (may be grey on this device)
+                    if (verbose) RecordingModEntry.Log("  WARN: falling back to EGL surface read");
+                    RenderTexture.active = null;
+                    _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
+                }
                 _readTex.Apply(false);
 
                 Color32[] px = _readTex.GetPixels32();
