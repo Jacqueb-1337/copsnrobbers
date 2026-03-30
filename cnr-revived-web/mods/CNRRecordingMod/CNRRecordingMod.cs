@@ -14,7 +14,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.22.0";
+        public  const string Version = "1.23.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -110,7 +110,27 @@ namespace CNRRecordingMod
         private sbyte[]       _sbyteTemp;  // Unity JNI maps Java byte -> C# sbyte
         private int           _encStride;  // actual encoder row stride (may be > VideoWidth due to alignment)
         private int           _encSliceH;  // actual encoder slice height
-        private List<Camera>  _disabledKamcordCams = new List<Camera>();
+
+        // OnPostRender grabber attached to kamcordPostCamera
+        private KamcordCapture _grabber;
+        private bool           _frameGrabbed;
+
+        // Captures one frame via OnPostRender on kamcordPostCamera.
+        // OnPostRender fires on the render thread BEFORE eglSwapBuffers, so the
+        // GL back buffer still contains Kamcord's native pbuffer blit.  WaitForEndOfFrame
+        // fires AFTER the swap (back buffer destroyed), so we must capture here instead.
+        private class KamcordCapture : MonoBehaviour
+        {
+            internal RecordingHook Hook;
+            void OnPostRender()
+            {
+                if (Hook == null || !Hook.IsCapturing || Hook._readTex == null) return;
+                RenderTexture.active = null;
+                Hook._readTex.ReadPixels(new Rect(0, 0, Hook._scrW, Hook._scrH), 0, 0, false);
+                Hook._readTex.Apply(false);
+                Hook._frameGrabbed = true;
+            }
+        }
 
         private int        _frameCount;
         private int        _drainLogCount;
@@ -191,19 +211,28 @@ namespace CNRRecordingMod
                 }
                 _scrW = scrW; _scrH = scrH;
 
-                // Log cameras and disable Kamcord's redirect cameras.
-                // kamcordPreCamera clears the screen to grey, then all game cameras render into
-                // Kamcord's native pbuffer (not the EGL display surface). kamcordPostCamera would
-                // blit that pbuffer to screen, but our no-op implementation means it never runs.
-                // Result: screen stays grey, ReadPixels always reads grey.
-                // Fix: disable both Kamcord cameras so game cameras render directly to the EGL
-                // display surface. ReadPixels after WaitForEndOfFrame then reads real game content.
-                _disabledKamcordCams.Clear();
+                // Attach OnPostRender grabber to kamcordPostCamera (depth=+MaxFloat, runs last).
+                // kamcordPostCamera's native component blits Kamcord's pbuffer to the GL back buffer.
+                // OnPostRender fires AFTER that blit but BEFORE eglSwapBuffers, so ReadPixels there
+                // reads real game content.  WaitForEndOfFrame fires after the swap when the back
+                // buffer is destroyed, which is why all previous WaitForEndOfFrame approaches got grey.
+                Camera kamcordPost = null;
+                _frameGrabbed = false;
                 foreach (Camera c in Camera.allCameras)
                 {
-                    bool isKamcord = c.name.IndexOf("kamcord", System.StringComparison.OrdinalIgnoreCase) >= 0;
-                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + (isKamcord ? " [disabling]" : ""));
-                    if (isKamcord) { c.enabled = false; _disabledKamcordCams.Add(c); }
+                    bool isPost = c.name.IndexOf("kamcordPostCamera", System.StringComparison.OrdinalIgnoreCase) >= 0;
+                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + (isPost ? " [grabber target]" : ""));
+                    if (isPost) kamcordPost = c;
+                }
+                if (kamcordPost != null)
+                {
+                    _grabber = kamcordPost.gameObject.AddComponent<KamcordCapture>();
+                    _grabber.Hook = this;
+                    RecordingModEntry.Log("  KamcordCapture attached to " + kamcordPost.name);
+                }
+                else
+                {
+                    RecordingModEntry.Log("  WARNING: kamcordPostCamera not found, falling back to WaitForEndOfFrame ReadPixels");
                 }
 
 
@@ -337,8 +366,7 @@ namespace CNRRecordingMod
             }
             catch (Exception ex) { RecordingModEntry.Log("  codec.release ERROR: " + ex.Message); }
             try { if (_bufferInfo != null) { _bufferInfo.Dispose(); _bufferInfo = null; } } catch { }
-            foreach (Camera c in _disabledKamcordCams) { if (c != null) c.enabled = true; }
-            _disabledKamcordCams.Clear();
+            if (_grabber != null) { Destroy(_grabber); _grabber = null; }
             _muxerStarted  = false;
             _videoTrackIdx = -1;
         }
@@ -360,25 +388,31 @@ namespace CNRRecordingMod
             bool verbose = (_frameCount < 5) || (_frameCount % 60 == 0);
             if (verbose) RecordingModEntry.Log("Frame " + _frameCount + " (screen=" + Screen.width + "x" + Screen.height + ")");
 
-            try
+            // If OnPostRender grabber fired this frame, _readTex already has pixels.
+            // Otherwise (no kamcordPostCamera found) fall back to direct ReadPixels.
+            if (!_frameGrabbed && _grabber == null)
             {
-                // With Kamcord cameras disabled, game cameras render to the EGL display surface.
-                // ReadPixels after WaitForEndOfFrame reads real game content.
                 RenderTexture.active = null;
                 _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
                 _readTex.Apply(false);
+            }
+            bool captured = _frameGrabbed || _grabber == null;
+            _frameGrabbed = false;
 
+            try
+            {
                 Color32[] px = _readTex.GetPixels32();
                 int texW = _readTex.width;
                 int capW = _scrW;
                 int capH = _scrH;
                 if (verbose)
                 {
+                    string src = _grabber != null ? (captured ? "OnPostRender" : "MISSED") : "fallback-ReadPixels";
                     // sample at center plus two corners to detect uniform grey vs. real content
                     Color32 pC  = px[(capH / 2) * texW + capW / 2];
                     Color32 pTL = px[System.Math.Max(0, capH - 1) * texW + 0];
                     Color32 pBR = px[0 * texW + System.Math.Max(0, capW - 1)];
-                    RecordingModEntry.Log("  GetPixels32 cap=" + capW + "x" + capH
+                    RecordingModEntry.Log("  GetPixels32 src=" + src + " cap=" + capW + "x" + capH
                         + " pC=(" + pC.r  + "," + pC.g  + "," + pC.b  + ")"
                         + " pTL=(" + pTL.r + "," + pTL.g + "," + pTL.b + ")"
                         + " pBR=(" + pBR.r + "," + pBR.g + "," + pBR.b + ")");
