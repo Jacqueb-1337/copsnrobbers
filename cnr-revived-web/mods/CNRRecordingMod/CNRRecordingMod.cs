@@ -14,7 +14,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.16.0";
+        public  const string Version = "1.17.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -218,8 +218,10 @@ namespace CNRRecordingMod
                 foreach (Camera c in Camera.allCameras)
                 {
                     if (c.targetTexture != null) continue; // skip render-to-texture cameras
+                    bool isKamcord = c.name.IndexOf("kamcord", System.StringComparison.OrdinalIgnoreCase) >= 0;
+                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + " rt=null tag=" + c.tag + (isKamcord ? " [kamcord,skip]" : ""));
+                    if (isKamcord) continue; // Kamcord pre/post cameras clear the framebuffer
                     if (bestCam == null || c.depth > bestCam.depth) bestCam = c;
-                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + " rt=" + (c.targetTexture != null ? c.targetTexture.name : "null") + " tag=" + c.tag);
                 }
                 if (bestCam == null) bestCam = Camera.main;
                 if (bestCam != null)
