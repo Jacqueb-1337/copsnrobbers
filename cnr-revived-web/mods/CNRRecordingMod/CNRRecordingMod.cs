@@ -38,7 +38,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.29.0";
+        public  const string Version = "1.30.0";
 
         private static bool _loaded = false;
 
@@ -117,7 +117,11 @@ namespace CNRRecordingMod
         }
 
         public override bool IsEnabled()      { return true; }
-        public override bool IsRecording()    { return _hook.IsCapturing; }
+        // Return false so Kamcord never activates its camera redirect (kamcordPreCamera
+        // clears the EGL surface to grey and pumps game cameras into a pbuffer; if we
+        // return true here that blit never reaches the screen and ReadPixels reads grey).
+        // Start/Stop buttons call StartRecording()/StopRecording() directly regardless.
+        public override bool IsRecording()    { return false; }
         public override void StartRecording() { _hook.StartCapture(); }
         public override void StopRecording()  { _hook.StopCapture(); }
         public override void ShowView()       { _hook.OpenViewer(); }
@@ -365,12 +369,13 @@ namespace CNRRecordingMod
                 codec.Call("configure", mediaFmt, null, null, 1);
                 codec.Call("start");
                 RecordingModEntry.Log("  codec.start OK");
-                // Query which color formats this device's encoder actually supports.
+                // Query which color formats this device's AVC encoder supports.
+                // API 21+ uses new MediaCodecList(int).getCodecInfos(); the old static
+                // getCodecs() was removed in later Android releases.
                 try
                 {
-                    var mcInfo = new AndroidJavaClass("android.media.MediaCodecInfo");
-                    var mcList = new AndroidJavaClass("android.media.MediaCodecList");
-                    var infos  = mcList.CallStatic<AndroidJavaObject[]>("getCodecs");
+                    var mcList = new AndroidJavaObject("android.media.MediaCodecList", 0 /*REGULAR_CODECS*/);
+                    var infos  = mcList.Call<AndroidJavaObject[]>("getCodecInfos");
                     foreach (var info in infos)
                     {
                         if (!info.Call<bool>("isEncoder")) continue;
@@ -381,7 +386,7 @@ namespace CNRRecordingMod
                         string s = "";
                         foreach (int f in fmts) s += f + " ";
                         RecordingModEntry.Log("  encoder " + name + " colorFormats: " + s.Trim());
-                        break; // only log first AVC encoder
+                        break;
                     }
                 }
                 catch (Exception ex) { RecordingModEntry.Log("  colorFormat query: " + ex.Message); }
