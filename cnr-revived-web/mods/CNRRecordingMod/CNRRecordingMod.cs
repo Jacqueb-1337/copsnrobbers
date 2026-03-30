@@ -6,6 +6,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using UnityEngine;
 
 namespace CNRRecordingMod
@@ -13,7 +14,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.13.0";
+        public  const string Version = "1.14.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -397,14 +398,19 @@ namespace CNRRecordingMod
                     yield break;
                 }
 
-                // 4. Write _yuvBuf into encoder ByteBuffer.
-                // Root cause of green frames: ConvertToJNIArray(sbyte[]) was producing null or a
-                // wrong-type array → put([B) threw a silent Java exception (res=null, posAfter=0).
-                // Fix: call put via AndroidJavaObject.Call<> instead of raw CallObjectMethod.
-                // ByteBuffer.put(byte[]) is defined DIRECTLY on ByteBuffer (not inherited from Buffer),
-                // so Unity 4.6's method resolution can find it — unlike clear/position/limit which are
-                // inherited and fail. Unity wraps Java exceptions as C# exceptions here, so we catch them.
-                // limit()+rewind() still need raw JNI since they ARE inherited from Buffer.
+                // 4. Write _yuvBuf into the encoder's native buffer memory.
+                //
+                // The core problem: Unity 4.6 cannot call ByteBuffer.put(byte[]) through
+                // ANY path:
+                //   - AndroidJavaObject.Call produces wrong JNI sig "([)Ljava/lang/Object;"
+                //     (sbyte[] maps to "[" not "[B") -> NoSuchMethodError
+                //   - Raw CallObjectMethod + ConvertToJNIArray -> silent Java exception
+                //     (res=null, posAfter=0) every frame
+                //
+                // Solution: DirectByteBuffer inherits java.nio.Buffer.address (a long field
+                // holding the native backing memory pointer). We read it via GetFieldID +
+                // GetLongField (JNI ignores Java access modifiers) then Marshal.Copy straight
+                // into that memory -- zero ByteBuffer API involved.
                 bool bufWritten = false;
                 int putLen = _yuvBuf.Length;
                 try
@@ -412,49 +418,31 @@ namespace CNRRecordingMod
                     var inBuf     = _codec.Call<AndroidJavaObject>("getInputBuffer", inIdx);
                     IntPtr rawBuf = inBuf.GetRawObject();
 
-                    // Inherited Buffer methods — must use raw JNI
                     IntPtr bufCls  = AndroidJNI.FindClass("java/nio/Buffer");
                     IntPtr midCap  = AndroidJNI.GetMethodID(bufCls, "capacity", "()I");
-                    IntPtr midLim  = AndroidJNI.GetMethodID(bufCls, "limit",    "(I)Ljava/nio/Buffer;");
-                    IntPtr midRew  = AndroidJNI.GetMethodID(bufCls, "rewind",   "()Ljava/nio/Buffer;");
-                    IntPtr midPos  = AndroidJNI.GetMethodID(bufCls, "position", "()I");
+                    IntPtr fidAddr = AndroidJNI.GetFieldID(bufCls,  "address",  "J");
                     AndroidJNI.DeleteLocalRef(bufCls);
 
                     int bufCap = AndroidJNI.CallIntMethod(rawBuf, midCap, new jvalue[0]);
                     putLen = bufCap < _yuvBuf.Length ? bufCap : _yuvBuf.Length;
 
-                    // Set limit=capacity then rewind to ensure remaining()=capacity before put
-                    jvalue[] limArgs = new jvalue[1]; limArgs[0].i = bufCap;
-                    IntPtr r1 = AndroidJNI.CallObjectMethod(rawBuf, midLim, limArgs);
-                    if (r1 != IntPtr.Zero) AndroidJNI.DeleteLocalRef(r1);
-                    IntPtr r2 = AndroidJNI.CallObjectMethod(rawBuf, midRew, new jvalue[0]);
-                    if (r2 != IntPtr.Zero) AndroidJNI.DeleteLocalRef(r2);
-                    if (verbose) RecordingModEntry.Log("  bufCap=" + bufCap + " yuvLen=" + _yuvBuf.Length);
+                    long nativeAddr = AndroidJNI.GetLongField(rawBuf, fidAddr);
+                    if (verbose) RecordingModEntry.Log("  bufCap=" + bufCap + " nativeAddr=0x" + nativeAddr.ToString("X16"));
 
-                    // Build sbyte[] (clamped to putLen)
-                    sbyte[] putArr;
-                    if (putLen == _yuvBuf.Length)
+                    if (nativeAddr != 0)
                     {
-                        Buffer.BlockCopy(_yuvBuf, 0, _sbyteTemp, 0, _yuvBuf.Length);
-                        putArr = _sbyteTemp;
+                        Marshal.Copy(_yuvBuf, 0, new IntPtr(nativeAddr), putLen);
+                        bufWritten = true;
+                        if (verbose) RecordingModEntry.Log("  Marshal.Copy OK (" + putLen + " bytes via Buffer.address)");
                     }
                     else
                     {
-                        putArr = new sbyte[putLen];
-                        Buffer.BlockCopy(_yuvBuf, 0, putArr, 0, putLen);
+                        RecordingModEntry.Log("  Buffer.address=0, not a DirectByteBuffer - no write");
                     }
-
-                    // Call put(byte[]) via AndroidJavaObject — defined on ByteBuffer directly so
-                    // Unity 4.6 resolves it; Java exceptions become C# exceptions here.
-                    inBuf.Call<AndroidJavaObject>("put", putArr);
-                    bufWritten = true;
-
-                    int posAfter = AndroidJNI.CallIntMethod(rawBuf, midPos, new jvalue[0]);
-                    if (verbose) RecordingModEntry.Log("  put OK posAfter=" + posAfter + " (expected " + putLen + ")");
                 }
                 catch (Exception ex)
                 {
-                    RecordingModEntry.Log("  ByteBuffer write FAILED: " + ex.Message);
+                    RecordingModEntry.Log("  buffer write FAILED: " + ex.Message);
                 }
 
                 // 5. Queue the input buffer back
