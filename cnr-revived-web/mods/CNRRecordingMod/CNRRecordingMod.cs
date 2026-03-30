@@ -14,7 +14,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.18.0";
+        public  const string Version = "1.19.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -118,12 +118,13 @@ namespace CNRRecordingMod
         {
             internal Texture2D Tex;
             internal bool      Ready;
-            internal int       CapW, CapH; // actual captured dimensions
-            // OnRenderImage fires with src = the real render target (Kamcord pbuffer),
-            // bypassing the grey EGL window surface that ReadPixels/OnPostRender always reads.
+            internal int       CapW, CapH; // populated region in Tex
+            internal int       SrcW = -1, SrcH = -1; // diagnostic: src RT dimensions
             void OnRenderImage(RenderTexture src, RenderTexture dst)
             {
-                if (Tex != null && !Ready)
+                SrcW = (src != null) ? src.width  : -1;
+                SrcH = (src != null) ? src.height : -1;
+                if (Tex != null && !Ready && src != null && src.width > 0 && src.height > 0)
                 {
                     int rw = System.Math.Min(src.width,  Tex.width);
                     int rh = System.Math.Min(src.height, Tex.height);
@@ -132,11 +133,11 @@ namespace CNRRecordingMod
                     Tex.ReadPixels(new Rect(0, 0, rw, rh), 0, 0, false);
                     Tex.Apply(false);
                     RenderTexture.active = prev;
-                    CapW  = rw;
-                    CapH  = rh;
-                    Ready = true;
+                    CapW = rw;
+                    CapH = rh;
                 }
-                UnityEngine.Graphics.Blit(src, dst); // required pass-through
+                Ready = true;
+                UnityEngine.Graphics.Blit(src, dst);
             }
         }
         private FrameGrabber  _grabber;
@@ -227,21 +228,29 @@ namespace CNRRecordingMod
                 // OnPostRender fires per-camera in depth order; attaching to the deepest
                 // screen camera gives us the fully-composited frame before the buffer swap.
                 if (_grabber != null) { Destroy(_grabber); _grabber = null; }
+                // kamcordPostCamera runs last (depth=MaxFloat) and its OnRenderImage.src is
+                // the fully composited frame that Kamcord is about to write to screen.
+                // Game cameras (depth 0-3) have empty src in OnRenderImage because Kamcord
+                // redirects their GL draw calls to a native pbuffer, leaving Unity's temp RT grey.
                 Camera bestCam = null;
+                Camera kamcordPost = null;
                 foreach (Camera c in Camera.allCameras)
                 {
-                    if (c.targetTexture != null) continue; // skip render-to-texture cameras
+                    if (c.targetTexture != null) { RecordingModEntry.Log("  cam: " + c.name + " [RT-target,skip]"); continue; }
                     bool isKamcord = c.name.IndexOf("kamcord", System.StringComparison.OrdinalIgnoreCase) >= 0;
-                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + " rt=null tag=" + c.tag + (isKamcord ? " [kamcord,skip]" : ""));
-                    if (isKamcord) continue; // Kamcord pre/post cameras clear the framebuffer
-                    if (bestCam == null || c.depth > bestCam.depth) bestCam = c;
+                    bool isPost    = c.name.IndexOf("post",    System.StringComparison.OrdinalIgnoreCase) >= 0;
+                    string tag = isKamcord ? (isPost ? " [kamcordPost]" : " [kamcord,skip]") : "";
+                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + " tag=" + c.tag + tag);
+                    if (isKamcord && isPost) { kamcordPost = c; }
+                    else if (!isKamcord && (bestCam == null || c.depth > bestCam.depth)) bestCam = c;
                 }
-                if (bestCam == null) bestCam = Camera.main;
-                if (bestCam != null)
+                // Prefer kamcordPostCamera; it's the only camera whose OnRenderImage.src has real content
+                Camera captureFrom = kamcordPost ?? bestCam ?? Camera.main;
+                if (captureFrom != null)
                 {
-                    _grabber = bestCam.gameObject.AddComponent<FrameGrabber>();
+                    _grabber = captureFrom.gameObject.AddComponent<FrameGrabber>();
                     _grabber.Tex = _readTex;
-                    RecordingModEntry.Log("  FrameGrabber attached to: " + bestCam.name + " (depth=" + bestCam.depth + ")");
+                    RecordingModEntry.Log("  FrameGrabber attached to: " + captureFrom.name + " (depth=" + captureFrom.depth + ")");
                 }
                 else RecordingModEntry.Log("  WARNING: no suitable camera found");
 
@@ -422,13 +431,24 @@ namespace CNRRecordingMod
                 }
 
                 Color32[] px = _readTex.GetPixels32();
-                int capW = (_grabber != null) ? _grabber.CapW : _scrW;
-                int capH = (_grabber != null) ? _grabber.CapH : _scrH;
+                // Stride of GetPixels32() is always _readTex.width, NOT capW.
+                // capW/capH are the filled region; srcW/srcH are the RT dimensions.
+                int texW = _readTex.width;
+                int capW = (_grabber != null && _grabber.CapW > 0) ? _grabber.CapW : _scrW;
+                int capH = (_grabber != null && _grabber.CapH > 0) ? _grabber.CapH : _scrH;
                 if (verbose)
                 {
-                    Color32 pMid = px[(capH / 2) * capW + capW / 2];
-                    RecordingModEntry.Log("  GetPixels32 len=" + px.Length
-                        + " px[scrC]=(" + pMid.r + "," + pMid.g + "," + pMid.b + ")");
+                    int srcW = (_grabber != null) ? _grabber.SrcW : _scrW;
+                    int srcH = (_grabber != null) ? _grabber.SrcH : _scrH;
+                    // sample at center plus two corners to detect uniform grey vs. real content
+                    Color32 pC  = px[(capH / 2) * texW + capW / 2];
+                    Color32 pTL = px[System.Math.Max(0, capH - 1) * texW + 0];
+                    Color32 pBR = px[0 * texW + System.Math.Max(0, capW - 1)];
+                    RecordingModEntry.Log("  GetPixels32 src=" + srcW + "x" + srcH
+                        + " cap=" + capW + "x" + capH
+                        + " pC=(" + pC.r  + "," + pC.g  + "," + pC.b  + ")"
+                        + " pTL=(" + pTL.r + "," + pTL.g + "," + pTL.b + ")"
+                        + " pBR=(" + pBR.r + "," + pBR.g + "," + pBR.b + ")");
                 }
 
                 // 2. Convert RGBA -> NV12 into _yuvBuf at actual encoder strides.
@@ -444,7 +464,7 @@ namespace CNRRecordingMod
                     for (int col = 0; col < VideoWidth; col++)
                     {
                         int srcCol = (col * capW) / VideoWidth;
-                        Color32 c = px[srcRow * capW + srcCol];
+                        Color32 c = px[srcRow * texW + srcCol]; // stride = texW, not capW
                         int R = c.r, G = c.g, B = c.b;
                         int Y = ((66 * R + 129 * G + 25 * B + 128) >> 8) + 16;
                         _yuvBuf[_yBase + row * _encStride + col] = (byte)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
