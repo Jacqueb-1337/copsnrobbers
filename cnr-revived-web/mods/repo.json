@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.29.0",
+      "latestVersion": "1.30.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.30.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.30.0.dll",
+          "changelog": "Fix grey capture root cause: IsRecording() was returning true (=IsCapturing), which told Kamcord to activate its camera redirect - kamcordPreCamera clears EGL surface to grey each frame and pumps game cameras into an internal pbuffer; since our impl does not perform the blit-back, the EGL surface stays grey and ReadPixels always reads (205,205,205). Fix: IsRecording() now returns false unconditionally. Kamcord camera redirect never activates, game cameras render directly to EGL surface, ReadPixels reads real game content. Start/Stop button calls flow through StartRecording()/StopRecording() directly and are unaffected. Also fix MediaCodecList.getCodecInfos() API (API 21+)."
+        },
         {
           "version": "1.29.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.29.0.dll",
