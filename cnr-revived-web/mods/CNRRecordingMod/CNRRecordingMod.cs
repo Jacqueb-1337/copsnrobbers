@@ -14,7 +14,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.20.0";
+        public  const string Version = "1.21.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -251,47 +251,9 @@ namespace CNRRecordingMod
                 }
                 _scrW = scrW; _scrH = scrH;
 
-                // Attach FrameGrabber to the highest-depth camera that renders to screen.
-                // Camera.main (tagged "MainCamera") may not be the last camera — the 3D game
-                // scene is often rendered by a camera with a higher depth on top of it.
-                // OnPostRender fires per-camera in depth order; attaching to the deepest
-                // screen camera gives us the fully-composited frame before the buffer swap.
-                if (_grabber != null) { Destroy(_grabber); _grabber = null; }
-                // kamcordPostCamera runs last (depth=MaxFloat) and its OnRenderImage.src is
-                // the fully composited frame that Kamcord is about to write to screen.
-                // Game cameras (depth 0-3) have empty src in OnRenderImage because Kamcord
-                // redirects their GL draw calls to a native pbuffer, leaving Unity's temp RT grey.
-                Camera bestCam = null;
-                Camera kamcordPost = null;
+                // Log cameras for diagnostics (capturing via direct ReadPixels, no FrameGrabber needed)
                 foreach (Camera c in Camera.allCameras)
-                {
-                    if (c.targetTexture != null) { RecordingModEntry.Log("  cam: " + c.name + " [RT-target,skip]"); continue; }
-                    bool isKamcord = c.name.IndexOf("kamcord", System.StringComparison.OrdinalIgnoreCase) >= 0;
-                    bool isPost    = c.name.IndexOf("post",    System.StringComparison.OrdinalIgnoreCase) >= 0;
-                    string tag = isKamcord ? (isPost ? " [kamcordPost]" : " [kamcord,skip]") : "";
-                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + " tag=" + c.tag + tag);
-                    if (isKamcord && isPost) { kamcordPost = c; }
-                    else if (!isKamcord && (bestCam == null || c.depth > bestCam.depth)) bestCam = c;
-                }
-                // Prefer kamcordPostCamera; it's the only camera whose OnRenderImage.src has real content
-                Camera captureFrom = kamcordPost ?? bestCam ?? Camera.main;
-                if (captureFrom != null)
-                {
-                    _grabber = captureFrom.gameObject.AddComponent<FrameGrabber>();
-                    _grabber.Tex = _readTex;
-                    RecordingModEntry.Log("  FrameGrabber attached to: " + captureFrom.name + " (depth=" + captureFrom.depth + ")");
-                }
-                else RecordingModEntry.Log("  WARNING: no suitable camera found");
-
-                // Attach a DiagGrabber to every camera: saves one PNG per camera on the first
-                // rendered frame so we can see which cameras have real content vs grey.
-                foreach (Camera c in Camera.allCameras)
-                {
-                    string safeName = c.name.Replace(' ', '_').Replace('/', '_').Replace('\\', '_');
-                    string diagPath = System.IO.Path.Combine(RecordingsDir, "diag_" + safeName + ".png");
-                    c.gameObject.AddComponent<DiagGrabber>().SavePath = diagPath;
-                    RecordingModEntry.Log("  DiagGrabber -> " + c.name);
-                }
+                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + " rt=" + (c.targetTexture != null ? c.targetTexture.name : "null"));
 
 
                 // MediaFormat
@@ -440,9 +402,6 @@ namespace CNRRecordingMod
 
         private IEnumerator EncodeFrameCoroutine()
         {
-            // Signal grabber to capture this frame, then wait.
-            // OnPostRender fires BEFORE WaitForEndOfFrame so pixels are ready when we resume.
-            if (_grabber != null) _grabber.Ready = false;
             yield return new WaitForEndOfFrame();
             if (!IsCapturing || _codec == null) yield break;
 
@@ -451,40 +410,29 @@ namespace CNRRecordingMod
 
             try
             {
-                // 1. Get pixels captured by FrameGrabber.OnPostRender (fires before buffer swap).
-                if (_grabber != null)
-                {
-                    if (!_grabber.Ready)
-                    {
-                        if (verbose) RecordingModEntry.Log("  FrameGrabber not ready, skipping frame");
-                        yield break;
-                    }
-                    if (verbose) RecordingModEntry.Log("  FrameGrabber captured OK");
-                }
-                else
-                {
-                    // Fallback: ReadPixels here (may read grey on some devices after buffer swap)
-                    if (verbose) RecordingModEntry.Log("  ReadPixels fallback (no grabber)");
-                    _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
-                    _readTex.Apply(false);
-                }
+                // Read from the screen backbuffer (EGL window surface) directly.
+                // kamcordPostCamera (depth=MaxFloat) blits Kamcord's composited
+                // frame to the default framebuffer before WaitForEndOfFrame fires.
+                // RenderTexture.active = null ensures ReadPixels reads from there.
+                // This is the same approach as v1.0.0 which produced working PNGs.
+                RenderTexture prevRT = RenderTexture.active;
+                if (verbose) RecordingModEntry.Log("  prevRT=" + (prevRT != null ? prevRT.name + " " + prevRT.width + "x" + prevRT.height : "null (screen)"));
+                RenderTexture.active = null;
+                _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
+                _readTex.Apply(false);
+                RenderTexture.active = prevRT;
 
                 Color32[] px = _readTex.GetPixels32();
-                // Stride of GetPixels32() is always _readTex.width, NOT capW.
-                // capW/capH are the filled region; srcW/srcH are the RT dimensions.
                 int texW = _readTex.width;
-                int capW = (_grabber != null && _grabber.CapW > 0) ? _grabber.CapW : _scrW;
-                int capH = (_grabber != null && _grabber.CapH > 0) ? _grabber.CapH : _scrH;
+                int capW = _scrW;
+                int capH = _scrH;
                 if (verbose)
                 {
-                    int srcW = (_grabber != null) ? _grabber.SrcW : _scrW;
-                    int srcH = (_grabber != null) ? _grabber.SrcH : _scrH;
                     // sample at center plus two corners to detect uniform grey vs. real content
                     Color32 pC  = px[(capH / 2) * texW + capW / 2];
                     Color32 pTL = px[System.Math.Max(0, capH - 1) * texW + 0];
                     Color32 pBR = px[0 * texW + System.Math.Max(0, capW - 1)];
-                    RecordingModEntry.Log("  GetPixels32 src=" + srcW + "x" + srcH
-                        + " cap=" + capW + "x" + capH
+                    RecordingModEntry.Log("  GetPixels32 cap=" + capW + "x" + capH
                         + " pC=(" + pC.r  + "," + pC.g  + "," + pC.b  + ")"
                         + " pTL=(" + pTL.r + "," + pTL.g + "," + pTL.b + ")"
                         + " pBR=(" + pBR.r + "," + pBR.g + "," + pBR.b + ")");
