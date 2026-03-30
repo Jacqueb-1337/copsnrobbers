@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.12.0",
+      "latestVersion": "1.13.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.13.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.13.0.dll",
+          "changelog": "Root cause identified for green frames: ConvertToJNIArray(sbyte[]) was producing a null or wrong-type Java array, causing ByteBuffer.put to throw a silent Java exception (posAfter=0, res=null every frame). Fix: call put(byte[]) via AndroidJavaObject.Call instead of raw CallObjectMethod. ByteBuffer.put(byte[]) is defined directly on ByteBuffer (not inherited from Buffer), so Unity 4.6 resolves it correctly - unlike clear/position/limit which are inherited and always failed. Also adds limit(capacity)+rewind via raw JNI before put to guarantee remaining()=capacity."
+        },
         {
           "version": "1.12.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.12.0.dll",
