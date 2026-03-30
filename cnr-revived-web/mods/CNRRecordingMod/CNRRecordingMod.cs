@@ -38,7 +38,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.38.0";
+        public  const string Version = "1.39.0";
 
         private static bool _loaded = false;
 
@@ -360,10 +360,14 @@ namespace CNRRecordingMod
         private void HookAllCameras()
         {
             Camera[] cams = Camera.allCameras;
-            // Filter out our own display camera
+            // Skip our own display camera and Kamcord's cameras.
+            // kamcordPreCamera / kamcordPostCamera have cullingMask=0 and are at
+            // float.Min / float.Max depth.  Even with clearFlags=Nothing they run
+            // Kamcord native post-render callbacks that overwrite whatever is bound
+            // as the current RT with grey.  Leave them targeting the screen.
             int count = 0;
             foreach (Camera c in cams)
-                if (c.gameObject != _displayCamGo) count++;
+                if (c.gameObject != _displayCamGo && !c.name.ToLower().StartsWith("kamcord")) count++;
             _hookedCameras = new Camera[count];
             _savedTargets  = new RenderTexture[count];
             int idx = 0;
@@ -371,6 +375,11 @@ namespace CNRRecordingMod
             foreach (Camera c in cams)
             {
                 if (c.gameObject == _displayCamGo) continue;
+                if (c.name.ToLower().StartsWith("kamcord"))
+                {
+                    RecordingModEntry.Log("  SKIP kamcord cam: " + c.name + " d=" + c.depth);
+                    continue;
+                }
                 _hookedCameras[idx] = c;
                 _savedTargets[idx]  = c.targetTexture;
                 c.targetTexture     = _captureRT;
