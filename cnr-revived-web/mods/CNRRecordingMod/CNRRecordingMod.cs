@@ -13,7 +13,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.8.0";
+        public  const string Version = "1.9.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -381,27 +381,49 @@ namespace CNRRecordingMod
                 }
 
                 // 4. Copy _yuvBuf into encoder ByteBuffer via raw JNI.
-                // Use ByteBuffer.put([B) found on the parent class (avoids Unity 4.6 DirectByteBuffer inheritance bug).
-                // This respects the encoder's actual Y/UV row strides, fixing the green-frame
-                // bug where UV was written at width*height but the encoder read it at
-                // rowStride*height (row stride is typically aligned to 16, e.g. 864 for 854px).
-                // NOTE: when using getInputImage, queueInputBuffer size MUST be 0.
+                // Buffer.capacity() is inherited from java.nio.Buffer - Unity 4.6 can't call it
+                // via AndroidJavaObject, so use raw JNI. The actual ByteBuffer capacity may be
+                // slightly less than stride*sliceH*3/2 (e.g. 645078 vs 645120) because the
+                // encoder's internal allocator uses a different alignment for the UV plane.
+                // We clamp the put and queueInputBuffer size to the real capacity.
                 bool bufWritten = false;
+                int putLen = _yuvBuf.Length;
                 try
                 {
-                    Buffer.BlockCopy(_yuvBuf, 0, _sbyteTemp, 0, _yuvBuf.Length);
-                    var inBuf = _codec.Call<AndroidJavaObject>("getInputBuffer", inIdx);
+                    var inBuf   = _codec.Call<AndroidJavaObject>("getInputBuffer", inIdx);
                     IntPtr rawBuf = inBuf.GetRawObject();
+
+                    // Get actual buffer capacity from Buffer.capacity() via raw JNI
+                    IntPtr bufClsC = AndroidJNI.FindClass("java/nio/Buffer");
+                    IntPtr midCap  = AndroidJNI.GetMethodID(bufClsC, "capacity", "()I");
+                    AndroidJNI.DeleteLocalRef(bufClsC);
+                    int bufCap = AndroidJNI.CallIntMethod(rawBuf, midCap, new jvalue[0]);
+                    if (verbose) RecordingModEntry.Log("  bufCap=" + bufCap + " yuvLen=" + _yuvBuf.Length);
+                    putLen = bufCap < _yuvBuf.Length ? bufCap : _yuvBuf.Length;
+
+                    // Convert byte[] to sbyte[] clamped to putLen
+                    sbyte[] putArr;
+                    if (putLen == _yuvBuf.Length)
+                    {
+                        Buffer.BlockCopy(_yuvBuf, 0, _sbyteTemp, 0, _yuvBuf.Length);
+                        putArr = _sbyteTemp;
+                    }
+                    else
+                    {
+                        putArr = new sbyte[putLen];
+                        Buffer.BlockCopy(_yuvBuf, 0, putArr, 0, putLen);
+                    }
+
                     IntPtr bbCls  = AndroidJNI.FindClass("java/nio/ByteBuffer");
                     IntPtr midPut = AndroidJNI.GetMethodID(bbCls, "put", "([B)Ljava/nio/ByteBuffer;");
                     AndroidJNI.DeleteLocalRef(bbCls);
-                    IntPtr jbArr  = AndroidJNIHelper.ConvertToJNIArray(_sbyteTemp);
+                    IntPtr jbArr  = AndroidJNIHelper.ConvertToJNIArray(putArr);
                     var jniArgs   = new jvalue[1];
                     jniArgs[0].l  = jbArr;
                     AndroidJNI.CallObjectMethod(rawBuf, midPut, jniArgs);
                     AndroidJNI.DeleteLocalRef(jbArr);
                     bufWritten = true;
-                    if (verbose) RecordingModEntry.Log("  ByteBuffer.put OK (" + _yuvBuf.Length + " bytes)");
+                    if (verbose) RecordingModEntry.Log("  ByteBuffer.put OK (" + putLen + " bytes)");
                 }
                 catch (Exception ex)
                 {
@@ -410,8 +432,8 @@ namespace CNRRecordingMod
 
                 // 5. Queue the input buffer back
                 _ptsUsec += (long)(1000000L / VideoFps);
-                _codec.Call("queueInputBuffer", inIdx, 0, bufWritten ? _yuvBuf.Length : 0, _ptsUsec, 0);
-                if (verbose) RecordingModEntry.Log("  queueInputBuffer OK (pts=" + _ptsUsec + " written=" + bufWritten + ")");
+                _codec.Call("queueInputBuffer", inIdx, 0, bufWritten ? putLen : 0, _ptsUsec, 0);
+                if (verbose) RecordingModEntry.Log("  queueInputBuffer OK (pts=" + _ptsUsec + " size=" + putLen + ")");
 
                 // 6. Drain
                 int written = DrainEncoder(false);
