@@ -38,7 +38,7 @@
         {
           "version": "1.4.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.4.0.dll",
-          "changelog": "Fixed 0-byte MP4s: (1) Removed inBuf.Call(clear) - Unity 4.6 AndroidJavaObject cannot resolve inherited methods on DirectByteBuffer; getInputBuffer already returns a reset buffer. (2) Replaced Unity JNI helper call with raw AndroidJNI.FindClass(java/nio/ByteBuffer)+GetMethodID to find put([B) on the superclass, bypassing the broken inheritance resolution. (3) Always call queueInputBuffer even on write failure so encoder input buffers are never leaked/starved. (4) Added post-start drain loop to capture FORMAT_CHANGED immediately so muxer starts before any frames arrive."
+          "changelog": "Fixed 0-byte MP4s: (1) Removed inBuf.Call(clear) - Unity 4.6 AndroidJavaObject cannot resolve inherited methods on DirectByteBuffer; getInputBuffer already returns a reset buffer. (2) Replaced Unity JNI helper call with raw AndroidJNI.FindClass(java/nio/ByteBuffer)+GetMethodID to find put(byte[]) on the superclass, bypassing the broken inheritance resolution. (3) Always call queueInputBuffer even on write failure so encoder input buffers are never leaked/starved. (4) Added post-start drain loop to capture FORMAT_CHANGED immediately so muxer starts before any frames arrive."
         },
         {
           "version": "1.3.0",
