@@ -13,7 +13,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.6.0";
+        public  const string Version = "1.7.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -90,7 +90,7 @@ namespace CNRRecordingMod
         private const int    VideoHeight      = 480;
         private const int    VideoBitrate     = 2000000;
         private const int    VideoFps         = 30;
-        private const int    COLOR_FMT_YUV420 = 21; // COLOR_FormatYUV420SemiPlanar (NV12: Y plane then interleaved UV)
+        private const int    COLOR_FMT_YUV420 = 0x7F420888; // COLOR_FormatYUV420Flexible - actual layout determined at runtime via getInputImage()
         private const float  REF_W            = 600f;
 
         public  bool IsCapturing { get; private set; }
@@ -104,8 +104,6 @@ namespace CNRRecordingMod
         private bool              _muxerStarted;
 
         private Texture2D  _readTex;
-        private byte[]     _yuvBuf;
-        private sbyte[]    _sbyteTemp;  // reused for JNI byte copy (Unity maps Java byte -> C# sbyte)
 
         private int        _frameCount;
         private int        _drainLogCount;
@@ -179,13 +177,7 @@ namespace CNRRecordingMod
                     _readTex = new Texture2D(VideoWidth, VideoHeight, TextureFormat.RGBA32, false);
                     RecordingModEntry.Log("  Texture2D created " + VideoWidth + "x" + VideoHeight);
                 }
-                int yuvSize = VideoWidth * VideoHeight * 3 / 2;
-                if (_yuvBuf == null || _yuvBuf.Length != yuvSize)
-                {
-                    _yuvBuf    = new byte[yuvSize];
-                    _sbyteTemp = new sbyte[yuvSize];
-                    RecordingModEntry.Log("  YUV buf: " + yuvSize + " bytes");
-                }
+
 
                 // MediaFormat
                 RecordingModEntry.Log("  creating MediaFormat...");
@@ -329,11 +321,7 @@ namespace CNRRecordingMod
                 Color32[] px = _readTex.GetPixels32();
                 if (verbose) RecordingModEntry.Log("  GetPixels32 len=" + px.Length);
 
-                // 2. RGBA -> NV12
-                RgbaToNV12(px, VideoWidth, VideoHeight, _yuvBuf);
-                if (verbose) RecordingModEntry.Log("  RgbaToNV12 OK");
-
-                // 3. Dequeue input buffer
+                // 2. Dequeue input buffer
                 int inIdx = _codec.Call<int>("dequeueInputBuffer", (long)10000);
                 if (verbose) RecordingModEntry.Log("  dequeueInputBuffer=" + inIdx);
                 if (inIdx < 0)
@@ -343,47 +331,153 @@ namespace CNRRecordingMod
                     yield break;
                 }
 
-                // 4. Copy YUV into encoder's ByteBuffer.
-                // IMPORTANT: Do NOT call inBuf.Call("clear") - Unity 4.6's AndroidJavaObject
-                // can't resolve inherited methods on DirectByteBuffer (e.g. clear() lives on
-                // java.nio.Buffer, not DirectByteBuffer). getInputBuffer() already returns a
-                // reset buffer (position=0, limit=capacity).
-                //
-                // We use raw JNI, explicitly finding put([B) on java.nio.ByteBuffer so JNI
-                // walks the superclass chain correctly instead of failing on DirectByteBuffer.
-                var inBuf = _codec.Call<AndroidJavaObject>("getInputBuffer", inIdx);
-                if (verbose) RecordingModEntry.Log("  getInputBuffer=" + (inBuf != null ? "OK" : "NULL!"));
-
+                // 3. Write pixels via getInputImage() + Image.Plane JNI.
+                // This respects the encoder's actual Y/UV row strides, fixing the green-frame
+                // bug where UV was written at width*height but the encoder read it at
+                // rowStride*height (row stride is typically aligned to 16, e.g. 864 for 854px).
+                // NOTE: when using getInputImage, queueInputBuffer size MUST be 0.
                 bool bufWritten = false;
+                AndroidJavaObject img = null;
                 try
                 {
-                    // byte[] -> sbyte[] (same bits; Unity JNI maps Java byte -> C# sbyte)
-                    Buffer.BlockCopy(_yuvBuf, 0, _sbyteTemp, 0, _yuvBuf.Length);
+                    img = _codec.Call<AndroidJavaObject>("getInputImage", inIdx);
+                    if (img == null) throw new Exception("getInputImage returned null");
 
-                    IntPtr rawBuf = inBuf.GetRawObject();
-                    // Look up put([B) on ByteBuffer (superclass), not DirectByteBuffer
+                    IntPtr imgRaw    = img.GetRawObject();
+                    IntPtr imgCls    = AndroidJNI.GetObjectClass(imgRaw);
+                    IntPtr midPlanes = AndroidJNI.GetMethodID(imgCls, "getPlanes", "()[Landroid/media/Image$Plane;");
+                    IntPtr plArr     = AndroidJNI.CallObjectMethod(imgRaw, midPlanes, new jvalue[0]);
+                    AndroidJNI.DeleteLocalRef(imgCls);
+
+                    IntPtr p0 = AndroidJNI.GetObjectArrayElement(plArr, 0); // Y
+                    IntPtr p1 = AndroidJNI.GetObjectArrayElement(plArr, 1); // U (or interleaved UV)
+                    IntPtr p2 = AndroidJNI.GetObjectArrayElement(plArr, 2); // V
+                    AndroidJNI.DeleteLocalRef(plArr);
+
+                    IntPtr planeCls     = AndroidJNI.GetObjectClass(p0);
+                    IntPtr midGetBuf    = AndroidJNI.GetMethodID(planeCls, "getBuffer",      "()Ljava/nio/ByteBuffer;");
+                    IntPtr midRowStride = AndroidJNI.GetMethodID(planeCls, "getRowStride",   "()I");
+                    IntPtr midPixStride = AndroidJNI.GetMethodID(planeCls, "getPixelStride", "()I");
+                    AndroidJNI.DeleteLocalRef(planeCls);
+
+                    int yRS  = AndroidJNI.CallIntMethod(p0, midRowStride, new jvalue[0]);
+                    int uvRS = AndroidJNI.CallIntMethod(p1, midRowStride, new jvalue[0]);
+                    int uvPS = AndroidJNI.CallIntMethod(p1, midPixStride, new jvalue[0]);
+
+                    IntPtr yBuf = AndroidJNI.CallObjectMethod(p0, midGetBuf, new jvalue[0]);
+                    IntPtr uBuf = AndroidJNI.CallObjectMethod(p1, midGetBuf, new jvalue[0]);
+                    IntPtr vBuf = AndroidJNI.CallObjectMethod(p2, midGetBuf, new jvalue[0]);
+                    AndroidJNI.DeleteLocalRef(p0);
+                    AndroidJNI.DeleteLocalRef(p1);
+                    AndroidJNI.DeleteLocalRef(p2);
+
+                    if (verbose)
+                        RecordingModEntry.Log("  Image planes: yRS=" + yRS + " uvRS=" + uvRS + " uvPS=" + uvPS);
+
+                    // ByteBuffer.put([B) found on parent class to avoid Unity 4.6 DirectByteBuffer inheritance bug
                     IntPtr bbCls  = AndroidJNI.FindClass("java/nio/ByteBuffer");
                     IntPtr midPut = AndroidJNI.GetMethodID(bbCls, "put", "([B)Ljava/nio/ByteBuffer;");
                     AndroidJNI.DeleteLocalRef(bbCls);
-                    // ConvertToJNIArray handles sbyte[] -> jbyteArray correctly
-                    IntPtr jbArr  = AndroidJNIHelper.ConvertToJNIArray(_sbyteTemp);
-                    var jniArgs   = new jvalue[1];
-                    jniArgs[0].l  = jbArr;
-                    AndroidJNI.CallObjectMethod(rawBuf, midPut, jniArgs);
-                    AndroidJNI.DeleteLocalRef(jbArr);
+                    var jArgs = new jvalue[1];
+
+                    // Y plane (respects actual row stride - padding bytes stay zero/16)
+                    byte[] yBytes = new byte[yRS * VideoHeight];
+                    for (int row = 0; row < VideoHeight; row++)
+                    {
+                        int srcRow = VideoHeight - 1 - row;
+                        for (int col = 0; col < VideoWidth; col++)
+                        {
+                            Color32 c = px[srcRow * VideoWidth + col];
+                            int R = c.r, G = c.g, B = c.b;
+                            int Y = ((66 * R + 129 * G + 25 * B + 128) >> 8) + 16;
+                            yBytes[row * yRS + col] = (byte)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
+                        }
+                    }
+                    sbyte[] yS = new sbyte[yBytes.Length];
+                    Buffer.BlockCopy(yBytes, 0, yS, 0, yBytes.Length);
+                    IntPtr jyArr = AndroidJNIHelper.ConvertToJNIArray(yS);
+                    jArgs[0].l = jyArr;
+                    AndroidJNI.CallObjectMethod(yBuf, midPut, jArgs);
+                    AndroidJNI.DeleteLocalRef(jyArr);
+                    AndroidJNI.DeleteLocalRef(yBuf);
+
+                    int uvH = VideoHeight / 2;
+                    if (uvPS == 2)
+                    {
+                        // NV12 or NV21 (interleaved UV): planes[1] buffer covers the whole UV plane
+                        byte[] uvBytes = new byte[uvRS * uvH];
+                        for (int i = 0; i < uvBytes.Length; i++) uvBytes[i] = 128; // neutral chroma
+                        for (int row = 0; row < uvH; row++)
+                        {
+                            int srcRow = VideoHeight - 1 - row * 2;
+                            for (int col = 0; col < VideoWidth / 2; col++)
+                            {
+                                Color32 c = px[srcRow * VideoWidth + col * 2];
+                                int R = c.r, G = c.g, B = c.b;
+                                int U = ((-38 * R -  74 * G + 112 * B + 128) >> 8) + 128;
+                                int V = ((112 * R -  94 * G -  18 * B + 128) >> 8) + 128;
+                                int off = row * uvRS + col * 2;
+                                uvBytes[off]     = (byte)(U < 0 ? 0 : U > 255 ? 255 : U);
+                                uvBytes[off + 1] = (byte)(V < 0 ? 0 : V > 255 ? 255 : V);
+                            }
+                        }
+                        sbyte[] uvS = new sbyte[uvBytes.Length];
+                        Buffer.BlockCopy(uvBytes, 0, uvS, 0, uvBytes.Length);
+                        IntPtr juArr = AndroidJNIHelper.ConvertToJNIArray(uvS);
+                        jArgs[0].l = juArr;
+                        AndroidJNI.CallObjectMethod(uBuf, midPut, jArgs);
+                        AndroidJNI.DeleteLocalRef(juArr);
+                    }
+                    else
+                    {
+                        // I420 (planar): separate U and V planes
+                        byte[] uBytes = new byte[uvRS * uvH];
+                        byte[] vBytes = new byte[uvRS * uvH];
+                        for (int i = 0; i < uBytes.Length; i++) { uBytes[i] = 128; vBytes[i] = 128; }
+                        for (int row = 0; row < uvH; row++)
+                        {
+                            int srcRow = VideoHeight - 1 - row * 2;
+                            for (int col = 0; col < VideoWidth / 2; col++)
+                            {
+                                Color32 c = px[srcRow * VideoWidth + col * 2];
+                                int R = c.r, G = c.g, B = c.b;
+                                int U = ((-38 * R -  74 * G + 112 * B + 128) >> 8) + 128;
+                                int V = ((112 * R -  94 * G -  18 * B + 128) >> 8) + 128;
+                                int off = row * uvRS + col;
+                                uBytes[off] = (byte)(U < 0 ? 0 : U > 255 ? 255 : U);
+                                vBytes[off] = (byte)(V < 0 ? 0 : V > 255 ? 255 : V);
+                            }
+                        }
+                        sbyte[] uS = new sbyte[uBytes.Length]; Buffer.BlockCopy(uBytes, 0, uS, 0, uBytes.Length);
+                        sbyte[] vS = new sbyte[vBytes.Length]; Buffer.BlockCopy(vBytes, 0, vS, 0, vBytes.Length);
+                        IntPtr juArr = AndroidJNIHelper.ConvertToJNIArray(uS);
+                        jArgs[0].l = juArr;
+                        AndroidJNI.CallObjectMethod(uBuf, midPut, jArgs);
+                        AndroidJNI.DeleteLocalRef(juArr);
+                        IntPtr jvArr = AndroidJNIHelper.ConvertToJNIArray(vS);
+                        jArgs[0].l = jvArr;
+                        AndroidJNI.CallObjectMethod(vBuf, midPut, jArgs);
+                        AndroidJNI.DeleteLocalRef(jvArr);
+                    }
+                    AndroidJNI.DeleteLocalRef(uBuf);
+                    AndroidJNI.DeleteLocalRef(vBuf);
+
                     bufWritten = true;
-                    if (verbose) RecordingModEntry.Log("  ByteBuffer.put OK (" + _yuvBuf.Length + " bytes)");
+                    if (verbose) RecordingModEntry.Log("  WriteImagePlanes OK (yRS=" + yRS + " uvRS=" + uvRS + ")");
                 }
                 catch (Exception ex)
                 {
-                    RecordingModEntry.Log("  ByteBuffer write FAILED: " + ex.Message);
+                    RecordingModEntry.Log("  WriteImagePlanes FAILED: " + ex.Message);
+                }
+                finally
+                {
+                    // MUST close Image before queueInputBuffer
+                    try { if (img != null) { img.Call("close"); img.Dispose(); img = null; } } catch { }
                 }
 
-                // 5. Always queue the input buffer back so the encoder gets it returned.
-                // Pass 0 size if we failed to write - encoder will produce no output for
-                // this slot but won't stall from unreturned buffers.
+                // 4. Queue buffer — size=0 required when using getInputImage
                 _ptsUsec += (long)(1000000L / VideoFps);
-                _codec.Call("queueInputBuffer", inIdx, 0, bufWritten ? _yuvBuf.Length : 0, _ptsUsec, 0);
+                _codec.Call("queueInputBuffer", inIdx, 0, 0, _ptsUsec, 0);
                 if (verbose) RecordingModEntry.Log("  queueInputBuffer OK (pts=" + _ptsUsec + " written=" + bufWritten + ")");
 
                 // 6. Drain
@@ -398,33 +492,7 @@ namespace CNRRecordingMod
             }
         }
 
-        // NV12 (COLOR_FormatYUV420SemiPlanar): Y plane (w*h), then interleaved UV plane (w*h/2).
-        // Total buffer size is the same as I420: w*h*3/2.
-        // UV plane layout: U0,V0,U1,V1,... (2 bytes per 2x2 chroma block, stride=w).
-        private static void RgbaToNV12(Color32[] px, int w, int h, byte[] yuv)
-        {
-            int yBase  = 0;
-            int uvBase = w * h;
-            for (int row = 0; row < h; row++)
-            {
-                int srcRow = h - 1 - row; // ReadPixels is bottom-to-top
-                for (int col = 0; col < w; col++)
-                {
-                    Color32 c = px[srcRow * w + col];
-                    int R = c.r, G = c.g, B = c.b;
-                    int Y = ((66 * R + 129 * G +  25 * B + 128) >> 8) + 16;
-                    yuv[yBase + row * w + col] = (byte)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
-                    if ((row & 1) == 0 && (col & 1) == 0)
-                    {
-                        int U = ((-38 * R -  74 * G + 112 * B + 128) >> 8) + 128;
-                        int V = ((112 * R -  94 * G -  18 * B + 128) >> 8) + 128;
-                        int uvOff = uvBase + (row / 2) * w + col; // col is even; 2 bytes: U then V
-                        yuv[uvOff]     = (byte)(U < 0 ? 0 : U > 255 ? 255 : U);
-                        yuv[uvOff + 1] = (byte)(V < 0 ? 0 : V > 255 ? 255 : V);
-                    }
-                }
-            }
-        }
+
 
         // -----------------------------------------------------------------------
         //  DrainEncoder - returns number of data buffers written to muxer
