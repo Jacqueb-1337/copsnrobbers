@@ -14,7 +14,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.21.0";
+        public  const string Version = "1.22.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -110,66 +110,7 @@ namespace CNRRecordingMod
         private sbyte[]       _sbyteTemp;  // Unity JNI maps Java byte -> C# sbyte
         private int           _encStride;  // actual encoder row stride (may be > VideoWidth due to alignment)
         private int           _encSliceH;  // actual encoder slice height
-
-        // Captures one frame per camera render in OnPostRender (before GLES back-buffer swap).
-        // WaitForEndOfFrame fires AFTER the swap so ReadPixels from the coroutine reads undefined
-        // (grey/black) content on Android. OnPostRender fires while the rendered frame is still live.
-        // Captures one PNG per camera on first fire, then removes itself.
-        private class DiagGrabber : MonoBehaviour
-        {
-            internal string SavePath;
-            void OnRenderImage(RenderTexture src, RenderTexture dst)
-            {
-                UnityEngine.Graphics.Blit(src, dst);
-                if (SavePath == null) return;
-                string path = SavePath;
-                SavePath = null;
-                if (src == null || src.width <= 0 || src.height <= 0) { Destroy(this); return; }
-                try
-                {
-                    var tex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false);
-                    RenderTexture prev = RenderTexture.active;
-                    RenderTexture.active = src;
-                    tex.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0, false);
-                    tex.Apply(false);
-                    RenderTexture.active = prev;
-                    byte[] png = tex.EncodeToPNG();
-                    Destroy(tex);
-                    System.IO.File.WriteAllBytes(path, png);
-                    RecordingModEntry.Log("  DiagShot: " + path + " (" + src.width + "x" + src.height + ")");
-                }
-                catch (Exception ex) { RecordingModEntry.Log("  DiagShot ERR " + name + ": " + ex.Message); }
-                Destroy(this);
-            }
-        }
-
-        private class FrameGrabber : MonoBehaviour
-        {
-            internal Texture2D Tex;
-            internal bool      Ready;
-            internal int       CapW, CapH; // populated region in Tex
-            internal int       SrcW = -1, SrcH = -1; // diagnostic: src RT dimensions
-            void OnRenderImage(RenderTexture src, RenderTexture dst)
-            {
-                SrcW = (src != null) ? src.width  : -1;
-                SrcH = (src != null) ? src.height : -1;
-                if (Tex != null && !Ready && src != null && src.width > 0 && src.height > 0)
-                {
-                    int rw = System.Math.Min(src.width,  Tex.width);
-                    int rh = System.Math.Min(src.height, Tex.height);
-                    RenderTexture prev = RenderTexture.active;
-                    RenderTexture.active = src;
-                    Tex.ReadPixels(new Rect(0, 0, rw, rh), 0, 0, false);
-                    Tex.Apply(false);
-                    RenderTexture.active = prev;
-                    CapW = rw;
-                    CapH = rh;
-                }
-                Ready = true;
-                UnityEngine.Graphics.Blit(src, dst);
-            }
-        }
-        private FrameGrabber  _grabber;
+        private List<Camera>  _disabledKamcordCams = new List<Camera>();
 
         private int        _frameCount;
         private int        _drainLogCount;
@@ -217,7 +158,6 @@ namespace CNRRecordingMod
         {
             RecordingModEntry.Log("RecordingHook.OnDestroy()");
             if (IsCapturing) StopCapture();
-            if (_grabber  != null) { Destroy(_grabber);  _grabber  = null; }
             if (_readTex  != null) { Destroy(_readTex);  _readTex  = null; }
         }
 
@@ -251,9 +191,20 @@ namespace CNRRecordingMod
                 }
                 _scrW = scrW; _scrH = scrH;
 
-                // Log cameras for diagnostics (capturing via direct ReadPixels, no FrameGrabber needed)
+                // Log cameras and disable Kamcord's redirect cameras.
+                // kamcordPreCamera clears the screen to grey, then all game cameras render into
+                // Kamcord's native pbuffer (not the EGL display surface). kamcordPostCamera would
+                // blit that pbuffer to screen, but our no-op implementation means it never runs.
+                // Result: screen stays grey, ReadPixels always reads grey.
+                // Fix: disable both Kamcord cameras so game cameras render directly to the EGL
+                // display surface. ReadPixels after WaitForEndOfFrame then reads real game content.
+                _disabledKamcordCams.Clear();
                 foreach (Camera c in Camera.allCameras)
-                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + " rt=" + (c.targetTexture != null ? c.targetTexture.name : "null"));
+                {
+                    bool isKamcord = c.name.IndexOf("kamcord", System.StringComparison.OrdinalIgnoreCase) >= 0;
+                    RecordingModEntry.Log("  cam: " + c.name + " depth=" + c.depth + (isKamcord ? " [disabling]" : ""));
+                    if (isKamcord) { c.enabled = false; _disabledKamcordCams.Add(c); }
+                }
 
 
                 // MediaFormat
@@ -386,7 +337,8 @@ namespace CNRRecordingMod
             }
             catch (Exception ex) { RecordingModEntry.Log("  codec.release ERROR: " + ex.Message); }
             try { if (_bufferInfo != null) { _bufferInfo.Dispose(); _bufferInfo = null; } } catch { }
-            if (_grabber != null) { Destroy(_grabber); _grabber = null; }
+            foreach (Camera c in _disabledKamcordCams) { if (c != null) c.enabled = true; }
+            _disabledKamcordCams.Clear();
             _muxerStarted  = false;
             _videoTrackIdx = -1;
         }
@@ -410,17 +362,11 @@ namespace CNRRecordingMod
 
             try
             {
-                // Read from the screen backbuffer (EGL window surface) directly.
-                // kamcordPostCamera (depth=MaxFloat) blits Kamcord's composited
-                // frame to the default framebuffer before WaitForEndOfFrame fires.
-                // RenderTexture.active = null ensures ReadPixels reads from there.
-                // This is the same approach as v1.0.0 which produced working PNGs.
-                RenderTexture prevRT = RenderTexture.active;
-                if (verbose) RecordingModEntry.Log("  prevRT=" + (prevRT != null ? prevRT.name + " " + prevRT.width + "x" + prevRT.height : "null (screen)"));
+                // With Kamcord cameras disabled, game cameras render to the EGL display surface.
+                // ReadPixels after WaitForEndOfFrame reads real game content.
                 RenderTexture.active = null;
                 _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
                 _readTex.Apply(false);
-                RenderTexture.active = prevRT;
 
                 Color32[] px = _readTex.GetPixels32();
                 int texW = _readTex.width;
