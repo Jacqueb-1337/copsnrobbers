@@ -514,26 +514,6 @@ function start(opts = {}) {
       return;
     }
 
-    // ── Static: /releases/<file>  ─────────────────────────────────────────
-    const relMatch = url.match(/^\/releases\/([^/]+)$/);
-    if (relMatch && req.method === 'GET') {
-      const filename = relMatch[1].replace(/[^a-zA-Z0-9_.\-]/g, '_');
-      const filepath  = path.join(__dirname, 'releases', filename);
-      if (!fs.existsSync(filepath)) { res.writeHead(404); res.end('Not found'); return; }
-      const ext = path.extname(filename).toLowerCase();
-      const mime = ext === '.apk' ? 'application/vnd.android.package-archive'
-                 : ext === '.zip' ? 'application/zip'
-                 : 'application/octet-stream';
-      const data = fs.readFileSync(filepath);
-      res.writeHead(200, {
-        'Content-Type':        mime,
-        'Content-Length':      data.length,
-        'Content-Disposition': `attachment; filename="${filename}"`,
-      });
-      res.end(data);
-      return;
-    }
-
     res.writeHead(404); res.end('Not found');
   });
   httpServer.listen(WEB_PORT, '0.0.0.0', () => {
