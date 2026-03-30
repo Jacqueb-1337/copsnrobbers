@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.17.0",
+      "latestVersion": "1.18.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.18.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.18.0.dll",
+          "changelog": "Fix persistent grey frames: Kamcord's kamcordPreCamera redirects all game cameras to render into an internal pbuffer (not the EGL window surface). ReadPixels/OnPostRender always read the window surface which remains grey until kamcordPostCamera blits. Fix: use OnRenderImage instead of OnPostRender. Unity passes src as the actual render target the camera wrote into (the Kamcord pbuffer), so ReadPixels on src gives real game content. Also exposes CapW/CapH for the actual RT dimensions so NV12 scaling is correct even if the RT differs from Screen dimensions."
+        },
         {
           "version": "1.17.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.17.0.dll",
