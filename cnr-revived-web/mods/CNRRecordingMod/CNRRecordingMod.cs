@@ -14,7 +14,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.14.0";
+        public  const string Version = "1.15.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -104,12 +104,29 @@ namespace CNRRecordingMod
         private string            _outputPath;
         private bool              _muxerStarted;
 
-        private Texture2D  _readTex;
-        private int        _scrW, _scrH;  // screen dims at capture start (readtex size)
-        private byte[]     _yuvBuf;
-        private sbyte[]    _sbyteTemp;  // Unity JNI maps Java byte -> C# sbyte
-        private int        _encStride;  // actual encoder row stride (may be > VideoWidth due to alignment)
-        private int        _encSliceH;  // actual encoder slice height
+        private Texture2D    _readTex;
+        private int           _scrW, _scrH;  // screen dims at capture start (readtex size)
+        private byte[]        _yuvBuf;
+        private sbyte[]       _sbyteTemp;  // Unity JNI maps Java byte -> C# sbyte
+        private int           _encStride;  // actual encoder row stride (may be > VideoWidth due to alignment)
+        private int           _encSliceH;  // actual encoder slice height
+
+        // Captures one frame per camera render in OnPostRender (before GLES back-buffer swap).
+        // WaitForEndOfFrame fires AFTER the swap so ReadPixels from the coroutine reads undefined
+        // (grey/black) content on Android. OnPostRender fires while the rendered frame is still live.
+        private class FrameGrabber : MonoBehaviour
+        {
+            internal Texture2D Tex;
+            internal bool      Ready;
+            void OnPostRender()
+            {
+                if (Tex == null) return;
+                Tex.ReadPixels(new Rect(0, 0, Screen.width, Screen.height), 0, 0, false);
+                Tex.Apply(false);
+                Ready = true;
+            }
+        }
+        private FrameGrabber  _grabber;
 
         private int        _frameCount;
         private int        _drainLogCount;
@@ -157,7 +174,8 @@ namespace CNRRecordingMod
         {
             RecordingModEntry.Log("RecordingHook.OnDestroy()");
             if (IsCapturing) StopCapture();
-            if (_readTex != null) { Destroy(_readTex); _readTex = null; }
+            if (_grabber  != null) { Destroy(_grabber);  _grabber  = null; }
+            if (_readTex  != null) { Destroy(_readTex);  _readTex  = null; }
         }
 
         // -----------------------------------------------------------------------
@@ -189,6 +207,17 @@ namespace CNRRecordingMod
                     RecordingModEntry.Log("  Texture2D created " + scrW + "x" + scrH + " (full screen)");
                 }
                 _scrW = scrW; _scrH = scrH;
+
+                // Attach FrameGrabber to Camera.main so OnPostRender captures before buffer swap
+                if (_grabber != null) { Destroy(_grabber); _grabber = null; }
+                Camera cam = Camera.main;
+                if (cam != null)
+                {
+                    _grabber = cam.gameObject.AddComponent<FrameGrabber>();
+                    _grabber.Tex = _readTex;
+                    RecordingModEntry.Log("  FrameGrabber attached to: " + cam.name);
+                }
+                else RecordingModEntry.Log("  WARNING: Camera.main is null");
 
 
                 // MediaFormat
@@ -321,6 +350,7 @@ namespace CNRRecordingMod
             }
             catch (Exception ex) { RecordingModEntry.Log("  codec.release ERROR: " + ex.Message); }
             try { if (_bufferInfo != null) { _bufferInfo.Dispose(); _bufferInfo = null; } } catch { }
+            if (_grabber != null) { Destroy(_grabber); _grabber = null; }
             _muxerStarted  = false;
             _videoTrackIdx = -1;
         }
@@ -336,6 +366,9 @@ namespace CNRRecordingMod
 
         private IEnumerator EncodeFrameCoroutine()
         {
+            // Signal grabber to capture this frame, then wait.
+            // OnPostRender fires BEFORE WaitForEndOfFrame so pixels are ready when we resume.
+            if (_grabber != null) _grabber.Ready = false;
             yield return new WaitForEndOfFrame();
             if (!IsCapturing || _codec == null) yield break;
 
@@ -344,12 +377,23 @@ namespace CNRRecordingMod
 
             try
             {
-                // 1. ReadPixels full screen into full-size texture.
-                // Scale down to VideoWidth x VideoHeight during the RGB→NV12 conversion below.
-                if (verbose) RecordingModEntry.Log("  ReadPixels full screen " + _scrW + "x" + _scrH);
-                _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
-                _readTex.Apply(false);
-                if (verbose) RecordingModEntry.Log("  ReadPixels OK");
+                // 1. Get pixels captured by FrameGrabber.OnPostRender (fires before buffer swap).
+                if (_grabber != null)
+                {
+                    if (!_grabber.Ready)
+                    {
+                        if (verbose) RecordingModEntry.Log("  FrameGrabber not ready, skipping frame");
+                        yield break;
+                    }
+                    if (verbose) RecordingModEntry.Log("  FrameGrabber captured OK");
+                }
+                else
+                {
+                    // Fallback: ReadPixels here (may read grey on some devices after buffer swap)
+                    if (verbose) RecordingModEntry.Log("  ReadPixels fallback (no grabber)");
+                    _readTex.ReadPixels(new Rect(0, 0, _scrW, _scrH), 0, 0, false);
+                    _readTex.Apply(false);
+                }
 
                 Color32[] px = _readTex.GetPixels32();
                 if (verbose)
