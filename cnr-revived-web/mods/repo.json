@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.37.0",
+      "latestVersion": "1.38.0",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.38.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.38.0.dll",
+          "changelog": "Fix grey recording: redirect all game cameras to a captureRT (ReadPixels from RT is reliable on Android). Screen stays visible via depth-1000 CaptureDisplay camera that blits captureRT to screen. ReadPixels from backbuffer always returns grey because Unity renders to an intermediate FBO, not FBO 0."
+        },
         {
           "version": "1.37.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.37.0.dll",
