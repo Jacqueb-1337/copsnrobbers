@@ -13,7 +13,7 @@ namespace CNRRecordingMod
     public static class RecordingModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/recording.log";
-        public  const string Version = "1.9.0";
+        public  const string Version = "1.10.0";
         private static bool _loaded = false;
 
         public static void Load()
@@ -221,6 +221,7 @@ namespace CNRRecordingMod
                     int h = inFmt.Call<int>("getInteger", "slice-height");
                     _encStride = s; _encSliceH = h;
                     RecordingModEntry.Log("  getInputFormat stride=" + s + " sliceH=" + h);
+                    try { int cf = inFmt.Call<int>("getInteger", "color-format"); RecordingModEntry.Log("  getInputFormat color-format=0x" + cf.ToString("X8")); } catch { }
                 }
                 catch (Exception ex) { RecordingModEntry.Log("  getInputFormat: " + ex.Message + ", using stride=" + _encStride + " sliceH=" + _encSliceH); }
 
@@ -335,13 +336,27 @@ namespace CNRRecordingMod
 
             try
             {
-                // 1. ReadPixels into fixed-size texture (captures top-left VideoWidth x VideoHeight of screen)
-                _readTex.ReadPixels(new Rect(0, 0, VideoWidth, VideoHeight), 0, 0, false);
+                // 1. ReadPixels into fixed-size texture.
+                // Capture the centre of the screen so we sample actual game content
+                // regardless of screen size (e.g. 2256x1032 → centre of game view).
+                float _rx = Mathf.Max(0f, (Screen.width  - VideoWidth)  * 0.5f);
+                float _ry = Mathf.Max(0f, (Screen.height - VideoHeight) * 0.5f);
+                if (verbose) RecordingModEntry.Log("  ReadPixels rect=(" + _rx + "," + _ry + "," + VideoWidth + "x" + VideoHeight + ") screen=" + Screen.width + "x" + Screen.height);
+                _readTex.ReadPixels(new Rect(_rx, _ry, VideoWidth, VideoHeight), 0, 0, false);
                 _readTex.Apply(false);
                 if (verbose) RecordingModEntry.Log("  ReadPixels OK");
 
                 Color32[] px = _readTex.GetPixels32();
-                if (verbose) RecordingModEntry.Log("  GetPixels32 len=" + px.Length);
+                if (verbose)
+                {
+                    Color32 p0   = px[0];
+                    Color32 pMid = px[VideoWidth / 2 + (VideoHeight / 2) * VideoWidth];
+                    Color32 pTR  = px[VideoWidth - 1 + (VideoHeight - 1) * VideoWidth];
+                    RecordingModEntry.Log("  GetPixels32 len=" + px.Length
+                        + "  px[BL]=(" + p0.r + "," + p0.g + "," + p0.b + ")"
+                        + " px[C]=(" + pMid.r + "," + pMid.g + "," + pMid.b + ")"
+                        + " px[TR]=(" + pTR.r + "," + pTR.g + "," + pTR.b + ")");
+                }
 
                 // 2. Convert RGBA -> NV12 into _yuvBuf at actual encoder strides.
                 // Y at [row*_encStride + col]; UV (interleaved) at [_encStride*_encSliceH + (row/2)*_encStride + col*2].
