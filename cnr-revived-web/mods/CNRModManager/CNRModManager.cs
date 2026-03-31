@@ -61,11 +61,12 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.4.0";
+        public  const string Version        = "1.4.1";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
         public  static bool  IsOpen         = false;
+        public  static bool  IsLoaded       = false;
 
         private static bool      _loaded       = false;
         private static FieldInfo _ecoOpenFI    = null;   // CNRMods.EconomyHook.ModManagerOpen
@@ -127,6 +128,7 @@ namespace CNRModManager
             RegisterWithCNRMod();
             Log("=== CNRModManager v" + Version + " Load() ===");
             Spawn();
+            IsLoaded = true;
         }
 
         // Called by CNRMods shim when CNRMod.dll is absent
@@ -137,6 +139,7 @@ namespace CNRModManager
             Log("=== CNRModManager v" + Version + " BootstrapLoad() (no CNRMod) ===");
             Spawn();
             ScanAndLoadMods();
+            IsLoaded = true;
         }
 
         private static void Spawn()
