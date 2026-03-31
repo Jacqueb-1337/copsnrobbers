@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.4.2";
+        public  const string Version        = "1.4.3";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -369,20 +369,28 @@ namespace CNRModManager
         private void TryInterceptMpButton()
         {
             if (_goMpBtn != null) return;
-            MonoBehaviour[] all = (MonoBehaviour[])(object)FindObjectsOfType(typeof(MonoBehaviour));
-            foreach (MonoBehaviour mb in all)
+            try
             {
-                if (mb.GetType().Name != "UIButtonEventKit") continue;
-                FieldInfo fi = mb.GetType().GetField("buttonName",
-                    BindingFlags.Instance | BindingFlags.Public);
-                if (fi == null) continue;
-                if ((int)(object)fi.GetValue(mb) != 49) continue; // 49 = GotoHall (multiplayer)
-                _goMpBtn = ((Component)(object)mb).gameObject;
-                ((Behaviour)(object)mb).enabled = false; // disable original handler
-                var interceptor = _goMpBtn.AddComponent<MgrMpInterceptor>();
-                interceptor.hook = this;
-                break;
+                MonoBehaviour[] all = (MonoBehaviour[])(object)FindObjectsOfType(typeof(MonoBehaviour));
+                foreach (MonoBehaviour mb in all)
+                {
+                    if (mb == null || mb.GetType().Name != "UIButtonEventKit") continue;
+                    FieldInfo fi = mb.GetType().GetField("buttonName",
+                        BindingFlags.Instance | BindingFlags.Public);
+                    if (fi == null) continue;
+                    int bval;
+                    try { bval = Convert.ToInt32(fi.GetValue(mb)); }
+                    catch { continue; }
+                    if (bval != 49) continue; // 49 = GotoHall (multiplayer)
+                    _goMpBtn = ((Component)(object)mb).gameObject;
+                    ((Behaviour)(object)mb).enabled = false; // disable original handler
+                    var interceptor = _goMpBtn.AddComponent<MgrMpInterceptor>();
+                    interceptor.hook = this;
+                    ModManagerEntry.Log("TryInterceptMpButton: intercepted GotoHall on " + _goMpBtn.name);
+                    break;
+                }
             }
+            catch (Exception ex) { ModManagerEntry.Log("TryInterceptMpButton err: " + ex.Message); }
         }
 
         internal void OnMpButtonClick()
