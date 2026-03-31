@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:background="@android:color/transparent" android:padding="10.0dip" android:layout_width="fill_parent" android:layout_height="fill_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <LinearLayout android:orientation="vertical" android:background="#ffffffff" android:paddingLeft="@dimen/kamcordChangeCredsPadding" android:paddingRight="@dimen/kamcordChangeCredsPadding" android:layout_width="fill_parent" android:layout_height="wrap_content" android:layout_marginBottom="10.0dip">
+        <EditText android:textColor="#ff000000" android:id="@id/username" android:background="@null" android:padding="@dimen/kamcordChangeCredsPadding" android:layout_width="fill_parent" android:layout_height="wrap_content" android:hint="@string/kamcordUsername" android:maxLines="1" android:ems="10" android:singleLine="true" android:digits="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890" android:inputType="textNoSuggestions" android:imeOptions="actionNext" android:textCursorDrawable="@null" />
+        <View android:background="@color/kamcordDividerColor" android:layout_width="fill_parent" android:layout_height="@dimen/kamcordDividerWidth" />
+        <EditText android:textColor="#ff000000" android:id="@id/password" android:background="@null" android:padding="@dimen/kamcordChangeCredsPadding" android:layout_width="fill_parent" android:layout_height="wrap_content" android:hint="@string/kamcordPassword" android:maxLines="1" android:ems="10" android:inputType="textPassword" android:textCursorDrawable="@null" />
+        <View android:background="@color/kamcordDividerColor" android:layout_width="fill_parent" android:layout_height="@dimen/kamcordDividerWidth" />
+        <EditText android:textColor="#ff000000" android:id="@id/email" android:background="@null" android:padding="@dimen/kamcordChangeCredsPadding" android:layout_width="fill_parent" android:layout_height="wrap_content" android:hint="@string/kamcordEmail" android:maxLines="1" android:ems="10" android:inputType="textEmailAddress" android:imeOptions="actionDone" android:textCursorDrawable="@null" />
+    </LinearLayout>
+    <Button android:id="@id/createProfile" android:text="@string/kamcordCreateProfile" style="@style/KamcordButton" />
+    <com.kamcord.android.CustomWebView android:id="@id/privacyAndTerms" android:layout_width="fill_parent" android:layout_height="0.0dip" android:layout_weight="1.0" />
+</LinearLayout>

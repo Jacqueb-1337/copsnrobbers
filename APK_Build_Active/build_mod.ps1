@@ -47,6 +47,7 @@ Write-Host "Building $OutName from $([System.IO.Path]::GetFileName($ModFile)) ..
     "/reference:$ManagedDir\System.Core.dll" `
     "/reference:$ManagedDir\UnityEngine.dll" `
     "/reference:$ManagedDir\JsonFx.Json.dll" `
+    "/reference:$ManagedDir\Assembly-CSharp-firstpass.dll" `
     "/reference:$ManagedDir\Assembly-CSharp.dll" `
     "$ModFile" 2>&1 | Where-Object { $_ -notmatch "go.microsoft.com|only supports language" }
 
