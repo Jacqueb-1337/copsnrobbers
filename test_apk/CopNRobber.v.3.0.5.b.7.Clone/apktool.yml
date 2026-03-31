@@ -1,0 +1,26 @@
+version: 2.9.3
+apkFileName: CopNRobber.v.3.0.5.b.7.Clone.apk
+isFrameworkApk: false
+usesFramework:
+  ids:
+  - 1
+  tag: null
+sdkInfo:
+  minSdkVersion: 9
+  targetSdkVersion: 24
+packageInfo:
+  forcedPackageId: 127
+  renameManifestPackage: com.joydo.minestrikenex
+versionInfo:
+  versionCode: 7
+  versionName: 3.0.5
+resourcesAreCompressed: false
+sharedLibrary: false
+sparseResources: false
+doNotCompress:
+- resources.arsc
+- assets/bin/Data/PlayerConnectionConfigFile
+- assets/bin/Data/sharedassets25.assets.split7
+- assets/bin/Data/sharedassets26.assets.split10
+- png
+- so

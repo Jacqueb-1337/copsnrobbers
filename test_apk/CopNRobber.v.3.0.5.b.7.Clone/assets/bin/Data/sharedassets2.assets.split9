@@ -1,0 +1,2751 @@
+ogram "fp" {
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" "SHADOWS_OFF" "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "DIRECTIONAL" "SHADOWS_OFF" "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" "SHADOWS_OFF" "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "DIRECTIONAL" "SHADOWS_OFF" "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" "SHADOWS_OFF" "LIGHTMAP_ON" "DIRLIGHTMAP_ON" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "DIRECTIONAL" "SHADOWS_OFF" "LIGHTMAP_ON" "DIRLIGHTMAP_ON" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" "SHADOWS_SCREEN" "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" }
+"!!GLES"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" "SHADOWS_SCREEN" "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" }
+"!!GLES"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" "SHADOWS_SCREEN" "LIGHTMAP_ON" "DIRLIGHTMAP_ON" }
+"!!GLES"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" "SHADOWS_SCREEN" "SHADOWS_NATIVE" "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "DIRECTIONAL" "SHADOWS_SCREEN" "SHADOWS_NATIVE" "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" "SHADOWS_SCREEN" "SHADOWS_NATIVE" "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "DIRECTIONAL" "SHADOWS_SCREEN" "SHADOWS_NATIVE" "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" "SHADOWS_SCREEN" "SHADOWS_NATIVE" "LIGHTMAP_ON" "DIRLIGHTMAP_ON" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "DIRECTIONAL" "SHADOWS_SCREEN" "SHADOWS_NATIVE" "LIGHTMAP_ON" "DIRLIGHTMAP_ON" }
+"!!GLES3"
+}
+}
+ }
+ Pass {
+  Name "FORWARD"
+  Tags { "LIGHTMODE"="ForwardAdd" "QUEUE"="AlphaTest" "IGNOREPROJECTOR"="true" "RenderType"="TransparentCutout" }
+  ZWrite Off
+  Fog {
+   Color (0,0,0,0)
+  }
+  Blend One One
+  ColorMask RGB
+Program "vp" {
+SubProgram "gles " {
+Keywords { "POINT" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec3 _glesNormal;
+attribute vec4 _glesMultiTexCoord0;
+uniform highp vec4 _WorldSpaceLightPos0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp mat4 _LightMatrix0;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+varying mediump vec3 xlv_TEXCOORD2;
+varying highp vec3 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  mediump vec3 tmpvar_2;
+  highp mat3 tmpvar_3;
+  tmpvar_3[0] = _Object2World[0].xyz;
+  tmpvar_3[1] = _Object2World[1].xyz;
+  tmpvar_3[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_4;
+  tmpvar_4 = (tmpvar_3 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_4;
+  highp vec3 tmpvar_5;
+  highp vec4 cse_6;
+  cse_6 = (_Object2World * _glesVertex);
+  tmpvar_5 = (_WorldSpaceLightPos0.xyz - cse_6.xyz);
+  tmpvar_2 = tmpvar_5;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+  xlv_TEXCOORD2 = tmpvar_2;
+  xlv_TEXCOORD3 = (_LightMatrix0 * cse_6).xyz;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform lowp vec4 _LightColor0;
+uniform sampler2D _LightTexture0;
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+varying mediump vec3 xlv_TEXCOORD2;
+varying highp vec3 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 c_1;
+  lowp vec3 lightDir_2;
+  lowp vec4 tmpvar_3;
+  tmpvar_3 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float tmpvar_4;
+  tmpvar_4 = tmpvar_3.w;
+  lowp float x_5;
+  x_5 = (tmpvar_3.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  mediump vec3 tmpvar_6;
+  tmpvar_6 = normalize(xlv_TEXCOORD2);
+  lightDir_2 = tmpvar_6;
+  highp float tmpvar_7;
+  tmpvar_7 = dot (xlv_TEXCOORD3, xlv_TEXCOORD3);
+  lowp vec4 c_8;
+  c_8.xyz = ((tmpvar_3.xyz * _LightColor0.xyz) * ((
+    max (0.0, dot (xlv_TEXCOORD1, lightDir_2))
+   * texture2D (_LightTexture0, vec2(tmpvar_7)).w) * 2.0));
+  c_8.w = tmpvar_4;
+  c_1.xyz = c_8.xyz;
+  c_1.w = tmpvar_4;
+  gl_FragData[0] = c_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "POINT" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec3 _glesNormal;
+in vec4 _glesMultiTexCoord0;
+uniform highp vec4 _WorldSpaceLightPos0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp mat4 _LightMatrix0;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out lowp vec3 xlv_TEXCOORD1;
+out mediump vec3 xlv_TEXCOORD2;
+out highp vec3 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  mediump vec3 tmpvar_2;
+  highp mat3 tmpvar_3;
+  tmpvar_3[0] = _Object2World[0].xyz;
+  tmpvar_3[1] = _Object2World[1].xyz;
+  tmpvar_3[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_4;
+  tmpvar_4 = (tmpvar_3 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_4;
+  highp vec3 tmpvar_5;
+  highp vec4 cse_6;
+  cse_6 = (_Object2World * _glesVertex);
+  tmpvar_5 = (_WorldSpaceLightPos0.xyz - cse_6.xyz);
+  tmpvar_2 = tmpvar_5;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+  xlv_TEXCOORD2 = tmpvar_2;
+  xlv_TEXCOORD3 = (_LightMatrix0 * cse_6).xyz;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform lowp vec4 _LightColor0;
+uniform sampler2D _LightTexture0;
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in lowp vec3 xlv_TEXCOORD1;
+in mediump vec3 xlv_TEXCOORD2;
+in highp vec3 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 c_1;
+  lowp vec3 lightDir_2;
+  lowp vec4 tmpvar_3;
+  tmpvar_3 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float tmpvar_4;
+  tmpvar_4 = tmpvar_3.w;
+  lowp float x_5;
+  x_5 = (tmpvar_3.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  mediump vec3 tmpvar_6;
+  tmpvar_6 = normalize(xlv_TEXCOORD2);
+  lightDir_2 = tmpvar_6;
+  highp float tmpvar_7;
+  tmpvar_7 = dot (xlv_TEXCOORD3, xlv_TEXCOORD3);
+  lowp vec4 c_8;
+  c_8.xyz = ((tmpvar_3.xyz * _LightColor0.xyz) * ((
+    max (0.0, dot (xlv_TEXCOORD1, lightDir_2))
+   * texture (_LightTexture0, vec2(tmpvar_7)).w) * 2.0));
+  c_8.w = tmpvar_4;
+  c_1.xyz = c_8.xyz;
+  c_1.w = tmpvar_4;
+  _glesFragData[0] = c_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec3 _glesNormal;
+attribute vec4 _glesMultiTexCoord0;
+uniform lowp vec4 _WorldSpaceLightPos0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+varying mediump vec3 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  mediump vec3 tmpvar_2;
+  highp mat3 tmpvar_3;
+  tmpvar_3[0] = _Object2World[0].xyz;
+  tmpvar_3[1] = _Object2World[1].xyz;
+  tmpvar_3[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_4;
+  tmpvar_4 = (tmpvar_3 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_4;
+  highp vec3 tmpvar_5;
+  tmpvar_5 = _WorldSpaceLightPos0.xyz;
+  tmpvar_2 = tmpvar_5;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+  xlv_TEXCOORD2 = tmpvar_2;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform lowp vec4 _LightColor0;
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+varying mediump vec3 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec4 c_1;
+  lowp vec3 lightDir_2;
+  lowp vec4 tmpvar_3;
+  tmpvar_3 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float tmpvar_4;
+  tmpvar_4 = tmpvar_3.w;
+  lowp float x_5;
+  x_5 = (tmpvar_3.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lightDir_2 = xlv_TEXCOORD2;
+  lowp vec4 c_6;
+  c_6.xyz = ((tmpvar_3.xyz * _LightColor0.xyz) * (max (0.0, 
+    dot (xlv_TEXCOORD1, lightDir_2)
+  ) * 2.0));
+  c_6.w = tmpvar_4;
+  c_1.xyz = c_6.xyz;
+  c_1.w = tmpvar_4;
+  gl_FragData[0] = c_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "DIRECTIONAL" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec3 _glesNormal;
+in vec4 _glesMultiTexCoord0;
+uniform lowp vec4 _WorldSpaceLightPos0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out lowp vec3 xlv_TEXCOORD1;
+out mediump vec3 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  mediump vec3 tmpvar_2;
+  highp mat3 tmpvar_3;
+  tmpvar_3[0] = _Object2World[0].xyz;
+  tmpvar_3[1] = _Object2World[1].xyz;
+  tmpvar_3[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_4;
+  tmpvar_4 = (tmpvar_3 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_4;
+  highp vec3 tmpvar_5;
+  tmpvar_5 = _WorldSpaceLightPos0.xyz;
+  tmpvar_2 = tmpvar_5;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+  xlv_TEXCOORD2 = tmpvar_2;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform lowp vec4 _LightColor0;
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in lowp vec3 xlv_TEXCOORD1;
+in mediump vec3 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec4 c_1;
+  lowp vec3 lightDir_2;
+  lowp vec4 tmpvar_3;
+  tmpvar_3 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float tmpvar_4;
+  tmpvar_4 = tmpvar_3.w;
+  lowp float x_5;
+  x_5 = (tmpvar_3.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lightDir_2 = xlv_TEXCOORD2;
+  lowp vec4 c_6;
+  c_6.xyz = ((tmpvar_3.xyz * _LightColor0.xyz) * (max (0.0, 
+    dot (xlv_TEXCOORD1, lightDir_2)
+  ) * 2.0));
+  c_6.w = tmpvar_4;
+  c_1.xyz = c_6.xyz;
+  c_1.w = tmpvar_4;
+  _glesFragData[0] = c_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles " {
+Keywords { "SPOT" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec3 _glesNormal;
+attribute vec4 _glesMultiTexCoord0;
+uniform highp vec4 _WorldSpaceLightPos0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp mat4 _LightMatrix0;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+varying mediump vec3 xlv_TEXCOORD2;
+varying highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  mediump vec3 tmpvar_2;
+  highp mat3 tmpvar_3;
+  tmpvar_3[0] = _Object2World[0].xyz;
+  tmpvar_3[1] = _Object2World[1].xyz;
+  tmpvar_3[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_4;
+  tmpvar_4 = (tmpvar_3 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_4;
+  highp vec3 tmpvar_5;
+  highp vec4 cse_6;
+  cse_6 = (_Object2World * _glesVertex);
+  tmpvar_5 = (_WorldSpaceLightPos0.xyz - cse_6.xyz);
+  tmpvar_2 = tmpvar_5;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+  xlv_TEXCOORD2 = tmpvar_2;
+  xlv_TEXCOORD3 = (_LightMatrix0 * cse_6);
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform lowp vec4 _LightColor0;
+uniform sampler2D _LightTexture0;
+uniform sampler2D _LightTextureB0;
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+varying mediump vec3 xlv_TEXCOORD2;
+varying highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 c_1;
+  lowp vec3 lightDir_2;
+  lowp vec4 tmpvar_3;
+  tmpvar_3 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float tmpvar_4;
+  tmpvar_4 = tmpvar_3.w;
+  lowp float x_5;
+  x_5 = (tmpvar_3.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  mediump vec3 tmpvar_6;
+  tmpvar_6 = normalize(xlv_TEXCOORD2);
+  lightDir_2 = tmpvar_6;
+  highp vec2 P_7;
+  P_7 = ((xlv_TEXCOORD3.xy / xlv_TEXCOORD3.w) + 0.5);
+  highp float tmpvar_8;
+  tmpvar_8 = dot (xlv_TEXCOORD3.xyz, xlv_TEXCOORD3.xyz);
+  lowp float atten_9;
+  atten_9 = ((float(
+    (xlv_TEXCOORD3.z > 0.0)
+  ) * texture2D (_LightTexture0, P_7).w) * texture2D (_LightTextureB0, vec2(tmpvar_8)).w);
+  lowp vec4 c_10;
+  c_10.xyz = ((tmpvar_3.xyz * _LightColor0.xyz) * ((
+    max (0.0, dot (xlv_TEXCOORD1, lightDir_2))
+   * atten_9) * 2.0));
+  c_10.w = tmpvar_4;
+  c_1.xyz = c_10.xyz;
+  c_1.w = tmpvar_4;
+  gl_FragData[0] = c_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "SPOT" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec3 _glesNormal;
+in vec4 _glesMultiTexCoord0;
+uniform highp vec4 _WorldSpaceLightPos0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp mat4 _LightMatrix0;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out lowp vec3 xlv_TEXCOORD1;
+out mediump vec3 xlv_TEXCOORD2;
+out highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  mediump vec3 tmpvar_2;
+  highp mat3 tmpvar_3;
+  tmpvar_3[0] = _Object2World[0].xyz;
+  tmpvar_3[1] = _Object2World[1].xyz;
+  tmpvar_3[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_4;
+  tmpvar_4 = (tmpvar_3 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_4;
+  highp vec3 tmpvar_5;
+  highp vec4 cse_6;
+  cse_6 = (_Object2World * _glesVertex);
+  tmpvar_5 = (_WorldSpaceLightPos0.xyz - cse_6.xyz);
+  tmpvar_2 = tmpvar_5;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+  xlv_TEXCOORD2 = tmpvar_2;
+  xlv_TEXCOORD3 = (_LightMatrix0 * cse_6);
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform lowp vec4 _LightColor0;
+uniform sampler2D _LightTexture0;
+uniform sampler2D _LightTextureB0;
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in lowp vec3 xlv_TEXCOORD1;
+in mediump vec3 xlv_TEXCOORD2;
+in highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 c_1;
+  lowp vec3 lightDir_2;
+  lowp vec4 tmpvar_3;
+  tmpvar_3 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float tmpvar_4;
+  tmpvar_4 = tmpvar_3.w;
+  lowp float x_5;
+  x_5 = (tmpvar_3.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  mediump vec3 tmpvar_6;
+  tmpvar_6 = normalize(xlv_TEXCOORD2);
+  lightDir_2 = tmpvar_6;
+  highp vec2 P_7;
+  P_7 = ((xlv_TEXCOORD3.xy / xlv_TEXCOORD3.w) + 0.5);
+  highp float tmpvar_8;
+  tmpvar_8 = dot (xlv_TEXCOORD3.xyz, xlv_TEXCOORD3.xyz);
+  lowp float atten_9;
+  atten_9 = ((float(
+    (xlv_TEXCOORD3.z > 0.0)
+  ) * texture (_LightTexture0, P_7).w) * texture (_LightTextureB0, vec2(tmpvar_8)).w);
+  lowp vec4 c_10;
+  c_10.xyz = ((tmpvar_3.xyz * _LightColor0.xyz) * ((
+    max (0.0, dot (xlv_TEXCOORD1, lightDir_2))
+   * atten_9) * 2.0));
+  c_10.w = tmpvar_4;
+  c_1.xyz = c_10.xyz;
+  c_1.w = tmpvar_4;
+  _glesFragData[0] = c_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles " {
+Keywords { "POINT_COOKIE" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec3 _glesNormal;
+attribute vec4 _glesMultiTexCoord0;
+uniform highp vec4 _WorldSpaceLightPos0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp mat4 _LightMatrix0;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+varying mediump vec3 xlv_TEXCOORD2;
+varying highp vec3 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  mediump vec3 tmpvar_2;
+  highp mat3 tmpvar_3;
+  tmpvar_3[0] = _Object2World[0].xyz;
+  tmpvar_3[1] = _Object2World[1].xyz;
+  tmpvar_3[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_4;
+  tmpvar_4 = (tmpvar_3 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_4;
+  highp vec3 tmpvar_5;
+  highp vec4 cse_6;
+  cse_6 = (_Object2World * _glesVertex);
+  tmpvar_5 = (_WorldSpaceLightPos0.xyz - cse_6.xyz);
+  tmpvar_2 = tmpvar_5;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+  xlv_TEXCOORD2 = tmpvar_2;
+  xlv_TEXCOORD3 = (_LightMatrix0 * cse_6).xyz;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform lowp vec4 _LightColor0;
+uniform lowp samplerCube _LightTexture0;
+uniform sampler2D _LightTextureB0;
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+varying mediump vec3 xlv_TEXCOORD2;
+varying highp vec3 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 c_1;
+  lowp vec3 lightDir_2;
+  lowp vec4 tmpvar_3;
+  tmpvar_3 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float tmpvar_4;
+  tmpvar_4 = tmpvar_3.w;
+  lowp float x_5;
+  x_5 = (tmpvar_3.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  mediump vec3 tmpvar_6;
+  tmpvar_6 = normalize(xlv_TEXCOORD2);
+  lightDir_2 = tmpvar_6;
+  highp float tmpvar_7;
+  tmpvar_7 = dot (xlv_TEXCOORD3, xlv_TEXCOORD3);
+  lowp vec4 c_8;
+  c_8.xyz = ((tmpvar_3.xyz * _LightColor0.xyz) * ((
+    max (0.0, dot (xlv_TEXCOORD1, lightDir_2))
+   * 
+    (texture2D (_LightTextureB0, vec2(tmpvar_7)).w * textureCube (_LightTexture0, xlv_TEXCOORD3).w)
+  ) * 2.0));
+  c_8.w = tmpvar_4;
+  c_1.xyz = c_8.xyz;
+  c_1.w = tmpvar_4;
+  gl_FragData[0] = c_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "POINT_COOKIE" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec3 _glesNormal;
+in vec4 _glesMultiTexCoord0;
+uniform highp vec4 _WorldSpaceLightPos0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp mat4 _LightMatrix0;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out lowp vec3 xlv_TEXCOORD1;
+out mediump vec3 xlv_TEXCOORD2;
+out highp vec3 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  mediump vec3 tmpvar_2;
+  highp mat3 tmpvar_3;
+  tmpvar_3[0] = _Object2World[0].xyz;
+  tmpvar_3[1] = _Object2World[1].xyz;
+  tmpvar_3[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_4;
+  tmpvar_4 = (tmpvar_3 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_4;
+  highp vec3 tmpvar_5;
+  highp vec4 cse_6;
+  cse_6 = (_Object2World * _glesVertex);
+  tmpvar_5 = (_WorldSpaceLightPos0.xyz - cse_6.xyz);
+  tmpvar_2 = tmpvar_5;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+  xlv_TEXCOORD2 = tmpvar_2;
+  xlv_TEXCOORD3 = (_LightMatrix0 * cse_6).xyz;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform lowp vec4 _LightColor0;
+uniform lowp samplerCube _LightTexture0;
+uniform sampler2D _LightTextureB0;
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in lowp vec3 xlv_TEXCOORD1;
+in mediump vec3 xlv_TEXCOORD2;
+in highp vec3 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 c_1;
+  lowp vec3 lightDir_2;
+  lowp vec4 tmpvar_3;
+  tmpvar_3 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float tmpvar_4;
+  tmpvar_4 = tmpvar_3.w;
+  lowp float x_5;
+  x_5 = (tmpvar_3.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  mediump vec3 tmpvar_6;
+  tmpvar_6 = normalize(xlv_TEXCOORD2);
+  lightDir_2 = tmpvar_6;
+  highp float tmpvar_7;
+  tmpvar_7 = dot (xlv_TEXCOORD3, xlv_TEXCOORD3);
+  lowp vec4 c_8;
+  c_8.xyz = ((tmpvar_3.xyz * _LightColor0.xyz) * ((
+    max (0.0, dot (xlv_TEXCOORD1, lightDir_2))
+   * 
+    (texture (_LightTextureB0, vec2(tmpvar_7)).w * texture (_LightTexture0, xlv_TEXCOORD3).w)
+  ) * 2.0));
+  c_8.w = tmpvar_4;
+  c_1.xyz = c_8.xyz;
+  c_1.w = tmpvar_4;
+  _glesFragData[0] = c_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL_COOKIE" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec3 _glesNormal;
+attribute vec4 _glesMultiTexCoord0;
+uniform lowp vec4 _WorldSpaceLightPos0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp mat4 _LightMatrix0;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+varying mediump vec3 xlv_TEXCOORD2;
+varying highp vec2 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  mediump vec3 tmpvar_2;
+  highp mat3 tmpvar_3;
+  tmpvar_3[0] = _Object2World[0].xyz;
+  tmpvar_3[1] = _Object2World[1].xyz;
+  tmpvar_3[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_4;
+  tmpvar_4 = (tmpvar_3 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_4;
+  highp vec3 tmpvar_5;
+  tmpvar_5 = _WorldSpaceLightPos0.xyz;
+  tmpvar_2 = tmpvar_5;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+  xlv_TEXCOORD2 = tmpvar_2;
+  xlv_TEXCOORD3 = (_LightMatrix0 * (_Object2World * _glesVertex)).xy;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform lowp vec4 _LightColor0;
+uniform sampler2D _LightTexture0;
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+varying mediump vec3 xlv_TEXCOORD2;
+varying highp vec2 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 c_1;
+  lowp vec3 lightDir_2;
+  lowp vec4 tmpvar_3;
+  tmpvar_3 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float tmpvar_4;
+  tmpvar_4 = tmpvar_3.w;
+  lowp float x_5;
+  x_5 = (tmpvar_3.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lightDir_2 = xlv_TEXCOORD2;
+  lowp vec4 c_6;
+  c_6.xyz = ((tmpvar_3.xyz * _LightColor0.xyz) * ((
+    max (0.0, dot (xlv_TEXCOORD1, lightDir_2))
+   * texture2D (_LightTexture0, xlv_TEXCOORD3).w) * 2.0));
+  c_6.w = tmpvar_4;
+  c_1.xyz = c_6.xyz;
+  c_1.w = tmpvar_4;
+  gl_FragData[0] = c_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "DIRECTIONAL_COOKIE" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec3 _glesNormal;
+in vec4 _glesMultiTexCoord0;
+uniform lowp vec4 _WorldSpaceLightPos0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp mat4 _LightMatrix0;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out lowp vec3 xlv_TEXCOORD1;
+out mediump vec3 xlv_TEXCOORD2;
+out highp vec2 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  mediump vec3 tmpvar_2;
+  highp mat3 tmpvar_3;
+  tmpvar_3[0] = _Object2World[0].xyz;
+  tmpvar_3[1] = _Object2World[1].xyz;
+  tmpvar_3[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_4;
+  tmpvar_4 = (tmpvar_3 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_4;
+  highp vec3 tmpvar_5;
+  tmpvar_5 = _WorldSpaceLightPos0.xyz;
+  tmpvar_2 = tmpvar_5;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+  xlv_TEXCOORD2 = tmpvar_2;
+  xlv_TEXCOORD3 = (_LightMatrix0 * (_Object2World * _glesVertex)).xy;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform lowp vec4 _LightColor0;
+uniform sampler2D _LightTexture0;
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in lowp vec3 xlv_TEXCOORD1;
+in mediump vec3 xlv_TEXCOORD2;
+in highp vec2 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 c_1;
+  lowp vec3 lightDir_2;
+  lowp vec4 tmpvar_3;
+  tmpvar_3 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float tmpvar_4;
+  tmpvar_4 = tmpvar_3.w;
+  lowp float x_5;
+  x_5 = (tmpvar_3.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lightDir_2 = xlv_TEXCOORD2;
+  lowp vec4 c_6;
+  c_6.xyz = ((tmpvar_3.xyz * _LightColor0.xyz) * ((
+    max (0.0, dot (xlv_TEXCOORD1, lightDir_2))
+   * texture (_LightTexture0, xlv_TEXCOORD3).w) * 2.0));
+  c_6.w = tmpvar_4;
+  c_1.xyz = c_6.xyz;
+  c_1.w = tmpvar_4;
+  _glesFragData[0] = c_1;
+}
+
+
+
+#endif"
+}
+}
+Program "fp" {
+SubProgram "gles " {
+Keywords { "POINT" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "POINT" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "DIRECTIONAL" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "SPOT" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "SPOT" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "POINT_COOKIE" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "POINT_COOKIE" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "DIRECTIONAL_COOKIE" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "DIRECTIONAL_COOKIE" }
+"!!GLES3"
+}
+}
+ }
+ Pass {
+  Name "PREPASS"
+  Tags { "LIGHTMODE"="PrePassBase" "QUEUE"="AlphaTest" "IGNOREPROJECTOR"="true" "RenderType"="TransparentCutout" }
+  Fog { Mode Off }
+Program "vp" {
+SubProgram "gles " {
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec3 _glesNormal;
+attribute vec4 _glesMultiTexCoord0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  highp mat3 tmpvar_2;
+  tmpvar_2[0] = _Object2World[0].xyz;
+  tmpvar_2[1] = _Object2World[1].xyz;
+  tmpvar_2[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_3;
+  tmpvar_3 = (tmpvar_2 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_3;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying lowp vec3 xlv_TEXCOORD1;
+void main ()
+{
+  lowp vec4 res_1;
+  lowp float x_2;
+  x_2 = ((texture2D (_MainTex, xlv_TEXCOORD0) * _Color).w - _Cutoff);
+  if ((x_2 < 0.0)) {
+    discard;
+  };
+  res_1.xyz = ((xlv_TEXCOORD1 * 0.5) + 0.5);
+  res_1.w = 0.0;
+  gl_FragData[0] = res_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec3 _glesNormal;
+in vec4 _glesMultiTexCoord0;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out lowp vec3 xlv_TEXCOORD1;
+void main ()
+{
+  lowp vec3 tmpvar_1;
+  highp mat3 tmpvar_2;
+  tmpvar_2[0] = _Object2World[0].xyz;
+  tmpvar_2[1] = _Object2World[1].xyz;
+  tmpvar_2[2] = _Object2World[2].xyz;
+  highp vec3 tmpvar_3;
+  tmpvar_3 = (tmpvar_2 * (normalize(_glesNormal) * unity_Scale.w));
+  tmpvar_1 = tmpvar_3;
+  gl_Position = (glstate_matrix_mvp * _glesVertex);
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = tmpvar_1;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in lowp vec3 xlv_TEXCOORD1;
+void main ()
+{
+  lowp vec4 res_1;
+  lowp float x_2;
+  x_2 = ((texture (_MainTex, xlv_TEXCOORD0) * _Color).w - _Cutoff);
+  if ((x_2 < 0.0)) {
+    discard;
+  };
+  res_1.xyz = ((xlv_TEXCOORD1 * 0.5) + 0.5);
+  res_1.w = 0.0;
+  _glesFragData[0] = res_1;
+}
+
+
+
+#endif"
+}
+}
+Program "fp" {
+SubProgram "gles " {
+"!!GLES"
+}
+SubProgram "gles3 " {
+"!!GLES3"
+}
+}
+ }
+ Pass {
+  Name "PREPASS"
+  Tags { "LIGHTMODE"="PrePassFinal" "QUEUE"="AlphaTest" "IGNOREPROJECTOR"="true" "RenderType"="TransparentCutout" }
+  ZWrite Off
+Program "vp" {
+SubProgram "gles " {
+Keywords { "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec3 _glesNormal;
+attribute vec4 _glesMultiTexCoord0;
+uniform highp vec4 _ProjectionParams;
+uniform highp vec4 unity_SHAr;
+uniform highp vec4 unity_SHAg;
+uniform highp vec4 unity_SHAb;
+uniform highp vec4 unity_SHBr;
+uniform highp vec4 unity_SHBg;
+uniform highp vec4 unity_SHBb;
+uniform highp vec4 unity_SHC;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec3 xlv_TEXCOORD2;
+void main ()
+{
+  highp vec3 tmpvar_1;
+  highp vec4 tmpvar_2;
+  tmpvar_2 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_3;
+  highp vec4 tmpvar_4;
+  tmpvar_4 = (tmpvar_2 * 0.5);
+  highp vec2 tmpvar_5;
+  tmpvar_5.x = tmpvar_4.x;
+  tmpvar_5.y = (tmpvar_4.y * _ProjectionParams.x);
+  o_3.xy = (tmpvar_5 + tmpvar_4.w);
+  o_3.zw = tmpvar_2.zw;
+  highp mat3 tmpvar_6;
+  tmpvar_6[0] = _Object2World[0].xyz;
+  tmpvar_6[1] = _Object2World[1].xyz;
+  tmpvar_6[2] = _Object2World[2].xyz;
+  highp vec4 tmpvar_7;
+  tmpvar_7.w = 1.0;
+  tmpvar_7.xyz = (tmpvar_6 * (normalize(_glesNormal) * unity_Scale.w));
+  mediump vec3 tmpvar_8;
+  mediump vec4 normal_9;
+  normal_9 = tmpvar_7;
+  highp float vC_10;
+  mediump vec3 x3_11;
+  mediump vec3 x2_12;
+  mediump vec3 x1_13;
+  highp float tmpvar_14;
+  tmpvar_14 = dot (unity_SHAr, normal_9);
+  x1_13.x = tmpvar_14;
+  highp float tmpvar_15;
+  tmpvar_15 = dot (unity_SHAg, normal_9);
+  x1_13.y = tmpvar_15;
+  highp float tmpvar_16;
+  tmpvar_16 = dot (unity_SHAb, normal_9);
+  x1_13.z = tmpvar_16;
+  mediump vec4 tmpvar_17;
+  tmpvar_17 = (normal_9.xyzz * normal_9.yzzx);
+  highp float tmpvar_18;
+  tmpvar_18 = dot (unity_SHBr, tmpvar_17);
+  x2_12.x = tmpvar_18;
+  highp float tmpvar_19;
+  tmpvar_19 = dot (unity_SHBg, tmpvar_17);
+  x2_12.y = tmpvar_19;
+  highp float tmpvar_20;
+  tmpvar_20 = dot (unity_SHBb, tmpvar_17);
+  x2_12.z = tmpvar_20;
+  mediump float tmpvar_21;
+  tmpvar_21 = ((normal_9.x * normal_9.x) - (normal_9.y * normal_9.y));
+  vC_10 = tmpvar_21;
+  highp vec3 tmpvar_22;
+  tmpvar_22 = (unity_SHC.xyz * vC_10);
+  x3_11 = tmpvar_22;
+  tmpvar_8 = ((x1_13 + x2_12) + x3_11);
+  tmpvar_1 = tmpvar_8;
+  gl_Position = tmpvar_2;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_3;
+  xlv_TEXCOORD2 = tmpvar_1;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec3 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec4 light_3;
+  lowp vec4 tmpvar_4;
+  tmpvar_4 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_5;
+  x_5 = (tmpvar_4.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_6;
+  tmpvar_6 = texture2DProj (_LightBuffer, xlv_TEXCOORD1);
+  light_3 = tmpvar_6;
+  mediump vec4 tmpvar_7;
+  tmpvar_7 = -(log2(max (light_3, vec4(0.001, 0.001, 0.001, 0.001))));
+  light_3.w = tmpvar_7.w;
+  highp vec3 tmpvar_8;
+  tmpvar_8 = (tmpvar_7.xyz + xlv_TEXCOORD2);
+  light_3.xyz = tmpvar_8;
+  lowp vec4 c_9;
+  mediump vec3 tmpvar_10;
+  tmpvar_10 = (tmpvar_4.xyz * light_3.xyz);
+  c_9.xyz = tmpvar_10;
+  c_9.w = tmpvar_4.w;
+  c_2 = c_9;
+  tmpvar_1 = c_2;
+  gl_FragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec3 _glesNormal;
+in vec4 _glesMultiTexCoord0;
+uniform highp vec4 _ProjectionParams;
+uniform highp vec4 unity_SHAr;
+uniform highp vec4 unity_SHAg;
+uniform highp vec4 unity_SHAb;
+uniform highp vec4 unity_SHBr;
+uniform highp vec4 unity_SHBg;
+uniform highp vec4 unity_SHBb;
+uniform highp vec4 unity_SHC;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out highp vec4 xlv_TEXCOORD1;
+out highp vec3 xlv_TEXCOORD2;
+void main ()
+{
+  highp vec3 tmpvar_1;
+  highp vec4 tmpvar_2;
+  tmpvar_2 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_3;
+  highp vec4 tmpvar_4;
+  tmpvar_4 = (tmpvar_2 * 0.5);
+  highp vec2 tmpvar_5;
+  tmpvar_5.x = tmpvar_4.x;
+  tmpvar_5.y = (tmpvar_4.y * _ProjectionParams.x);
+  o_3.xy = (tmpvar_5 + tmpvar_4.w);
+  o_3.zw = tmpvar_2.zw;
+  highp mat3 tmpvar_6;
+  tmpvar_6[0] = _Object2World[0].xyz;
+  tmpvar_6[1] = _Object2World[1].xyz;
+  tmpvar_6[2] = _Object2World[2].xyz;
+  highp vec4 tmpvar_7;
+  tmpvar_7.w = 1.0;
+  tmpvar_7.xyz = (tmpvar_6 * (normalize(_glesNormal) * unity_Scale.w));
+  mediump vec3 tmpvar_8;
+  mediump vec4 normal_9;
+  normal_9 = tmpvar_7;
+  highp float vC_10;
+  mediump vec3 x3_11;
+  mediump vec3 x2_12;
+  mediump vec3 x1_13;
+  highp float tmpvar_14;
+  tmpvar_14 = dot (unity_SHAr, normal_9);
+  x1_13.x = tmpvar_14;
+  highp float tmpvar_15;
+  tmpvar_15 = dot (unity_SHAg, normal_9);
+  x1_13.y = tmpvar_15;
+  highp float tmpvar_16;
+  tmpvar_16 = dot (unity_SHAb, normal_9);
+  x1_13.z = tmpvar_16;
+  mediump vec4 tmpvar_17;
+  tmpvar_17 = (normal_9.xyzz * normal_9.yzzx);
+  highp float tmpvar_18;
+  tmpvar_18 = dot (unity_SHBr, tmpvar_17);
+  x2_12.x = tmpvar_18;
+  highp float tmpvar_19;
+  tmpvar_19 = dot (unity_SHBg, tmpvar_17);
+  x2_12.y = tmpvar_19;
+  highp float tmpvar_20;
+  tmpvar_20 = dot (unity_SHBb, tmpvar_17);
+  x2_12.z = tmpvar_20;
+  mediump float tmpvar_21;
+  tmpvar_21 = ((normal_9.x * normal_9.x) - (normal_9.y * normal_9.y));
+  vC_10 = tmpvar_21;
+  highp vec3 tmpvar_22;
+  tmpvar_22 = (unity_SHC.xyz * vC_10);
+  x3_11 = tmpvar_22;
+  tmpvar_8 = ((x1_13 + x2_12) + x3_11);
+  tmpvar_1 = tmpvar_8;
+  gl_Position = tmpvar_2;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_3;
+  xlv_TEXCOORD2 = tmpvar_1;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in highp vec4 xlv_TEXCOORD1;
+in highp vec3 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec4 light_3;
+  lowp vec4 tmpvar_4;
+  tmpvar_4 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_5;
+  x_5 = (tmpvar_4.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_6;
+  tmpvar_6 = textureProj (_LightBuffer, xlv_TEXCOORD1);
+  light_3 = tmpvar_6;
+  mediump vec4 tmpvar_7;
+  tmpvar_7 = -(log2(max (light_3, vec4(0.001, 0.001, 0.001, 0.001))));
+  light_3.w = tmpvar_7.w;
+  highp vec3 tmpvar_8;
+  tmpvar_8 = (tmpvar_7.xyz + xlv_TEXCOORD2);
+  light_3.xyz = tmpvar_8;
+  lowp vec4 c_9;
+  mediump vec3 tmpvar_10;
+  tmpvar_10 = (tmpvar_4.xyz * light_3.xyz);
+  c_9.xyz = tmpvar_10;
+  c_9.w = tmpvar_4.w;
+  c_2 = c_9;
+  tmpvar_1 = c_2;
+  _glesFragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec4 _glesMultiTexCoord0;
+attribute vec4 _glesMultiTexCoord1;
+uniform highp vec4 _ProjectionParams;
+uniform highp vec4 unity_ShadowFadeCenterAndType;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 glstate_matrix_modelview0;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_LightmapST;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec2 xlv_TEXCOORD2;
+varying highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  highp vec4 tmpvar_1;
+  highp vec4 tmpvar_2;
+  tmpvar_2 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_3;
+  highp vec4 tmpvar_4;
+  tmpvar_4 = (tmpvar_2 * 0.5);
+  highp vec2 tmpvar_5;
+  tmpvar_5.x = tmpvar_4.x;
+  tmpvar_5.y = (tmpvar_4.y * _ProjectionParams.x);
+  o_3.xy = (tmpvar_5 + tmpvar_4.w);
+  o_3.zw = tmpvar_2.zw;
+  tmpvar_1.xyz = (((_Object2World * _glesVertex).xyz - unity_ShadowFadeCenterAndType.xyz) * unity_ShadowFadeCenterAndType.w);
+  tmpvar_1.w = (-((glstate_matrix_modelview0 * _glesVertex).z) * (1.0 - unity_ShadowFadeCenterAndType.w));
+  gl_Position = tmpvar_2;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_3;
+  xlv_TEXCOORD2 = ((_glesMultiTexCoord1.xy * unity_LightmapST.xy) + unity_LightmapST.zw);
+  xlv_TEXCOORD3 = tmpvar_1;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform sampler2D unity_Lightmap;
+uniform sampler2D unity_LightmapInd;
+uniform highp vec4 unity_LightmapFade;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec2 xlv_TEXCOORD2;
+varying highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec3 lmIndirect_3;
+  mediump vec3 lmFull_4;
+  mediump float lmFade_5;
+  mediump vec4 light_6;
+  lowp vec4 tmpvar_7;
+  tmpvar_7 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_8;
+  x_8 = (tmpvar_7.w - _Cutoff);
+  if ((x_8 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_9;
+  tmpvar_9 = texture2DProj (_LightBuffer, xlv_TEXCOORD1);
+  light_6 = tmpvar_9;
+  mediump vec4 tmpvar_10;
+  tmpvar_10 = -(log2(max (light_6, vec4(0.001, 0.001, 0.001, 0.001))));
+  light_6.w = tmpvar_10.w;
+  highp float tmpvar_11;
+  tmpvar_11 = ((sqrt(
+    dot (xlv_TEXCOORD3, xlv_TEXCOORD3)
+  ) * unity_LightmapFade.z) + unity_LightmapFade.w);
+  lmFade_5 = tmpvar_11;
+  lowp vec3 tmpvar_12;
+  tmpvar_12 = (2.0 * texture2D (unity_Lightmap, xlv_TEXCOORD2).xyz);
+  lmFull_4 = tmpvar_12;
+  lowp vec3 tmpvar_13;
+  tmpvar_13 = (2.0 * texture2D (unity_LightmapInd, xlv_TEXCOORD2).xyz);
+  lmIndirect_3 = tmpvar_13;
+  light_6.xyz = (tmpvar_10.xyz + mix (lmIndirect_3, lmFull_4, vec3(clamp (lmFade_5, 0.0, 1.0))));
+  lowp vec4 c_14;
+  mediump vec3 tmpvar_15;
+  tmpvar_15 = (tmpvar_7.xyz * light_6.xyz);
+  c_14.xyz = tmpvar_15;
+  c_14.w = tmpvar_7.w;
+  c_2 = c_14;
+  tmpvar_1 = c_2;
+  gl_FragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec4 _glesMultiTexCoord0;
+in vec4 _glesMultiTexCoord1;
+uniform highp vec4 _ProjectionParams;
+uniform highp vec4 unity_ShadowFadeCenterAndType;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 glstate_matrix_modelview0;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_LightmapST;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out highp vec4 xlv_TEXCOORD1;
+out highp vec2 xlv_TEXCOORD2;
+out highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  highp vec4 tmpvar_1;
+  highp vec4 tmpvar_2;
+  tmpvar_2 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_3;
+  highp vec4 tmpvar_4;
+  tmpvar_4 = (tmpvar_2 * 0.5);
+  highp vec2 tmpvar_5;
+  tmpvar_5.x = tmpvar_4.x;
+  tmpvar_5.y = (tmpvar_4.y * _ProjectionParams.x);
+  o_3.xy = (tmpvar_5 + tmpvar_4.w);
+  o_3.zw = tmpvar_2.zw;
+  tmpvar_1.xyz = (((_Object2World * _glesVertex).xyz - unity_ShadowFadeCenterAndType.xyz) * unity_ShadowFadeCenterAndType.w);
+  tmpvar_1.w = (-((glstate_matrix_modelview0 * _glesVertex).z) * (1.0 - unity_ShadowFadeCenterAndType.w));
+  gl_Position = tmpvar_2;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_3;
+  xlv_TEXCOORD2 = ((_glesMultiTexCoord1.xy * unity_LightmapST.xy) + unity_LightmapST.zw);
+  xlv_TEXCOORD3 = tmpvar_1;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform sampler2D unity_Lightmap;
+uniform sampler2D unity_LightmapInd;
+uniform highp vec4 unity_LightmapFade;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in highp vec4 xlv_TEXCOORD1;
+in highp vec2 xlv_TEXCOORD2;
+in highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec3 lmIndirect_3;
+  mediump vec3 lmFull_4;
+  mediump float lmFade_5;
+  mediump vec4 light_6;
+  lowp vec4 tmpvar_7;
+  tmpvar_7 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_8;
+  x_8 = (tmpvar_7.w - _Cutoff);
+  if ((x_8 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_9;
+  tmpvar_9 = textureProj (_LightBuffer, xlv_TEXCOORD1);
+  light_6 = tmpvar_9;
+  mediump vec4 tmpvar_10;
+  tmpvar_10 = -(log2(max (light_6, vec4(0.001, 0.001, 0.001, 0.001))));
+  light_6.w = tmpvar_10.w;
+  highp float tmpvar_11;
+  tmpvar_11 = ((sqrt(
+    dot (xlv_TEXCOORD3, xlv_TEXCOORD3)
+  ) * unity_LightmapFade.z) + unity_LightmapFade.w);
+  lmFade_5 = tmpvar_11;
+  lowp vec3 tmpvar_12;
+  tmpvar_12 = (2.0 * texture (unity_Lightmap, xlv_TEXCOORD2).xyz);
+  lmFull_4 = tmpvar_12;
+  lowp vec3 tmpvar_13;
+  tmpvar_13 = (2.0 * texture (unity_LightmapInd, xlv_TEXCOORD2).xyz);
+  lmIndirect_3 = tmpvar_13;
+  light_6.xyz = (tmpvar_10.xyz + mix (lmIndirect_3, lmFull_4, vec3(clamp (lmFade_5, 0.0, 1.0))));
+  lowp vec4 c_14;
+  mediump vec3 tmpvar_15;
+  tmpvar_15 = (tmpvar_7.xyz * light_6.xyz);
+  c_14.xyz = tmpvar_15;
+  c_14.w = tmpvar_7.w;
+  c_2 = c_14;
+  tmpvar_1 = c_2;
+  _glesFragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_ON" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec4 _glesMultiTexCoord0;
+attribute vec4 _glesMultiTexCoord1;
+uniform highp vec4 _ProjectionParams;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp vec4 unity_LightmapST;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec2 xlv_TEXCOORD2;
+void main ()
+{
+  highp vec4 tmpvar_1;
+  tmpvar_1 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_2;
+  highp vec4 tmpvar_3;
+  tmpvar_3 = (tmpvar_1 * 0.5);
+  highp vec2 tmpvar_4;
+  tmpvar_4.x = tmpvar_3.x;
+  tmpvar_4.y = (tmpvar_3.y * _ProjectionParams.x);
+  o_2.xy = (tmpvar_4 + tmpvar_3.w);
+  o_2.zw = tmpvar_1.zw;
+  gl_Position = tmpvar_1;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_2;
+  xlv_TEXCOORD2 = ((_glesMultiTexCoord1.xy * unity_LightmapST.xy) + unity_LightmapST.zw);
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform sampler2D unity_Lightmap;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec2 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec4 light_3;
+  lowp vec4 tmpvar_4;
+  tmpvar_4 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_5;
+  x_5 = (tmpvar_4.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_6;
+  tmpvar_6 = texture2DProj (_LightBuffer, xlv_TEXCOORD1);
+  light_3 = tmpvar_6;
+  mediump vec3 lm_7;
+  lowp vec3 tmpvar_8;
+  tmpvar_8 = (2.0 * texture2D (unity_Lightmap, xlv_TEXCOORD2).xyz);
+  lm_7 = tmpvar_8;
+  mediump vec4 tmpvar_9;
+  tmpvar_9.w = 0.0;
+  tmpvar_9.xyz = lm_7;
+  mediump vec4 tmpvar_10;
+  tmpvar_10 = (-(log2(
+    max (light_3, vec4(0.001, 0.001, 0.001, 0.001))
+  )) + tmpvar_9);
+  light_3 = tmpvar_10;
+  lowp vec4 c_11;
+  mediump vec3 tmpvar_12;
+  tmpvar_12 = (tmpvar_4.xyz * tmpvar_10.xyz);
+  c_11.xyz = tmpvar_12;
+  c_11.w = tmpvar_4.w;
+  c_2 = c_11;
+  tmpvar_1 = c_2;
+  gl_FragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_ON" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec4 _glesMultiTexCoord0;
+in vec4 _glesMultiTexCoord1;
+uniform highp vec4 _ProjectionParams;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp vec4 unity_LightmapST;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out highp vec4 xlv_TEXCOORD1;
+out highp vec2 xlv_TEXCOORD2;
+void main ()
+{
+  highp vec4 tmpvar_1;
+  tmpvar_1 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_2;
+  highp vec4 tmpvar_3;
+  tmpvar_3 = (tmpvar_1 * 0.5);
+  highp vec2 tmpvar_4;
+  tmpvar_4.x = tmpvar_3.x;
+  tmpvar_4.y = (tmpvar_3.y * _ProjectionParams.x);
+  o_2.xy = (tmpvar_4 + tmpvar_3.w);
+  o_2.zw = tmpvar_1.zw;
+  gl_Position = tmpvar_1;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_2;
+  xlv_TEXCOORD2 = ((_glesMultiTexCoord1.xy * unity_LightmapST.xy) + unity_LightmapST.zw);
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform sampler2D unity_Lightmap;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in highp vec4 xlv_TEXCOORD1;
+in highp vec2 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec4 light_3;
+  lowp vec4 tmpvar_4;
+  tmpvar_4 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_5;
+  x_5 = (tmpvar_4.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_6;
+  tmpvar_6 = textureProj (_LightBuffer, xlv_TEXCOORD1);
+  light_3 = tmpvar_6;
+  mediump vec3 lm_7;
+  lowp vec3 tmpvar_8;
+  tmpvar_8 = (2.0 * texture (unity_Lightmap, xlv_TEXCOORD2).xyz);
+  lm_7 = tmpvar_8;
+  mediump vec4 tmpvar_9;
+  tmpvar_9.w = 0.0;
+  tmpvar_9.xyz = lm_7;
+  mediump vec4 tmpvar_10;
+  tmpvar_10 = (-(log2(
+    max (light_3, vec4(0.001, 0.001, 0.001, 0.001))
+  )) + tmpvar_9);
+  light_3 = tmpvar_10;
+  lowp vec4 c_11;
+  mediump vec3 tmpvar_12;
+  tmpvar_12 = (tmpvar_4.xyz * tmpvar_10.xyz);
+  c_11.xyz = tmpvar_12;
+  c_11.w = tmpvar_4.w;
+  c_2 = c_11;
+  tmpvar_1 = c_2;
+  _glesFragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles " {
+Keywords { "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec3 _glesNormal;
+attribute vec4 _glesMultiTexCoord0;
+uniform highp vec4 _ProjectionParams;
+uniform highp vec4 unity_SHAr;
+uniform highp vec4 unity_SHAg;
+uniform highp vec4 unity_SHAb;
+uniform highp vec4 unity_SHBr;
+uniform highp vec4 unity_SHBg;
+uniform highp vec4 unity_SHBb;
+uniform highp vec4 unity_SHC;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec3 xlv_TEXCOORD2;
+void main ()
+{
+  highp vec3 tmpvar_1;
+  highp vec4 tmpvar_2;
+  tmpvar_2 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_3;
+  highp vec4 tmpvar_4;
+  tmpvar_4 = (tmpvar_2 * 0.5);
+  highp vec2 tmpvar_5;
+  tmpvar_5.x = tmpvar_4.x;
+  tmpvar_5.y = (tmpvar_4.y * _ProjectionParams.x);
+  o_3.xy = (tmpvar_5 + tmpvar_4.w);
+  o_3.zw = tmpvar_2.zw;
+  highp mat3 tmpvar_6;
+  tmpvar_6[0] = _Object2World[0].xyz;
+  tmpvar_6[1] = _Object2World[1].xyz;
+  tmpvar_6[2] = _Object2World[2].xyz;
+  highp vec4 tmpvar_7;
+  tmpvar_7.w = 1.0;
+  tmpvar_7.xyz = (tmpvar_6 * (normalize(_glesNormal) * unity_Scale.w));
+  mediump vec3 tmpvar_8;
+  mediump vec4 normal_9;
+  normal_9 = tmpvar_7;
+  highp float vC_10;
+  mediump vec3 x3_11;
+  mediump vec3 x2_12;
+  mediump vec3 x1_13;
+  highp float tmpvar_14;
+  tmpvar_14 = dot (unity_SHAr, normal_9);
+  x1_13.x = tmpvar_14;
+  highp float tmpvar_15;
+  tmpvar_15 = dot (unity_SHAg, normal_9);
+  x1_13.y = tmpvar_15;
+  highp float tmpvar_16;
+  tmpvar_16 = dot (unity_SHAb, normal_9);
+  x1_13.z = tmpvar_16;
+  mediump vec4 tmpvar_17;
+  tmpvar_17 = (normal_9.xyzz * normal_9.yzzx);
+  highp float tmpvar_18;
+  tmpvar_18 = dot (unity_SHBr, tmpvar_17);
+  x2_12.x = tmpvar_18;
+  highp float tmpvar_19;
+  tmpvar_19 = dot (unity_SHBg, tmpvar_17);
+  x2_12.y = tmpvar_19;
+  highp float tmpvar_20;
+  tmpvar_20 = dot (unity_SHBb, tmpvar_17);
+  x2_12.z = tmpvar_20;
+  mediump float tmpvar_21;
+  tmpvar_21 = ((normal_9.x * normal_9.x) - (normal_9.y * normal_9.y));
+  vC_10 = tmpvar_21;
+  highp vec3 tmpvar_22;
+  tmpvar_22 = (unity_SHC.xyz * vC_10);
+  x3_11 = tmpvar_22;
+  tmpvar_8 = ((x1_13 + x2_12) + x3_11);
+  tmpvar_1 = tmpvar_8;
+  gl_Position = tmpvar_2;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_3;
+  xlv_TEXCOORD2 = tmpvar_1;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec3 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec4 light_3;
+  lowp vec4 tmpvar_4;
+  tmpvar_4 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_5;
+  x_5 = (tmpvar_4.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_6;
+  tmpvar_6 = texture2DProj (_LightBuffer, xlv_TEXCOORD1);
+  light_3 = tmpvar_6;
+  mediump vec4 tmpvar_7;
+  tmpvar_7 = max (light_3, vec4(0.001, 0.001, 0.001, 0.001));
+  light_3.w = tmpvar_7.w;
+  highp vec3 tmpvar_8;
+  tmpvar_8 = (tmpvar_7.xyz + xlv_TEXCOORD2);
+  light_3.xyz = tmpvar_8;
+  lowp vec4 c_9;
+  mediump vec3 tmpvar_10;
+  tmpvar_10 = (tmpvar_4.xyz * light_3.xyz);
+  c_9.xyz = tmpvar_10;
+  c_9.w = tmpvar_4.w;
+  c_2 = c_9;
+  tmpvar_1 = c_2;
+  gl_FragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec3 _glesNormal;
+in vec4 _glesMultiTexCoord0;
+uniform highp vec4 _ProjectionParams;
+uniform highp vec4 unity_SHAr;
+uniform highp vec4 unity_SHAg;
+uniform highp vec4 unity_SHAb;
+uniform highp vec4 unity_SHBr;
+uniform highp vec4 unity_SHBg;
+uniform highp vec4 unity_SHBb;
+uniform highp vec4 unity_SHC;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_Scale;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out highp vec4 xlv_TEXCOORD1;
+out highp vec3 xlv_TEXCOORD2;
+void main ()
+{
+  highp vec3 tmpvar_1;
+  highp vec4 tmpvar_2;
+  tmpvar_2 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_3;
+  highp vec4 tmpvar_4;
+  tmpvar_4 = (tmpvar_2 * 0.5);
+  highp vec2 tmpvar_5;
+  tmpvar_5.x = tmpvar_4.x;
+  tmpvar_5.y = (tmpvar_4.y * _ProjectionParams.x);
+  o_3.xy = (tmpvar_5 + tmpvar_4.w);
+  o_3.zw = tmpvar_2.zw;
+  highp mat3 tmpvar_6;
+  tmpvar_6[0] = _Object2World[0].xyz;
+  tmpvar_6[1] = _Object2World[1].xyz;
+  tmpvar_6[2] = _Object2World[2].xyz;
+  highp vec4 tmpvar_7;
+  tmpvar_7.w = 1.0;
+  tmpvar_7.xyz = (tmpvar_6 * (normalize(_glesNormal) * unity_Scale.w));
+  mediump vec3 tmpvar_8;
+  mediump vec4 normal_9;
+  normal_9 = tmpvar_7;
+  highp float vC_10;
+  mediump vec3 x3_11;
+  mediump vec3 x2_12;
+  mediump vec3 x1_13;
+  highp float tmpvar_14;
+  tmpvar_14 = dot (unity_SHAr, normal_9);
+  x1_13.x = tmpvar_14;
+  highp float tmpvar_15;
+  tmpvar_15 = dot (unity_SHAg, normal_9);
+  x1_13.y = tmpvar_15;
+  highp float tmpvar_16;
+  tmpvar_16 = dot (unity_SHAb, normal_9);
+  x1_13.z = tmpvar_16;
+  mediump vec4 tmpvar_17;
+  tmpvar_17 = (normal_9.xyzz * normal_9.yzzx);
+  highp float tmpvar_18;
+  tmpvar_18 = dot (unity_SHBr, tmpvar_17);
+  x2_12.x = tmpvar_18;
+  highp float tmpvar_19;
+  tmpvar_19 = dot (unity_SHBg, tmpvar_17);
+  x2_12.y = tmpvar_19;
+  highp float tmpvar_20;
+  tmpvar_20 = dot (unity_SHBb, tmpvar_17);
+  x2_12.z = tmpvar_20;
+  mediump float tmpvar_21;
+  tmpvar_21 = ((normal_9.x * normal_9.x) - (normal_9.y * normal_9.y));
+  vC_10 = tmpvar_21;
+  highp vec3 tmpvar_22;
+  tmpvar_22 = (unity_SHC.xyz * vC_10);
+  x3_11 = tmpvar_22;
+  tmpvar_8 = ((x1_13 + x2_12) + x3_11);
+  tmpvar_1 = tmpvar_8;
+  gl_Position = tmpvar_2;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_3;
+  xlv_TEXCOORD2 = tmpvar_1;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in highp vec4 xlv_TEXCOORD1;
+in highp vec3 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec4 light_3;
+  lowp vec4 tmpvar_4;
+  tmpvar_4 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_5;
+  x_5 = (tmpvar_4.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_6;
+  tmpvar_6 = textureProj (_LightBuffer, xlv_TEXCOORD1);
+  light_3 = tmpvar_6;
+  mediump vec4 tmpvar_7;
+  tmpvar_7 = max (light_3, vec4(0.001, 0.001, 0.001, 0.001));
+  light_3.w = tmpvar_7.w;
+  highp vec3 tmpvar_8;
+  tmpvar_8 = (tmpvar_7.xyz + xlv_TEXCOORD2);
+  light_3.xyz = tmpvar_8;
+  lowp vec4 c_9;
+  mediump vec3 tmpvar_10;
+  tmpvar_10 = (tmpvar_4.xyz * light_3.xyz);
+  c_9.xyz = tmpvar_10;
+  c_9.w = tmpvar_4.w;
+  c_2 = c_9;
+  tmpvar_1 = c_2;
+  _glesFragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec4 _glesMultiTexCoord0;
+attribute vec4 _glesMultiTexCoord1;
+uniform highp vec4 _ProjectionParams;
+uniform highp vec4 unity_ShadowFadeCenterAndType;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 glstate_matrix_modelview0;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_LightmapST;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec2 xlv_TEXCOORD2;
+varying highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  highp vec4 tmpvar_1;
+  highp vec4 tmpvar_2;
+  tmpvar_2 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_3;
+  highp vec4 tmpvar_4;
+  tmpvar_4 = (tmpvar_2 * 0.5);
+  highp vec2 tmpvar_5;
+  tmpvar_5.x = tmpvar_4.x;
+  tmpvar_5.y = (tmpvar_4.y * _ProjectionParams.x);
+  o_3.xy = (tmpvar_5 + tmpvar_4.w);
+  o_3.zw = tmpvar_2.zw;
+  tmpvar_1.xyz = (((_Object2World * _glesVertex).xyz - unity_ShadowFadeCenterAndType.xyz) * unity_ShadowFadeCenterAndType.w);
+  tmpvar_1.w = (-((glstate_matrix_modelview0 * _glesVertex).z) * (1.0 - unity_ShadowFadeCenterAndType.w));
+  gl_Position = tmpvar_2;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_3;
+  xlv_TEXCOORD2 = ((_glesMultiTexCoord1.xy * unity_LightmapST.xy) + unity_LightmapST.zw);
+  xlv_TEXCOORD3 = tmpvar_1;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform sampler2D unity_Lightmap;
+uniform sampler2D unity_LightmapInd;
+uniform highp vec4 unity_LightmapFade;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec2 xlv_TEXCOORD2;
+varying highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec3 lmIndirect_3;
+  mediump vec3 lmFull_4;
+  mediump float lmFade_5;
+  mediump vec4 light_6;
+  lowp vec4 tmpvar_7;
+  tmpvar_7 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_8;
+  x_8 = (tmpvar_7.w - _Cutoff);
+  if ((x_8 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_9;
+  tmpvar_9 = texture2DProj (_LightBuffer, xlv_TEXCOORD1);
+  light_6 = tmpvar_9;
+  mediump vec4 tmpvar_10;
+  tmpvar_10 = max (light_6, vec4(0.001, 0.001, 0.001, 0.001));
+  light_6.w = tmpvar_10.w;
+  highp float tmpvar_11;
+  tmpvar_11 = ((sqrt(
+    dot (xlv_TEXCOORD3, xlv_TEXCOORD3)
+  ) * unity_LightmapFade.z) + unity_LightmapFade.w);
+  lmFade_5 = tmpvar_11;
+  lowp vec3 tmpvar_12;
+  tmpvar_12 = (2.0 * texture2D (unity_Lightmap, xlv_TEXCOORD2).xyz);
+  lmFull_4 = tmpvar_12;
+  lowp vec3 tmpvar_13;
+  tmpvar_13 = (2.0 * texture2D (unity_LightmapInd, xlv_TEXCOORD2).xyz);
+  lmIndirect_3 = tmpvar_13;
+  light_6.xyz = (tmpvar_10.xyz + mix (lmIndirect_3, lmFull_4, vec3(clamp (lmFade_5, 0.0, 1.0))));
+  lowp vec4 c_14;
+  mediump vec3 tmpvar_15;
+  tmpvar_15 = (tmpvar_7.xyz * light_6.xyz);
+  c_14.xyz = tmpvar_15;
+  c_14.w = tmpvar_7.w;
+  c_2 = c_14;
+  tmpvar_1 = c_2;
+  gl_FragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec4 _glesMultiTexCoord0;
+in vec4 _glesMultiTexCoord1;
+uniform highp vec4 _ProjectionParams;
+uniform highp vec4 unity_ShadowFadeCenterAndType;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp mat4 glstate_matrix_modelview0;
+uniform highp mat4 _Object2World;
+uniform highp vec4 unity_LightmapST;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out highp vec4 xlv_TEXCOORD1;
+out highp vec2 xlv_TEXCOORD2;
+out highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  highp vec4 tmpvar_1;
+  highp vec4 tmpvar_2;
+  tmpvar_2 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_3;
+  highp vec4 tmpvar_4;
+  tmpvar_4 = (tmpvar_2 * 0.5);
+  highp vec2 tmpvar_5;
+  tmpvar_5.x = tmpvar_4.x;
+  tmpvar_5.y = (tmpvar_4.y * _ProjectionParams.x);
+  o_3.xy = (tmpvar_5 + tmpvar_4.w);
+  o_3.zw = tmpvar_2.zw;
+  tmpvar_1.xyz = (((_Object2World * _glesVertex).xyz - unity_ShadowFadeCenterAndType.xyz) * unity_ShadowFadeCenterAndType.w);
+  tmpvar_1.w = (-((glstate_matrix_modelview0 * _glesVertex).z) * (1.0 - unity_ShadowFadeCenterAndType.w));
+  gl_Position = tmpvar_2;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_3;
+  xlv_TEXCOORD2 = ((_glesMultiTexCoord1.xy * unity_LightmapST.xy) + unity_LightmapST.zw);
+  xlv_TEXCOORD3 = tmpvar_1;
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform sampler2D unity_Lightmap;
+uniform sampler2D unity_LightmapInd;
+uniform highp vec4 unity_LightmapFade;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in highp vec4 xlv_TEXCOORD1;
+in highp vec2 xlv_TEXCOORD2;
+in highp vec4 xlv_TEXCOORD3;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec3 lmIndirect_3;
+  mediump vec3 lmFull_4;
+  mediump float lmFade_5;
+  mediump vec4 light_6;
+  lowp vec4 tmpvar_7;
+  tmpvar_7 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_8;
+  x_8 = (tmpvar_7.w - _Cutoff);
+  if ((x_8 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_9;
+  tmpvar_9 = textureProj (_LightBuffer, xlv_TEXCOORD1);
+  light_6 = tmpvar_9;
+  mediump vec4 tmpvar_10;
+  tmpvar_10 = max (light_6, vec4(0.001, 0.001, 0.001, 0.001));
+  light_6.w = tmpvar_10.w;
+  highp float tmpvar_11;
+  tmpvar_11 = ((sqrt(
+    dot (xlv_TEXCOORD3, xlv_TEXCOORD3)
+  ) * unity_LightmapFade.z) + unity_LightmapFade.w);
+  lmFade_5 = tmpvar_11;
+  lowp vec3 tmpvar_12;
+  tmpvar_12 = (2.0 * texture (unity_Lightmap, xlv_TEXCOORD2).xyz);
+  lmFull_4 = tmpvar_12;
+  lowp vec3 tmpvar_13;
+  tmpvar_13 = (2.0 * texture (unity_LightmapInd, xlv_TEXCOORD2).xyz);
+  lmIndirect_3 = tmpvar_13;
+  light_6.xyz = (tmpvar_10.xyz + mix (lmIndirect_3, lmFull_4, vec3(clamp (lmFade_5, 0.0, 1.0))));
+  lowp vec4 c_14;
+  mediump vec3 tmpvar_15;
+  tmpvar_15 = (tmpvar_7.xyz * light_6.xyz);
+  c_14.xyz = tmpvar_15;
+  c_14.w = tmpvar_7.w;
+  c_2 = c_14;
+  tmpvar_1 = c_2;
+  _glesFragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_ON" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES
+
+
+#ifdef VERTEX
+
+attribute vec4 _glesVertex;
+attribute vec4 _glesMultiTexCoord0;
+attribute vec4 _glesMultiTexCoord1;
+uniform highp vec4 _ProjectionParams;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp vec4 unity_LightmapST;
+uniform highp vec4 _MainTex_ST;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec2 xlv_TEXCOORD2;
+void main ()
+{
+  highp vec4 tmpvar_1;
+  tmpvar_1 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_2;
+  highp vec4 tmpvar_3;
+  tmpvar_3 = (tmpvar_1 * 0.5);
+  highp vec2 tmpvar_4;
+  tmpvar_4.x = tmpvar_3.x;
+  tmpvar_4.y = (tmpvar_3.y * _ProjectionParams.x);
+  o_2.xy = (tmpvar_4 + tmpvar_3.w);
+  o_2.zw = tmpvar_1.zw;
+  gl_Position = tmpvar_1;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_2;
+  xlv_TEXCOORD2 = ((_glesMultiTexCoord1.xy * unity_LightmapST.xy) + unity_LightmapST.zw);
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform sampler2D unity_Lightmap;
+uniform lowp float _Cutoff;
+varying highp vec2 xlv_TEXCOORD0;
+varying highp vec4 xlv_TEXCOORD1;
+varying highp vec2 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec4 light_3;
+  lowp vec4 tmpvar_4;
+  tmpvar_4 = (texture2D (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_5;
+  x_5 = (tmpvar_4.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_6;
+  tmpvar_6 = texture2DProj (_LightBuffer, xlv_TEXCOORD1);
+  light_3 = tmpvar_6;
+  mediump vec3 lm_7;
+  lowp vec3 tmpvar_8;
+  tmpvar_8 = (2.0 * texture2D (unity_Lightmap, xlv_TEXCOORD2).xyz);
+  lm_7 = tmpvar_8;
+  mediump vec4 tmpvar_9;
+  tmpvar_9.w = 0.0;
+  tmpvar_9.xyz = lm_7;
+  mediump vec4 tmpvar_10;
+  tmpvar_10 = (max (light_3, vec4(0.001, 0.001, 0.001, 0.001)) + tmpvar_9);
+  light_3 = tmpvar_10;
+  lowp vec4 c_11;
+  mediump vec3 tmpvar_12;
+  tmpvar_12 = (tmpvar_4.xyz * tmpvar_10.xyz);
+  c_11.xyz = tmpvar_12;
+  c_11.w = tmpvar_4.w;
+  c_2 = c_11;
+  tmpvar_1 = c_2;
+  gl_FragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_ON" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES3#version 300 es
+
+
+#ifdef VERTEX
+
+
+in vec4 _glesVertex;
+in vec4 _glesMultiTexCoord0;
+in vec4 _glesMultiTexCoord1;
+uniform highp vec4 _ProjectionParams;
+uniform highp mat4 glstate_matrix_mvp;
+uniform highp vec4 unity_LightmapST;
+uniform highp vec4 _MainTex_ST;
+out highp vec2 xlv_TEXCOORD0;
+out highp vec4 xlv_TEXCOORD1;
+out highp vec2 xlv_TEXCOORD2;
+void main ()
+{
+  highp vec4 tmpvar_1;
+  tmpvar_1 = (glstate_matrix_mvp * _glesVertex);
+  highp vec4 o_2;
+  highp vec4 tmpvar_3;
+  tmpvar_3 = (tmpvar_1 * 0.5);
+  highp vec2 tmpvar_4;
+  tmpvar_4.x = tmpvar_3.x;
+  tmpvar_4.y = (tmpvar_3.y * _ProjectionParams.x);
+  o_2.xy = (tmpvar_4 + tmpvar_3.w);
+  o_2.zw = tmpvar_1.zw;
+  gl_Position = tmpvar_1;
+  xlv_TEXCOORD0 = ((_glesMultiTexCoord0.xy * _MainTex_ST.xy) + _MainTex_ST.zw);
+  xlv_TEXCOORD1 = o_2;
+  xlv_TEXCOORD2 = ((_glesMultiTexCoord1.xy * unity_LightmapST.xy) + unity_LightmapST.zw);
+}
+
+
+
+#endif
+#ifdef FRAGMENT
+
+
+layout(location=0) out mediump vec4 _glesFragData[4];
+uniform sampler2D _MainTex;
+uniform lowp vec4 _Color;
+uniform sampler2D _LightBuffer;
+uniform sampler2D unity_Lightmap;
+uniform lowp float _Cutoff;
+in highp vec2 xlv_TEXCOORD0;
+in highp vec4 xlv_TEXCOORD1;
+in highp vec2 xlv_TEXCOORD2;
+void main ()
+{
+  lowp vec4 tmpvar_1;
+  mediump vec4 c_2;
+  mediump vec4 light_3;
+  lowp vec4 tmpvar_4;
+  tmpvar_4 = (texture (_MainTex, xlv_TEXCOORD0) * _Color);
+  lowp float x_5;
+  x_5 = (tmpvar_4.w - _Cutoff);
+  if ((x_5 < 0.0)) {
+    discard;
+  };
+  lowp vec4 tmpvar_6;
+  tmpvar_6 = textureProj (_LightBuffer, xlv_TEXCOORD1);
+  light_3 = tmpvar_6;
+  mediump vec3 lm_7;
+  lowp vec3 tmpvar_8;
+  tmpvar_8 = (2.0 * texture (unity_Lightmap, xlv_TEXCOORD2).xyz);
+  lm_7 = tmpvar_8;
+  mediump vec4 tmpvar_9;
+  tmpvar_9.w = 0.0;
+  tmpvar_9.xyz = lm_7;
+  mediump vec4 tmpvar_10;
+  tmpvar_10 = (max (light_3, vec4(0.001, 0.001, 0.001, 0.001)) + tmpvar_9);
+  light_3 = tmpvar_10;
+  lowp vec4 c_11;
+  mediump vec3 tmpvar_12;
+  tmpvar_12 = (tmpvar_4.xyz * tmpvar_10.xyz);
+  c_11.xyz = tmpvar_12;
+  c_11.w = tmpvar_4.w;
+  c_2 = c_11;
+  tmpvar_1 = c_2;
+  _glesFragData[0] = tmpvar_1;
+}
+
+
+
+#endif"
+}
+}
+Program "fp" {
+SubProgram "gles " {
+Keywords { "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_ON" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_ON" "HDR_LIGHT_PREPASS_OFF" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_OFF" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_OFF" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES3"
+}
+SubProgram "gles " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_ON" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES"
+}
+SubProgram "gles3 " {
+Keywords { "LIGHTMAP_ON" "DIRLIGHTMAP_ON" "HDR_LIGHT_PREPASS_ON" }
+"!!GLES3"
+}
+}
+ }
+}
+Fallback "Transparent/Cutout/VertexLit"
+}            X             water                                         €¾  €¾  €@  €¿  €¾  €¾         _MainTex.offset.y                               €¾  €¾  €@  €¿  €¾  €¾         _MainTex.offset.x                        pB                                                             €?  €?  €?  €?  €?                                                                 €?  €?  €?  €?  €?                                      €?  €?  €?  €?  €?                                      €?  €?  €?  €?  €?                                      €?  €?  €?  €?  €?                                      €?  €?  €?  €?  €?                                                                                                                                 €?  €?  €?  €?  €?                                                                                                   4                                                                                                                                                                                                                                                 €?  €?  €?  €?  €?                              €?  €?  €?  €?  €?                              €?  €?  €?  €?  €?                              €?  €?  €?  €?  €?                              €?  €?  €?  €?  €?                                                          €?                †   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ                                  Proc            Øc  RIFFĞc  WAVEfmt      @   }    data c                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             ÿÿ              ÿÿ      ÿÿ  ÿÿ                      ÿÿ  ÿÿ                                                                                            ÿÿÿÿ                                                                  ÿÿ   şÿ ÿÿ                   ÿÿ         ÿÿşÿÿÿÿÿşÿÿÿ  ÿÿ ÿÿ     ıÿ  ÿÿ     ÿÿ  ÿÿ şÿÿÿşÿÿÿÿÿ    ÿÿ                                                   ÿÿ                                                                        ÿÿ  şÿÿÿ  ÿÿ şÿşÿÿÿşÿÿÿıÿÿÿÿÿ    şÿşÿ         ÿÿ     ÿÿıÿ ÿÿ ÿÿ ÿÿ                              ÿÿ   şÿ  şÿ  ÿÿ                    ÿÿıÿ şÿ  ÿÿıÿıÿ        şÿÿÿÿÿ  ÿÿ  şÿ    ÿÿ           ÿÿ          ÿÿÿÿ     ÿÿ     ÿÿşÿ ÿÿ                  ÿÿÿÿ      ıÿ              ÿÿ       şÿ ÿÿ             
+    ÿÿşÿ     	         ıÿ    üÿúÿ  ÿÿ          şÿ      şÿ                    ÿÿÿÿ     ÿÿ   
+                  	     şÿ  	    üÿ  
+    şÿ  
+        	                      	       	        
+  şÿ  şÿ   ÿÿ     ÿÿ  şÿ             ıÿûÿ  
+           üÿıÿ 	    ûÿ 	    ıÿ    ÷ÿùÿÿÿ  ÿÿ şÿıÿ	  ÷ÿøÿşÿùÿ        ùÿıÿ     ıÿşÿ	    üÿøÿ    ûÿùÿÿÿ    ÿÿ ÿÿ
+  şÿÿÿ          öÿüÿ
+ 	  ıÿüÿıÿ  ùÿıÿ  ùÿùÿúÿıÿ     
+ úÿ       şÿ   	  øÿşÿ  ıÿüÿ üÿ  ÿÿ  ÿÿ 	   øÿşÿ   ûÿúÿ   úÿõÿ    ıÿ 	    üÿúÿ  ïÿñÿ  õÿ÷ÿşÿ   ãÿêÿ0 + ³ÿ³ÿıÿ ] I  ÿ¨ÿN S 3 . µÿ¹ÿşÿñÿøÿ T O Åÿ¼ÿÍÿÜÿ,   éÿòÿ^ \ ×ÿÊÿÅÿÏÿ9 3  ÿÿ  ßÿßÿ"  çÿäÿÚÿãÿ> 2 ÃÿÂÿ6 ? &  °ÿ§ÿ( '    şÿöÿ  ïÿéÿ ÿÿ    ôÿóÿúÿíÿùÿ	 ? 2 ÿÿçÿœÿ¯ÿ-     øÿÿÿ	 ÷ÿØÿäÿ      çÿßÿÓÿÙÿ5 1      íÿåÿÏÿÑÿ  & -   ÙÿÒÿıÿøÿ  øÿúÿ    öÿãÿÙÿçÿ /  	 çÿáÿ  ğÿşÿ    ëÿøÿıÿõÿóÿøÿ- + áÿŞÿ ( !  ¦ÿšÿ3 H   âÿÖÿ@ 6 æÿçÿüÿşÿ  ) ûÿêÿÿÿíÿ . ÷ÿõÿçÿàÿ& + ÷ÿòÿëÿûÿ    öÿÿÿğÿğÿ9 F ùÿâÿĞÿÆÿ # !    áÿòÿ+  ôÿıÿıÿ 9  àÿÏÿ" V üÿßÿ÷ÿóÿ# D êÿ¿ÿ ) úÿïÿ>  íÿ ğÿÕÿL Z ½ÿÀÿ şÿôÿ  éÿ/ Q ½ÿµÿ2 1 ¬ÿóÿ9 åÿU W ¥ÿÅÿI & Íÿûÿ:   àÿÒÿ£ÿ¶ÿš y ªÿÁÿ   ûÿÎÿıÿK A 
+  ÎÿõÿöşÈşù V D ãÿšÿß9hı/ıÿÿi¯ÿÿùÿ  (ÿ:ÿºÿœÿ0üÿæÿi € mÿ?ÿ§ÿ§ÿ¾ÿËÿ’ e Dc8ş#ş€ÿ®ÿ][åÿºÿ V ğÿØÿ¾ÿ˜ÿ“ ¥ eÿ™ÿX  d@şş¤şšş¯ÿçÿWÿ5ÿĞhıÅı^şşğ>zü ıÏ€§ e ÕşmşQ—uúûwş6şÄ-’ı~ı« ø ¹ü²ü_ş¢şü¿´ , ¥û6üÀş¥şü] İ -ÿŒş¨ÿªÿWÿÙÿ‡‡ÿ®ÿ`ÿŒÿ×§Õş
+ÿÇşmşp{) 8 ÿäş¸ g+ÿÖşMÿÿ+y5ÿñşmÿºÿÏ “ 8ÿ.ÿf  Âÿ™ÿçÿk x éÿ¸ÿÔÿ) ¡ ±ÿÿ1 Ç -  ¥ÿhÿI É ] ¸ÿ…ÿ¹ÿ‘ÿ Ä ÿÂÿ4ÿ:ÿË — ëÿ # Q êÿÎÿÃÿëÿN C äÿ­ÿ H æÿ²ÿ" Q  7 àÿpÿöÿ* ıÿ º € Zÿ’ÿ¨ÿ—ÿ­ œ ˜ÿÿÿD &  œÿ¹ÿ  1 îÿÉÿ& O áÿwÿ $ òÿ^ 5 ¹ÿ‹ r [ÿ°ÿ•ÿ…ÿy ‚  4 Æÿÿ7 # ïÿ÷ÿåÿ¸ÿ‡ œ ‰ÿºÿ¾ÿ”ÿŒ ‰ öÿùÿ   âÿ äÿ¯ÿ) 2 H — œÿ†ÿÀÿ“ÿ"ä Pÿ•ÿÿyÿEÜ ;  ÿÿÜÿ Òÿ % Öÿj j Ìÿ ‰ÿ…ÿ| G ¿ÿ³ÿ& [ l ] ‹ÿ‚ÿR  pÿÿd Î < Ûÿ«ÿçÿ¼êbşşùş$ÿû iÿzÿ9>ÿÿèÿ›ÿş aÍşÿ§ > İÿ0 % ğÿ#  ÜşSÿá F åÿ: ûÿZ  ‹ÿ²ÿ²ÿ Ş oÿ…ÿ, Şÿn ¿ Òÿ¸ÿqÿ&ÿöÿx Æ sÿÿîÿ “  œÿëÿ P  üÿáÿ™ÿV / R ¤ Aÿ'ÿk U g ‡ ÿ…ÿÊ å Êşôşl ñÿ%4uşÓş¢ %  Q   “ ^ %ÿ_ÿŠ - F “ OÿAÿaÿPÿ.q  «şÿŸ ” âÿ‚ÿ$ ^ 9  øşQÿ¸ “ *  şÿ3 ïÿÖÿÍÿ B áÿ˜ÿ|ÿt … éÿ•ÿåÿe Èÿ¶ÿÿJÿĞ H ÆÿD  ²ÿıÿÿIÿ© – ‚ÿÇÿ ¸ÿ$ F ×ÿ ñÿ|ÿ¿ÿ 4 _ Õÿfÿ1 P  ÿ˜ÿõÿ¶ÿ{ ³ cÿ«ÿJ   	 ìÿ] ²ÿƒÿŒÿeÿÄ ™ÿ7ÿ³ÿàÿE ± ¢ÿİş’ Ğ  € ùşş™ 
+) İÿÿÇşQÒIÿÿgÿˆÿ‰Ëÿ¯ş[  ÿ±ÿ) D i´ ¸ı]şHf ŸÿšÿÊÿ6ã EşşCóÿÌÿïÿÓÿ  " }ÿÇÿÇ'ş?şX Ó Ã ÿGÿ© z ÿşÿ±ÿ`ÿ‘ÿ ê Û Eÿóşû #.ÿÿ] o † š fÿFÿÎ Ò ÿÿ¢ ¤  	 ( äÿşÿ1 \ÿŒÿ€Fúş'ÿe w F Ûÿ”ÿ¢ÿÁ Z ÿ‚şä ÿ D Jÿ!  ÿ¿ÿ˜ÿ ªşÿâ  ÚÿÛÿAÿJÿ£Jşóş/¼ ¸ÿxÿÂÿ3 nû qşaş¡ ÿyÿú x üÿüÿ“şñş»m“şáşØ Êÿpÿ ÿÙÿÃ£Ëşıı ë QÿsÿĞ áÿ ğ ÿ˜ş£>mşWÿ× \ øÿf &ÿÿzş ÿDÿV A ĞÿJ è 6 Mÿ®ÿ^ÿ±ÿÜö Gşèş¹ ® Qÿ‚ÿ÷ÿğÿ1Î €ş–şè£Êşqÿ ´ÿO ^ -ÿ#ÿûŸşÆş÷   › 8ÿ*ÿ#‚ ÙşÒÿCP –şPÿ› É _ ·ÿùş‘ÿ· OşÆş"`ÿ\ÿ  ¡ 9 Oş"ÿR»¤ıbşGù F <ÿbş^ÿZ9 ıHı3‰$ÿ¸ÿĞÿ Š“ uıuşM&Yüı/‘p< Ïüş©aûlûG‚# ª °şMÿ4È 0üşüíûCOÅ ÿ}ü›ş—(øĞ÷Rƒ»ıöüÄú*üğ×Éöï÷<4ø÷ûôw÷áÁ„éjéTôÿ	åÀåÄ|¼ø$÷§ûÃûËĞÂıˆüû	­	ï§ğø
+u	@çõ5ö/z?ò‰ó-×Â©nğzï^ ` ^
+}Rùøşoıï	zôóôD	À
+pö’öõœ‚û†ıŒıpütÎúÉûÑ³íúQü¡QuşÒşõõŠHúúû¿ı”ûÌşêøÌù;ìÁÿ,¥ÈşıIúqû'
+ü0ıîÎş5şpı¤şã·üı ÃÿN  ÿ÷ëı¿ü ı¬ü0E©ıaı§ÿsÿ!ş	şFÿŸÿõ…üÈú_È Á 2ı°üs sşJığöIııæşğşeSı·üf`ÿhÿş@şTKªÿ´ÿ±ÿ6 âÿşvÿ›Fÿ6 š  ıø A{ÿØÿ(şıe  —şıÜşÿ ³ïşğı Ğ  şş/şøşÿØ 5Ğ/ ´ıŞıN5- –ı§ış;Ÿ ısÿW'Xşşƒı.ş§aÿ@ ëÿZıƒ Pÿe HŸÿ ÿ¡şšıÎ ö šÿÿWşù Myÿ1şòÿ EÄ!ÿş˜ÿ"IJ ØşwÿÓ $ şÿH ! Ù İşşI˜ íıuş	ºõşßıQ ‡ÿÂ }ÃşÕüG  ¶ç”şWşğş¹ 1í Xş_ş Àÿ+‡šÿ‡ÿ% Üş a êÿÓÿÍşìş”2¿ÿl äş´ş~]şş9 DÌGÿış UŸÿıı5 ÿOÿe„4ÿ8ÿ­ÿÿÄÿÖ ”ÿãÿcC[ }ş8ÿ éşO „¢ÿGÿ»ÿÒşl+0ÿş¶şßÿ¦}¦ÿzı@ÿf ‹  ‰ÿ7şUÿ° ‘L 3şªÿÀ iÿH × =   ÿ$şİÿUŒş ıˆÿ¨ˆzş¿ı[ ã g H şÍş‚J  ø 1ÿ}ş ÿ³ jºşÄı” İ Ä … cÿÜşĞÿı  ëşQ ÿŠşW — j  òÿÿ Œrÿ{şG  éÿêÿR  ÿ ì ¹ÿºÿûÿEÿ:  ¹ÿM g ÿgÿH œ X W ìşŸşP>áş³ıU a‰ v cÿÈş (ŞÿSş» |=ÿqÿ^ Îÿ¾ÿ  	 [   ÆÿÆÿ<ÿM dşÿ[ÿ : Öÿ › ïÿÿõÿÚ À Âÿ ÿ Ô ‰ G ™şPş:ÖÃÿáş@ÿ+ Ñ < & . %ÿÊÿ‡ ¹ÿV õ ÿ<şş ÜPÿ4ÿÓÿOÿË \ÿ®şÎ ñ ! - sÿCÿU K 0 t |ÿUÿ? l ƒ L [ÿŒÿ1  y  ,ÿYÿU Âÿ¾ :DÿŞş < % F  ÿ a 
+ : 7 ÆÿöÿûÿÊÿ_ R fÿÜÿA   ƒ çÿÿäÿœ Á ¸ Uÿ¯şF Ç ¶ÿŸÿ Ùÿq – •ÿ‘ÿşÿ0 7 ôÿÑÿıÿçÿ°ÿ« ¸ Iÿ~ÿ\ 	 Õÿ ùÿØÿC Y ĞÿÇÿ9 C ¨ÿ‹ÿ) M áÿ p ıÿÅÿ Üÿâÿ\ - Èÿàÿ 
+ òÿıÿ   Îÿ  , •ÿ³ÿ– a  3 WÿVÿ~ o 4 I «ÿ›ÿ
+ óÿW a ¯ÿšÿ   O i àÿõÿ ÿÿğÿ  üÿ  èÿêÿßÿ³ÿ. F   ±ÿ¥ÿh ƒ æÿßÿ³ÿ¤ÿl ¢ áÿ®ÿ²ÿ‘ÿ ¬ ¢ÿ¥ÿÕÿ®ÿ­  –ÿÍÿ¼ÿ™ÿz ¢ õÿ½ÿ™ÿ®ÿg ‹ Öÿ±ÿêÿ U / “ÿµÿ_ :   ËÿÇÿI L  	 “ÿÿ 0 l W gÿfÿc R   »ÿ¼ÿo x ÓÿÖÿ ãÿıÿ# óÿ ßÿÑÿV & êÿ ÔÿÆÿo X ‘ÿ­ÿh 1 õÿ ÿ•ÿq T   Öÿäÿôÿ ; ; ãÿ•ÿ+ 5 # I ÚÿÁÿ ÿÿåÿ òÿøÿ< B éÿÎÿéÿçÿS ^ —ÿÿ? H -  ×ÿÕÿşÿ  ÷ÿ  éÿÒÿ@ B ×ÿèÿ  ' V Òÿ‡ÿøÿ H S èÿÉÿÛÿ 2 E  Èÿ  ÷ÿ       ãÿîÿãÿ3 P  üÿİÿİÿ2 J ĞÿĞÿ- üÿèÿÿÿ8 L  âÿĞÿÿÿ.  æÿçÿ 
+ 0   = ¸ÿ©ÿ_ V Ğÿçÿ   6   äÿÿÿÜÿëÿ  6 ; Æÿ±ÿ^ ^ åÿàÿîÿ	 #  ğÿûÿüÿçÿ. /   ·ÿ»ÿ: !  üÿ×ÿşÿ  7 , ÓÿÓÿşÿ* 6  ğÿ  ôÿ  íÿ B ¼ÿ±ÿ5 .  	 ÔÿÃÿ( ?   ÷ÿùÿ/ ! èÿæÿÔÿúÿ7  øÿëÿ + ñÿ÷ÿúÿğÿ 1 İÿŞÿ     
+ ıÿÿÿıÿñÿ ' üÿ×ÿ ' ×ÿòÿ8  øÿ àÿÄÿ )   $   õÿÕÿ % íÿöÿ áÿ" Q åÿ½ÿ   1 İÿ¸ÿ 2 +  áÿÙÿ  ÿÿ Üÿßÿ  #  øÿÿÿşÿ  / ) àÿÒÿ    îÿæÿ %   èÿæÿ    şÿ çÿ" & éÿ    íÿõÿşÿ) 3 ìÿÉÿäÿ  " -    Ğÿòÿ9  úÿ öÿíÿ  ôÿşÿéÿöÿ   êÿóÿ   ıÿåÿ
+ 	 ùÿ üÿ: F ÓÿĞÿ     äÿñÿ  úÿ #  ìÿòÿ 
+       ôÿöÿëÿ- ! âÿéÿöÿ   Ùÿøÿ şÿ+ " âÿİÿ   
+ : úÿÙÿşÿ ,  ØÿÛÿôÿóÿB L ²ÿÄÿ$     ùÿçÿ' $ êÿñÿ óÿ    ğÿáÿ%  ùÿ ÑÿÊÿ1 . üÿşÿîÿíÿ6 7 øÿğÿçÿéÿ! ' ğÿìÿ	   	  ÷ÿôÿ øÿ×ÿ  õÿüÿ  óÿÿÿ ùÿ ÿÿèÿ   îÿŞÿ!       öÿúÿóÿøÿ.  ñÿåÿ	  ÿÿûÿóÿèÿ	 $   üÿïÿ  åÿïÿ  øÿÿÿ    ÍÿÛÿ  öÿøÿ   íÿ   ,  ãÿîÿ
+ âÿğÿ*  ÷ÿùÿ  "  ×ÿåÿ  úÿ÷ÿ   şÿ   ùÿóÿ     ìÿğÿ ãÿ 4  ñÿüÿ  ıÿ 
+    õÿãÿ  ıÿ ÿÿ  
+ 	  şÿïÿùÿ   öÿ  üÿ ùÿùÿ øÿÿÿ  íÿçÿ   ıÿ     ùÿêÿ    şÿ êÿ ,  èÿåÿ üÿ+  éÿıÿ    éÿèÿøÿ	 !   ñÿõÿ   íÿìÿ  ÷ÿ  øÿîÿ   
+ óÿøÿşÿ   ÿÿúÿ ÿÿ ! ıÿõÿğÿôÿ  íÿæÿ  + 0 áÿáÿ üÿ   äÿÿÿ      úÿùÿğÿîÿ 
+ üÿ ûÿõÿ	   òÿóÿ÷ÿ   
+ äÿüÿÿÿõÿ  ìÿ
+   úÿıÿüÿñÿ    íÿ şÿ÷ÿ  ëÿ÷ÿ 	   óÿöÿ  ûÿ ûÿ   öÿ  õÿúÿ 
+ öÿøÿÿÿùÿ   ıÿşÿ    ûÿûÿ
+  üÿûÿ ıÿ  
+  ûÿ ñÿ  şÿõÿùÿ  ıÿ  úÿ÷ÿòÿ #  øÿøÿõÿ  ôÿôÿ    ıÿ  öÿ      öÿ  şÿòÿ    ùÿïÿ    øÿóÿ   
+  	  ùÿ   úÿ÷ÿöÿõÿ  ıÿñÿ    îÿçÿ     şÿ    ùÿ  óÿÿÿ   úÿÿÿ   ıÿñÿ÷ÿ    ûÿùÿ   	 ìÿìÿ   
+ ôÿøÿ 	 ûÿ	 úÿøÿ  úÿùÿ      
+   ÿÿ øÿ   	  ÿÿ
+ 	 
+   ôÿÿÿ    õÿóÿ  ÿÿ   ôÿ  ıÿ øÿüÿ÷ÿşÿ   ÿÿ     şÿ    ÷ÿ ÷ÿıÿ úÿùÿ      øÿùÿ  
+  öÿ÷ÿ  şÿ  öÿõÿıÿ    úÿíÿ	 	   íÿñÿ    
+ öÿùÿ     õÿıÿüÿùÿ 	 ùÿ  	     ÷ÿøÿ      	  ÿÿ      şÿÿÿÿÿ   ÿÿ    ÿÿ     ûÿ  	  üÿùÿ   
+ øÿûÿ   ıÿÿÿ        üÿüÿ
+        ûÿ    şÿşÿ 	  ıÿ    üÿ     ÿÿ    şÿ ıÿ    üÿıÿ   ÿÿÿÿÿÿÿÿÿÿ        ÿÿ   ıÿşÿ   üÿ  ùÿşÿ    üÿÿÿ  üÿ    ÿÿşÿ     ıÿ   ÿÿ    ÿÿüÿ 	  ÿÿıÿúÿşÿşÿ
+  şÿşÿıÿ   ÿÿıÿ     ûÿ     ùÿöÿ    úÿóÿ  ÿÿ şÿûÿ  ûÿÿÿ    ıÿşÿ  ıÿ       
+ 
+ şÿüÿ    ıÿıÿÿÿıÿ      ıÿøÿ 	  ûÿ  ıÿşÿ   ÿÿÿÿ      ÿÿ  şÿıÿ	  şÿ    ÿÿ  ÿÿ ÿÿ     ùÿıÿ	 
+   ÿÿ     ÿÿ               	  şÿ    ıÿúÿ    ÿÿúÿ
+ 	  	   úÿ     üÿ  ÿÿ   ÿÿ       şÿ           şÿ  ÿÿ  ıÿıÿ     ÿÿşÿ ÿÿÿÿ  şÿ     ÿÿ     ıÿÿÿ   ÿÿÿÿ  ÿÿ  şÿ  şÿ     ÿÿ  şÿ   ÿÿ  ÿÿ  ÿÿ              ÿÿ   şÿ       ÿÿ       ÿÿ  şÿ        şÿ ÿÿ ıÿÿÿıÿıÿ           ÿÿ         ÿÿÿÿ                                        ıÿ    ÿÿüÿ                            ÿÿ            şÿşÿ       şÿ          şÿÿÿ şÿ                 ÿÿ  ÿÿ                    ıÿ  üÿ               ÿÿ  ÿÿ      ÿÿ şÿ           ÿÿ     şÿıÿ     ÿÿ     ÿÿÿÿ      ÿÿ        ıÿ ÿÿ    ıÿşÿ  ÿÿ                                       ÿÿ              ÿÿ          ÿÿ     ÿÿ               ÿÿ  ÿÿ   ÿÿ    ıÿşÿ     ÿÿıÿ  şÿ ÿÿ      ıÿÿÿ    ÿÿşÿÿÿ                                                                      şÿ                                ÿÿ        ûÿşÿ   ÿÿşÿ                 ÿÿ      ÿÿ                                                                    ÿÿ     şÿ               ÿÿşÿ                         şÿ                          ÿÿ                                      ÿÿ           ÿÿÿÿ   ÿÿıÿüÿ ÿÿ      şÿ     şÿ         ÿÿ  ÿÿ          ÿÿıÿ                                            şÿÿÿúÿúÿ                ÿÿşÿ  şÿ  ÿÿÿÿ                                   ÿÿ           şÿ                       ÿÿıÿ                                           ÿÿ şÿÿÿÿÿÿÿ          şÿ            ÿÿ                                                ÿÿ        ÿÿ   ÿÿşÿşÿ    ÿÿÿÿ                                                                                                                                                                                                                     ıÿ           ÿÿ                   ÿÿÿÿşÿ ÿÿ       ÿÿ     ÿÿÿÿ                                   ÿÿ                  ÿÿÿÿ                                                                                                   ÿÿ                                                                                    ÿÿşÿşÿÿÿÿÿÿÿ             ÿÿ                                                     ÿÿ                                 ÿÿ                                                                                                                                                                               ÿÿ şÿşÿ  ıÿÿÿ  ıÿÿÿıÿşÿşÿÿÿÿÿÿÿÿÿÿÿ     ÿÿ ÿÿ ÿÿÿÿ  şÿ                 ÿÿ                   ÿÿ    ÿÿ                                                                                                                                                                                                        ÿÿ                     ÿÿ ÿÿ                            ÿÿ  ÿÿ                      ÿÿ       şÿ  ÿÿ                       şÿ  şÿ     ÿÿ                                                                          şÿ    ÿÿ                                           ÿÿ                                   ÿÿ                              ÿÿşÿ ÿÿ            ÿÿ      ÿÿ                         ÿÿ      ÿÿ         ÿÿ        ÿÿıÿ   şÿÿÿ   ÿÿşÿ      şÿıÿ       ÿÿ ıÿşÿ    ıÿÿÿ  ÿÿ       ÿÿ  ÿÿ    şÿ      ÿÿ        ÿÿ         ÿÿ                    şÿ     şÿ         ÿÿ 	 ÿÿşÿ    	 üÿÿÿ    ûÿÿÿ  şÿÿÿÿÿ   ıÿ  
+          şÿ  şÿÿÿÿÿ 	        üÿ       
+  şÿ   úÿ 
+    ôÿ          şÿ	  üÿùÿ    ÿÿûÿ   ûÿ 	 	   üÿ    ùÿÿÿ
+ üÿ  	      èÿ  ıÿ  ÷ÿûÿüÿúÿ  ÿÿûÿ ıÿ  Ûÿöÿşÿòÿ"  ğÿşÿ  ùÿ ûÿåÿ  éÿ   êÿùÿ  âÿôÿ& éÿüÿ" æÿ  ûÿ   ïÿşÿúÿâÿ ÿÿõÿ' ÷ÿìÿ õÿöÿ ÷ÿ   îÿìÿ    ûÿæÿ  
+  æÿÛÿğÿôÿ1 :   úÿÏÿ  Ùÿ şÿìÿõÿÊÿøÿòÿ4 R åÿÍÿÉÿ¸ÿ. M ÷ÿòÿæÿ»ÿ9 # îÿ ıÿçÿÿÿ Ğÿæÿ4     ´ÿ .   E  ÿÚÿ  d  Êÿ    ¸ÿõÿ< @ ıÿ»ÿ²ÿ L C  ¼ÿöÿ" Òÿÿÿ ëÿ; : Áÿ )  èÿíÿ   $ P ×ÿªÿM ŞÿÕÿ€ şÿÓÿH µÿßÿ‰  ÚÿÇÿ¤ÿR † 9 øÿ¢ÿñÿ  Óÿ´ÿ1 T @ ßÿ–ÿfÿ3 U F < Âÿ‰ÿåÿäÿ! D îÿÜÿ  Öÿ  İÿ3   õÿ—ÿ	 8 C F ½ÿºÿÏÿéÿ'  3 % àÿÏÿ  : U ÈÿÊÿ  Éÿ ãÿ% g  ÔÿÃÿ& j  åÿàÿíÿ I ½ÿÛÿ a  ÑÿA Óÿîÿ… …ÿĞÿw íÿÿÿn  - ¶ÿcÿÛÿ$ ª ‚ õşïşZ  ‡  şªş&í Àÿ 
+ÿÿdÿùşöı/ş¡ í ”şüı,` ¤uû-û Ûÿ”ÃıîümÿeÿÇúÿ‹ş*ÿ¨ÿ]føÿzÿ¢ÿE ÂSzşgşŠÿïÿt<àıFş,ÿÿ º ì 3ˆ % ÿtÿ@ ¦   j [ " Y Äÿšÿ$  öş}ÿx = f   6 àÿÌ Nÿÿ^şşt ÿ ?¢ÿ3ÿÿ"ÿvIò å kş—ş/şµş„ Äÿ*]}ÿxÿ÷şşT v 9 { ÍÿÿD  iÿqİıŒş“ÿÿ"núşÿ_ G Š © \ § + ˜ÿvÿÿô $ ÿRÿñÿYÿD 8 ~ ­ c ÏÿµıËıvlá «ş
+ÿ· Vÿ<ÿóşeÿt÷ ëÿÑÿ£ş$ÿ»\  Ş ıı#ƒ ,î4ş1ÿÿâÿ&ÿõşNş¼ş÷ÚÙÿÉÿÿ9 Ó¬öşYşø Ë˜ÿ  oıı)ŠLÿÿÿ“ÿïÿ0u MşÿU ' #QÆÿ¬ ”şíü¶ ê ×ÿí ¼ı`üÃüÿG ºşÈş¸ ° ş şí ·ÿ` oÿ¤şàÿ„ oÿÃQZ ğ úıòüNLkÿxÿÑıWüK1ÄıwşÉÿŒ¾ Jü´ı*jOCÕüûıcÿ	 ñzåı¯şş!ş¨HÖşÿšıïşÉ”‘  wş£ş:~l†ıBıÿòQÿÒÿÈúäúí* ö (üzü·× N ’ ä şş–şîşÆşdŠÿ*ÿ,şpş£"$¸ Rüêûÿÿ… ‰6ªÿıı±ûÜü©?' ’úRü‘K²ŠûqıŸş™ıTŠ¨tı}û< ã Ğ ´ Úş!ÿ«×Õÿ9ÿ&ıgıv 3 ãª Aÿ‰ 	ÿı AşPı-º˜şóÿ(şIı—ÿ¾ÿcÿ,ÿaÏµş;ÿu å I¾ù¹ø.³¡~ùaøı–ı}ô|ü¾ı Õÿ‚ğğúºüíÆúûõûsşâı›*ÿÃıpıìşï®åöD÷VòÂ÷HFæèçó×õiö†ğMõÂ¸Ín{ågë|êÇíOmöû\û3â›âÿ2úşr êúuøaù‰÷Åa9
+‹ä¯éÎëSÏÿJĞçeè%,
+4Öé,ëÁâÿÒï&ñö÷oõB÷"şïö—óCı‘úMíñHø)ÜÕŞwÿ3<ZßYßF£¦óõ+ £
+ÿ=AôïFæ}üÿ:ÿL
+D
+eòó9ı"üĞùşiş“¯÷@÷£VÌíªírıšı,²¸Ù°õ3õ ÿa 7; ,ÿë Jö»õ8;Wú×øLü&ıRö• Xÿ5£Äû~ü³üÂú€ §uı2şc¨ †Øû>üé$ 4ÿº Vÿìş{  íşIÿiş0şWüAıÅã^*ùû÷08ÿÒıWúnıQSvÿ±ı’ù†ı7wÒÑŸû¯ş,ş2úc÷˜ÿ ıü@úèûàÿÿÀ½×X»æù÷ùµıûşêìÈõ¦öı]ët
+ØïÄñü3ügMşüÿ
+ù‡ø^
+©1ü©ıUıåûO
+
+©÷ùúvùù“ğşêşşı·ı©÷Òæ{üı­ıàş
+ıÿ ¾ûÉüúú2ø‚s¬\ü®ú9‰ÿ³ıLÿ ş<×<U øÿ.ùêú-ÿ¡ûšû'ş¼ Gqø“úÙ€!€üSÿN¦ú³ùÒ ³|ù £ü‰ı”ÿwı-ıoşmÿÙÿ” {şÿ@ııT“÷üı¾ÿşx!üüšÿâşÔ ÓSÑıUıõûÃüæ“ÿ6 ì ]… ş éÿŠş¬   2ı·û°  ¤ø‚şjıxş*ÿ(ş”şrGQûmüş mşÿıpÿg ‘Œÿæş1 ÿ` g »ş°aTûZüIşŸıÁãıdÿ şkş Áÿñÿ© W\ ş_şS‡şFş±ş‹ DìğúÚùàÿŒ	×% ÿÛş·• šşÿ­şmûãıø'»ûüüÓ Öş%ÿ¤ıhş.=şÃÿ ƒ Aÿ^ş† s0< SışÙ+ÿ•ÿZÿ Â¹ öış±şÿŒ6+ÿËÿ?şşz 4 Äıeüa °ıÁÿ2 ¨ıÚ­üğşëÿˆşdÿ‡ )¢ıøüxÿ[ Ëáåş7ü6ÿ˜/ï\ Òü0ÿ€ ¶ µş·ş£Ï Fÿ % ş“ YÏÿ\ş»ÿ˜ÿ¦ÿ'±Eü€ıKgÒ <üÆüç¤… vÿ*ÿ ! ÿÂÿã c’ ™ıÜıâ Gÿ{şıÿB  a¤¨ürı¡ 4ß?|üşÈ + é¼ –ş‘ ,ÿ×üaûZşƒş˜ÿ”ş§ÿ3 Ã \? bış¶l óıbÿLÕÿrÿ>ÿ|ÿÙ _c Œş»şª ö ¾ÿ " Tÿîÿæ  •ÿ]ÿÿOÿ! ä c ´ÿàÿK Sÿ»ÿÓ çÿäıÿ\KïÿÉşÿë $ Éşm—ÿAÿ³ÿÓÿÃ œ DÿQ › ÿı!ı] ¹€ íı0ÿH  Œ óşèÿC < Á ÿ~ÿAÿ¥ş*0 Ôşÿ Ûÿ:ÿ;(Aÿvÿbÿ6ÿè º­ µÿ¬ş¬ÿÇÿÎşI‡¨ÿÍÿ`ÿ@ÿÿŞş¨ÿ# +R 6şêÿU­ÿ * ’ÿº è Nÿ0ÿ0 }ÿ˜ÿ‰\ - øış P ãÿ¡ÿ„ÿ ¸ÿ\ ¡µÿµş ÿ, 7  a ìÿ‹ÿ	 Æ æÿ}ÿğşëşÙÎ´ÿwşbÿ u Q [  œÿİÿ- $ y Ÿ 	 €ÿŸÿ… ÷ÿ‚ÿ— ‰ {ÿpÿ  <  h  Şÿ% ­ÿzÿğÿH ÿ¤ÿŒ ¯ U Âÿ6  9 \ »ÿòÿÍ Ï ’ÿUÿbÿ|ÿó ş şÿÜÿ_ÿ›ÿ„ x       Íÿ  ®ÿşÿ@ W ( ™ÿÃÿQ . ! ïÿ A òÿ  ? ¹ N ÿ ÿmÿ]ÿë ô @ $ <ÿbÿÔ w öÿ0 ¾ÿ — Ùÿ¿ÿ ¶ÿãÿ  - ? A $ /  •ÿÚÿ! . I îÿ J $ 6 6  ƒÿÈÿºÿ­ÿì º xÿjÿŒ m L Š jÿÿŒ \ öÿÏÿ¨ÿÊÿ, ' n  »ÿ…ÿn s   j lÿUÿ= a c N èÿÓÿE F W ' lÿÿÎÿ
+ « ƒ İÿ«ÿ	 V K T iÿ(ÿ9     «ÿíÿ¦ b Ãÿ üÿÔÿÚ  óÿ> wÿÿ åÿî  |ÿ  øÿÇÿ  NÿhÿÇ ª E P ÇÿÊÿ  éÿo H Æÿ ÓÿÓÿs [ Æÿáÿ! 5 ' ñÿàÿ ÆÿÍÿ>     
+ - < êÿÓÿ 3  òÿA  ûÿ R H äÿóÿòÿ$ ñÿ + ¶ÿ  ™ÿğÿ` N íÿÂÿ% èÿöÿN âÿ¹ÿ ğÿîÿ \ E  I  ¿ÿ ñÿµÿßÿ! & ! B åÿÉÿ  Óÿ¼ÿ* . j X £ÿÖÿ+ ! Z  ™ÿÙÿøÿ 8  2 óÿàÿE 7 óÿ¹ÿ  * Q  »ÿŒÿúÿùÿF ‹ 7 ®ÿyÿÉÿ ! [ _ úÿ§ÿßÿ Y I áÿÒÿÜÿôÿV  Øÿ & úÿ= K ) @ Şÿñÿ¯ÿ¿ÿ   ßÿıÿæÿ   @  1 Ôÿ ÿe y ŞÿáÿÕÿ¨ÿh › ØÿÒÿòÿÒÿ  3 ;  §ÿ$ W  M Ûÿgÿ. w z @ •ÿ·ÿ şÿìÿ5 îÿıÿZ # “ÿ×ÿ[  êÿ ôÿÑÿ"   - E óÿáÿÖÿ¬ÿ   ùÿ  A 6 
+ ìÿÆÿÆÿîÿ' / ÛÿßÿX )   C áÿæÿ æÿÁÿèÿ  = :  úÿõÿøÿN \ àÿµÿÀÿ¼ÿJ O çÿ  ÿÿ@ 4 áÿ
+  ÿÿ ôÿÎÿÒÿ  , ôÿL Q ãÿİÿßÿæÿ < Òÿzÿ: 4 âÿùÿ  ÷ÿ  Ûÿ, : ÷ÿéÿ  İÿÌÿ-  N r Åÿ¸ÿäÿÚÿ 5 # * 0 $ ¸ÿ›ÿ  òÿøÿ
+  / 5 Åÿ–ÿ, S !  Íÿ°ÿ1 h   óÿîÿúÿôÿ $ #  Óÿòÿêÿ" O Æÿ˜ÿ, p ïÿ  ¯ÿ  ıÿòÿõÿæÿüÿéÿ; > ²ÿùÿ"    üÿ×ÿ+  íÿşÿÇÿèÿ' L 4 ñÿÇÿãÿ    Õÿıÿ0 ìÿ	 ' 2 ìÿªÿ  , G °ÿªÿ!   ÷ÿ×ÿ şÿ  N üÿ£ÿıÿ ? : Éÿæÿ =  Ûÿ÷ÿÛÿE  ©ÿ& Şÿ¿ÿåÿùÿ^ < øÿ éÿ @  ´ÿìÿ    çÿÉÿ D   ÃÿÍÿb !   Àÿïÿ7  + ?   Øÿ»ÿ 2 Øÿæÿ Ìÿ G âÿ
+ 0 äÿ$ # õÿ & úÿ  ÖÿÓÿæÿğÿ) + ' şÿÔÿíÿ / "   Òÿ  Ëÿ #    Ñÿüÿ0 îÿÒÿ+  úÿûÿ©ÿòÿ ! 
+ ğÿ åÿéÿñÿøÿ* $ ùÿ×ÿ ! ùÿíÿ, + ôÿêÿŞÿëÿ ùÿáÿÃÿ C àÿçÿ  üÿäÿ"  ìÿßÿèÿ  õÿïÿãÿ. E ÕÿËÿ-  ŞÿÓÿùÿ'  òÿèÿ     ûÿÚÿ $ ×ÿÍÿ     ãÿ
+ üÿòÿ# ôÿ   Üÿ
+ ; æÿëÿ şÿóÿæÿÖÿôÿ7 : çÿÿÿ  ıÿ­ÿŞÿ#  ÿÿ	 ëÿûÿ ïÿÖÿëÿ   :  ëÿïÿãÿ ÷ÿìÿ< # öÿøÿõÿ êÿøÿòÿ¿ÿ *   , òÿÑÿûÿ(  öÿ  äÿüÿ(  ãÿ   *  âÿñÿ ëÿùÿ ëÿ  ïÿõÿ    	   êÿØÿÑÿ   üÿáÿ(  ôÿçÿìÿåÿùÿ! 
+ øÿìÿõÿêÿ	 ÿÿ    êÿØÿüÿ0 ÿÿÿÿ ãÿ òÿ  ïÿöÿ ñÿ$ 7 ×ÿâÿ	 ûÿ  ïÿâÿ óÿ  '  ìÿûÿíÿæÿ ! îÿıÿæÿ  
+ øÿ öÿæÿ  ùÿòÿäÿ÷ÿ  ôÿ÷ÿÚÿ   Şÿğÿ  òÿúÿ
+ ıÿ éÿæÿ  õÿ#  äÿïÿûÿáÿ   ×ÿëÿ   êÿöÿ ñÿúÿ ùÿúÿôÿúÿûÿ    şÿ÷ÿäÿÙÿ " âÿîÿ ğÿúÿ ñÿ  ğÿÿÿíÿ#  ãÿïÿæÿ 	 óÿûÿëÿ  øÿØÿèÿ    îÿçÿúÿ  øÿ ğÿîÿ   òÿøÿêÿıÿİÿ  ûÿ óÿñÿ   êÿëÿ  ùÿıÿğÿáÿ üÿüÿ Ùÿ 
+ ôÿıÿòÿôÿ 
+ íÿóÿğÿ % ÿÿ åÿêÿ   ' êÿèÿ  ìÿ÷ÿğÿöÿ  ïÿâÿÿÿ
+  õÿ ÿÿ   ìÿ    òÿ õÿêÿ 	  ùÿĞÿ  éÿ    ıÿøÿîÿ
+ íÿóÿ   	 ûÿÿÿ   èÿùÿÿÿôÿûÿ	  şÿíÿúÿíÿòÿ  ıÿ
+ üÿğÿ ñÿÿÿÿÿèÿóÿ  ñÿîÿûÿüÿóÿõÿ    ãÿñÿ  ïÿ   îÿ üÿ  ïÿñÿÿÿ öÿğÿ÷ÿşÿ  øÿüÿóÿæÿıÿêÿ  îÿîÿùÿ ıÿòÿıÿ	  ÿÿşÿøÿıÿ ùÿíÿ       øÿôÿñÿ   ïÿõÿıÿ  úÿùÿêÿïÿ    üÿîÿüÿüÿ÷ÿøÿ 
+ ôÿîÿ÷ÿ   ÿÿöÿúÿ÷ÿ ñÿ  îÿùÿ	  óÿ  ıÿïÿşÿ øÿşÿ÷ÿ÷ÿøÿşÿ   ÷ÿ  ğÿ   ôÿ  ûÿúÿúÿúÿöÿ  òÿøÿ  ÷ÿ  ïÿüÿ   üÿöÿëÿ    ûÿÿÿşÿ  ıÿ ûÿõÿ÷ÿüÿ   õÿóÿıÿóÿëÿøÿ  
+ ıÿûÿ üÿüÿûÿ    ğÿõÿÿÿ  üÿùÿûÿñÿ  üÿõÿóÿúÿÿÿ   ñÿşÿ úÿüÿûÿ úÿôÿúÿÿÿ ûÿ÷ÿóÿÿÿ şÿüÿÿÿøÿıÿ ûÿøÿüÿùÿ    úÿûÿ  úÿ şÿôÿ üÿşÿ ùÿøÿøÿúÿıÿúÿúÿıÿóÿùÿ  şÿşÿöÿóÿüÿıÿıÿúÿûÿıÿşÿ  ÿÿşÿÿÿ÷ÿ÷ÿöÿşÿÿÿ øÿúÿ úÿıÿÿÿúÿıÿ ıÿöÿûÿşÿûÿ  ıÿüÿûÿ  şÿ  øÿñÿıÿÿÿùÿúÿ÷ÿıÿ şÿûÿıÿùÿùÿôÿ÷ÿ   üÿùÿûÿûÿÿÿıÿõÿøÿ  üÿòÿøÿ ÿÿûÿúÿöÿÿÿøÿõÿõÿøÿ  ûÿúÿÿÿıÿùÿùÿşÿ  úÿıÿ   ÿÿüÿûÿüÿ   üÿ    ùÿõÿ    úÿùÿÿÿ ÿÿöÿıÿüÿøÿÿÿûÿ   üÿ şÿşÿüÿıÿ    øÿùÿ  şÿüÿûÿ   ùÿşÿ ıÿúÿ  şÿüÿ    ÿÿûÿ ıÿşÿ    ûÿ  üÿ ıÿıÿ   ûÿÿÿ øÿıÿ÷ÿ   ÿÿùÿ       úÿ   ıÿ   üÿúÿıÿûÿ   ÿÿ ÿÿşÿ ÿÿúÿùÿşÿ   ÷ÿ÷ÿùÿüÿ ıÿşÿÿÿşÿşÿ  ÿÿÿÿúÿùÿùÿÿÿûÿüÿùÿıÿ  ÿÿıÿşÿúÿıÿ  üÿõÿÿÿÿÿşÿ ıÿúÿüÿ    ıÿşÿ   ıÿ  şÿøÿúÿ üÿıÿ üÿüÿ   ıÿÿÿúÿ÷ÿüÿüÿ   ùÿùÿ ÿÿøÿùÿ  ıÿÿÿûÿûÿşÿûÿûÿúÿşÿ  úÿûÿ øÿùÿÿÿ ıÿ  ùÿüÿ úÿıÿ øÿùÿüÿıÿ   ÷ÿıÿşÿ  ûÿöÿ  ûÿşÿ  ıÿşÿüÿùÿüÿıÿ ÿÿÿÿúÿıÿşÿùÿûÿÿÿôÿıÿÿÿùÿşÿ ıÿ     şÿ   ÿÿ   şÿ                üÿ      ÿÿ     üÿ   şÿ    ıÿ    şÿ  şÿ şÿ   şÿşÿşÿ   ıÿşÿ ÿÿ  üÿ          ıÿşÿ  ÿÿşÿ  ÿÿ şÿüÿ     şÿşÿ     ıÿûÿ     ûÿ     şÿıÿ      ÿÿşÿ  ÿÿ   ıÿ   şÿ  şÿ   ÿÿ  ÿÿÿÿÿÿ    şÿıÿ   ÿÿÿÿ     ıÿ  şÿ ÿÿ ÿÿşÿ    ÿÿüÿÿÿ  üÿÿÿ  ÿÿ   şÿ    ÿÿ ÿÿıÿ      üÿ     şÿıÿ  ÿÿ ÿÿıÿ        ÿÿ     ıÿÿÿ  ÿÿ                  ÿÿÿÿ    şÿÿÿ    ÿÿşÿ      ÿÿ   ÿÿÿÿ    ÿÿ    ÿÿ   ÿÿşÿ                      ÿÿ  şÿÿÿ   ÿÿ ÿÿÿÿ   ÿÿ  şÿÿÿ    şÿıÿ   ÿÿ  şÿ   şÿ   üÿ   ÿÿ ÿÿıÿ       şÿ   üÿÿÿ ÿÿ  şÿ  şÿıÿ           şÿ   LIST¤   INFOIPRD   Õ¾³¤ËØ²Ä(sc.chinaz.com) IART   Õ¾³¤ËØ²Ä(sc.chinaz.com) ICRD   Õ¾³¤ËØ²Ä(sc.chinaz.com) IGNR   Õ¾³¤ËØ²Ä(sc.chinaz.com) INAM   Õ¾³¤ËØ²Ä(sc.chinaz.com)        BuyPotionSuccess             Z1  ID3     rTALB     ÿş1 0 7 4 TPE1     ÿşf l a s h 8 TIT2   #  ÿşirSOPN- 6 4   -   6 4 . m p 3 TLEN   @  000000000734ÿû@     K€    	p    .      %À  ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿû@¾€Ø K€    	p    .      %À  ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿû@ÿ€è K€    	p    .      %À  ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿû@ÿ€è K€    	p    .      %À  ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿû@ÿ€è K€    	p    .      %À  ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿû@ÿ€è K€    	p    .      %À  ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿû@ÿ€è K€    	p    .      %À  ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿû$h’I%&ÛPHJÂ€ú#F	Ğ.pAÁ @#ÙJ$yæÿû@ÿ€è K€    	p    .      %À  
+ÕN“ÿÿÿWp¿ÿÿÿÿù»ş®XæØœ&”^öQ4•&’#Q5Ÿ6a'¨äáuu½†á8&³'›bp]$'Ï˜n„ê98]ZÌŸ>a¸N„çWóa:–N¤Ödñ¶Át¢ÓØn£Y#D’I)6Ü
+‚BP˜6Ñ0Ns‚64ÈQ#Ï0¸˜VªtŸÿÿú»…ÿÿÿÿÿÍØ_õrÇ6Äá4¢÷°º‰¤©0°àœ‘‰¬„ù³á8]G'«¨½ì7	Á5™<Û‚é!>|Ãpœ'QÉÂêÖdùóÂpœ':¿›	Ô²p&³'°¥Ãp-^e¤iU‡ àg™ĞÀ¬N(³ÌŸ}ãÇÌË„˜‘CÁí›ùß«şuüXã
+/Fìã0R9'¶¿Ø0sÇA ô›¬ã‚éğx{×ˆj”/8&6™šÿÓÆàpáBö!f_dK~ÎpN„áøà:9qPĞÍûÎIÃ¯¶ñ‚Ãô‡‡
+ÿû@ÿ€Ü K€    	p  ”Å¤¡-ŠB²˜´”%±/|/€@|§-¬l¨".<m"Š9‘		U,ë¤T`İ“ˆïüõ–k¼x¾*CjuÒ'?_g	IÆßæ[ş–Æ*_Oÿ=58€ãus }Ì4˜ˆ5	r†“ƒØj 4¹G&‰ °wì~RÉY(”OâPH*J~9‰bZ£7ŒB¿ğC`NÌ×Ù{ó=4Ùœqˆ˜èQDÊ#©ùÅéE»Â8?‡à&ƒápP¡.‚° `Ü?"….hôgRîA‚X,‚&“wîñTˆ“hdWMŠ%@°¨ùdBBM¢Œ2¦ÿşïÿ”ÿÿÿşq{¬> 	&’uÿû!¿ÿ+¿õ‚{:{UÈÂÎ Œ§;‘F<°ã‡!Oj;sœX1$r¹ÕÎÇ},î@‚=N?bo˜¸7Éÿÿ»} 5 F2Q$ª¨û!qî¯Iª×MNÛ"C–&ZĞRîê7?ïü|wl¿¶ÿû`ÿ€¿f@Iìch>§ Zí‘f1¡O1¤¨‰µ~DÖT?©<gò†BƒÄ9w(‹Œ¢`‚=EÇÂT—iU¸Û[š´§~ZSÒm¸ä»{ûøyÿN:¿ô½ºúÿ¨?Š¿Ù È ´Ô’|A q4ÊRx¿ãBEû`—€Ñ.Cu—kÇûwµ>ùt÷ïlü¦ Ac}}†ïß¿Ù~ûÿ{Ü·¾ıÛû}ßĞçï~^ã;>ùô~øñÑßXšfc¦Ù÷€Öî:ø=
+•”–”ÆA €\6rD,CÄğx aowD2Û)æ›IÍ×=Â²¦ı0£‘¤Pğ®L.İ ¶×6a¼' Ò7¦Ó-.öêû¾	£v2Iáñ¸_…ø\ê;Ql ³„ÖUéÎy–ªÖÖ€ €ÕÿŠ#ÿ¿ıwşØûı³³³¡{Ú#31ÚnõŸS±k¤/	óÀf<Äw.ñˆ=(¬nat¯®¤¹Ê‘÷Õ¼'ú¡•ğÿ£3–[‚ÿşvÿû`Ñ ¤\ÌaæCjc«‰¿&mNI„™+¡Pi0i_X”‰%n7À3 ~XöQƒlÓP2E?ĞöbP^3˜?`-eAñ‹¸fÔ³6^¾|šwğ´Š¦‡í¨†A»Ïï3öœ=÷Ù§WK×¢Ø¡†Â¢‰fl TÛd¬h¬ê†©ı«&[KçßÛXò $ZM¦“¨Ÿù@qz‹ˆÉÑş÷µ”ú}hÊä#,r˜)…å"]aîä*#™HF‰˜B³h$/×@¶Ü±ƒõ¹B)(^µ[tªº¼ËÄ$B»Ô’(Æ–—ğQ–ÁÀ„§‡Á7z!ˆ¢HBÍ"ÈY$œ­¤«Cğü\ÎÄ¹\Ê¬²qŠ]Eq¦aM5dX±’Œ{ÓueàùcÍ‹o¿si^Ú¢U*şÂíâúz¢à A­ÒR)CdÕÿ„øÜ'cˆ¸v”,¤Èâ¤®¸´%‰J¯uTkpò÷jˆBÏºåMĞş‹Åİ(ÁfÔò½¯èŸÁ+»_Y9|¦Zê¾šÒgV”G3ÿû`¿ L6SU<ÀM¦ú¢”HYkø÷’`Ší?Â@1ş¹ŒS9¹í@ıº‰óÜ¥RYËL¯&ÇÃ3œâ>§×õjîë¬>ƒ4KµF’4–¾!nı¡n×ÏúÛtk¸ÆÕ¢Ò>¢FŞõmçÖÏŸFŞÙ‹à†DK;&
+ÀM¨”ºÂAO¨U€ä’97D}“£r\¿ÿş’å÷¾~—ğaQ¶Û™3lqµkû0
+\ub@Çß·` !M±Ó “<ß[à’[¿ˆPWûîLWê÷áG"B
+(QÎî1B‚§í,¥}$’MÕÁm4‰ø ÿJ½@WUQFàiCšêè_guÍµáÅˆù·jUc¢Èn4¿ü­·fâŸ$­é_‡ı÷·gÏq¸ó-¿ ‹GêyÕrûı7jxYĞˆ[NYÒb«UM(ßílªµ…NÁ œ½ï†'>ÄÀ@¨ÛÓ
+Vdy8¢™êé€CšÂÏ*-Öÿ¥ß”v!{©P,yV["tÓ;: %–I$ÎP Ô¦‰ø_S§üÊ˜[¼Këaÿû`Ä€V8XÏ=àY§]áL€Ë`ç¼ËQ‹­dc	&3H&Œ3ØN¤QË6–÷5ªpZ/6ôÖj—Ÿç¤Nîig*ÈîGfò5$»ì>6¸¤«rJétÚ°órÓÛß6äºUŞÛaPÙû©{ş­•ÒcªfÀ»ÒI!;Cıã1®ï_[[;ıNÿıí9 æ&Oÿÿ;=ØR: Úf+6KÉ§PPŒYÂäCa"iqg;ßPÆ-fN§¬n‹WjÀ(¦ãm¸ÚO ,Üa)1I‹ÜZŞ -”‡ÕíYÏv,Bîa8©ìÓåxog‡o(¨°Ì¹ª$9‹ˆ¯˜xJÖù°Ÿ)œec-éŞïf+ÏÿÏÖÇyCô¿‰R=Éä«óÈOY'n¾šæ¿µ%ô %8åVÌŠÊŸfÿÿå:EgA5Ôû¯‘mò‘j´!ä[ß>Ãçş¥¸%ü!ÃJ%to$úkK©n­Nÿß` ”“n6ãm°HPGÛ[A¼ĞĞÒ©U¡«+N%Ø»Î1ä~ûgÿû`Í X8×ié2ØPFû)Ã[ŒÌûU¦0Ë¡KlpwÁÔ	pËˆÏ¥}¸¾lC/Tk¿N´PœéĞ¬»¾Æk¢’ğ;93w)-ç²fE—!lãí‘J±Ù „<—©)¬CnßŸÁ§õj¬ô>³ËB)jÛÕÉm’à8¡ÒB&çXFE„)úWÔ—ù¥?şå›…$-x
+6ƒ8;XÈˆÖr¡•Ücé…Ú§…jyÁú‹ˆ‘z€Ñ+‘©F6Ûm·$q¶	 <¼†M¨”9†gI¬Ê!_Ô}ŞhÑÓñDÍ$a©"Å9Î+û-®‹à¢´ïo-yú(ŒkÂWNG]¿òß*ÌNÚp˜J>nõ¾«á;ğMö½(€‘¤›mwPÆË  6T0BˆoõT&D „,œä’ê>5ÿæwŞ¹Óÿí§>ú×lß²óú¬ì
+nˆHLg-ÇX+µ¹Ú™¨®åkÃt—.êÕAÊÌ·ÒZjïÿûÔyš”N¯¡ˆ–uÛ2'@ğ €ÿû`Ñ BÓéïJèTÆš½$C[<çQ¦Ëizi°”™lÀ4€}
+±òMH´—š¹MÇÔQ/á®H­¼ü%
+K)Æ•×.¬ ×ŠÙi¾û­‰ThŒÚ!›`™R/f¼šX}
+€—¥áä¦7bZm¶Ô’FèåÔŠcàBxrîš[¡ëoù(x·“İÌU¡ÌîájBDÈQíFŒ°Èi¢ŒÂTë¸A08&ì$x¡FÈ½g/€–k»º‚H–‡!å‘1PÕCëÃºl0ˆ‚Ád›\Å(º(Á9,Ï’•BhGŠï‹û­¶ssæ¿š«=»kÉ>_ƒH)gÓÚ¤\‹›:ylõ#†v*IZÚœ’ïIAÆ­<;’®ÓHÙqÖä‘Àz%wd–ä¹ba¡÷NéÂ­ŞÏ.Û.j¼½ÿ<ùğ¹B¯¬ÈÓ£ÜÌÂUxÍ¹‰\~ñfC†~§ÿÿæqÈ1‰Æş€Z¾ÿª€˜2$ÇÁ‘òQĞ–ógrÿ+Š5›;ëÿû`Ë 1:SIæJØV&ú0Ã[óE&%+¡<Ÿi´ôtëû[Ï9?[m«©+$ªQt-*q°2‚ƒ©®¢…TÕE[ÍßW-•ı^	£ÔÛnY3”)õ·U—6ÿ¹£n¡îHæ 9(v–AE)I,@ûòì¨­soaš9Sôë#uò§å±ÿÿë”%>;›°î„q1˜Wúöè~[,®aÜó4Ü¾ûşİ0€¥w€á@@øguƒáÙ[I?û¨&Êó}f”šÔªÖ
+zÒÓÓ«{ı€˜òç HÀ¢S^J:fìé††fˆ!À­9"´,=i(©,Ú¶U‚RäV’²`šÅÌ2‹:£ª‘û*ŒuÉ&°°ÿºbœì%î¤:§‰L˜Á³""b8ã †gX…‹É@àBŠ¸ˆL â¥v×?Noÿê\¶6¬†2±¬TJŠ‘Ñô+ß™„`ğò²ªJW6Å)Æ=H$rÌâFQV|®Çå]¬	¶£’9#À*_¬Ôş2™OVî¥ \ºê‹ÿû`Ï€€DÑÉ,JèPhJ}$c]™K‡™¡W#*<’•t‘ÂÒªÜgtŠZ×„ ù(ögfÏƒû¹,aj.°ÒŠUª é¤…CÁ­!Á1…«QVô)HHÁQ2WmWcÉ .CE|BÏ9–)m¤’É,’@ÎoÈğ$AÂ‡9èå¥jîDÅ=-“ÔÓéûÿä}zğš«5²¬Mã÷CÃ4ŸrBM PŞ›jX~“lÍÿû~.ÿÿşËÑÙI)$’(¥Ñ•ˆB€„V}#Šƒ_ÑbÎæ^P¦ËE»@ÎĞØšâ¥Ûv1§„àtDd|óÚ˜ËÿIW¼ÛCTİÖ“ò—.\ €Y¹od„i8p8ŒÉ0„3ûK-…súÈ‚RÜ  ÎOYÃ(™š9#iº%÷øêÒYI,Óæ]
+F¡ós¹ó\çÅÄç$êçr9î¬;ĞèESŸ:ôw’¨Ê¶jênùê®®º²)ó¢„ rÖ>®B¿ÔùÈK¿Qv „"“‡Ï¨õ€'‘‹XÁh%qP¦KEÿû`Ì€H?RiéBèQem1KM©9G´Ä !*)¾–P#ÈyÃË—¢¾âAvC	: ß&ÆXèƒ€np>  @ 1Ş?˜‘ŠÇYc"O^FŞj:Ô›—÷Rı%¬úûş9/6Wÿsşh“!v›ÇİDÿÇ×ïA¥&Ç39óßÿÌw?şL³G›Ø ’-]Æİ¸²Ü° À™)ru[]OFÔÎë~Ÿ½ÂªB	–²Ã…š0æ¤Q0›óu›—ÖhIºİKR«]Ğ¦¥Wm­²µ¦ÿíeï¾ÿ¯ß}jfMÔ®§~ú­RH©ÌÍÌŒ_7½–w#Ş±ÊCéŒ6[-‰$’Qm8R—ÔA<\`¸7‹åqxÉ !£h°®LqhN@gT¤¡ÙùõŸå[v^ué¥˜ìÚ}fù»Õ½³+Ó/NRiŸ?f}+É@™½Ş—â¨,ğZ2¦]ÑgÂŸ— €   ±6C)$“ï×ÿÿşæx¹ÁFÃ ÷®¸íüÈuMv¥ºú¯u½>WGL]÷]{¼²_ÿû`Å üMXş=d gêoÆ´¥o¸ö ÷
+®wPz# E’“n7#i¾Ø”Î•¢F&›ìÄ•Õ}dØ:_V–°×DV¹TÇa3ªH„ú«õŒĞ”ëÉ"ãq_¦kTÂgmº6E‚SÓ7¾²õ#3_ïîñó~7ñÛz€8î„ÆÑSş‰fÉàHcO 4‚	¶é j:ï¿ø4åãøàÂ$A{QÄJÿ÷6e³ÿD7ÌŠÈWvvò5ÅˆÃZF+ºƒ}lî=PúşËÈşŞ¯ÿş‹Ÿè7˜Ÿ	P’’)$J0èD°28º¤•kslqFÉjaGTä’Qò£m±œDt ( .]/İ”Ô¥ëõjiPdPms·y‡™ùóßŒPrê¿æ L™1öÎ™È³úğ†¡v›èû³ñ?EŒ¶0K^ı, 4I7€“ç W_ı4~kÿ‘KSºÿÿİ—}ÈåE®ÛúØˆ¤3>¦æz=Šç!‚"'…Âà#E*8ë¿ì‚
+[Ê©ÿû`¼€a>Yï`ÀLË›Jã Î±'a¦ Í¡/¡¬ôq	tÚ 
+ÆÑ$•(°.F#ÃgDÄgÑ0º90ªTJkÁ(ëªóŞ¸X¹ !ùXğDÌÄ‚$0ÊFšÊìÅ5½¼œXtî$P¤<…‹¯Üí™Êoæ¿9hÿzZz÷‚òúÃš¾µvÖøÏ“gÛkw4>p0|0‡0>  hm}"{ñDAÀ   !&Ü	"#$?ÿúŸÿŸD#T…8´8FïéS¥KDäŒ	Ş¢çñQÉÅî‡Ùkã–Pc*ª£*.ás;2%‡ã¹C^Ãgî*Ãí¸ûDÂeÒ0†·Õ¯ùùuÏ´ºĞ¼ø&@(ÇåˆÔIµÉ¤Ï¸Ë>TÃj51* @êi(A*j÷{b¥¶„8î¹µÎè‡·uL¶ZÃÎ"¢M[İÃ¦}­âŞÕ˜‡”¥¬Qs„ü2Ò)À €	(ïşoıÙd¿şßÿ¿÷INL‹EaÒÿìkÊúÖbq[>º/Í5`ç<€²Ü´*¥j©&ÓIÔâ¬Ÿ„‚¡ÿû`½€ùFXá)bè6…K(Z+c&1m Û”m4p‰,ie2ŸV7t¹tâÈà Éú„«Õ¯,Íi+¬Ã*šPNÒ&Å0&x……YÏM·	ï‰,%^W5.Q¼l¾“pÏ³U:ÛKMnàŒ³>ZíïËèmÙ5_ï÷Òëşçiú›„’‘	"$˜¨q4«RÎ‰Øq`Me¿°Š¨¨D,u/ü œèç¨‘;’€Ö¤¬3ì[/YU>éĞ(ÀåĞ”qÎ…‚b%&Óm4”+ñsÄ(n‡!ÌÆâ:œ^É‹ÁeBi~ş÷_|È”[ç	¨Ôy?¹2(âã/÷¦Šâ¿ºs·aÓsØ»Y¼úÍ–¼/…^—¢(’âvÎÀ‰ğ` ”.B¿Øò}ÛÎ	ˆ„­¶É$Õ^€rşR°	Œ#0QáÑñR®¤Eµq+N¡Çw‹$
+•´ù{ºbŞµ…%«,ÿŞì İD©)RÀE”YYEÔ«ä™Bf†Ô&ÿû`Å€ 3YQïJÚF ;0 @ßc¦<Ëa4‡m¼pˆÜ!E)Øè\á‰+–FÍm~ÜA*ô©ù¬\t¾:ä6¤H²S†ãŠ9´û[-(a
+×BçkH¼œ¶;›†UVVÿ-Ÿïwïé±—eN¸¨	1g¸<•Á@(¢Æá'¤­Pƒd¸Ómàj}zX2ôtt_¯«PÇrøi	ÄşU¿ıÏÿî}	Oùá¥.(Ë*:%W¥6u.,òGQµÂ!Çƒ­R¾ãÖÃ³ÍUÓ§VWRÉ%
+ÈÄ&ÇÒ(|F!ªµx¤´cUÍV.Jyu?6‡¿úv“¹}[kKôX†nØDÄ_vBflà´†©P=Q„«*öÚøs/w<¦ºf¹~ÿ¿ùÒûšw×ùó×ÕÔAï•®¸®íˆ64Ds¯T‹³A$Ûs ×o{’˜ÑÅ'•ÖÇ#?øÿçvBtjwó‰Á@³!štV”‹á‚ÕÌßÿ;[¯ÿş×W&·¾m~Åfq²¬
+$I%‘$šÀÂ ¨XÊDâƒ(Ï&ÿû`Ç mAÖIæ2èPG»C]ÙUF0Ë¡­¬(q	²‚l[¾=!›ıSœî9¦ãºÊÓH¹·‚=3Ò9†˜’vÏı8^½%dcÛBRĞè8ÔïI¨D(h æSgñõÓÖE„4’Qt|À'ñR3$3ÜëÿÿüúŸù´ei¬y¿³¢òûÏ3òĞ¡Ü››vœÉH$ÖÊh.QÒÏ®Ò¾KÓ]ßcé5I¦ÚI,ÇFÇ“ÑgL®¡Î¨J4éœôÉõXtXÀb`•$k!İR²3ju’Læim\Â%„Ê^Zš®ÊsiC>iwF¡I/ºE-õR|‚=¨A}<ñ"Ü±+X(¥ÿë:Gù•³™ “I-(;¿u­ÀC@šm÷8V¤¸—üúÈş[^ósh½’ùq6awüºú›ñIò¢ujo%5‚Ò@É5€ÜT]ÑOâRßúİ".ÔÛm¶ãiÀ‡Ó–ÓŠIcÁmáö­Ñ‡rÏÓæºqºk5ñ‚Pÿû`Ì '8Ui#2ØR%«F[ ÷U¦+¡7–ë°Sn¹vÌºáxÌú%BA ŒMv[GQ•€H$æ&šŞFª«$†åÛI†9û¾ÔİŸq34 °ÒÆYuAúéWjF•YV[m—|ª‰AbB—JÈĞŠ-i¨Ã_a»_úmè±<t‘ƒ£NÓ65¥rÕ÷¬İº$v…~Ôz%$ßùEÑÿ¼¯{Çÿ–“ó
+…K5¤„!-‰VæÏÑ(E´“¯ºÁÔ`;	àØ¢/ŞNøtQ*¹EÔß½aåö.ºÕN™–Q/q8ò³DnI£§§Ùù·1²ğ"•(«9®µôœÉtpÌV8Op`›-
+ SYtIÔ.pòûC±Ï8uş²“ÙÉ$’Hæ	ÿŸ @‚TÍÎ}ZÊ8?‚§Æ1,ğbÕë R¥ásÇÜ2t!¢í4Uè±@oàËÿ]OïôX¥qØ7×†¢˜eİ "Úm¦Úi@	áhv%	WaˆĞ.OU`¢9ÚRÿû`Ñ€B<Õi‰2è]¦Úï%&[”ãO†1+aG›jôcl¼CK{ÈuND²<I,$ä1zrI“sÌ$?úMqÊ	$«®g“|Q6ÊÜSúÄÊIòJÓ!cå¢s˜”7õ¦Ø§VA"¨†ˆ¸Ût·ù€Sİ[m
+“VŠQ&Ùjš[%^å·Í érGõüEh"* 
+[îä”ê‹ÛL¤>¢ÕË§4ƒPªÅ”!HåÁ©JÀ›“«µ.Î·‘-ºJeÕU@ŠG
+((ÎÓ’¢1“gØ>º†IÅú*àRdlˆf\âÈí¤½ÊH–}¥äÏGóÍ<³Ëšça3R1y1ì›Ô45Fm@t`qQ“:ÿŸ³ÿxÜ®wÆ0ªÎnZÎ¬©M¶›i§wx¬X@âÕ!8wY§¤§T¤k‰gSåSfv³
+t’Œ>Iıøò‚K5Nt„<FÅç{B1’;ïdšŠ¥mçáLue’M?ènm©ª› à8t= N l0Dy©ø°JVØµ91¤õÒpEÿû`Í€7Óé‰2Ø[&:Ÿ%([ÙK†$Ë¡Méô“l	±$8 µd‘ñxªp.c7’ ìh|ÃØ¬2Kùh%¦xõ³KKsŒûönéË(8´Hq´$…@¾˜AÍ¦ŸıÖäuÉÄí¾ XpÁ%-·£2(P$ œ>Ù¨’Oœ‘‡×æ4á ÖvlÄ=“Ts	k{~{i¿{”…e»^oi~F"8T¨’Â‚¡/OVT(¢’ªeÀ<"‰ ¡Û‹OQ C¹ÜYr(–2G­šV¢2%U^ÄKEe”JPdF¹uWcÂÍY@òM©‘ŞE7ìôåyÅ‰Í•‘—X0‹ç™yá¹Ô‡©_¶ÿùş+Ï”ßÿó»¨9…6ÛM¶Ü _Š |‘9MôgqÑ*‚}ÌîïÈ\»ıó»<ğôÍø‘y±i ¤Ä¨ˆFvj.Ÿ_?İgƒÚ2w—…©BÄ\½d…K¤‰ÒªO«Hjë½6ÓJ®d-Î"` ÛÚ™&ŒæL#eğkB xÌÖ8CK
+Œÿû`Ğ€4>ÑÉ&BèVfª\0f[Ô±E†%+iXšét“l©ÏG©J2R$ÃHx¡ÇÀŠXJÈ`Œ¬Â •I8HîAvqŠƒ^òÍ:ÏÎbE¹–q¯ÊÜè¬·uİÜ75?ÿ_Uÿ} ES(–fPø.ê,Ø¤–³“Pª¬Ÿƒ¤s¦¿DY•÷ï·¦8A…’ ³H„òpr-±%£«JçS…'YÌÿãöÂ¨ª‚@7œ¬¦µVI$‹5’E@¢.‡H"9	ª É`I ‹Ìp»Î¯ŒCrh‘Fh0üäf¨ÑKO 9§‘¢@é‹'ä½@²uv$ø×áeËÂâ‹§7ºÄ‹¯Ş3³ãë¯3ÿÑÎış>íÛ–	ü[ÊTyÆ·$rG´ˆ¡I^e;ÁˆÔäÉ¨ì-œTË \˜’Yh¦D¶+–ŒYI ¬
+ãoM/7şìxuim8&Ğ\¦¿®œ%óófâÙ¹`o©­&ÓJ Úfqi¹Nz»b^\Ÿe2H2NRVnn7ƒ4Šóÿû`Ò [JÑÑéChUŠ$Æ[ÑAF$Ë¡Ri4ÃlªR¢e
+	Ú,‘²F¥áwEimU]ªŸ“®sÇÎu]êÎzoyw©>Õ„2®zhxKğSä??ÿÿø Û$»û Üèå*²ˆ{	@‘›ä†fbLæYhÓëë:E-hÕ’4¤äÂ)¬-„B¡ï²»‰òÏzÍÇŞSéû*¥'%ivRSz!Ó;ĞA6Sm«}xq«®š’ÀÇBì•%N„¢
+4
+4åç™6¥ ˜‘¥"²$M*J†4¶«—Œ¤D*}"½ıdS!E-*‡:{ËF–=…<orø½9ÑI&K¸Mÿÿ…I$›rÊãÿ‘H©6²EYÔ:ÂÂÖ*Ó\ªñ³åÿ¿pT|×yõûKUymÿÕkM% ·×d©ò©ÈæÓÍE¶^[{U€Ğèvtô+tïÕüH
+*4Ø°TÊÒ,€_ª©$‘)@HR@3	cÀöTH…Ğ6Ê$î£ÿû`Ò€S6ĞQéJÚX¦*$É[LTÃ9&+i“§è”j(¬ªÇN¨ÛšBD!, ó(²Š>76Yİ¾nT³<nlÓ½MIÆŠ,£Á1¢¢İd@BÂÂ¡H\F¬[ø³+ıb¢Í‹³ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿòìN8‘*&ÜQ \(ÀA°p¹ÒˆĞ6ÀêÒ²Å`¡ƒGì²:òÿe¨¨½VíôT¢¢¢ÂÁÑ ˆD`™Š0hÑ³ıÿÿEDTÕD>ª©3ÿÿûMWåUÓôÓUşªé                                                                                                                                  ÿû`Ë€¤*:Ñ‰2Ø`‰M$el@ .      %À                                                                                                                                                                                                                                                                                                                                                                                                        BuyGemSuccess                O+  ID3    kTALB   )  ÿşÙz• }Pg( s c . c h i n a z . c o m ) TPE1   )  ÿşÙz• }Pg( s c . c h i n a z . c o m ) TCON     ÿş( 1 2 ) TIT2   )  ÿşÙz• }Pg( s c . c h i n a z . c o m ) TLEN   @  000000000627COMM      chi Õ¾³¤ËØ²Ä(sc.chinaz.com)ÿû`  d3q†cj  	p  äã€  %À  ÉvDQ!fV,‹ÉÙHªd>«V¡{°õ™Y¹¸°Á‡ œ[?ùfr)¡û9È‡¥4HĞÍËÒÌ®Rnnx¾ŸW”«7,?Ğ%%¡˜FÖ^—bÆåé·iÕ(ÑFêãÒÑ|'_½ØÔ8ÿ}/–ëÒù¶îúnmªò5Ø…§_¦VÕ³'E’9|?sùäGçîNÚ±¬m—¢~—ëEâU¦†!!"5$‘ÇÂá°6O0Q\İ~âoß`ÕNë÷‘öÄÑ<E¨à!!ÌrèêaœÚ°2Ò¾.û£ÙqĞq:YmĞ c£”;ì­!Ò-ç`bçyãw9BœëŞQ(‡YgÓ^!,”5…Ø×"ûz10díê_«»øs¸~zÿüÿÿ¿úÿÿ¯{ğÿüó}ÛGûè 800_SV‚şÚ`ùØÙÌ¤,ÊT"1*åH
+Ò	Ó±K-°f~÷:ûqô¯µ0ã¦á¿ñ¸ìo8¼¾ r$Ím ‰Xÿû`€2ANu3   	p  a]øú€   %Ã   üFáè@âi´váOr×«µà±#÷OOMv/RR_ÿükX–~Ë•nX˜–c•JM^•×¿„nW?S?Ï>ÿÿÿÿşa†a†sÿÿÿŞó·ßşS‚&o=QVhM„È£iÓE8Ôlâè\†9p?±9Et“r¥(‡¥0èÈp·¢*ğàÂà*b3“ãà @Á`qÁúŠ)>N01©ÌÖ'@¬I€ƒ¸8-%³ ,?ˆ€òpÌĞÔûŸ5j´¾hHºFÈå±ÂT~ìëÑQsüßüÄûz¾ïK¿'úÀ©Å33"€–ê2t«Ğ•q¼øşåRéµC˜˜‹ö^!–….2ã.;Ç"tÅ`
+€P„.`XBØ“ã*#Ñ<r!Ây˜}°H¥$`c È  É
+ØòH	é¡xêh¤‰¨ÔĞºD‘:xùæ/šŒÈd0pYçËŠE%š$yÉ2ÑWFÉ©NÔÕÿû`I -RP>    	pà MK?§ò  %À  ĞQñ¬ÀA7a6V1ÿÿÿÙ"¯»6ÒHˆ&òˆÕ5ê^±E
+T±—ºgûhj,¹œˆãT]ãIVÖ±REB¤‰Ö?OÒÀ ‘?äsÅô19Ôÿ(#;%é¡¹óG¢bu:®’g™4Ï,úŒS@Å2.HŒh}Äš_*Ÿ8Æ,ìÚË4fY‰©Äu›å×.©%90`D›Ë·ÿÿÿÖdJ§…FC32$@RÈ eùgx™6–J)ÖÒ§$egÃïòÀ3ÑilÕ®Ğ±”Ø†Q›?0ËšÖß;WdKµT²(Iç"†`à¬Å¯`Š™İ]Ş´]Ö¥2)´ÔÔ¼™TgCh‘TVÄ4‹D™ôÒl…"‘ºL_Q¹8³$Ó2- M2(, /¢¼EÔÿÿÿÔ¬u	šPÎèˆ†fˆ
+ë-Âqp¶¯¡rR”CKö3ÕÈVçn ÿ6ÎÓ|˜!Às{×cÚ³Ÿqn‘
+¯lÿû`k€ûRÏùı“d  	p  ¹M?çöM  %À  3ö¶$©¢ênp$ÂD`àä$Âà!î¿°_4ZÖƒ¯ĞI%´ó­™–ˆlÃ6Ê"^ Ô\é¤’ÊäÅÈ_%ÜˆŠf…ÔŠ‡I¢$tØé¢&åá‘.$Œ}_ê-D	N¦¹·ÿÿıæãÿª¿úô ‡ˆTUDF‰wİ›‰rz¢ùÉĞÌ¹äÁüwnQ-é-GhîÂŒªÈÛ¸ï#YM=ŒYv]ÙKûœ­y"Î–i	F&¤‡Ršæ‚A ªuC·ñ6S»R£Ôkº)»YŒIâ$M€™Q™P¸lyI¨šFÑ”(’%&/¤W20/>Lr.MSJQn)-A«ÿÌÍİ¨}]H˜II‰²¹µm´Ú$¹dÂ°4€ÁaB$Ãfğ¤ƒ®~Wj³¶é†f#v©¢P%Y©Eşå·ñ:Üa‡ ãĞ3‰ÎƒÁ5HïÃ‘¸ÜHôÆkşé]À‚ÆÏ	~!šWÏGílwW’áèFó­Ô'ÿû`‡ $RÑy‹d  	p  KG¤õí˜  %À  qò¸T'@˜„ıæ›,{\:s?Ñc?F<	™Õö7…¤è»½_YHğçy2q“Y;ÌïXÖ°òkŞ•ùDi36‡&""$HrÊ õ€8˜J À‚p½Š˜Bù«ñÛÖèf¥¿>ıŠV×¦‡jNLÅj]·5]/óºÃA #1Otœ0àšm&U¶õóYßW0l*øÈ÷‰	ønLM
+!Â-éÒ«C`CF1$I¹Î’<‹yR‘¤ëAK*RÇùœs8ÍVr¼´÷0X—jØ1m³<n™ãRåj$+R‰ööi^D~¤ƒL^¹ÜõÅãt
+Ä²ÄÑ$¢n@:ˆ#˜ÒW)BÃØ n­ıˆö¢TyÎÃÍš¬ÍŠ³ìêH ºÓ÷eKÖ;‰r0]s!Hü‹Ë"—‹‡±§ŒÏë)ây©‰9Ì¥d´â¥rÆ¬G+M*)£#åÉö´‘qf¹½Tk’ê”CÃvU“ôÊlx™ÿû`› ˜RÑù<{b  	p  íMC¦qíˆ  %À  qG©ĞÕavÚ½Ná©N.Ü­T®¹ ı€ÿP®W¨¢‚ÅIkŞ7y Óı# ›D›m´L–àŸÀc¢£çØ6œ†flĞKğ_¡«+½A„bš‹69ŠjÑHÑ˜’M2×™S
+LÜ8êÀà"ûUÇãHİhØ«æÍæHÏh~¤™JÖ°Ït«;:¶Ezªy/:PíœäQ®t¯WÆ9²Ü>¶ı)SJÖDë™¨y´)òeHzq¹¹ö_+ Ù(ØÈÚ~¹ÙÍZ×Er|¾öèÏ•éÈµ®¡¼ÜxQ'Ü®VDÓİ$0%· Ø"ÒÇAb2‹B\İYkZ¥ˆSêf5)d£PCøÿ;¯¤¾–Û¢·=öQ/i€`ùÍIA€ö™/±O½×Xÿı3…âö­Éqo\LÌ2MÆ¦–Üåò[ä¹ºxEW´"ˆB±*^ 13Ìo€­5ÕÊ%Â½Ä¬¡v‹T)”;q’ÈéVà®OEÛ¦ÿû`¨ •SÑi<{`  	p  ]UC¤ñí€  %À  ÛtLÚãeTÀ™ÿ¾7-àÅ¤PyeeDDHÈ»~Äãb)8;h;'Â¥š<‡Ãµìç{åñûô=.nPõûô~]+“@²Pb_ª£ZBAó3”Ó?AFw«{ZÎş±½ÓS²éÑ„|½fkÒ•Á	ò¹N©w.ØdÑSÖ\¡éCÉÄé`Naá?Eyç%‡òhfOHYyE©V“ùc!i–ò´’>˜ği«S%SÂR¸¯9e±ü5¸Ñ Ú[5>qäÜšÚÜm¶‰–Ü‹Ëè…*^dær”êt}<=IEkU±ŒG$°«Ô”|ˆ@üoàë=[Îq\Ö¦´bÙŸœBw¶9–<“Q7lîë°2>l‰;åkù	A’åƒ¡v•:$–qÉ"y´Ë8›HÒátz¬˜d)àqG[NÑ~V£íˆIPxBa8äâ‰s¦å
+vtìYX—núíâu¹ûj‘Gó4Íj‡Ÿÿû`³€ÓUĞù›{`  	p  ±WE§ñí€  %À  Ä…ñdÆ ëÎ²Fã¶¶à“Cé4¦`S2ZúPäHK¯RåüŠGr[ƒßèÛ¦÷Y†aÈä-¡Æ–^İ×*úƒ_•œaáYá…$CÆ?Ÿœ©63Ÿ<mç_,©ÔBéúQ²aµõ¤,‰UÄ¡31MÃÔı…2Tù9f9rX¶[cÍL¯]ªà0§V”Ğ’N“‹V)¢#’.	S-T E[r|²®V¢%‚Ù{*Xc§eâ;gdyhñâ±xĞ-$4wï%²I	Û~'§?IƒfÊE–NR‹â6ìO^“>I`ö]È\ìFoø”;?’Ëöİ%byX”’¢(FçÆQ3‡/_vúÕ³·ŒIÖ×Ö˜•LJbo¿)—º\˜ñ¡²5bd›V¸—6öåÛÀ|¡Ç"_Rí¬Èw¾Õ˜Ö<ŒÄ9$æ*`(ĞårIM@u+ÏÈ+	·GoO£â³ÇS0Í¦©¬Èé€•¸ãn6ÿû`º ÃSĞéœ{b  	p  ½IE¦míˆ  %À  K–Ğh;€ˆ¤\TĞ|É(RŸãq,2Øşq—EoEŸC>‹àé`Ó¹^šhR~Õ‘6¦@&ÃCmBOIûcYµóŒ¾lÕ\c0;Ã´8ê”ïq}cù\Ä§2¥Så!¤E(‡Ò%$iÈ"p^ÄÌüéæ®RjL‰Â¼ê;NQêá-ÍÊÆ6!êfM¦—‹…T_K«óÅã9&b?“…Â™ Â[m¤w±§´¶ïÅ[$’I#%Ûp´Á¡j2YUI1¨¤ÌÌIÇk—\ÛìMÑuº	ÊÉã³M3#§‘>­öPW(p	I3cŞş+÷óõñ‹É˜SRØÔ|Ç¾jôö5ÏdéÜg5ÂYNM“ŒÅAr&cĞÚ?
+÷èQ œdnsPœæñÌ_„éu\¤`Ÿç	¨y¬Æ‹óqt{ª×‘Î„ñv5ÓÆXOÂÍ:¬X,Å¶°¤3*w…yÉìXÌûò 7m¶’Z	¸.tJÿû`Á ÑTQé;{f  	p  !WG¦mí  %À  ¼F.Á"DLCòxÜİxg¶dåZäv†ÚC@§€1s§'*¾;†Œ±˜€T°>²VÚŞ:ıæûŞ¿¾D¸Bì‡¤†áÃ¾,Š«ãIt­¢èo¶¨Ñg:Ùê£W–RªËú‚	Ê‡§Ş²3k/”i3åe™µ˜0Œ÷ëŒ/IV£ŒÜ[¦dS,B|ıpJ4éØå‹wm~ç[±®g,7öŠæ=¹›m¶ØIBb(âNÇä4tS©ù^Y Ÿ„ĞdÖ[,B?.¨ÃÓ2á0™TBà°CMi³ïVÚÃ1.¡Ã­Êøo,~÷ïÿ÷JçéêÄŠ§}¦xès*¢¬4İ5ˆI„Æ†›‡Ğõ’U0¾æ£:üEä ‘ªÔğFñ¶ˆ…¼”¢rx£\[Gê°¼—é“©óEÅÅV‡I1ÔÊx#’*%òôdÉ¸ëjt%†3Æ¥ÚÊ†gÑ3.¥²In6–Ú,\r'›EbsÀv'FóÆ&£Ñ(ÿû`Å€†VPé:{f  	p  ¥WC¦mí  %À  ûëAY³+‡!¥;ïô!¯C²ê-¶	lû‚Üœ'eZŠ¦Â†¨ŒW,süãëÓüüõCÊ®üñ<	œWêÎCÕg«Š}t¨W9¬ÆDy9XpÇ¤Ú5òLãØ™·²ÑŠ=#t¼2à|R	@Oãa{/‡áuC¤evrd)…Æ®/Lf–ÏÛÈ~0íŸpff“.$ÊïàÙe’I$dËn©„€pd&F
+  ›$B° R4øÈšds±¸ÛœÎ®NUy¥T¯{:]ğûm¹D£)…ÃFid‚¯F`0ùDÎïVôÿYÖoÑmîQ'šd=[eº©XÎT8Ê:èÊv²@h(
+S ö.ëKJB@«hM¤Ä¾¶“ğ÷?ĞÈc6g¹’VS±øq7+ê•j3\Îdû—¤i´6QˆB
+P"#Óıp¯_5•Î;jgs{Im ±ÆÛm¶’P¤Ğ|×*ÊãI‘˜HÇìQÛrŞlbÍ†W8èÿû`Í ÌSPé›{f  	p  ­SI¤éí  %À  >/œ±ŞgÉĞÓßjó.¦cjvî²ê)Çü(}P™‹|Â>5¾ò4}âÚU<D¼xäu<ck€ß+Aš3AÜ=À}-ç:pîn½Ü‚Ä¶\É2v:ÀªxªA¥‡Â<•,ìIhç<šH®Q‘ƒõ>€]©qÒ)ä³ö5·AÊr¡ˆ‚´éb<KÂµâ‘éæÄ§|ÊÌõ^¡õ¯u$²G$l-ÁXCßƒÅD Vœq©Hvp£o\&8ÍöÃ§%©G5W‘eK%p©5ÃPÔÅ¥jf¬:™°Œ”}ö»¢73ş|k{ÿq•×3ø³®w
+Ğ2IP¢èe"Phãa<Øı’!+æŠ„ØJ­d©?U,$”¤Ÿ%© …ˆ1®©@„qRuqªHE$z7r%G3dC˜…AŠm¥Â¤~¡îâ“9ÙÕÌ§¹ê|e_•ÃøöGçLÎ€–Kq¶’Z …Á€ †ÁA…mÑè*Ü†‚Ô¾K(yÿû`Ğ ÷UĞé›{d  	p  ÍWC§åí  %À  &]Ø\VÄ:öGµšøC3¼|c »2Ô
+`'`°¡a8;ïçÿÿúÖTç»Î¨–ß®ÛSëPÙÛÁn–+z¥z!iÃ³7'„*è÷æƒb8Ô™'¥Z”»£Ü’Ç²±p^WMÏWäèb@¼¿I¾‚€N¿µÌo³úHĞ9%Bß<a‡"Ş™ßÆ•ûû†àW.cå®6Ûm€ä–‡§Xz2jrKP_-5(Æ«Í,wwu÷´ô7W
+b™ºCÔóŒÿ¿ŒÚ&ºÈD€°ièh	óDueØåú÷ÖuÿÅ«¤T;ÅeîØR±7&Hb›X#Ä×V§'I…:äÒTêó´åˆ¹>Uá|_ÇÉÿ:½~I¨0QÅûwL—Ñ}hqCÍVÕkº®R‰–"9W$%˜nJÔ«vFj¦ë#•‹ÕhÕ£ÒÕœ–Vä‘¶’Û:q^h±¤˜VømÁ”yD è\Ù"á˜¿î]‘Äïãÿû`Ï€ºVPé;{f  	p  ‘]C¦ií  %À  Zd”ÔĞäºG‡¥Ì5ÚãƒîˆIúèáŸ0ÿçZÇÿíŠÖV[-aÁvÍi~$ë‰¶i3<J®‡¡áîºv¢:Ò)IOåcRÍºh˜L¨T„Dh)‘Ø>¸÷\?•©Öt-ÉÁ˜ÚÖDz=Ã®•r™9}ez¼Ñµ·1ŸCb;êE‡¼|cwÔ²Y$¶HÉ–İ¨0ˆA(–†	/EÔS‰7J±æş}ß£‹Æ2ıxá™cjôƒ;w ¦ÆYtôd¸à·ôcudV;÷õßÇŞqn¬¢MÍÓR‘XÊÚ‡=Ef!3LçBÚ•‰³¤ºgIˆÎxlÄéèà^a/Œ§b©†F†¡&
+ì?Íö1Üdœî2›‡ì#ÅÁ _!!ée+d®ØN¦‘ğMU*ôzÂ‘tò¶+õÃù\eRgàkƒE ¶I$²FL¶ìÀ  :€°^ Ã‡‡K»Ñ+û3l­÷ˆÍÒV{·…å²£ÿû`Ô ÓXĞéú{d  	p  ¹UG¦mí˜  %À  ½{yêü™V?p,¥²$• 7yEİo~ùÿ¶4„—ø‘XÛÛÑÇ‘şõì4!N„œˆJ›=Gàé?Ni.ña]Ş	¡ê?vMÔÇ* ±êvñÖ¹CÌ³äÆ¼‰¢ŒãX;"±í'võZqŠ*v‡r­º)¸©	ÓÕã¦CDÒ‚ƒîÛ¥Ü®P“°Ú¢Dİ+¹”ïôË&’I$&[v ÍƒÃ ë!ÜFÁ’°¾ŞÌª™ïŠIã0ä‚í§ù·Æ2÷2fã‡' ›ÃaURÿ+šWø 
+W|Áb×­üï;øŞ½zu]œ¼sjR?@¦X (ƒ€Æz˜g•¨ôä(š×¤°ö'*2r`œ§™#O ORì©.fš]‰ójTâ©pITg"tºµ«áéÁ ÔI¹ŸŠ·7%n%ts±T{¬ßŸÅ;b5â–\+ÍK˜í“¶Ãšbwè²É$¶’Úäf(Så	|	»øª%1Ö­˜á+}¡¹d*zœG]¯E&%ÿû`Ö XRi:{d  	p  YI¤íí˜  %À  ±xÊŸ¢‘Ár¨Œ¦b|x:°?×±GG°L1/Ã¸a¿õÿÓtX*Ê8Ì£ƒ‘vïe…Be"˜ÏÃÙ@[P“µ}a'lKg‘_!“6˜RÊäb9J¯G*¬çóBDº¬`‹£ºib0Œasë˜F;+Ã_*øã,vuõRUÆß
+^\Ú=àN¯yˆÊÍ\$²I$‘’í¶–‰Eq:ÎY,¶VDR;ñK£2–	mĞ‡ –u‚`§ÖeÑX”Ã¥n‡²™¥$ä³(òñÖ?­TÚS[¼Ö¿úÿÎ·"ü¸
+6"»øà±)‰¡q=ˆ"q8!+fë%^§š‰a¼~)“p`’Şe ÃñD¶# C"‹¹P3Tƒl¢òJ:”¦¡º’[9Ñ/“)è–S0ÅM9İíWÀ†ıXé¹ìHw]¸E¸°¡î,ĞıÄ€’Fä’6’Úv1‘KÂVƒwÎ *ñ‚ğÔô¶6ğ)!ÀO¼N]@×Ú3Yj°Äÿû`Ô êTPéú{f  	p  WG¦ií˜  %À  £Ü•‹OÃ8f/¦Q@h	Ê*ù5ûİÏçı½¸ÎÍXJ·6*2“†tÙN İÄcA~f-…©3N8ë“&3¬^Ìea~¦NKgÔşGg*´Şh2MA.[˜K‚¼zPõ¶á,$Å‘š¯WÊÚEXŞó&ZÚêÈz=4õ¶,ğYœßÁ–Ş¡{°“j¶Ùl¶Be·cr@ş%‰€ñrªWBÄÆ
+XæãRHbBß?Œ”>ÂÑhnãP‹Cò‰tünŠ*P¯/—¨’Sƒ*»­÷ıcÿÿÇU;ZO:`kÒQ¹µµ¹áÌ€/)ÔÙ=?$RGI¼C9Ô±ú¨W®”Î"ÙŠÌ9˜'éº[ÎóDÎâUê¥¡"»0Ú“®le¹”ç†Ø²†§_ÈÀ^OÕ,‰Y™ 0ªb)í‰5gĞ³JÇš1ì¶É-’È·l‹LAÅé<ìpæK ‘üB}éue–ªØ‰µé{àü>K©†V~³ÔâMÃQÿû`Õ åVĞé›{f  	p  EWI¦ií˜  %À  ¸2=8«iGñ´^Qw-šŞ9ÿ3ÿøÿÿä‘Æ¾vo$E~9ÔQÉ9À=qBH¬2\b”ÊE3„ç)àH¥!„[˜Uµ†q°€§4ÁæX„”o
+óz¨„œªB@–§=š{NÀnBË”ú7´®=Q'óZí[5Ùß°Fù~®‹½²Åîı:­’I$’ í»Ä‚ø’8ÕY^¦¬ÄE*@L5İ¼ï»O^–¼* İ£pDiÒ_ª¾Ãë’Ê '12‹Fº“¦Ì\`×RŞÿÿÿş?ıÎ4vsÈï16Gm~,&{af¥,g‚µZ™9\ÌãæÊse$ÌwCdƒ¤J¡,?S©Blu3,Y#gÑàCÑMzrRmH‡¡)óÑBÀñ­‚\'7‡Le9#B•ĞæT¾SŸsH»%+[írA–9Â÷*‹m´Z“Id’F¶ìªn\F;Óñ­m^:Lm%¨ü~S<n4f´»8T–(èF[»–½Ò›7sÿû`Ø òWÑiš{d  	p  É]A¦eí  %À  ‡ã÷U†Ã!• ô°äÿóÿÖs|fø—î40ŞÖyæ{wx\J"q6œŠÕ[Z 8Ìq—CP&)òîu±ÁĞ×â?‰eíeÉ^iå°…µú…4¨É*"VD²¹Ó•J*Ulä±1 ;i²â§F#ÖÙÍÎ'$ãã:¿ÿQì²I$€í·$ ”„°ĞBd}²v1&ïÛm!¢‡Ùë»n)©Q«·$İ¯5.2MEåvà$JwVµg„WÅ–½K–ÿÿúŞ¿ÿøĞ`<‡+;®xˆÙàr¨ˆ+tÊÒe.Æ6æAÒ«”M”=ØÂ ¦1}Õ{!7¼7FPŠšj’æ¹	>LÒr(Py(hæ€­ÜğUgñÔ¥?n¸bVªäˆªQ.)¨Ô¿d´Ç§’3Íÿhßõ ·ímºØLÛ~ EpuƒÈ:PÙĞî;”¢1,i¸äÒ6éĞ^DÆ¢ÀĞmíœ{Ó•×nrÿû`Ø êYÑiú{d  	p  İgC¦eí  %À  ‘yN–ÃG½ÙÅœ~Á1z+xwñÿõú×úzí‹4¤k8ÑÓÈªÓ|¸Àä(ñb&¥‚1y7ÑÊSa
+ (O9Wbê3YqüM-²mvÈâ8y—‡2ìNL‘¼*”C”üQ¢âØ^Ò+ëÂhª,oÎ'Ì,¨ÂZBòäy WŒÆ²Â®’4êi‡²6Û’zzŞïQí¿ıÉ$’HÉ–İˆD"Â¡ *#Qñ¶„„R¥Ãµ¡ø	üŒ¾ğ¸”qÿ"z_×xåÄô{õQˆ¤Ê^¢Xd*Ûü÷¯şïş>°‡<…–UÂ%…^‚U*²›Q(iü¾»@©ÎWÍLÖ#‡ğ[b¾2¹.>YÔÊn§K²ERöì…õÜÀx/ë¹ºkC\ÒË
+ë¨Ô&
+´¨8n¹S¢¹ÌÍo˜ë¬ÇÔ­Ñ²ëP×ªr×[m¶ØÛ~‡e5áq(š©hö—O	Ş½MÅ—Ã²§åzEGX&ÿû`Ø WÒiš{d  	p  å_A¤éí  %À  9‚á¨E¾I¦Òµ0ŞQ¢	/–\ïÿÿÿÿÿÖh·û·Æñ_cÍháh%‘ºb±š)çG‚q8[” œàK)áŸ„ÁrÌU(jd¡*òJq*Õ¼¿Ó¹£Kq1%nÃ¶3Y²Ô¹?R'ë|ß©Î=ß:ˆ¿GR¼èJÒÈBE6äá–÷1m(í:ñíØ™2‹.ƒü¶Ûm¶Û›oÉ¥±às+EçËÍ«¼£³Óò¨Ä"‰½‹&’½m•Øb-fzè±¯ƒÒpS?­% d'ã©f“ùÿÿÿÿÿ‹¿êù«5–Äá”ÓG¨TIb\JÍéÜ…ÍTŞ§L)Ñg¸ØCœGÁàBÓÇ:Ö{–5Ai:q"¯Šw«™ˆÉ²ÄÆ7ÅZé\ …@d2Ô¼5æq2Òj—A5n¶©I§×(Z±4ÊˆiO§Õjö?,vGÕ $Ú%1Ÿ
+ïşçÚÙ$’F¶ì×¥p ¦¢Ye¸]QU4°ªô/¾iÄ‰º­n>ÿû`Ö VPi™{f  	p  UYC¦eí˜  %À  ûÄ¨ xy#-´ZY³•e};1[‚8’i±×ïÿùÿÿÿ¯}¶Õ-amškfã´ğr7Ü˜gCUÄ’KªâsiânÂæÆ‰!R?6IãJÌuiv9UêRÚ~‹‰’>S)&âøu«êÚÂœ]Ùˆê/Ğ_+UÂTuÆn»2%‰ôTìÊôc¶b ­³ˆ›nú^âmm¶Û›ÄÑxŠ•²9¢ã/¤Bt³fÔVÌuÕtÛå®ÕaöœÚÑ¸ijÀcÌİÿzâÖ#pÕ+Åz]Ùc: ë|ÏÿÿÿÿşÛ“/µIöÉ$´´Tq„cË§ÉROÔ‘¨º?Oç6Ø	ôº³2Zt£˜Os¦«£¨ÊmC‡Yì@’Í§ø„‘o…Zàiƒ}U›‹¦WHObÒH›G½Ò1˜™UèK+Æfm[Âš¸‚÷å‘íşöpæ-m€’Fãm¶–Ü´²=Ä’êŠ”²’åçç•_Ö½@ñ@ûÓ#nÔÿû`Ñ€ÓSOé™{d  	p  ÙYC¦ií˜  %À  "Q³H~•¾Ğº0ÌQV~c1¢MÈÍ4·.Çÿzÿxîl5%/e‰G&-¨’éd‰âBN¦Rzâº«k÷
+ªÓbâ°ÕIåŞ_bÜs¥±Ò~¡à­8Kr\©€‡'OùŞ§Ğãm…a¥2ÚõB­=Öa&ÙTÅ‹½­ß96?e™Ügxa¾¤ÅdÅõ²_ñ>«áëPõ¯¬ê´“~Ô­#f¹Ì÷XÜÆÀrÛˆã˜$V(Å[œplæÃö¡«X^‚_X¬50Ã]GµäeS;OÜ¦A(›ÓXîÂï¼ÙA†Ôºü;Ì?ÿÿ¯ÿ¶bËD€ pk…ğâ‚eÚ©¡N†‹ˆ§U[›`õ¹"ÄcµÙ
+/¢f¹ˆXÚÇù×ÎrÃõûLÖˆ°•‚{¥v#•zf%Ë™Çn*ÍÀ\BdVx‘Ÿ¿¼Ú“Uójê¶lcu—X½µ=3¬ãZÅ£J iD°€²Hä6–Ü
+âá °XÊ¦¥5ÿû`Ó [gLi™{d  	p  …3¦eí˜  %À  ì	Uˆnv	åîl1(‡ßxußXvıØŒ´-·‡ 7~rãONxÔN&2 /—Ö¤æ ?‡º@Õ)­ªÛ¤l™‘äíqZ»åAèÍx5ªêe„>:¬`H›J»Eº:‡R)È¤W KzÑZB¶CËdtpé”¾äÛ?Mó§ÖÔL«ìHr³9+Å—&
+RîM˜«$IVéäÑÕ)ö{2+"±«&S«ğÀ ˆı’ªö8JÆJ¿d«=•Œ•r6ÒI"–Ü
+” 
+.–™,*4V3f$şËfŸéé—ö[gbNU2şÎ4¦s8á5éZr¦™-’-şèYdÖ—²—é2&¤µ€·!MfŠ‰¬ÑT·J¥)¢ÌÚrª[æfÔ5™J†¬©ç%)Ó:tºbQFa4Y—'K,%s”[©NULŠèĞYeae€‡3e…[vYÈs4\½ÓyšTê¶ì,²+™¥ae»YF•†,ÿû`É ÈgNiš{d  	p  )¤áí€  %À  ¸}W±`«YdW3AVÅ‚­‹	]
+¶h*Ø­ÊèĞU±`«bÂWNÚ­¥UT“%¶Ğ€À¨xl`F04!‡†Ô‹´Â)ŠH¦h„Z`Ş7MãØ=ÎÃªCY…Ôi±dqd#E	"¤ÁöA€”“‰#Ñ\˜Y%ÎÑ=^Z™‡âz¼µ3nFêèhµ¦ÜÖ¡£­^:Ô4éúÙ–¡c6Ì´•	;kL´•	:Hi”ÉP“¤–’¦CH$´Êd4‰Ò@ËIS!¤N‘	–’¦CH")’¦CH"TÉS!¤N‘	*d©Ò'ÿÿÿÿÿÿÿÿÿÿÿÿÿ                                                                                                                                  ÿû`«  g-Q/c`  	p    .      %À                                                                                                                                                                                                                                                                                                                                                                                                   NoCoin               §   ÿûÄ  u*Ê€¯$é¹° ÿ£¥>Ì4Ñšoø}ç>ãğö³ÿøÅã[TBŸ&Ã¢Şì¤ŠD!Aİp
+œÎà¦+¾n… gÒØ^ ‡ a çÿ€0°€ÂŞÀÀ  lÿøœãV,b
+	@ÿÿÇ<ŸHŞ™©(8?ÿÿØ\ÙXPbË"audÑP¾_ÿÿÿüÜ¸\0(àø!ÿÿÿóàL„ş `úÊ0ØpÀ3ÌP“L(A2!HÂ €€Ra%òÃ9NÛ8.Æ¥àI|P’ÓX9wãO;dkOô5MzRòİºê	EÉİØfU.­jÕ©ª¯jrÆ5¦wËè+TÎ_?kï“Ã¨¹Ë>sğÜ?/·nÆ5óç9=ïrî}Ë[Çœç9‡;­kZ­ïĞÊ_«ûæÜó·õVQjCõƒÿÿÿÿÿÿÿıJÀ  ´åp”ÇğCŸŒÁÂ)\|0(Ú¥®µi‘·gù‘Ù9+5“•ËfğÛìÂÛÇ’°û»ïää6›ÿû’ÄåMG.n‹Ê°)è!ŞQxB¢#ÔË©Š5ûÒ‰]ºöæ¦)§"hhbbC	ÉÒ(DH1°çZI¬´Äé'Gh@p¨s‡8‹H©<²éuU3wMh¢Õ­kZÑÒz×6u$d’déuRwI$•­$VŠ(õ$ÿå“…@ á·WùpŠQà¡9MÇàIaö—ÎİEZø?Iz 	€ †bRg ¶ÏşŠ–ı6rYX)ÅxW©B€‰ªLÌ …¹ƒ¸ìÇ%ÌõÅ´J‘A9™ 0¥È‚ÁéB ¹„ò8	â‰hr‹fÅ±É™W‚õŠ&§	ãR6¢‚I6rñ²FÉ>‰‹7Wé•¶©fº›ROÒ[~§ÿË(U~š@ Ì  Âô`MmÁ°ÁDÀ@`DF
+` eb`’¹Ïà4äÒ
+ÆoUæ/ ­:[iOóë•7Xş¦L×œts ¬ß5¢Ï5Å.5-Ş‰OÒß1DŠ˜“'…àeNŒ©PBÂ>È¢é&ÿû’Ä:ÕÕO4v«Â³*&UîÕxÉ&j$!Ørà5N‚/‘&„Õè£_Z( Ëu£½JõôÑZ.¦Ù—ÿşƒ­W®¾>KTmõ¼—üŸéÿşT	¤‚@h˜ƒjš‰‚˜ qĞ€LÁJ…@e¤5™€€\“·@hVlı Ùd^’§ÿî]V»)C*¬`€Ngd\¢ğÜè­/^e)Ë<ºi	‡Ui¡A‘®ë¸‰€Mš â¹¢ÖÈ«{Vµ±å¥õ µ=zôœ°4™o½¯W[-ÛtjÔ­w­jqòB>ÄÔš7ò´„˜ŞÛêömíÿ]J Ô– x„LÆ Q t €TÁÌ» Ø0P©H»À5‰ÌCæ‡@áÃ~üg,·K­VÂ¥Ûøö]a{˜@b²ñ„Ü¤·Q©×şóšLë"Œ‡TO§cTºi8–… 
+H¸À—©Rm&[­µÔ]2<“Öµ¯úÔJ}5³í÷Ú¾¶gRNËé)u¤&òŠ@[YÎòä/G½©¸ÿû’ÄSÕ-Q2/v«Â–©æAîÕxÀÿE ÀÀ0Ã	cE54C ã #¡G¥°A¡@J=uE€c’W`ı«OÎQÿ;¾Øß7ÖÖ @„jµoÄ¾ß&İ[|¦Ï~Ò¢b*KM”ÎµkèˆP‘€$ë­±:ƒ&õ"Õ½h(ú6şÌÌîªñğ.'eÛôº›u«ULµ¯ú”Y!3v»–qdJêµ(öiêîm¨uŸèÅ,È€ ˆŒ, {+AÁª<æ (`ŠFUàÖ`‚À#ƒ„ k³9@€$âc|x!lör¥îV¹v®Ü»K:" €É1§æ@BÍ¯e-¦µ¼õ‡û£u¬Œ3«¤yöVôE4(L­vhˆ ´®Ûj3KK]Õd
+’L”&ŞšúKooIuÓ­ÔÏİUçHK—JoÒmtvÄÎ¦‡£ÑĞßD C¢5–`ÀDL@Ô =L @ £@òH!¦-aô`)(íÒô2ìˆBÇÓ9Ê¦½–ªe—2ÃU5ÿû’Är”µO2/v«Â›ª&UîUx®ÓÎ‚mœ=-k8ájõÚöjŞı¤ƒéğT¦êEÙ[c1M Kä l€uyh:ª¡N•ìÌîµ;;£ªÊS5r8¥²L¦ÙĞA-vzßĞZ¬¾ÊUd·[åj#’Ú•ŞÀÃwÎU}ëBmÙr~¹:ì•# :fˆHb´%åP6
+ 9`˜‰’PH p9É~‡ ò	TxvšÂÆ¥8o²½R÷s»E¹‡İh~Ó¨@ÈÊìÛ ÇV3ıÍê±$¤H¡N½j… Èà*İ‰QªLö]7×EST]
+KM7©i²Ou.Jê½JSú¨¯Ú­WmD±Ág¬n— FSMƒÜÎ‡z­s;¾ë¼z¾,è¨ÉƒjşˆYÈ€HŒƒ°Çh;Ì	  ¶ğDÙ`Ôª™¨ˆÏ¤¿üq·kTøks¸÷+±À©øyâ DÉïeIZ¾jÖúŒõL-Gİ.µ²—Î"/A€G7	¾ÁÑcdkg4N¥PI×¶µSNu{Ô¡ÿû’Ä’ÔÕO2/r«Ò™©æîÕxøŠWI›gwJ¶~¥Zµª§²Ö„Ày+TçUe€«-Ô¤—6ÔchıßÑ«èír¢Q€à ˜Uá®È`ÀäÃ`É)À@¬Y•ÜâŒ€vÊÒ5_¦¥¦ÂÖ±Öë÷bşeË¤ÀóĞàUtH
+yhùom·pÎ¦ºì·EÉBºÓBõ)Ùç“>>AÀW6iÔÉ²ŸE+T©½ÔÕ;­ZÙnGu*¶­i2
+Z­İµ­²*§­j8K5i!(dio¥”[Ù“«N±O}ë€+°0Ì€XÂ4nMRÂ°Á\@@À` fa†cªÆ`¸_úB 
+AZ$Hšú1;tmUËõ–µ‡{ôW€À±(éf4İŠyùeåÿüçwß×æğHÿ=f}zÔúÌˆh8
+^@Aº†btÙô©º÷Zw¤“wõ-²Ár¥»#Mº/öëïGÖ½¥"ÒÚİGŞ*eîjÀ^õÀ´Ôä«ÿí}M¤ì ÌŒIõO/IŒÿû’Ä²•aQ0/v«Â¬fîÕ¸@AÁ… é…9ÄÆ±„€zW'Ë¼J	Àò×ŒD‹ <æTşªß³Îÿ+n ¢â0É–|¸[ùbÜã­øó¿Ä’İAä+3º‘uëE] $¼>‚OĞ
+	M“8‹RÒ®¥½TuêúPÆš¶ÔÕ:Õ¿s©½¤¥:ù4z¡ tÙÙja`Â*eÀ‰±´¥á&ÛR¤»>Ù!ğ 2ùNCŒ$Ã„¢`ÜÁÂèàãÁàÇo!² RQŒ ÎSG·²Eb7­gûí®eÿI\€¹Ép`vÉ$qz—^İêÇÿ­hù™*IzÑkŸ4
+2İàá‚))]3WUlÖØÍ}I$z¤–ÏÊDA¬úšîÚw»iWC8Êô´ÊœmA&örPçYN(U•ìk™ÑÍîÿZ  Òÿ ©Zé¯àT8 è@?€ñ‚X9ˆ¸ªŞŒlÅöŠ CË¢!©B)¥±­ÒecYgØÛÚÖ„`Å¨Ğ˜³ÿû’ÄÏÕ1O.ö«Â©¥ÁŞÕxç+W¹}ßæ>`ŠÖë1,‚nµ¢šÇè10@T¼=¥ fàA6.—IEÎ©%$’‘¤çÔ›PR“¦Š)ä¡«!AkS²MY«;$’Œõ­¤é¦ìÉ³%’…p¨á U÷öM\ÿ‰Y? äÙÑ¤ÑÛ–ùa=÷ğ¿ÃÅ¸>ûûLsõÿÿı€ƒ‹ àÌ&ğÖ8H‚¥–‡á^™+…pĞëÀ aÒ}\S @£¨Øpà¹šÏI¥ü¤ııìşÍ5i×	@L)!MÎD„&£¿*›·øS×ß±õ­NGT’[¹²&‰ì]€´’,( W±‚"D®Ê³; £è5$Î]W«]U-i)E"uô”š{?SïZ–¥³­T®ëv¨’ˆš®8Š)nn•h›]8,\øåÁbl-})^®]uKA C
+LV³°;Ì(€À)ˆ@)†ˆ)±F‘„ YdšË”` *ü¿Ë Î>~Àë^ŒÓKok¼Æö¬ÒXüj0°jÿû’ÄîƒÚÅO*v«Ë	*%îÕxgI “7ùŒgQŒqæ»¤y{Ù™ªnò°º©`0Aœ¼á‹MKYqº(Ôº²Ù
+nìÚßrÁ’ŞÔÖ«é©Û©
+L‚N¦Uzª©fed!’¢f­Â„Cøƒ‰ÉjÃîÖ1bÇU.ĞùÊ#£˜‘PID €àzõQGÄ!¡`*gh?HK‚†Áàb0[Íªh…C£xipÒbXÆ¨ûÌõkáªi˜	£‰ÙÌ
+
+ƒDj\ ½îîw=ÑÑHV¦šÌîè—Öç`%Ä4¤^ˆ‰!.h}×A$ÊI“T´×RĞ²–f” ]Ii$'M+)nî…ÖÆÈ§R¦Ë7­N‚J-Çb1+‚ì^ÓònxÑ=È5U;û×ÈÇ™ª4ıÑ©~‘›ış·Ò§ÛşEREÅQCÓîóJ³@@àLÄ8ÂthÑsœÀĞ0½ªš:¬×y}D3;+êÜ¡İİá¬²©ËZ½*pDJ	ËhR5Ktô°'™Vïÿû’Äèƒ×O,ö«Ã)åAŞÕyo÷˜qlaÎ÷"ù‹ÓM1”ÃüK”È`·€d¹™óZ—S©2è»2kÑM6[-'EkdÎš’H ­ŞÈ­nÉ³Pw}##]I2K)–™©&è33 ÊfRé-n‰“¢Ç˜<DFX±è$::xğt*ò`0lMu×–:”ä@M”‰ øğI†ªx,€hqø-™c‚ğp9‰.{ˆP¯øªù†9^ @	wÀu1›¤Şv¹¬å8K9˜çXüíJ¹FõÜ?mvt…¨¨ƒ­ÖÉ"ë1L¶âtÄ	  q&‘ÄK¨Öšn‰ãì¥vQ‚4kdlÇM2‘©TêE–•54Q›¤´PU{$uKRe”Úæ©Abòáu_:üX€4“
+§Û¬õdcf^+ ôq‹óÿø7÷ÕXZ`00bÛ¦|©8a¨
+.Ì@L–8]&³Dûtƒæ£Ç€à–PÔ§©bÖîçºš©„ÌŸáÿû’ÄïÙi*ö­ÃE*åîÕyCå1P¹P^¬Sc—ç¿×î–îzä&Ï>íÔ’‹åÆ¼¸%Ä ™ DF WË3M*¬n’’sŠÙÖ¤tÖ¤”º*HêED‘­htQRš4wAÓ1EÖé%B´iÌVÈ$µ®Ê ni½Cÿ~X×RW3ûşIÆeg÷s2ıËÎ~¹mvÛâºÿààÀ€p"0£4\Â€+8
+$¤ÂÂßlÑ HÛ¤‹€ ¶à‹ø¥ûnXÆYMùwú¥rŒÃ6€µ!cW~–Õ[ÍwŸ«×ñÿ¤½ÿ…Óz«IMhŠÁ ]&A©T®%™—©®yé3;,úİ¨:‚Œ”È®£­^º™²+}hŒ”ÉgŠ¬º™<Í' ´¨ÔÊ{š…T8šò$³åÜ@l€‘2d‹íKz’@<´)ÉÜµ! Ø½æ ƒÆ!T'.†bB1… Ah1Tç‚Š•àl" :”º¡ 1Â+~Ğ`ùÚneÎKç7¼·<±—‚ÓgÄÀÀ—Êÿû’ÄçØµk*ö­Ê÷­¥AŞU¸,owv;mÌ‘u¤3ÅJ	»ºEô”™°¡…@ñ2@*ÂVZK6FïZŒ”}ì’-O2t‹ët^ŠH)Ff‹[»½+jy²êJu4¥ É …g©±™õ,ò¨À3¼-÷LbgbÄ2§šŸ+dìû**¶®Ez¹sfğvil&ŸşüšıŠ€m˜X ŒJDO€Bjº€ƒ 08>U|áÅ‹;A@Iè#AŠşwşõÉ-aß½bì e
+³æ+çSëÿÕı]îÏÁè×q²“¤ÎÔLÉÁ¸6 ?¨/¡+U˜:µ¬ÉÑtÓEiV¶S_Z”ÈNÙJFô>û³)H-©4©²’ºÓRh©4ÒNªƒ$£ë«+˜u<}Ñ’¯ÇÑ¬QÅ¤ şw¿ïmú±—ü£ÿÿù{~ÕVh010î<°c È(e
+¦=šD€J[A4|ıF_QP¡àK‚@)oirŞìå Wşa0ÔE¥Su$ZÇÊoÑjwÿû’ÄëƒÙ¥W(ö«Êô­¥AŞQ¹›­Ûá¹T"·rÛwY8•h“£pI†€”˜¸M jš§Oª`ƒ …Ú“)%¢Ìë\Ì¦aZ§uÖ‹ £è¦•jwtÖÈ ’™©:H:FÊHÉØÁ®‘²,Î‹2ª¦ŠëZRĞ>µ6…lì¦İlô¬ÎİŒ¢å 4-DÙ</ =n@.•iLBã† ÁpdÁ§¨ØBT(¨80ÀU8X Qå— d4Ñ" $äBs¯Õ=Luú}a½jÏ‚ÆŒ}Áğæ_Ã¹pÔş¬òÔÖ;<ÉL4R'’‚JhL€bL–IKDÅI¦³E©k£R)¬ÃdRZf.¥-«Î›­h¤…•R‹Oc%"ÊvEĞ|òİgMëRÌëUÒ¥Z	.¥®éÑ[=zI1©ÿêxÓ¿9mXÈ6?ú‹r‡ö~»¿©Õ,&À °DÂ¾c‘ @ À€ø|JÀ5âädpeT%ÿu|¤I(Ç*÷'qç¾70ÿ¹É¹ %Œz7Ã¤¯.ÿû’ÄìƒÙáÑ(ò­Ã4%ŞU¹‹{Ï[ùº¹åú™Xµb¢=ÌkF¢0Fª'€vğ|Âé³¤]Q‹$ËRÎ …i)6M–‚Nš“w¨ê.½ÓtYĞSæHV“-w­M3ëæ
+LÙ[2õ¢é¥¬ÌÔ8h9"Î$ã³g«x²¤˜aÀDA2ih`ØøO½®eØ S°aêpuˆZ4!·À
+F†DI[jT'Ë¬Ù^G$ÀÓ•7M-ÇW,^³Zî]í+´`GQÛêØÊÏeÿv;ÿ';sÑÉİnßXİÓ1EI©£pQLŠ@PŞ‚u$ëiÄİdÌR™"_gi¢¹“3—Î=)•=×fQ¢gÌJšI>’ÌI$O$‘Šé-
+ŒÉ£Œ´5“Lºiª³%˜)4;jTK‰ Õ©I¢¤V‚Ò>›zÅtd(?Õ]Ü¢„ãÉÿ‰ççrZvûó*ZÁ@]ƒÆ3‘C Àü80!R´Ì²°*¾’¸ò2r<‹ç$JòÏ+Ùj§#ÕóÎåÚœí@»Píéf¼ÿû’Äçƒ×is(rÃO¶¤ÁŞU¹¿*¶1©(·ßîWù¾á!îş’•”§Y‰‘ê)‚ûMOéUEH½j©e;s5©{Vqn·ZêZMkMƒ×¤µ§e:Ğ<‚™Ò>Æ®‰³®nèÚšiNÌº‘MÚ¤–f`ô‡E×,ÏÜrøsBÀñ10Lù‡l:Ô„DTãúˆ0‘ Fšœ´ÌjÀ`€)‰ç¨†«ùÅ‰ 2;Ô(p: Õ¦WÕXôæ×ÇŸ„Î9L´a…á»ln%Cü·İeî¿yeÜ0¦œ×óÔ•3vNŠŒ	B*lf ¤ –sÇREoVf’´‘ZÏ­™Ô‚EÓt‘^•gMİ#'e²GBzl‚KZjs#e¤Š«TÙÛgK7S-ÒIİéh¦u&œ¼ÛX
+Ó¢/kj>Éöú	²Êh=ï¬×ÌşKÿÏİ@ H„`«i·Œ€RaP@¸,º8‚œ xâ%€Uì¶‚1:ÒAÈ;E^OZ¦Q9ë=Rß­P
+ò3úYö«I«8XÖ3v;ÙŒ¿ş–ÿû’Äæ—i(òÃ	®¥ÎU¹C†zâTĞD™e¦’ŠD<ÈŸ À’’É¢´k8¶E^¤&q4Ö›Ñt7vM”ë2IF:ÍZÒ¡eM‘0d”‹º.ÊAÔ’×<šgjIÍ/jiNº,Ì‹šiœfŸEÑZ–™²gìøTNn´²viK›Ã/LËI\ók´óı6™*„˜ğ	 F&aŸ8
+”Ì&1øòeĞ0ùH»Ğ) Õ¶ |¢ÑXEzİ‹T–0¤·ñ¦™­6Ò ©ÃL%Rş—İ˜İ¿Çw÷tØo[›±–xñÑºI¦Ê@Àšr˜tè—Ş‰‰“¦}IÚ’)S¢ŠÖµ)i&¦jjI$Z.Š)(ÉîdÎƒ:iTzë^©öwZ+03zëI:Ğ I³:n•+Ò<Ğ}[–__gH;ÕPpîpºAØşÈXÚw”¼½åíı“?ªDòô	9†Œ‡Ê‘$ˆBDœİ³‰}¨¥Š¢‘ñXcÀç¶ıšõ+ÜÊ5Ü÷Ê“Øo)Ø‹§òŸMØŒk¿—å»ÿû’ÄíƒÙ¡©&r­Ë±dÁÎQ¹T]ıØæó*En›²‘DÔ¤0åJĞU@ñ’™7M:ìš¢``šiš&È8«!M™¦îìËE˜òg”¤+@Ñg—IJ©f‰»2–Õ2jjl¢H¦§¨¾ìµ:I$d’(2wdÖ´İJZªwE3\$NÀ ¦ßè…°öJº¡ÀÛ‚#Ùõ_@P"ÍRü³¦#jé*"$¹…€ægœP$¼åXOˆ )b±…@Â¨³)é±"¥³oÊns¶r™Ï–™È8TgH8ˆÍä”ÔÓØŞ¹÷õñÿæïãtòÑE,ê”ÄÃ2Phå%¬ÕJFÖ26EÌ—HÙ%¨áªW˜¢ŠK5wU$SsN¶:’,“>åçEÖÔ’RH²´”bƒ;'{Ó<ŠN·t˜Å¿^0aÕƒÌB…»…DKøü°´ÎXÒˆkÿJwôßÿüYün<Á@¦;¼}jAÉF
+&D¾~Qâ &g,˜0!ê(´Ã£ÔÁ¦/; vá‰]{e¶/µŒ¸H2Šp:ÿû’ÄêƒÙu­&rË®¤ÎQ¹3R½</Õ\ÿ[şå–XïşëLY/˜Â>Ñ@% b¡G$MĞv¢©=Ñ=JÉ2­‹©Öke¢‹#EI-%VŠÛE’I$UtPI*4’¤“¤§­’IIwZ(¢ÎÖöú.‹W£¤”ÄÔ­PÔpÇ•2µÖ,Xx*™ÒÇ¢¦\iŠ‰Gy*†@
+*©‰0±Ò¹w ‰Q¨$X@Ãa 1™ØA¡p6Ayqè¨¬é©#äØæ+@ĞFĞ0  =qrB.hO(Õ$&EDòNÉ­N¤SZ¦H”1ˆZ¡œEWÚšI£®Çi.¼ÕI5Şº	ÓYåÑA’IîÌŠT,¥µjjK­ÑV¤’Ue¦´RuT½kEÒJ5ë_WRI¢ï®º•»3¢y ©iXT`W°1Ùşt°­.ô:BçïİÿÉªmá†GÛáŸ]'œ$aAŞ¼È`Ã	…ŒX[˜Ö1íŒñB3ÌÄ7Ë¢Cåx™ãAW&Öº*!¸T5>
+Åÿû’Äçƒ×ı·êÃ%¸ Â·PA)¤¿ı’ @€C[¸@Ü€ C€šZ_ÿÿ–øÀà…2$
+\—EˆË×«ÿÿı_”*.Â_ˆ€;ÅåR1ö(oÿï¶Œ<A•¤ ]í
+€€À&¤À˜“Z}b³[ÿÿÿÿRâş%óD€AAĞòmëSILz^ÊŸôyVç\eQoÿÿßşÿÔ©”<Jd—åïXÀ`s^ji¢ƒêÎşVÕf”´SA^M-Œª»)”ÑÿÿÿÿÿÿúG	º–ÈJ^­ÙÜXtwbIËRM5R½<ÔåG[’Ï€×úú³5fBµVÇ)M[9evóIb1Fâ¸?¶BÀ™2ñ¦«@è¸°Bb
+j)™qÁµULAME3.86UUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUÿû’Äé *ÖàÎ    4ƒ€  UUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU    13AvatarT     ÿÿÿÿÿÿÿÿ              [(ûÁ
+×#§Ä@A    ô5¿       €ô5?\"@\"@\"@  €?   [(ûÁ
+×#§Ä@A    ô5¿       €ô5?\"@\"@\"@  €?                                     €?  €?  €?  €?  €?                   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ           ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ   
+ò>>ø=>ø=˜F=˜F=à<à<>ø<
+ò”>˜F<˜F=˜Æ;˜Æ;˜Æ<˜Æ<
+ò”<
+ò”<˜Æ;˜Æ;à;à;               ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ  €?   ?   ?   ?   ?ÍÌL=ÍÌL=                ÿÿÿÿ                              €?  €?  €?  €?  €?                                      14AvatarT     ÿÿÿÿÿÿÿÿ              {8ÀÎ
+B¾7ÄÀ    ô5¿       €ô5?\"@\"@\"@  €?   {8ÀÎ
+B¾7ÄÀ    ô5¿       €ô5?\"@\"@\"@  €?                                     €?  €?  €?  €?  €?                   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ           ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ   
+ò>>ø=>ø=˜F=˜F=à<à<>ø<
+ò”>˜F<˜F=˜Æ;˜Æ;˜Æ<˜Æ<
+ò”<
+ò”<˜Æ;˜Æ;à;à;               ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ  €?   ?   ?   ?   ?ÍÌL=ÍÌL=                ÿÿÿÿ                              €?  €?  €?  €?  €?                                      11AvatarT     ÿÿÿÿÿÿÿÿ              R,Â4š¼m#A    ô5¿       €ô5?\"@\"@\"@  €?   R,Â4š¼m#A    ô5¿       €ô5?\"@\"@\"@  €?                                     €?  €?  €?  €?  €?                   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ           ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ   
+ò>>ø=>ø=˜F=˜F=à<à<>ø<
+ò”>˜F<˜F=˜Æ;˜Æ;˜Æ<˜Æ<
+ò”<
+ò”<˜Æ;˜Æ;à;à;               ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ  €?   ?   ?   ?   ?ÍÌL=ÍÌL=                ÿÿÿÿ                              €?  €?  €?  €?  €?                                      danjiaAvatarT     ÿÿÿÿÿÿÿÿ                 €                   €   €  €?  €?  €?  €?  €?      €                   €   €  €?  €?  €?  €?  €?                                     €?  €?  €?  €?  €?                   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ           ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ   
+ò>>ø=>ø=˜F=˜F=à<à<>ø<
+ò”>˜F<˜F=˜Æ;˜Æ;˜Æ<˜Æ<
+ò”<
+ò”<˜Æ;˜Æ;à;à;               ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ  €?   ?   ?   ?   ?ÍÌL=ÍÌL=                ÿÿÿÿ                              €?  €?  €?  €?  €?                                  15AvatarT     ÿÿÿÿÿÿÿÿ              ÏÂ‹¾+ZTBÙ=    ô5¿       €ô5?\"@\"@\"@  €?   ÏÂ‹¾+ZTBÙ=    ô5¿       €ô5?\"@\"@\"@  €?                                     €?  €?  €?  €?  €?                   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ   ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ           ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ   
+ò>>ø=>ø=˜F=˜F=à<à<>ø<
+ò”>˜F<˜F=˜Æ;˜Æ;˜Æ<˜Æ<
+ò”<
+ò”<˜Æ;˜Æ;à;à;               ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ  €?   ?   ?   ?   ?ÍÌL=ÍÌL=                ÿÿÿÿ                              €?  €?  €?  €?  €?                                             i   R       s          Audio                j   r       v          StoreInGame                  k   r       u          Cube                 l   !       p   A       r          n   r       w          PropBulletPreb  /N               m   !       q          o   _       t          ProcBulletModel        d                 €?               ?   ?   ?        l           e                 €?              €?  €?  €?                    f                 €? °å;À™½ À:   ?   ?   ?       m       l           g                 €?ŒyşBØ†?éb\BÍÌL?ÍÌL?ÍÌL?       i       k                   h                 €? æ >À`–¾ XÁ>MÜ+=MÜ+=MÜ+=        k           g    ÿ  €?  €?                                                     h   ÿ  €?  €?                                                      g      Ú'      h       S       g               €?  €?  €?                    d          [         €?  €?    €     €?      HB                    €?          €?                           €?                                               h          b                               f         Ç           e                      "   	   AddCoinBg     šC  <C  @C  @B  šC  <C  @C  @B                       AddCoinBg_Dis     DC  åC  @C  @B  DC  åC  @C  @B                       AddCoinBg_S    @  åC  @C  @B   @  åC  @C  @B                    	   Coin_0_99     NC  C  ÈB  C  NC  C  ÈB  C                    	   Coin_1_99     ĞB  ™C  ÈB  C  ĞB  ™C  ÈB  C                    
+   Coin_19_99    NC   @  ÈB  C  NC   @  ÈB  C                    	   Coin_2_99     ĞB  C  ÈB  C  ĞB  C  ÈB  C                    	   Coin_4_99      @  ™C  ÈB  C   @  ™C  ÈB  C                    
+   Coin_49_99    ĞB   @  ÈB  C  ĞB   @  ÈB  C                    	   Coin_9_99      @   @  ÈB  C   @   @  ÈB  C                       Coin_9_99_S   D  ÌB  ğB  @B  D  ÌB  ğB  @B                    
+   Coin_99_99     @  C  ÈB  C   @  C  ÈB  C                       Gem_0_99  šC  üB  4C  pB  šC  üB  4C  pB                       Gem_1_99  šC   @  4C  pB  šC   @  4C  pB                    	   Gem_19_99     šC  €B  4C  pB  šC  €B  4C  pB                       Gem_4_99  NC  ¸C  4C  pB  NC  ¸C  4C  pB                       Gem_9_99  NC  ™C  4C  pB  NC  ™C  4C  pB                    
+   Price_0_99    D  PB  ğB  @B  D  PB  ğB  @B                       Price_0_99_S  D   @  ğB  @B  D   @  ğB  @B                    
+   Price_1_99    õC  ÌB  ğB  @B  õC  ÌB  ğB  @B                       Price_1_99_S  õC  PB  ğB  @B  õC  PB  ğB  @B                       Price_19_99   
+D  JC  ğB  @B  
+D  JC  ğB  @B                       Price_19_99_S     ûC  C  ğB  @B  ûC  C  ğB  @B                    
+   Price_2_99    õC   @  ğB  @B  õC   @  ğB  @B                       Price_2_99_S   D  ÛC  ğB  @B   D  ÛC  ğB  @B                    
+   Price_4_99    ÿC  C  ğB  @B  ÿC  C  ğB  @B                       Price_4_99_S  ÃC  ÛC  ğB  @B  ÃC  ÛC  ğB  @B                       Price_49_99   ÿC  ÂC  ğB  @B  ÿC  ÂC  ğB  @B                       Price_49_99_S     ÿC  ©C  ğB  @B  ÿC  ©C  ğB  @B                    
+   Price_9_99    ×C  nC  ğB  @B  ×C  nC  ğB  @B                       Price_99_99   ÂC  ÂC  ğB  @B  ÂC  ÂC  ğB  @B                       Price_99_99_S     ÂC  ©C  ğB  @B  ÂC  ©C  ğB  @B                       StartBtn  ÂC  C  ğB  @B  ÂC  C  ğB  @B                    
+   StartBtn_S    šC  nC  ğB  @B  šC  nC  ğB  @B                          €?            g               

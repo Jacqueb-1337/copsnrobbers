@@ -1,0 +1,628 @@
+[21:24:40] === CNRModManager v1.3.5 BootstrapLoad() (no CNRMod) ===
+[21:24:40] ScanMods: CNRSettingsMod.dll OK
+[21:24:40] ScanMods: IPRedirectMod.dll OK
+[21:24:40] PatchMenu scene=MainMenu font=ok
+[21:24:40] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[21:24:40] ParseRepo: 3 mods
+[21:24:40] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[21:25:07] Download: https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll -> /storage/emulated/0/CNRMods/CNRSettingsMod.dll
+[21:25:08] Download OK: /storage/emulated/0/CNRMods/CNRSettingsMod.dll (203776 bytes)
+[21:25:11] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[21:25:12] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (769024 bytes)
+[21:25:17] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[21:25:18] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (769024 bytes)
+[21:25:26] === CNRModManager v1.3.5 Load() ===
+[21:25:26] PatchMenu scene=MainMenu font=ok
+[21:25:26] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[21:25:27] ParseRepo: 3 mods
+[21:25:27] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[21:32:42] === CNRModManager v1.3.5 Load() ===
+[21:32:42] PatchMenu scene=MainMenu font=ok
+[21:32:42] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[21:32:42] ParseRepo: 3 mods
+[21:32:42] CheckForUpdates: 2 update(s)  HasRequiredPending=True
+[21:33:04] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[21:33:05] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (769024 bytes)
+[21:33:05] Download: https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll -> /storage/emulated/0/CNRMods/CNRSettingsMod.dll
+[21:33:05] Download OK: /storage/emulated/0/CNRMods/CNRSettingsMod.dll (203776 bytes)
+[21:33:10] === CNRModManager v1.3.5 Load() ===
+[21:33:10] PatchMenu scene=MainMenu font=ok
+[21:33:10] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[21:33:11] ParseRepo: 3 mods
+[21:33:11] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[21:46:06] PatchMenu scene=MainMenu font=ok
+[21:46:11] PatchMenu scene=MainMenu font=ok
+[21:46:15] PatchMenu scene=MainMenu font=ok
+[21:46:35] PatchMenu scene=MainMenu font=ok
+[21:52:58] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[21:52:58] ParseRepo: 3 mods
+[21:52:58] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[21:52:59] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[21:53:00] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (770048 bytes)
+[21:53:08] === CNRModManager v1.3.5 Load() ===
+[21:53:08] PatchMenu scene=MainMenu font=ok
+[21:53:08] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[21:53:08] ParseRepo: 3 mods
+[21:53:08] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[21:54:09] PatchMenu scene=MainMenu font=ok
+[21:54:17] === CNRModManager v1.3.5 Load() ===
+[21:54:17] PatchMenu scene=MainMenu font=ok
+[21:54:17] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[21:54:18] ParseRepo: 3 mods
+[21:54:18] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[21:56:43] === CNRModManager v1.3.5 Load() ===
+[21:56:43] PatchMenu scene=MainMenu font=ok
+[21:56:43] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[21:56:44] ParseRepo: 3 mods
+[21:56:44] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[22:00:42] === CNRModManager v1.3.5 Load() ===
+[22:00:42] PatchMenu scene=MainMenu font=ok
+[22:00:42] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:00:43] ParseRepo: 3 mods
+[22:00:43] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[22:02:52] === CNRModManager v1.3.5 Load() ===
+[22:02:52] PatchMenu scene=MainMenu font=ok
+[22:02:52] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:02:53] ParseRepo: 3 mods
+[22:02:53] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[22:03:02] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[22:03:03] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (770048 bytes)
+[22:03:15] === CNRModManager v1.3.5 Load() ===
+[22:03:15] PatchMenu scene=MainMenu font=ok
+[22:03:15] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:03:16] ParseRepo: 3 mods
+[22:03:16] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[22:05:31] === CNRModManager v1.3.5 Load() ===
+[22:05:31] PatchMenu scene=MainMenu font=ok
+[22:05:31] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:05:32] ParseRepo: 3 mods
+[22:05:32] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[22:08:47] === CNRModManager v1.3.5 Load() ===
+[22:08:47] PatchMenu scene=MainMenu font=ok
+[22:08:47] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:08:48] ParseRepo: 3 mods
+[22:08:48] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[22:08:51] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[22:08:52] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (770048 bytes)
+[22:09:01] === CNRModManager v1.3.5 Load() ===
+[22:09:01] PatchMenu scene=MainMenu font=ok
+[22:09:01] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:09:02] ParseRepo: 3 mods
+[22:09:02] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[22:11:29] PatchMenu scene=MainMenu font=ok
+[22:12:15] PatchMenu scene=MainMenu font=ok
+[22:16:28] PatchMenu scene=MainMenu font=ok
+[22:21:03] === CNRModManager v1.3.5 Load() ===
+[22:21:03] PatchMenu scene=MainMenu font=ok
+[22:21:03] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:21:04] ParseRepo: 3 mods
+[22:21:04] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[22:21:10] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[22:21:11] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (770048 bytes)
+[22:21:16] === CNRModManager v1.3.5 Load() ===
+[22:21:16] PatchMenu scene=MainMenu font=ok
+[22:21:16] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:21:17] ParseRepo: 3 mods
+[22:21:17] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[22:22:03] PatchMenu scene=MainMenu font=ok
+[22:23:07] PatchMenu scene=MainMenu font=ok
+[22:27:31] PatchMenu scene=MainMenu font=ok
+[22:29:27] === CNRModManager v1.3.5 Load() ===
+[22:29:28] PatchMenu scene=MainMenu font=ok
+[22:29:28] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:29:28] ParseRepo: 3 mods
+[22:29:28] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[22:31:04] PatchMenu scene=MainMenu font=ok
+[22:33:36] === CNRModManager v1.3.5 Load() ===
+[22:33:36] PatchMenu scene=MainMenu font=ok
+[22:33:36] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:33:37] ParseRepo: 3 mods
+[22:33:37] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[22:45:26] === CNRModManager v1.3.5 Load() ===
+[22:45:26] PatchMenu scene=MainMenu font=ok
+[22:45:26] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:45:27] ParseRepo: 3 mods
+[22:45:27] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[22:45:36] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[22:45:38] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (770560 bytes)
+[22:45:43] === CNRModManager v1.3.5 Load() ===
+[22:45:43] PatchMenu scene=MainMenu font=ok
+[22:45:43] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:45:44] ParseRepo: 3 mods
+[22:45:44] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[22:48:59] PatchMenu scene=MainMenu font=ok
+[22:49:14] PatchMenu scene=MainMenu font=ok
+[22:49:19] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:49:19] ParseRepo: 3 mods
+[22:49:19] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[22:49:20] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[22:49:21] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (771072 bytes)
+[22:49:44] === CNRModManager v1.3.5 Load() ===
+[22:49:44] PatchMenu scene=MainMenu font=ok
+[22:49:44] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[22:49:45] ParseRepo: 3 mods
+[22:49:45] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[23:03:34] === CNRModManager v1.3.5 Load() ===
+[23:03:34] PatchMenu scene=MainMenu font=ok
+[23:03:34] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:03:35] ParseRepo: 3 mods
+[23:03:35] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[23:03:42] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[23:03:44] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (771584 bytes)
+[23:03:51] === CNRModManager v1.3.5 Load() ===
+[23:03:51] PatchMenu scene=MainMenu font=ok
+[23:03:51] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:03:52] ParseRepo: 3 mods
+[23:03:52] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[23:04:37] PatchMenu scene=MainMenu font=ok
+[23:04:43] PatchMenu scene=MainMenu font=ok
+[23:05:05] === CNRModManager v1.3.5 Load() ===
+[23:05:05] PatchMenu scene=MainMenu font=ok
+[23:05:05] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:05:06] ParseRepo: 3 mods
+[23:05:06] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[23:11:36] === CNRModManager v1.3.5 Load() ===
+[23:11:36] PatchMenu scene=MainMenu font=ok
+[23:11:36] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:11:37] ParseRepo: 3 mods
+[23:11:37] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[23:11:41] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[23:11:43] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (772096 bytes)
+[23:11:49] === CNRModManager v1.3.5 Load() ===
+[23:11:49] PatchMenu scene=MainMenu font=ok
+[23:11:49] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:11:49] ParseRepo: 3 mods
+[23:11:49] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[23:15:21] === CNRModManager v1.3.5 Load() ===
+[23:15:21] PatchMenu scene=MainMenu font=ok
+[23:15:21] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:15:21] ParseRepo: 3 mods
+[23:15:21] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[23:15:25] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[23:15:27] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (772096 bytes)
+[23:15:30] === CNRModManager v1.3.5 Load() ===
+[23:15:31] PatchMenu scene=MainMenu font=ok
+[23:15:31] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:15:31] ParseRepo: 3 mods
+[23:15:31] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[23:20:33] === CNRModManager v1.3.5 Load() ===
+[23:20:33] PatchMenu scene=MainMenu font=ok
+[23:20:33] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:20:34] ParseRepo: 3 mods
+[23:20:34] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[23:20:36] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[23:20:38] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (773120 bytes)
+[23:20:49] === CNRModManager v1.3.5 Load() ===
+[23:20:49] PatchMenu scene=MainMenu font=ok
+[23:20:49] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:20:50] ParseRepo: 3 mods
+[23:20:50] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[23:35:24] PatchMenu scene=MainMenu font=ok
+[23:35:27] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:35:28] ParseRepo: 3 mods
+[23:35:28] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[23:35:28] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[23:35:30] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (773632 bytes)
+[23:35:37] === CNRModManager v1.3.5 Load() ===
+[23:35:37] PatchMenu scene=MainMenu font=ok
+[23:35:37] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:35:38] ParseRepo: 3 mods
+[23:35:38] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[23:47:03] PatchMenu scene=MainMenu font=ok
+[23:47:06] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:47:06] ParseRepo: 3 mods
+[23:47:06] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[23:47:07] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[23:47:09] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (774656 bytes)
+[23:47:20] === CNRModManager v1.3.5 Load() ===
+[23:47:20] PatchMenu scene=MainMenu font=ok
+[23:47:20] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:47:21] ParseRepo: 3 mods
+[23:47:21] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[23:57:07] PatchMenu scene=MainMenu font=ok
+[23:57:11] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:57:12] ParseRepo: 3 mods
+[23:57:12] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[23:57:12] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[23:57:14] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (775168 bytes)
+[23:57:22] === CNRModManager v1.3.5 Load() ===
+[23:57:23] PatchMenu scene=MainMenu font=ok
+[23:57:23] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:57:23] ParseRepo: 3 mods
+[23:57:23] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[23:59:14] === CNRModManager v1.3.5 Load() ===
+[23:59:14] PatchMenu scene=MainMenu font=ok
+[23:59:14] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[23:59:15] ParseRepo: 3 mods
+[23:59:15] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:01:34] PatchMenu scene=MainMenu font=ok
+[00:01:36] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:01:37] ParseRepo: 3 mods
+[00:01:37] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[00:01:38] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[00:01:40] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (775168 bytes)
+[00:01:43] === CNRModManager v1.3.5 Load() ===
+[00:01:43] PatchMenu scene=MainMenu font=ok
+[00:01:43] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:01:44] ParseRepo: 3 mods
+[00:01:44] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:03:36] === CNRModManager v1.3.5 Load() ===
+[00:03:36] PatchMenu scene=MainMenu font=ok
+[00:03:36] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:03:37] ParseRepo: 3 mods
+[00:03:37] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:12:19] === CNRModManager v1.3.5 Load() ===
+[00:12:19] PatchMenu scene=MainMenu font=ok
+[00:12:19] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:12:20] ParseRepo: 3 mods
+[00:12:20] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[00:12:24] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[00:12:26] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (774656 bytes)
+[00:12:34] === CNRModManager v1.3.5 Load() ===
+[00:12:34] PatchMenu scene=MainMenu font=ok
+[00:12:34] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:12:35] ParseRepo: 3 mods
+[00:12:35] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:15:27] === CNRModManager v1.3.5 Load() ===
+[00:15:27] PatchMenu scene=MainMenu font=ok
+[00:15:27] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:15:28] ParseRepo: 3 mods
+[00:15:28] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:22:15] === CNRModManager v1.3.5 Load() ===
+[00:22:15] PatchMenu scene=MainMenu font=ok
+[00:22:15] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:22:16] ParseRepo: 3 mods
+[00:22:16] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:22:23] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:22:23] ParseRepo: 3 mods
+[00:22:23] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[00:22:24] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[00:22:25] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (776192 bytes)
+[00:22:35] === CNRModManager v1.3.5 Load() ===
+[00:22:35] PatchMenu scene=MainMenu font=ok
+[00:22:35] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:22:36] ParseRepo: 3 mods
+[00:22:36] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:27:48] === CNRModManager v1.3.5 Load() ===
+[00:27:48] PatchMenu scene=MainMenu font=ok
+[00:27:48] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:27:49] ParseRepo: 3 mods
+[00:27:49] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:28:23] === CNRModManager v1.3.5 Load() ===
+[00:28:24] PatchMenu scene=MainMenu font=ok
+[00:28:24] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:28:24] ParseRepo: 3 mods
+[00:28:24] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:28:36] PatchMenu scene=MainMenu font=ok
+[00:42:19] === CNRModManager v1.3.5 Load() ===
+[00:42:20] PatchMenu scene=MainMenu font=ok
+[00:42:20] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:42:21] ParseRepo: 3 mods
+[00:42:21] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[00:42:36] PatchMenu scene=MainMenu font=ok
+[00:42:36] PatchMenu scene=MainMenu font=ok
+[00:42:40] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[00:42:42] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (777728 bytes)
+[00:42:48] === CNRModManager v1.3.5 Load() ===
+[00:42:48] PatchMenu scene=MainMenu font=ok
+[00:42:48] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:42:49] ParseRepo: 3 mods
+[00:42:49] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:44:27] === CNRModManager v1.3.5 Load() ===
+[00:44:27] PatchMenu scene=MainMenu font=ok
+[00:44:27] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[00:44:28] ParseRepo: 3 mods
+[00:44:28] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[00:46:31] PatchMenu scene=MainMenu font=ok
+[01:01:05] === CNRModManager v1.3.5 Load() ===
+[01:01:05] PatchMenu scene=MainMenu font=ok
+[01:01:05] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[01:01:06] ParseRepo: 3 mods
+[01:01:06] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[01:01:25] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[01:01:27] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[01:01:28] ParseRepo: 3 mods
+[01:01:28] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[01:01:29] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[01:01:30] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (778752 bytes)
+[01:01:47] === CNRModManager v1.3.5 Load() ===
+[01:01:48] PatchMenu scene=MainMenu font=ok
+[01:01:48] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[01:01:48] ParseRepo: 3 mods
+[01:01:48] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[01:03:32] === CNRModManager v1.3.5 Load() ===
+[01:03:32] PatchMenu scene=MainMenu font=ok
+[01:03:32] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[01:03:33] ParseRepo: 3 mods
+[01:03:33] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[01:20:40] === CNRModManager v1.3.5 Load() ===
+[01:20:40] PatchMenu scene=MainMenu font=ok
+[01:20:40] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[01:20:41] ParseRepo: 3 mods
+[01:20:41] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[01:20:43] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[01:20:45] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (779264 bytes)
+[01:20:50] === CNRModManager v1.3.5 Load() ===
+[01:20:50] PatchMenu scene=MainMenu font=ok
+[01:20:50] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[01:20:51] ParseRepo: 3 mods
+[01:20:51] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[10:05:50] === CNRModManager v1.3.5 Load() ===
+[10:05:50] PatchMenu scene=MainMenu font=ok
+[10:05:50] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[10:05:51] ParseRepo: 3 mods
+[10:05:51] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[10:06:02] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[10:06:03] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (779776 bytes)
+[10:06:09] === CNRModManager v1.3.5 Load() ===
+[10:06:09] PatchMenu scene=MainMenu font=ok
+[10:06:09] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[10:06:10] ParseRepo: 3 mods
+[10:06:10] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[10:07:08] === CNRModManager v1.3.5 Load() ===
+[10:07:09] PatchMenu scene=MainMenu font=ok
+[10:07:09] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[10:07:09] ParseRepo: 3 mods
+[10:07:09] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[10:18:20] === CNRModManager v1.3.5 Load() ===
+[10:18:20] PatchMenu scene=MainMenu font=ok
+[10:18:20] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[10:18:20] ParseRepo: 3 mods
+[10:18:20] CheckForUpdates: 1 update(s)  HasRequiredPending=True
+[10:18:24] Download: https://play.jacqueb.me/mods/CNRMod/CNRMod.dll -> /storage/emulated/0/CNRMods/CNRMod.dll
+[10:18:25] Download OK: /storage/emulated/0/CNRMods/CNRMod.dll (779776 bytes)
+[10:18:30] === CNRModManager v1.3.5 Load() ===
+[10:18:30] PatchMenu scene=MainMenu font=ok
+[10:18:30] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[10:18:31] ParseRepo: 3 mods
+[10:18:31] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[10:19:29] === CNRModManager v1.3.5 Load() ===
+[10:19:29] PatchMenu scene=MainMenu font=ok
+[10:19:29] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[10:19:30] ParseRepo: 3 mods
+[10:19:30] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[10:22:21] === CNRModManager v1.3.5 Load() ===
+[10:22:21] PatchMenu scene=MainMenu font=ok
+[10:22:21] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[10:22:22] ParseRepo: 3 mods
+[10:22:22] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[10:39:29] === CNRModManager v1.3.5 Load() ===
+[10:39:29] PatchMenu scene=MainMenu font=ok
+[10:39:29] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[10:39:31] ParseRepo: 3 mods
+[10:39:31] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[10:40:08] PatchMenu scene=MainMenu font=ok
+[10:53:14] === CNRModManager v1.3.5 Load() ===
+[10:53:14] PatchMenu scene=MainMenu font=ok
+[10:53:14] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[10:53:15] ParseRepo: 3 mods
+[10:53:15] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[11:00:29] === CNRModManager v1.3.5 Load() ===
+[11:00:29] PatchMenu scene=MainMenu font=ok
+[11:00:29] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[11:00:30] ParseRepo: 3 mods
+[11:00:30] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[11:42:50] === CNRModManager v1.3.5 Load() ===
+[11:42:50] PatchMenu scene=MainMenu font=ok
+[11:42:50] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[11:42:51] ParseRepo: 3 mods
+[11:42:51] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[11:49:50] === CNRModManager v1.3.5 Load() ===
+[11:49:50] PatchMenu scene=MainMenu font=ok
+[11:49:50] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[11:49:51] ParseRepo: 3 mods
+[11:49:51] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[11:54:40] === CNRModManager v1.3.5 Load() ===
+[11:54:40] PatchMenu scene=MainMenu font=ok
+[11:54:40] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[11:54:41] ParseRepo: 3 mods
+[11:54:41] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:02:28] === CNRModManager v1.3.5 Load() ===
+[12:02:28] PatchMenu scene=MainMenu font=ok
+[12:02:28] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:02:29] ParseRepo: 3 mods
+[12:02:29] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:05:42] === CNRModManager v1.3.5 Load() ===
+[12:05:43] PatchMenu scene=MainMenu font=ok
+[12:05:43] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:05:43] ParseRepo: 3 mods
+[12:05:43] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:06:56] === CNRModManager v1.3.5 Load() ===
+[12:06:56] PatchMenu scene=MainMenu font=ok
+[12:06:56] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:06:57] ParseRepo: 3 mods
+[12:06:57] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:07:41] === CNRModManager v1.3.5 Load() ===
+[12:07:41] PatchMenu scene=MainMenu font=ok
+[12:07:41] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:07:42] ParseRepo: 3 mods
+[12:07:42] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:08:24] === CNRModManager v1.3.5 Load() ===
+[12:08:24] PatchMenu scene=MainMenu font=ok
+[12:08:24] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:08:25] ParseRepo: 3 mods
+[12:08:25] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:09:55] === CNRModManager v1.3.5 Load() ===
+[12:09:55] PatchMenu scene=MainMenu font=ok
+[12:09:55] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:09:56] ParseRepo: 3 mods
+[12:09:56] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:10:15] === CNRModManager v1.3.5 Load() ===
+[12:10:15] PatchMenu scene=MainMenu font=ok
+[12:10:15] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:10:16] ParseRepo: 3 mods
+[12:10:16] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:10:48] === CNRModManager v1.3.5 Load() ===
+[12:10:48] PatchMenu scene=MainMenu font=ok
+[12:10:48] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:10:49] ParseRepo: 3 mods
+[12:10:49] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:11:16] === CNRModManager v1.3.5 Load() ===
+[12:11:16] PatchMenu scene=MainMenu font=ok
+[12:11:16] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:11:17] ParseRepo: 3 mods
+[12:11:17] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:11:42] === CNRModManager v1.3.5 Load() ===
+[12:11:42] PatchMenu scene=MainMenu font=ok
+[12:11:42] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:11:43] ParseRepo: 3 mods
+[12:11:43] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:29:07] === CNRModManager v1.3.5 Load() ===
+[12:29:07] PatchMenu scene=MainMenu font=ok
+[12:29:07] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:29:08] ParseRepo: 3 mods
+[12:29:08] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:47:05] === CNRModManager v1.3.5 Load() ===
+[12:47:05] PatchMenu scene=MainMenu font=ok
+[12:47:05] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:47:06] ParseRepo: 3 mods
+[12:47:06] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:47:27] === CNRModManager v1.3.5 Load() ===
+[12:47:27] PatchMenu scene=MainMenu font=ok
+[12:47:27] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:47:28] ParseRepo: 3 mods
+[12:47:28] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[12:55:04] === CNRModManager v1.3.5 Load() ===
+[12:55:05] PatchMenu scene=MainMenu font=ok
+[12:55:05] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[12:55:05] ParseRepo: 3 mods
+[12:55:05] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[13:05:25] === CNRModManager v1.3.5 Load() ===
+[13:05:25] PatchMenu scene=MainMenu font=ok
+[13:05:25] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[13:05:26] ParseRepo: 3 mods
+[13:05:26] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[13:25:04] === CNRModManager v1.3.5 Load() ===
+[13:25:04] PatchMenu scene=MainMenu font=ok
+[13:25:04] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[13:25:05] ParseRepo: 3 mods
+[13:25:05] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[13:29:44] === CNRModManager v1.3.5 Load() ===
+[13:29:44] PatchMenu scene=MainMenu font=ok
+[13:29:44] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[13:29:45] ParseRepo: 3 mods
+[13:29:45] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[13:32:30] === CNRModManager v1.3.5 Load() ===
+[13:32:31] PatchMenu scene=MainMenu font=ok
+[13:32:31] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[13:32:32] ParseRepo: 3 mods
+[13:32:32] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[13:51:14] === CNRModManager v1.3.5 Load() ===
+[13:51:15] PatchMenu scene=MainMenu font=ok
+[13:51:15] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[13:51:16] ParseRepo: 3 mods
+[13:51:16] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[13:52:16] === CNRModManager v1.3.5 Load() ===
+[13:52:16] PatchMenu scene=MainMenu font=ok
+[13:52:16] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[13:52:17] ParseRepo: 3 mods
+[13:52:17] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[13:59:47] === CNRModManager v1.3.5 Load() ===
+[13:59:47] PatchMenu scene=MainMenu font=ok
+[13:59:47] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[13:59:48] ParseRepo: 3 mods
+[13:59:48] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[14:01:02] === CNRModManager v1.3.5 Load() ===
+[14:01:03] PatchMenu scene=MainMenu font=ok
+[14:01:03] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[14:01:03] ParseRepo: 3 mods
+[14:01:03] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[14:01:57] PatchMenu scene=MainMenu font=ok
+[14:39:37] === CNRModManager v1.3.5 Load() ===
+[14:39:37] PatchMenu scene=MainMenu font=ok
+[14:39:37] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[14:39:38] ParseRepo: 3 mods
+[14:39:38] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[14:51:56] === CNRModManager v1.3.5 Load() ===
+[14:51:56] PatchMenu scene=MainMenu font=ok
+[14:51:56] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[14:51:57] ParseRepo: 3 mods
+[14:51:57] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[15:10:14] === CNRModManager v1.3.5 Load() ===
+[15:10:15] PatchMenu scene=MainMenu font=ok
+[15:10:15] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[15:10:15] ParseRepo: 3 mods
+[15:10:15] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[15:14:03] === CNRModManager v1.3.5 Load() ===
+[15:14:03] PatchMenu scene=MainMenu font=ok
+[15:14:03] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[15:14:03] ParseRepo: 3 mods
+[15:14:04] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[15:26:57] === CNRModManager v1.3.5 Load() ===
+[15:26:57] PatchMenu scene=MainMenu font=ok
+[15:26:57] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[15:26:58] ParseRepo: 3 mods
+[15:26:58] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[15:30:11] === CNRModManager v1.3.5 Load() ===
+[15:30:11] PatchMenu scene=MainMenu font=ok
+[15:30:11] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[15:30:12] ParseRepo: 3 mods
+[15:30:12] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[15:33:04] === CNRModManager v1.3.5 Load() ===
+[15:33:04] PatchMenu scene=MainMenu font=ok
+[15:33:04] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[15:33:05] ParseRepo: 3 mods
+[15:33:05] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[15:33:33] PatchMenu scene=MainMenu font=ok
+[15:42:05] === CNRModManager v1.3.5 Load() ===
+[15:42:06] PatchMenu scene=MainMenu font=ok
+[15:42:06] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[15:42:06] ParseRepo: 3 mods
+[15:42:06] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[15:51:45] === CNRModManager v1.3.5 Load() ===
+[15:51:45] PatchMenu scene=MainMenu font=ok
+[15:51:45] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[15:51:46] ParseRepo: 3 mods
+[15:51:46] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[15:55:12] === CNRModManager v1.3.5 Load() ===
+[15:55:12] PatchMenu scene=MainMenu font=ok
+[15:55:12] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[15:55:13] ParseRepo: 3 mods
+[15:55:13] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[16:12:04] === CNRModManager v1.3.5 Load() ===
+[16:12:04] PatchMenu scene=MainMenu font=ok
+[16:12:04] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[16:12:05] ParseRepo: 3 mods
+[16:12:05] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[16:25:03] === CNRModManager v1.3.5 Load() ===
+[16:25:03] PatchMenu scene=MainMenu font=ok
+[16:25:03] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[16:25:04] ParseRepo: 3 mods
+[16:25:04] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[16:29:47] === CNRModManager v1.3.5 Load() ===
+[16:29:47] PatchMenu scene=MainMenu font=ok
+[16:29:47] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[16:29:47] ParseRepo: 3 mods
+[16:29:47] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[16:31:35] === CNRModManager v1.3.5 Load() ===
+[16:31:35] PatchMenu scene=MainMenu font=ok
+[16:31:35] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[16:31:36] ParseRepo: 3 mods
+[16:31:36] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[16:32:21] PatchMenu scene=MainMenu font=ok
+[16:33:55] === CNRModManager v1.3.5 Load() ===
+[16:33:55] PatchMenu scene=MainMenu font=ok
+[16:33:55] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[16:33:56] ParseRepo: 3 mods
+[16:33:56] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[16:34:19] PatchMenu scene=MainMenu font=ok
+[16:35:39] === CNRModManager v1.3.5 Load() ===
+[16:35:39] PatchMenu scene=MainMenu font=ok
+[16:35:39] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[16:35:40] ParseRepo: 3 mods
+[16:35:40] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[16:37:33] === CNRModManager v1.3.5 Load() ===
+[16:37:33] PatchMenu scene=MainMenu font=ok
+[16:37:33] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[16:37:34] ParseRepo: 3 mods
+[16:37:34] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[16:56:10] === CNRModManager v1.3.5 Load() ===
+[16:56:11] PatchMenu scene=MainMenu font=ok
+[16:56:11] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[16:56:11] ParseRepo: 3 mods
+[16:56:11] CheckForUpdates: 0 update(s)  HasRequiredPending=False
+[17:12:34] === CNRModManager v1.3.5 Load() ===
+[17:12:35] PatchMenu scene=MainMenu font=ok
+[17:12:35] FetchBrowse: https://play.jacqueb.me/mods/repo.json
+[17:12:35] ParseRepo: 3 mods
+[17:12:35] CheckForUpdates: 0 update(s)  HasRequiredPending=False

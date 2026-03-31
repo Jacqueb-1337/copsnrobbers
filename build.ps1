@@ -9,7 +9,7 @@
 
 param(
     [Parameter(Mandatory=$true, Position=0)]
-    [ValidateSet("settings","mod","manager","all")]
+    [ValidateSet("settings","mod","manager","recording","all")]
     [string]$Target,
 
     [string]$Device   = "",
@@ -20,12 +20,13 @@ $Build = "d:\Projects\copsnrobbers\APK_Build_Active\build_mod.ps1"
 $Mods  = "d:\Projects\copsnrobbers\cnr-revived-web\mods"
 
 $map = @{
-    settings = "$Mods\CNRSettingsMod\CNRSettingsMod.cs"
-    mod      = "$Mods\CNRMod\CNRMod.cs"
-    manager  = "$Mods\CNRModManager\CNRModManager.cs"
+    settings  = "$Mods\CNRSettingsMod\CNRSettingsMod.cs"
+    mod       = "$Mods\CNRMod\CNRMod.cs"
+    manager   = "$Mods\CNRModManager\CNRModManager.cs"
+    recording = "$Mods\CNRRecordingMod\CNRRecordingMod.cs"
 }
 
-$targets = if ($Target -eq "all") { "settings","mod","manager" } else { @($Target) }
+$targets = if ($Target -eq "all") { "settings","mod","manager","recording" } else { @($Target) }
 
 foreach ($t in $targets) {
     $buildArgs = @{ ModFile = $map[$t] }
