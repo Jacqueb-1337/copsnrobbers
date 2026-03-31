@@ -499,12 +499,17 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.4.2",
+      "latestVersion": "1.4.3",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.4.3",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.3.dll",
+          "changelog": "Fix multiplayer button intercept: use Convert.ToInt32 instead of direct int cast to handle enum buttonName field. Add error handling so intercept failures are logged instead of silently killing the coroutine."
+        },
         {
           "version": "1.4.2",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.2.dll",
