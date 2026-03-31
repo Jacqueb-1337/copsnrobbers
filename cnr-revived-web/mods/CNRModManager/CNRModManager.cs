@@ -242,6 +242,9 @@ namespace CNRModManager
         private UICamera[] _nguiCameras = null;
         private static Font _font = null;
 
+        // Multiplayer button intercept
+        private GameObject _goMpBtn = null;
+
         // ── Installed tab data ────────────────────────────────────────────────
         private struct InstalledMod
         {
@@ -330,6 +333,7 @@ namespace CNRModManager
             _nguiCameras = null;
             _nguiBlocked = false;
             _showWindow  = false;
+            _goMpBtn     = null;
             ModManagerEntry.IsOpen = false;
             ModManagerEntry.SetEcoHookOpen(false);
             if (_scene == "MainMenu") PatchMenu();
@@ -339,6 +343,7 @@ namespace CNRModManager
         {
             if (_patched) return;
             _patched = true;
+            _goMpBtn = null;
             if (_font == null)
             {
                 UILabel[] lbls = (UILabel[])(object)FindObjectsOfType(typeof(UILabel));
@@ -347,6 +352,52 @@ namespace CNRModManager
                     { _font = lbl.font.dynamicFont; break; }
             }
             ModManagerEntry.Log("PatchMenu scene=" + _scene + " font=" + (_font != null ? "ok" : "null"));
+            StartCoroutine(InterceptMpButton());
+        }
+
+        private IEnumerator InterceptMpButton()
+        {
+            for (int i = 0; i < 30 && _goMpBtn == null; i++)
+            {
+                yield return null;
+                yield return null;
+                TryInterceptMpButton();
+            }
+            ModManagerEntry.Log("InterceptMpButton: " + (_goMpBtn != null ? "intercepted" : "not found"));
+        }
+
+        private void TryInterceptMpButton()
+        {
+            if (_goMpBtn != null) return;
+            MonoBehaviour[] all = (MonoBehaviour[])(object)FindObjectsOfType(typeof(MonoBehaviour));
+            foreach (MonoBehaviour mb in all)
+            {
+                if (mb.GetType().Name != "UIButtonEventKit") continue;
+                FieldInfo fi = mb.GetType().GetField("buttonName",
+                    BindingFlags.Instance | BindingFlags.Public);
+                if (fi == null) continue;
+                if ((int)(object)fi.GetValue(mb) != 49) continue; // 49 = GotoHall (multiplayer)
+                _goMpBtn = ((Component)(object)mb).gameObject;
+                ((Behaviour)(object)mb).enabled = false; // disable original handler
+                var interceptor = _goMpBtn.AddComponent<MgrMpInterceptor>();
+                interceptor.hook = this;
+                break;
+            }
+        }
+
+        internal void OnMpButtonClick()
+        {
+            bool cnrOk = File.Exists("/sdcard/CNRMods/CNRMod.dll");
+            bool stgOk = File.Exists("/sdcard/CNRMods/CNRSettingsMod.dll");
+            bool mgrOk = File.Exists("/sdcard/CNRMods/CNRModManager.dll");
+            if (cnrOk && stgOk && mgrOk)
+            {
+                Application.LoadLevel("MultiPlayerSelect");
+                return;
+            }
+            // Missing mods — open mod manager window so user can install
+            ModManagerEntry.Log("Mp blocked: cnr=" + cnrOk + " stg=" + stgOk + " mgr=" + mgrOk);
+            OpenWindow();
         }
 
         private void Update()
@@ -1672,6 +1723,15 @@ namespace CNRModManager
                 GUI.enabled = true;
                 GUILayout.EndHorizontal();
             }
+        }
+    }
+
+    public class MgrMpInterceptor : MonoBehaviour
+    {
+        public ModManagerHook hook;
+        private void OnClick()
+        {
+            if (hook != null) hook.OnMpButtonClick();
         }
     }
 }
