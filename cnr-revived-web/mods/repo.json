@@ -499,12 +499,17 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.4.5",
+      "latestVersion": "1.4.6",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.4.6",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.6.dll",
+          "changelog": "Fix multiplayer button intercept: correct buttonName from 49 to 12 (actual Multiplayer button value)."
+        },
         {
           "version": "1.4.5",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.5.dll",
