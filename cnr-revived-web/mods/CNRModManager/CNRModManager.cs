@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.4.4";
+        public  const string Version        = "1.4.5";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -244,6 +244,7 @@ namespace CNRModManager
 
         // Multiplayer button intercept
         private GameObject _goMpBtn = null;
+        private bool _interceptDiagDone = false;
 
         // ── Installed tab data ────────────────────────────────────────────────
         private struct InstalledMod
@@ -344,6 +345,7 @@ namespace CNRModManager
             if (_patched) return;
             _patched = true;
             _goMpBtn = null;
+            _interceptDiagDone = false;
             if (_font == null)
             {
                 UILabel[] lbls = (UILabel[])(object)FindObjectsOfType(typeof(UILabel));
@@ -357,18 +359,31 @@ namespace CNRModManager
         private void TryInterceptMpButton()
         {
             if (_goMpBtn != null) return;
+            bool diag = !_interceptDiagDone;
+            _interceptDiagDone = true;
             try
             {
                 MonoBehaviour[] all = (MonoBehaviour[])(object)FindObjectsOfType(typeof(MonoBehaviour));
+                int kitCount = 0;
                 foreach (MonoBehaviour mb in all)
                 {
                     if (mb == null || mb.GetType().Name != "UIButtonEventKit") continue;
+                    kitCount++;
                     FieldInfo fi = mb.GetType().GetField("buttonName",
                         BindingFlags.Instance | BindingFlags.Public);
-                    if (fi == null) continue;
+                    if (fi == null)
+                    {
+                        if (diag) ModManagerEntry.Log("MpDiag: " + mb.name + " noField");
+                        continue;
+                    }
                     int bval;
                     try { bval = Convert.ToInt32(fi.GetValue(mb)); }
-                    catch { continue; }
+                    catch (Exception ex2)
+                    {
+                        if (diag) ModManagerEntry.Log("MpDiag: " + mb.name + " castErr=" + ex2.Message);
+                        continue;
+                    }
+                    if (diag) ModManagerEntry.Log("MpDiag: " + mb.name + " buttonName=" + bval);
                     if (bval != 49) continue; // 49 = GotoHall (multiplayer)
                     _goMpBtn = ((Component)(object)mb).gameObject;
                     ((Behaviour)(object)mb).enabled = false; // disable original handler
@@ -377,6 +392,8 @@ namespace CNRModManager
                     ModManagerEntry.Log("TryInterceptMpButton: intercepted GotoHall on " + _goMpBtn.name);
                     break;
                 }
+                if (diag && kitCount == 0)
+                    ModManagerEntry.Log("MpDiag: no UIButtonEventKit found (MB count=" + all.Length + ")");
             }
             catch (Exception ex) { ModManagerEntry.Log("TryInterceptMpButton err: " + ex.Message); }
         }
