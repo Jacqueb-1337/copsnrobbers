@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.4.3";
+        public  const string Version        = "1.4.4";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -352,18 +352,6 @@ namespace CNRModManager
                     { _font = lbl.font.dynamicFont; break; }
             }
             ModManagerEntry.Log("PatchMenu scene=" + _scene + " font=" + (_font != null ? "ok" : "null"));
-            StartCoroutine(InterceptMpButton());
-        }
-
-        private IEnumerator InterceptMpButton()
-        {
-            for (int i = 0; i < 30 && _goMpBtn == null; i++)
-            {
-                yield return null;
-                yield return null;
-                TryInterceptMpButton();
-            }
-            ModManagerEntry.Log("InterceptMpButton: " + (_goMpBtn != null ? "intercepted" : "not found"));
         }
 
         private void TryInterceptMpButton()
@@ -411,6 +399,8 @@ namespace CNRModManager
         private void Update()
         {
             SetNguiBlocking(_showWindow);
+            if (_scene == "MainMenu" && _patched && _goMpBtn == null)
+                TryInterceptMpButton();
         }
 
         private void SetNguiBlocking(bool block)
