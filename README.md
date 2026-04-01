@@ -130,7 +130,7 @@ The console will print the `SERVER_IP` value to use in `server.cfg`.
 |------|---------|
 | 5055 | Master server  room listing, authentication |
 | 5056 | Game server  in-room traffic |
-| 8080 | Web console (browser status dashboard) |
+| 1337 | Web console (browser status dashboard) |
 
 ---
 
