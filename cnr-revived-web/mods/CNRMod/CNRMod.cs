@@ -27,7 +27,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.55";
+        public const  string Version = "2.0.56";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -3005,6 +3005,13 @@ namespace CNRMods
             Material baseMat = vanillaBody[0];
             string   equippedDlcId = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
 
+            // If CurSettedSkinName is one of the 33 vanilla skins, the user has a vanilla
+            // skin equipped — don't let a stale CNR_EquippedDLCSkin override skinUsingId.
+            string curVanillaSkin = PlayerPrefs.GetString("CurSettedSkinName", "");
+            bool vanillaSkinActive = false;
+            foreach (var sn in vanillaNames)
+                if (sn == curVanillaSkin) { vanillaSkinActive = true; break; }
+
             for (int i = 0; i < _dlcSkins.Length; i++)
             {
                 var sk  = _dlcSkins[i];
@@ -3037,7 +3044,8 @@ namespace CNRMods
                 _extBody[idx] = mat;
 
                 // Fix skinUsingId if this DLC skin is the one currently equipped
-                if (equippedDlcId == sk.Id && owned)
+                // (skip if the user currently has a vanilla skin equipped)
+                if (equippedDlcId == sk.Id && owned && !vanillaSkinActive)
                     _fi_skinUsingId.SetValue(_store, idx);
             }
         }
@@ -3106,6 +3114,10 @@ namespace CNRMods
             {
                 // Vanilla skin — let the original method handle it, then re-inject our arrays
                 _mi_SkinSetUnlock.Invoke(_store, null);
+                // Clear the DLC equipped pref so it doesn't override skinUsingId next time
+                // the shop opens (stale value would make the DLC skin appear equipped).
+                PlayerPrefs.DeleteKey("CNR_EquippedDLCSkin");
+                PlayerPrefs.Save();
                 StartCoroutine(ReInjectAfterFrame());
                 return;
             }
