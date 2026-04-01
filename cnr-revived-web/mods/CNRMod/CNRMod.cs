@@ -27,7 +27,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.59";
+        public const  string Version = "2.0.60";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -4022,9 +4022,11 @@ namespace CNRMods
         private bool        _mpMissingCnr     = false;
         private bool        _mpMissingStg     = false;
         private bool        _mpMissingMgr     = false;
-        private bool        _mpNeedsUpdate    = false;  // required updates pending (from CNRModManager)
-        private bool        _mpPendingBlock   = false;  // survives scene reload — trigger dialog on next MainMenu
-        private bool        _mpPendingIsUpdate = false; // true=update required  false=dll missing
+        private bool        _mpNeedsUpdate       = false;  // required updates pending (from CNRModManager)
+        private bool        _mpDownloadsMissing  = false;  // not all DLC content cached
+        private bool        _mpPendingBlock      = false;  // survives scene reload — trigger dialog on next MainMenu
+        private bool        _mpPendingIsUpdate   = false; // true=update required  false=dll missing
+        private bool        _mpPendingDownloads  = false; // true=downloads missing block
         private static FieldInfo _modMgrShowFI = null;  // cached: ModManagerHook._showWindow (to trigger open)
         private static readonly string _SettingsIconB64 =
             "iVBORw0KGgoAAAANSUhEUgAAAwEAAAK1CAYAAACQM+LCAAAAAXNSR0IArs4c6QAAAARzQklUCAgICHwIZIgAACAASURBVHic7L3d" +
@@ -7722,8 +7724,9 @@ namespace CNRMods
             _goRecordBtn      = null;
             _goAgreementBtn   = null;
             _goMultiplayerBtn = null;
-            _showMpDialog     = false;
-            _mpNeedsUpdate    = false;
+            _showMpDialog        = false;
+            _mpNeedsUpdate        = false;
+            _mpDownloadsMissing   = false;
             _ecoNguiCam  = null;
             _nguiCameras = null;   // invalidate cache; new UICamera instances after scene load
             _nguiBlocked = false;
@@ -7732,10 +7735,12 @@ namespace CNRMods
                 // If we were bounced back from MultiplayerSelect, show block dialog
                 if (_mpPendingBlock)
                 {
-                    _mpNeedsUpdate     = _mpPendingIsUpdate;
-                    _showMpDialog      = true;
-                    _mpPendingBlock    = false;
-                    _mpPendingIsUpdate = false;
+                    _mpNeedsUpdate        = _mpPendingIsUpdate;
+                    _mpDownloadsMissing   = _mpPendingDownloads;
+                    _showMpDialog         = true;
+                    _mpPendingBlock       = false;
+                    _mpPendingIsUpdate    = false;
+                    _mpPendingDownloads   = false;
                 }
                 StartCoroutine(EcoPatchDelay());
             }
@@ -7773,6 +7778,16 @@ namespace CNRMods
             if (hasRequired)
             {
                 _mpPendingBlock = true; _mpPendingIsUpdate = true;
+                Application.LoadLevel("MainMenu");
+                return;
+            }
+
+            // Also block if not all DLC content has been downloaded yet
+            if (ContentManager.Ready && DlCountMissing() > 0)
+            {
+                _mpPendingBlock     = true;
+                _mpPendingIsUpdate  = false;
+                _mpPendingDownloads = true;
                 Application.LoadLevel("MainMenu");
             }
         }
@@ -8527,7 +8542,13 @@ namespace CNRMods
             bodySt.alignment = TextAnchor.UpperLeft;
             bodySt.wordWrap  = true;
             string body;
-            if (_mpNeedsUpdate)
+            if (_mpDownloadsMissing)
+            {
+                int missing = DlCountMissing();
+                body = missing + " content file" + (missing != 1 ? "s are" : " is")
+                    + " not yet downloaded.\n\nAll DLC content must be cached before playing multiplayer.\n\nOpen Downloads to fetch the missing files.";
+            }
+            else if (_mpNeedsUpdate)
             {
                 body = "One or more required mods are missing or out of date.\n\nOpen Mod Manager to install the required updates before playing multiplayer.";
             }
@@ -8550,7 +8571,16 @@ namespace CNRMods
             if (GUI.Button(new Rect(px, py, btnW, btnH), "Close", closeSt))
                 _showMpDialog = false;
 
-            if (modMgrLoaded)
+            if (_mpDownloadsMissing)
+            {
+                GUIStyle dlSt = EcoBtnSt(14, new Color(0.4f, 0.9f, 1f));
+                if (GUI.Button(new Rect(px + btnW + 8f, py, btnW, btnH), "Open Downloads", dlSt))
+                {
+                    _showMpDialog = false;
+                    EcoOpenDownloads();
+                }
+            }
+            else if (modMgrLoaded)
             {
                 GUIStyle dlSt = EcoBtnSt(14, new Color(0.4f, 0.85f, 1f));
                 if (GUI.Button(new Rect(px + btnW + 8f, py, btnW, btnH), "Open Mod Manager", dlSt))
