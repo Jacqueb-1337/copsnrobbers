@@ -7,7 +7,7 @@ Community effort to restore online / LAN multiplayer for the original *Cops n Ro
 ## Repository layout
 
 ```
-node_server/          Node.js master + game server (TCP, Photon-like protocol)
+cnr-revived-web/          Node.js master + game server (TCP, Photon-like protocol)
 APK_Build_Active/     Patched APK ready to install + mod source files
   target_modloader.apk   Install this on the device
   IPRedirectMod.cs       Baked-in mod: redirects Photon connections, loads other mods
@@ -100,7 +100,7 @@ Game starts  →  MainMenuDirector.Awake()
 
 ## Server  Node.js
 
-The server lives in `node_server/`. No extra dependencies are required.
+The server lives in `cnr-revived-web/`. No extra dependencies are required.
 
 ### Requirements
 
@@ -110,7 +110,7 @@ The server lives in `node_server/`. No extra dependencies are required.
 ### Start
 
 ```powershell
-cd node_server
+cd cnr-revived-web
 npm start
 ```
 
