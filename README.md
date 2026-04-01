@@ -1,4 +1,4 @@
-# Cops n Robbers — Revival Project
+# Cops n Robbers Revival Project
 
 Community effort to restore online / LAN multiplayer for the original *Cops n Robbers* Android game by reverse-engineering the protocol and injecting a custom mod loader.
 
@@ -20,9 +20,9 @@ Archive/              Old backups, earlier attempts, docs
 
 ## How the mod system works
 
-### 1 — APK patch (Assembly-CSharp.dll)
+### 1  APK patch (Assembly-CSharp.dll)
 
-`target_modloader.apk` contains two patched game classes that act as the mod loader. No patching of `Extensions` or any other class is needed — only these two:
+`target_modloader.apk` contains two patched game classes that act as the mod loader. No patching of `Extensions` or any other class is needed  only these two:
 
 **`MainMenuDirector.Awake()`** calls `MainMenuDirector.LoadMods()` (static, also callable from elsewhere):
 
@@ -39,7 +39,7 @@ public static void LoadMods()
 }
 ```
 
-This loads any DLL that exposes `CNRMods.ModEntry.Load()` — that's `CNRMod.dll`.
+This loads any DLL that exposes `CNRMods.ModEntry.Load()`  that's `CNRMod.dll`.
 
 **`CNRMod.LoadExternalMods()`** is called from `CNRMods.ModEntry.Load()` and does a second pass over the folder, finding **the first `public static void Load()` in any type** in each remaining DLL:
 
@@ -60,11 +60,11 @@ private static void LoadExternalMods()
 }
 ```
 
-This means extra mods (`CNRSettingsMod`, `CNRRecordingMod`, etc.) don't need to follow the `CNRMods.ModEntry` naming convention — **any public static `Load()` method in any class will be found and called**.
+This means extra mods (`CNRSettingsMod`, `CNRRecordingMod`, etc.) don't need to follow the `CNRMods.ModEntry` naming convention  **any public static `Load()` method in any class will be found and called**.
 
-This means the APK itself never needs to be replaced again — you add or update mods by pushing DLLs to the device.
+This means the APK itself never needs to be replaced again  you add or update mods by pushing DLLs to the device.
 
-### 2 — /sdcard/CNRMods/ folder
+### 2  /sdcard/CNRMods/ folder
 
 Drop compiled mod DLLs here. The loader finds them automatically on the next game launch.
 
@@ -83,7 +83,7 @@ SERVER_IP=172.28.48.1
 
 Set this to the IP address of the machine running the Node.js server.
 
-### 3 — Mod loading chain (summary)
+### 3  Mod loading chain (summary)
 
 ```
 Game starts  →  MainMenuDirector.Awake()
@@ -98,7 +98,7 @@ Game starts  →  MainMenuDirector.Awake()
 
 ---
 
-## Server — Node.js
+## Server  Node.js
 
 The server lives in `node_server/`. No extra dependencies are required.
 
@@ -128,8 +128,8 @@ The console will print the `SERVER_IP` value to use in `server.cfg`.
 
 | Port | Purpose |
 |------|---------|
-| 5055 | Master server — room listing, authentication |
-| 5056 | Game server — in-room traffic |
+| 5055 | Master server  room listing, authentication |
+| 5056 | Game server  in-room traffic |
 | 8080 | Web console (browser status dashboard) |
 
 ---
@@ -245,7 +245,7 @@ catch { }
 | IP redirect (Photon → custom server) | ✅ Done |
 | Discovery / room listing (custom server) | ✅ Done |
 | HUD editor + settings overlay | ✅ Done |
-| Protocol (Photon forced into TCP mode — no UDP translation needed) | ✅ Done |
+| Protocol (Photon forced into TCP mode  no UDP translation needed) | ✅ Done |
 | Room loading / joining | ✅ Done |
 | Full handshake + live matches | ✅ Done |
 | Packaging, signing, public release | ✅ Done |
