@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using ExitGames.Client.Photon;
 using UnityEngine;
 using Pathfinding.Serialization.JsonFx;
 
@@ -27,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.1.4";
+        public const  string Version = "2.1.6";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -49,43 +50,73 @@ namespace CNRMods
 
         private static bool _loaded = false;
 
-        // ── Photon DLC skin broadcast helpers ─────────────────────────────────
-        // Called by CNRSkinStoreHook (equip) and RedirectHook (room join).
-        // Advertises the local player's equipped DLC skin ID to all other room members.
-        public static void BroadcastDlcSkin(string skinId)
+        // ── CNR event system ───────────────────────────────────────────────────
+        // Custom Photon event code for all CNR mod-to-mod communication.
+        // Avoids SetCustomProperties entirely (which can trigger SendMonoMessage in old PUN).
+        public const byte CNR_EVENT_CODE = 199;
+
+        // Broadcast data to all room members via Photon RaiseEvent (no SendMonoMessage pathway).
+        public static void RaiseCnrEvent(System.Collections.Hashtable data)
         {
             try
             {
                 Type pnt = null;
                 foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
                 { Type t = asm.GetType("PhotonNetwork"); if (t != null) { pnt = t; break; } }
-                if (pnt == null) return;
-                var playerProp = pnt.GetProperty("player", BindingFlags.Static | BindingFlags.Public);
-                if (playerProp == null) return;
-                var player = playerProp.GetValue(null, null);
-                if (player == null) return;
-                var ht = new System.Collections.Hashtable();
-                ht["CNR_DLC_SKIN"] = skinId ?? "";
-                var setProp = player.GetType().GetMethod("SetCustomProperties",
-                    new Type[] { typeof(System.Collections.Hashtable) });
-                if (setProp != null) setProp.Invoke(player, new object[] { ht });
-                Log("BroadcastDlcSkin: " + (skinId ?? "(none)"));
+                if (pnt == null) { Log("RaiseCnrEvent: PhotonNetwork not found"); return; }
+                FieldInfo peerField = pnt.GetField("networkingPeer",
+                    BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+                if (peerField == null) { Log("RaiseCnrEvent: networkingPeer field not found"); return; }
+                object peer = peerField.GetValue(null);
+                if (peer == null) { Log("RaiseCnrEvent: networkingPeer is null"); return; }
+                MethodInfo raise = peer.GetType().GetMethod("OpRaiseEvent",
+                    new Type[] { typeof(byte), typeof(System.Collections.Hashtable), typeof(bool), typeof(byte) });
+                if (raise == null) { Log("RaiseCnrEvent: OpRaiseEvent not found"); return; }
+                raise.Invoke(peer, new object[] { CNR_EVENT_CODE, data, true, (byte)0 });
+                Log("RaiseCnrEvent: sent " + data.Count + " keys");
             }
-            catch (Exception ex) { Log("BroadcastDlcSkin error: " + ex.Message); }
+            catch (Exception ex) { Log("RaiseCnrEvent error: " + ex.Message); }
         }
 
-        // Reads CNR_DLC_SKIN from a Photon PhotonPlayer object (passed as object to avoid hard dep).
-        public static string ReadDlcSkinProp(object photonPlayer)
+        // Inject CnrPhotonListenerProxy into NetworkingPeer.externalListener to receive CNR events.
+        // NetworkingPeer.OnEvent() calls externalListener.OnEvent() after its own switch, so ALL
+        // events (including custom codes like 199) reach the proxy without modifying game code.
+        private static bool _eventListenerInstalled = false;
+        public static void InstallEventListener()
         {
+            if (_eventListenerInstalled) return;
             try
             {
-                var cp = photonPlayer.GetType().GetProperty("customProperties",
-                    BindingFlags.Instance | BindingFlags.Public);
-                if (cp == null) return null;
-                var ht = cp.GetValue(photonPlayer, null) as System.Collections.Hashtable;
-                return (ht != null && ht.ContainsKey("CNR_DLC_SKIN")) ? ht["CNR_DLC_SKIN"] as string : null;
+                Type pnt = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                { Type t = asm.GetType("PhotonNetwork"); if (t != null) { pnt = t; break; } }
+                if (pnt == null) { Log("InstallEventListener: PhotonNetwork not found"); return; }
+                FieldInfo peerField = pnt.GetField("networkingPeer",
+                    BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+                if (peerField == null) { Log("InstallEventListener: networkingPeer field not found"); return; }
+                object peer = peerField.GetValue(null);
+                if (peer == null) { Log("InstallEventListener: networkingPeer is null"); return; }
+                FieldInfo listenerField = peer.GetType().GetField("externalListener",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (listenerField == null) { Log("InstallEventListener: externalListener field not found"); return; }
+                IPhotonPeerListener original = listenerField.GetValue(peer) as IPhotonPeerListener;
+                if (original == null) { Log("InstallEventListener: externalListener is null or wrong type"); return; }
+                if (original is CnrPhotonListenerProxy) { _eventListenerInstalled = true; Log("InstallEventListener: already wrapped"); return; }
+                listenerField.SetValue(peer, new CnrPhotonListenerProxy(original));
+                _eventListenerInstalled = true;
+                Log("InstallEventListener: externalListener wrapped OK");
             }
-            catch { return null; }
+            catch (Exception ex) { Log("InstallEventListener error: " + ex.Message); }
+        }
+
+        // Advertise the local player's DLC skin to all room members via CNR event.
+        public static void BroadcastDlcSkin(string skinId)
+        {
+            if (string.IsNullOrEmpty(skinId)) return;
+            var ht = new System.Collections.Hashtable();
+            ht["skin"] = skinId;
+            RaiseCnrEvent(ht);
+            Log("BroadcastDlcSkin (event): " + skinId);
         }
 
         // Returns all current Photon otherPlayers as an object[] (empty on error/offline).
@@ -235,7 +266,16 @@ namespace CNRMods
             Log("Config: IP=" + ServerIp + "  PORT=" + ServerPort + "  MAP_URL=" + MapUrl +
                 "  VERSION=" + Version + "  KICK=" + KickNoMod);
             if (string.IsNullOrEmpty(WebUrl) && !string.IsNullOrEmpty(ServerIp))
-                WebUrl = "http://" + ServerIp + ":1337";
+            {
+                // IP addresses → LAN setup, plain HTTP on 1337 is fine.
+                // Hostnames (e.g. play.jacqueb.me) → public server, Android 9+ blocks cleartext;
+                // use HTTPS on standard port (requires nginx proxy: location /rooms → localhost:1337).
+                System.Net.IPAddress dummy;
+                if (System.Net.IPAddress.TryParse(ServerIp, out dummy))
+                    WebUrl = "http://" + ServerIp + ":1337";
+                else
+                    WebUrl = "https://" + ServerIp;
+            }
             Log("WebUrl=" + (WebUrl != "" ? WebUrl : "(not set)"));
             // Economy URL: hardcoded host unless overridden by ECONOMY_URL in server.cfg
             if (string.IsNullOrEmpty(EconomyUrl))
@@ -334,6 +374,103 @@ namespace CNRMods
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    //  CNR EVENT BUS — shared state populated by Photon OnEventCall receiver
+    // ══════════════════════════════════════════════════════════════════════════
+    public static class CnrEventBus
+    {
+        // Map URL sent by master; consumed by RedirectHook.ProcessPendingCnrEvents.
+        public static string PendingMapUrl = null;
+        // actorId → received skin id (read by CNRRemoteSkinRenderer each poll)
+        public static Dictionary<int, string> RemoteSkins = new Dictionary<int, string>();
+        // actorId → mod version announced via CNR event (used by kick logic)
+        public static Dictionary<int, string> PlayerVersions = new Dictionary<int, string>();
+        // Set when any client sends a version announcement; master re-broadcasts mapUrl.
+        public static bool NeedMapBroadcast = false;
+
+        // Called by PhotonNetwork.OnEventCall delegate — fires on Unity main thread.
+        // Signature matches PUN v1: delegate void EventCallback(byte, object, int)
+        public static void OnPhotonEventReceived(byte eventCode, object content, int senderId)
+        {
+            if (eventCode != ModEntry.CNR_EVENT_CODE) return;
+            var ht = content as System.Collections.Hashtable;
+            if (ht == null) return;
+            if (ht.ContainsKey("mapUrl"))
+            {
+                string url = ht["mapUrl"] as string;
+                if (!string.IsNullOrEmpty(url)) PendingMapUrl = url;
+            }
+            if (ht.ContainsKey("skin"))
+            {
+                string skin = ht["skin"] as string;
+                if (!string.IsNullOrEmpty(skin)) RemoteSkins[senderId] = skin;
+            }
+            if (ht.ContainsKey("version"))
+            {
+                string ver = ht["version"] as string;
+                if (!string.IsNullOrEmpty(ver))
+                {
+                    PlayerVersions[senderId] = ver;
+                    NeedMapBroadcast = true; // new joiner announced — master should re-send mapUrl
+                }
+            }
+            ModEntry.Log("CnrEvent[" + senderId + "]:"
+                + (ht.ContainsKey("mapUrl")  ? " mapUrl="  + ht["mapUrl"]  : "")
+                + (ht.ContainsKey("skin")    ? " skin="    + ht["skin"]    : "")
+                + (ht.ContainsKey("version") ? " version=" + ht["version"] : ""));
+        }
+
+        // Clear per-room state when leaving a room.
+        public static void OnLeftRoom()
+        {
+            PendingMapUrl = null;
+            RemoteSkins.Clear();
+            PlayerVersions.Clear();
+            NeedMapBroadcast = false;
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  PHOTON LISTENER PROXY — wraps NetworkingPeer.externalListener to capture
+    //  CNR custom events (code 199) forwarding everything else to the original.
+    // ══════════════════════════════════════════════════════════════════════════
+    internal class CnrPhotonListenerProxy : IPhotonPeerListener
+    {
+        private readonly IPhotonPeerListener _original;
+        internal CnrPhotonListenerProxy(IPhotonPeerListener original) { _original = original; }
+
+        public void DebugReturn(DebugLevel level, string message)
+        {
+            _original.DebugReturn(level, message);
+        }
+
+        public void OnEvent(EventData photonEvent)
+        {
+            if (photonEvent.Code == ModEntry.CNR_EVENT_CODE)
+            {
+                // Parameter 245 = event data (Hashtable passed to OpRaiseEvent)
+                // Parameter 254 = sender ActorNr
+                int senderId = photonEvent.Parameters.ContainsKey((byte)254)
+                    ? (int)photonEvent[(byte)254] : 0;
+                var ht = photonEvent.Parameters.ContainsKey((byte)245)
+                    ? photonEvent[(byte)245] as System.Collections.Hashtable : null;
+                if (ht != null)
+                    CnrEventBus.OnPhotonEventReceived(photonEvent.Code, ht, senderId);
+            }
+            _original.OnEvent(photonEvent);
+        }
+
+        public void OnOperationResponse(OperationResponse operationResponse)
+        {
+            _original.OnOperationResponse(operationResponse);
+        }
+
+        public void OnStatusChanged(StatusCode statusCode)
+        {
+            _original.OnStatusChanged(statusCode);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     //  REDIRECT HOOK — Photon TCP redirect + room poll + map broadcast + kick
     // ══════════════════════════════════════════════════════════════════════════
     public class RedirectHook : MonoBehaviour
@@ -419,10 +556,40 @@ namespace CNRMods
         int   _heartbeatCount = 0;
         private void Update()
         {
+            ProcessPendingCnrEvents();
             _pollTimer -= Time.deltaTime;
             if (_pollTimer > 0f) return;
             _pollTimer = PollInterval;
             PollRoomState();
+        }
+
+        // Consume events delivered by CnrEventBus.OnPhotonEventReceived.
+        private void ProcessPendingCnrEvents()
+        {
+            // Client received a map URL from master—download it.
+            if (!string.IsNullOrEmpty(CnrEventBus.PendingMapUrl))
+            {
+                string url = CnrEventBus.PendingMapUrl;
+                CnrEventBus.PendingMapUrl = null;
+                PlayerPrefs.SetString("CNRMod_ActiveMapURL", url);
+                PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
+                PlayerPrefs.Save();
+                StartCoroutine(DownloadMap(url));
+                ModEntry.Log("CnrEvent: received mapUrl=" + url + ", downloading");
+            }
+            // A new player announced their version — re-broadcast mapUrl so they receive it.
+            if (_isMaster && CnrEventBus.NeedMapBroadcast)
+            {
+                CnrEventBus.NeedMapBroadcast = false;
+                string url = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
+                if (!string.IsNullOrEmpty(url))
+                {
+                    var ht = new System.Collections.Hashtable();
+                    ht["mapUrl"] = url;
+                    ModEntry.RaiseCnrEvent(ht);
+                    ModEntry.Log("Master: re-broadcast mapUrl=" + url + " (triggered by new joiner)");
+                }
+            }
         }
 
         // ── Room state machine ────────────────────────────────────────────────
@@ -467,9 +634,11 @@ namespace CNRMods
             string roomName = GetRoomName(pnt);
             ModEntry.Log("Room: " + (roomName ?? "(unknown)"));
 
-            // Delay Photon property broadcasts by a few seconds to avoid triggering
-            // the game's OnRoomPropertiesUpdate / OnPhotonPlayerPropertiesChanged
-            // handlers during room initialization, which ANR-freezes on slow devices.
+            // Hook Photon event callback so we can receive CNR events.
+            ModEntry.InstallEventListener();
+
+            // Delay CNR event broadcast 3s so it fires after the join storm
+            // (event 255 OnPhotonPlayerConnected → SendMonoMessage → freeze on slow devices).
             StartCoroutine(BroadcastPropsDelayed(pnt));
 
             // Spawn skin renderer immediately — just GameObject creation, no Photon calls.
@@ -487,53 +656,43 @@ namespace CNRMods
                 }
             }
 
-            // Map operations are async (coroutines) so start them immediately.
             if (asMaster)
             {
                 string url = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
                 if (!string.IsNullOrEmpty(url))
                 {
-                    SetRoomProp(pnt, "CNR_MAP_URL", url);
+                    // Raise CNR event to all current members; re-raised when new joiners announce themselves.
+                    var mapHt = new System.Collections.Hashtable();
+                    mapHt["mapUrl"] = url;
+                    ModEntry.RaiseCnrEvent(mapHt);
+                    // Also POST to node server for web-console display.
                     if (!string.IsNullOrEmpty(ModEntry.WebUrl) && !string.IsNullOrEmpty(roomName))
                         StartCoroutine(PostRoomToServer(roomName, url));
                     StartCoroutine(DownloadMap(url));
-                    ModEntry.Log("Master: registered map " + url);
+                    ModEntry.Log("Master: broadcast mapUrl=" + url);
                 }
             }
-            else
-            {
-                if (!string.IsNullOrEmpty(ModEntry.WebUrl) && !string.IsNullOrEmpty(roomName))
-                    StartCoroutine(FetchAndCacheMap(roomName));
-                else
-                {
-                    string roomUrl = GetRoomPropStr(pnt, "CNR_MAP_URL");
-                    if (!string.IsNullOrEmpty(roomUrl)) StartCoroutine(DownloadMap(roomUrl));
-                }
-            }
+            // Clients receive mapUrl via CnrEvent (ProcessPendingCnrEvents handles it).
         }
 
-        // Broadcasts our mod version and DLC skin as Photon player properties after a
-        // short delay so the game's own property-change callbacks don't fire during the
-        // room-join initialization sequence (causes ANR freeze on slow devices like WSA).
+        // Broadcasts CNR mod version and DLC skin via Photon RaiseEvent after a short
+        // delay so it fires well after the join storm (SendMonoMessage on slow devices).
         private IEnumerator BroadcastPropsDelayed(Type pnt)
         {
             yield return new WaitForSeconds(3f);
-            // Only set version prop if we're a client (master never gets kicked).
-            // Only broadcast DLC skin if we actually have one — calling SetCustomProperties
-            // with an empty skin triggers the game's OnPhotonPlayerPropertiesChanged callback
-            // which freezes on slow devices (WSA).
-            if (!ModEntry.IsMaster)
-                SetPlayerProp(pnt, "CNR_MOD_VERSION", ModEntry.Version);
             string skin = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
-            if (!string.IsNullOrEmpty(skin))
-                ModEntry.BroadcastDlcSkin(skin);
-            ModEntry.Log("Props broadcast (delayed): v" + ModEntry.Version + " skin=" + (string.IsNullOrEmpty(skin) ? "(none)" : skin));
+            var ht = new System.Collections.Hashtable();
+            ht["version"] = ModEntry.Version;
+            if (!string.IsNullOrEmpty(skin)) ht["skin"] = skin;
+            ModEntry.RaiseCnrEvent(ht);
+            ModEntry.Log("CnrEvent broadcast (delayed): v" + ModEntry.Version + " skin=" + (string.IsNullOrEmpty(skin) ? "(none)" : skin));
         }
 
         private void OnLeftRoom()
         {
             ModEntry.Log("Left room");
             _pendingVerify.Clear();
+            CnrEventBus.OnLeftRoom();
             _pollDebugCount = 0; // re-enable verbose logging for next room
             // Don't clear map prefs if we're transitioning into a game scene —
             // Photon briefly reports inRoom=false during the level load, so
@@ -581,23 +740,6 @@ namespace CNRMods
             else ModEntry.Log("PostRoom OK: " + www.text);
         }
 
-        // GET /rooms/<roomName> from node server, cache the map URL, start download
-        private IEnumerator FetchAndCacheMap(string roomName)
-        {
-            string fetchUrl = ModEntry.SanitizeUrl(ModEntry.WebUrl + "/rooms/" + Uri.EscapeDataString(roomName));
-            ModEntry.Log("Client: GET " + fetchUrl);
-            var www = new WWW(fetchUrl);
-            yield return www;
-            if (!string.IsNullOrEmpty(www.error)) { ModEntry.Log("FetchRoom error: " + www.error); yield break; }
-            string mapUrl = ModEntry.ParseJsonStringValue(www.text, "mapUrl");
-            if (string.IsNullOrEmpty(mapUrl)) { ModEntry.Log("FetchRoom: no mapUrl in: " + www.text); yield break; }
-            ModEntry.Log("Client: got mapUrl=" + mapUrl);
-            PlayerPrefs.SetString("CNRMod_ActiveMapURL", mapUrl);
-            PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
-            PlayerPrefs.Save();
-            StartCoroutine(DownloadMap(mapUrl));
-        }
-
         private static string EscapeJson(string s)
         {
             if (s == null) return "";
@@ -619,7 +761,8 @@ namespace CNRMods
                 {
                     if (player == null) continue;
                     int    pid = GetIntProp(player, "ID");
-                    string ver = GetPlayerCustomProp(player, "CNR_MOD_VERSION");
+                    string ver;
+                    CnrEventBus.PlayerVersions.TryGetValue(pid, out ver);
                     current.Add(pid);
 
                     if (!_pendingVerify.ContainsKey(pid))
@@ -699,41 +842,7 @@ namespace CNRMods
             catch (Exception ex) { ModEntry.Log("DownloadMap save error: " + ex.Message); }
         }
 
-        // ── Photon prop helpers ───────────────────────────────────────────────
-        private void SetRoomProp(Type pnt, string key, string value)
-        {
-            try
-            {
-                PropertyInfo rp = pnt.GetProperty("room", BindingFlags.Static | BindingFlags.Public);
-                if (rp == null) return;
-                object room = rp.GetValue(null, null);
-                if (room == null) return;
-                var ht = new System.Collections.Hashtable();
-                ht[key] = value;
-                MethodInfo m = room.GetType().GetMethod("SetCustomProperties",
-                    new Type[] { typeof(System.Collections.Hashtable) });
-                if (m != null) m.Invoke(room, new object[] { ht });
-            }
-            catch (Exception ex) { ModEntry.Log("SetRoomProp error: " + ex.Message); }
-        }
-
-        private void SetPlayerProp(Type pnt, string key, string value)
-        {
-            try
-            {
-                PropertyInfo pp = pnt.GetProperty("player", BindingFlags.Static | BindingFlags.Public);
-                if (pp == null) return;
-                object player = pp.GetValue(null, null);
-                if (player == null) return;
-                var ht = new System.Collections.Hashtable();
-                ht[key] = value;
-                MethodInfo m = player.GetType().GetMethod("SetCustomProperties",
-                    new Type[] { typeof(System.Collections.Hashtable) });
-                if (m != null) m.Invoke(player, new object[] { ht });
-            }
-            catch (Exception ex) { ModEntry.Log("SetPlayerProp error: " + ex.Message); }
-        }
-
+        // ── Photon prop helpers (read-only — write path replaced by RaiseCnrEvent) ──────────
         private string GetRoomPropStr(Type pnt, string key)
         {
             try
@@ -1332,8 +1441,8 @@ namespace CNRMods
                         File.Copy(cachePath, stdCachePath, true);
                         PlayerPrefs.SetInt("CNRMod_MapCacheReady", 1);
                         PlayerPrefs.SetString("CNRMod_DonorScene", loadScene);
-                        PlayerPrefs.SetString("CNRMod_ActiveMapURL", "");
-                        ModEntry.Log("Official map '" + om.Name + "': used pre-cached JSON (donor=" + loadScene + ")");
+                        PlayerPrefs.SetString("CNRMod_ActiveMapURL", om.Url);  // keep URL so master can distribute it to joining clients
+                        ModEntry.Log("Official map '" + om.Name + "': used pre-cached JSON (donor=" + loadScene + ")");;
                     }
                     catch (Exception copyEx)
                     {
@@ -3558,21 +3667,27 @@ namespace CNRMods
 
         void PollRemotePlayers()
         {
+            // Build active actor ID set for cleanup.
             object[] others = ModEntry.GetPhotonOtherPlayers();
             var activeIds = new HashSet<int>();
             foreach (object ph in others)
             {
                 if (ph == null) continue;
-                int    actorId = ModEntry.GetPhotonPlayerId(ph);
-                activeIds.Add(actorId);
-                string dlcId   = ModEntry.ReadDlcSkinProp(ph);
+                activeIds.Add(ModEntry.GetPhotonPlayerId(ph));
+            }
+
+            // Apply skins announced via CNR events (CnrEventBus.RemoteSkins).
+            foreach (var kv in CnrEventBus.RemoteSkins)
+            {
+                int    actorId = kv.Key;
+                string dlcId   = kv.Value;
                 if (string.IsNullOrEmpty(dlcId)) continue;
 
                 string prev;
                 if (_applied.TryGetValue(actorId, out prev) && prev == dlcId) continue;
 
                 Texture2D tex = ContentManager.GetSkinTexture(dlcId);
-                if (tex == null) continue;  // we don't have this skin downloaded
+                if (tex == null) continue;  // skin not yet downloaded
 
                 if (ApplyToActor(actorId, tex))
                 {
@@ -3580,7 +3695,8 @@ namespace CNRMods
                     ModEntry.Log("CNRRemoteSkins: applied [" + dlcId + "] to actor " + actorId);
                 }
             }
-            // Clean up departed actors
+
+            // Clean up departed actors.
             var gone = new List<int>();
             foreach (int id in _applied.Keys) if (!activeIds.Contains(id)) gone.Add(id);
             foreach (int id in gone) _applied.Remove(id);
