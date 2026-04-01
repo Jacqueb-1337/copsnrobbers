@@ -47,7 +47,7 @@ if ($method === 'GET') {
     auto_purge_mail($pdo, $player['id']);
 
     $q = $pdo->prepare(
-        "SELECT id, subject, body, coins, gems, claimed, sent_at
+        "SELECT id, subject, body, coins, gems, spins, claimed, sent_at
            FROM player_mail
           WHERE player_id = ?
           ORDER BY id DESC
@@ -61,6 +61,7 @@ if ($method === 'GET') {
         $r['id']      = (int)$r['id'];
         $r['coins']   = (int)$r['coins'];
         $r['gems']    = (int)$r['gems'];
+        $r['spins']   = (int)$r['spins'];
         $r['claimed'] = (int)$r['claimed'];
         $r['sent_at'] = (int)$r['sent_at'];
     }
@@ -116,6 +117,14 @@ if ($method === 'POST') {
                 time(),
             ]);
         }
+
+        if ((int)$mail['spins'] > 0) {
+            $pdo->prepare(
+                "INSERT INTO wheel_spins (player_id, last_spin_at, bonus_spins) VALUES (?, 0, ?)
+                 ON CONFLICT(player_id) DO UPDATE SET bonus_spins = bonus_spins + ?"
+            )->execute([$player['id'], (int)$mail['spins'], (int)$mail['spins']]);
+        }
+
         $pdo->commit();
     } catch (\Throwable $e) {
         $pdo->rollBack();
@@ -125,7 +134,13 @@ if ($method === 'POST') {
     $bal = $pdo->prepare("SELECT coins, gems FROM accounts WHERE id = ?");
     $bal->execute([$player['id']]);
     $b = $bal->fetch();
-    ok(['coins' => (int)$b['coins'], 'gems' => (int)$b['gems']]);
+
+    $ws = $pdo->prepare("SELECT bonus_spins FROM wheel_spins WHERE player_id = ?");
+    $ws->execute([$player['id']]);
+    $wsRow = $ws->fetch();
+    $bonus_spins = $wsRow ? (int)$wsRow['bonus_spins'] : 0;
+
+    ok(['coins' => (int)$b['coins'], 'gems' => (int)$b['gems'], 'bonus_spins' => $bonus_spins]);
 }
 
 fail('method_not_allowed', 405);

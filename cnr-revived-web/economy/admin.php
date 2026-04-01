@@ -1,4 +1,8 @@
 <?php
+// Permanent redirect — admin panel has moved to /economy/admin/
+header('Location: admin/', true, 301);
+exit;
+
 // admin.php — full admin dashboard with session-based login
 // To change the password, run:  php -r "echo password_hash('newpass', PASSWORD_DEFAULT);"
 // and replace the ADMIN_PASS_HASH constant below.
@@ -113,6 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $body    = trim($_POST['body']      ?? '');
         $coins   = (int)($_POST['coins']    ?? 0);
         $gems    = (int)($_POST['gems']     ?? 0);
+        $spins   = (int)($_POST['spins']    ?? 0);
 
         if ($subject === '') {
             $flash = 'Subject is required.'; $flash_ok = false;
@@ -120,12 +125,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Global broadcast — insert a row for every registered player
             $all = $pdo->query("SELECT id FROM accounts")->fetchAll();
             $stmt = $pdo->prepare(
-                "INSERT INTO player_mail (player_id, subject, body, coins, gems, claimed, sent_at)
-                 VALUES (?, ?, ?, ?, ?, 0, ?)"
+                "INSERT INTO player_mail (player_id, subject, body, coins, gems, spins, claimed, sent_at)
+                 VALUES (?, ?, ?, ?, ?, ?, 0, ?)"
             );
             $now = time();
             foreach ($all as $p) {
-                $stmt->execute([$p['id'], $subject, $body, max(0,$coins), max(0,$gems), $now]);
+                $stmt->execute([$p['id'], $subject, $body, max(0,$coins), max(0,$gems), max(0,$spins), $now]);
             }
             $flash = 'Global mail sent to ' . count($all) . ' players.';
         } elseif ($pid === '') {
@@ -137,9 +142,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $flash = 'Player not found.'; $flash_ok = false;
             } else {
                 $pdo->prepare(
-                    "INSERT INTO player_mail (player_id, subject, body, coins, gems, claimed, sent_at)
-                     VALUES (?, ?, ?, ?, ?, 0, ?)"
-                )->execute([$pid, $subject, $body, max(0, $coins), max(0, $gems), time()]);
+                    "INSERT INTO player_mail (player_id, subject, body, coins, gems, spins, claimed, sent_at)
+                     VALUES (?, ?, ?, ?, ?, ?, 0, ?)"
+                )->execute([$pid, $subject, $body, max(0, $coins), max(0, $gems), max(0, $spins), time()]);
                 $flash = 'Mail sent to player ' . htmlspecialchars($pid) . '.';
             }
         }
@@ -298,7 +303,7 @@ $players = $pdo->query(
 
 $recent_mail = $pdo->query("
     SELECT m.id, m.sent_at, m.subject, m.coins AS m_coins, m.gems AS m_gems,
-           m.claimed, p.display_name
+           m.spins AS m_spins, m.claimed, p.display_name
       FROM player_mail m JOIN accounts p ON p.id = m.player_id
      ORDER BY m.id DESC LIMIT 100
 ")->fetchAll();
@@ -407,6 +412,8 @@ input[type=search]{background:#161b22;border:1px solid #30363d;border-radius:4px
         <input type="number" name="coins" value="0" min="0" max="99999" style="max-width:100px">
         <label style="min-width:60px">Gems</label>
         <input type="number" name="gems"  value="0" min="0" max="9999"  style="max-width:100px">
+        <label style="min-width:70px">Spins</label>
+        <input type="number" name="spins" value="0" min="0" max="99"    style="max-width:80px">
       </div>
       <button type="submit">Send Mail</button>
     </form>
@@ -480,7 +487,7 @@ input[type=search]{background:#161b22;border:1px solid #30363d;border-radius:4px
 <!-- Mail log tab -->
 <div class="pane" id="pane-mail">
   <table>
-    <tr><th>#</th><th>Sent</th><th>To</th><th>Subject</th><th>Coins</th><th>Gems</th><th>Status</th></tr>
+    <tr><th>#</th><th>Sent</th><th>To</th><th>Subject</th><th>Coins</th><th>Gems</th><th>Spins</th><th>Status</th></tr>
     <?php foreach ($recent_mail as $m): ?>
     <tr>
       <td><?= (int)$m['id'] ?></td>
@@ -489,6 +496,7 @@ input[type=search]{background:#161b22;border:1px solid #30363d;border-radius:4px
       <td><?= htmlspecialchars($m['subject']) ?></td>
       <td class="<?= $m['m_coins'] > 0 ? 'pos' : '' ?>"><?= (int)$m['m_coins'] ?></td>
       <td class="<?= $m['m_gems']  > 0 ? 'pos' : '' ?>"><?= (int)$m['m_gems'] ?></td>
+      <td class="<?= (int)($m['m_spins'] ?? 0) > 0 ? 'pos' : '' ?>"><?= (int)($m['m_spins'] ?? 0) ?></td>
       <td class="<?= $m['claimed'] ? 'claimed' : 'unclaimed' ?>"><?= $m['claimed'] ? '✓ claimed' : 'pending' ?></td>
     </tr>
     <?php endforeach; ?>

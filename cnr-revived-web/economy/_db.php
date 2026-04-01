@@ -121,6 +121,8 @@ function init_schema(PDO $pdo): void {
     try { $pdo->exec("ALTER TABLE content_items ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT ''"); } catch (Exception $e) {}
     try { $pdo->exec("ALTER TABLE content_items ADD COLUMN file_hash TEXT NOT NULL DEFAULT ''"); } catch (Exception $e) {}
     try { $pdo->exec("ALTER TABLE content_items ADD COLUMN thumbnail_hash TEXT NOT NULL DEFAULT ''"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE player_mail ADD COLUMN spins INTEGER NOT NULL DEFAULT 0"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE wheel_spins ADD COLUMN bonus_spins INTEGER NOT NULL DEFAULT 0"); } catch (Exception $e) {}
 }
 
 // ---------- one-time migration: players → accounts + devices ------------------
