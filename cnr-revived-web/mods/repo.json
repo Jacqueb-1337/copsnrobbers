@@ -221,11 +221,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.1.6",
+      "latestVersion": "2.1.7",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.1.7",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.7.dll",
+          "changelog": "Fix custom map not loading on joining clients: MapLoader.TriggerBuildIfIdle() now called by DownloadMap after caching, starting the hold+build pipeline even when OnLevelWasLoaded already bailed out (Photon mapUrl event arrives after scene load). Fix kick loop: master NeedMapBroadcast re-broadcast now includes version+skin so late-arriving master learns all players' versions. Fix: non-master players also re-announce version+skin to new joiners (NeedSelfAnnounce). Fix _eventListenerInstalled stale flag: proxy is now installed against the live networkingPeer on each room join instead of skipping reinstall after reconnects."
+        },
         {
           "version": "2.1.6",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.6.dll",

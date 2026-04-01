@@ -81,10 +81,11 @@ namespace CNRMods
         // Inject CnrPhotonListenerProxy into NetworkingPeer.externalListener to receive CNR events.
         // NetworkingPeer.OnEvent() calls externalListener.OnEvent() after its own switch, so ALL
         // events (including custom codes like 199) reach the proxy without modifying game code.
+        // NOTE: no static guard here — checked per call against the live networkingPeer so that
+        // a new peer instance created after a reconnect always gets the proxy installed.
         private static bool _eventListenerInstalled = false;
         public static void InstallEventListener()
         {
-            if (_eventListenerInstalled) return;
             try
             {
                 Type pnt = null;
@@ -384,8 +385,10 @@ namespace CNRMods
         public static Dictionary<int, string> RemoteSkins = new Dictionary<int, string>();
         // actorId → mod version announced via CNR event (used by kick logic)
         public static Dictionary<int, string> PlayerVersions = new Dictionary<int, string>();
-        // Set when any client sends a version announcement; master re-broadcasts mapUrl.
+        // Set when any client sends a version announcement; master re-broadcasts mapUrl+version+skin.
         public static bool NeedMapBroadcast = false;
+        // Set when a new joiner is detected; non-master players re-announce their version+skin.
+        public static bool NeedSelfAnnounce = false;
 
         // Called by PhotonNetwork.OnEventCall delegate — fires on Unity main thread.
         // Signature matches PUN v1: delegate void EventCallback(byte, object, int)
@@ -410,7 +413,8 @@ namespace CNRMods
                 if (!string.IsNullOrEmpty(ver))
                 {
                     PlayerVersions[senderId] = ver;
-                    NeedMapBroadcast = true; // new joiner announced — master should re-send mapUrl
+                    NeedMapBroadcast = true;   // master: re-broadcast mapUrl+version+skin
+                    NeedSelfAnnounce = true;   // non-masters: re-announce to this new joiner
                 }
             }
             ModEntry.Log("CnrEvent[" + senderId + "]:"
@@ -426,6 +430,7 @@ namespace CNRMods
             RemoteSkins.Clear();
             PlayerVersions.Clear();
             NeedMapBroadcast = false;
+            NeedSelfAnnounce = false;
         }
     }
 
@@ -577,18 +582,32 @@ namespace CNRMods
                 StartCoroutine(DownloadMap(url));
                 ModEntry.Log("CnrEvent: received mapUrl=" + url + ", downloading");
             }
-            // A new player announced their version — re-broadcast mapUrl so they receive it.
+            // A new player announced their version — re-broadcast mapUrl+version+skin so they
+            // know both the active map URL and this player's identity (prevents kick loop,
+            // makes skins visible to late joiners).
             if (_isMaster && CnrEventBus.NeedMapBroadcast)
             {
                 CnrEventBus.NeedMapBroadcast = false;
                 string url = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
-                if (!string.IsNullOrEmpty(url))
-                {
-                    var ht = new System.Collections.Hashtable();
-                    ht["mapUrl"] = url;
-                    ModEntry.RaiseCnrEvent(ht);
-                    ModEntry.Log("Master: re-broadcast mapUrl=" + url + " (triggered by new joiner)");
-                }
+                var ht = new System.Collections.Hashtable();
+                if (!string.IsNullOrEmpty(url)) ht["mapUrl"] = url;
+                ht["version"] = ModEntry.Version;
+                string skin = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
+                if (!string.IsNullOrEmpty(skin)) ht["skin"] = skin;
+                ModEntry.RaiseCnrEvent(ht);
+                ModEntry.Log("Master: re-broadcast to new joiner (mapUrl=" + (string.IsNullOrEmpty(url) ? "(none)" : url) + " v" + ModEntry.Version + ")");
+            }
+            // Re-announce our own version+skin when we detect a new joiner (non-master path).
+            // Ensures every existing player is visible to the newcomer, not just master.
+            if (!_isMaster && CnrEventBus.NeedSelfAnnounce)
+            {
+                CnrEventBus.NeedSelfAnnounce = false;
+                var ht = new System.Collections.Hashtable();
+                ht["version"] = ModEntry.Version;
+                string skin = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
+                if (!string.IsNullOrEmpty(skin)) ht["skin"] = skin;
+                ModEntry.RaiseCnrEvent(ht);
+                ModEntry.Log("Non-master: re-announced version+skin to new joiner");
             }
         }
 
@@ -838,6 +857,8 @@ namespace CNRMods
                 PlayerPrefs.SetInt("CNRMod_MapCacheReady", 1);
                 PlayerPrefs.Save();
                 ModEntry.Log("Map cached (" + json.Length + " bytes)");
+                // Wake MapLoader if it already bailed out before this event arrived.
+                MapLoader.TriggerBuildIfIdle();
             }
             catch (Exception ex) { ModEntry.Log("DownloadMap save error: " + ex.Message); }
         }
@@ -1681,6 +1702,20 @@ namespace CNRMods
             // block on the same physics job and UnityMain never processes the next frame.
             // TeleportToSpawn (and RespawnWatcher.DoTeleport) re-enable CC at the normal
             // in-scene spawn position once the map is built.
+        }
+
+        // Called by RedirectHook.DownloadMap after successfully caching a received map.
+        // Starts the hold+build pipeline when the Photon mapUrl event arrived AFTER
+        // OnLevelWasLoaded already decided to skip (client-side timing race).
+        public static void TriggerBuildIfIdle()
+        {
+            if (Array.IndexOf(BASE_SCENES, Application.loadedLevelName) < 0) return;
+            MapLoader ml = (MapLoader)UnityEngine.Object.FindObjectOfType(typeof(MapLoader));
+            if (ml == null || ml._spawnRunning) return;
+            ml._holdingPlayer = true;
+            ml.StartCoroutine(ml.HoldAtLoadingPos());
+            ml.StartCoroutine(ml.WaitAndSpawn());
+            ModEntry.Log("MapLoader: late build triggered (map received from master)");
         }
 
         void OnLevelWasLoaded(int level)
