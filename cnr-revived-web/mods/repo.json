@@ -221,11 +221,26 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.1.0",
+      "latestVersion": "2.1.3",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.1.3",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.3.dll",
+          "changelog": "Fix WSA/slow-device freeze on room join: ApplyToActor was calling FindObjectsOfType(MonoBehaviour) — scanning every MonoBehaviour in the scene plus reflection on each, causing ANR freezes. Now scans only PhotonView components (handful vs thousands) with cached property lookup."
+        },
+        {
+          "version": "2.1.2",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.2.dll",
+          "changelog": "Fix room join detection: this PUN version has no PhotonNetwork.inRoom — now checks room != null. This was silently returning false always, breaking OnEnteredRoom, BroadcastDlcSkin, CNRRemoteSkinRenderer, map sync, and kick logic."
+        },
+        {
+          "version": "2.1.1",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.1.dll",
+          "changelog": "Fix DLC skin not showing on clients who join an in-progress game. CNRRemoteSkinRenderer is now also spawned on room join when the game scene is already loaded."
+        },
         {
           "version": "2.1.0",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.0.dll",
@@ -448,7 +463,6 @@
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
       "latestVersion": "2.0.23",
-      "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
