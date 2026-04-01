@@ -518,10 +518,16 @@ namespace CNRMods
         private IEnumerator BroadcastPropsDelayed(Type pnt)
         {
             yield return new WaitForSeconds(3f);
-            // Set as PLAYER property so CheckKickPlayers can read it.
-            SetPlayerProp(pnt, "CNR_MOD_VERSION", ModEntry.Version);
-            ModEntry.BroadcastDlcSkin(PlayerPrefs.GetString("CNR_EquippedDLCSkin", ""));
-            ModEntry.Log("Props broadcast (delayed): v" + ModEntry.Version);
+            // Only set version prop if we're a client (master never gets kicked).
+            // Only broadcast DLC skin if we actually have one — calling SetCustomProperties
+            // with an empty skin triggers the game's OnPhotonPlayerPropertiesChanged callback
+            // which freezes on slow devices (WSA).
+            if (!ModEntry.IsMaster)
+                SetPlayerProp(pnt, "CNR_MOD_VERSION", ModEntry.Version);
+            string skin = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
+            if (!string.IsNullOrEmpty(skin))
+                ModEntry.BroadcastDlcSkin(skin);
+            ModEntry.Log("Props broadcast (delayed): v" + ModEntry.Version + " skin=" + (string.IsNullOrEmpty(skin) ? "(none)" : skin));
         }
 
         private void OnLeftRoom()
