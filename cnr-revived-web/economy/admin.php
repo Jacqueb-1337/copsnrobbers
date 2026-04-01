@@ -147,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($act === 'add_content') {
         $cid   = preg_replace('/[^a-z0-9_\-]/i', '_', trim($_POST['content_id']   ?? ''));
-        $ctype = in_array($_POST['ctype'] ?? '', ['map','texture','data']) ? $_POST['ctype'] : 'map';
+        $ctype = in_array($_POST['ctype'] ?? '', ['map','texture','data','skin','gun']) ? $_POST['ctype'] : 'map';
         $cname = trim($_POST['cname'] ?? '');
         $curl  = trim($_POST['curl']  ?? '');
         $base  = trim($_POST['base_scene']    ?? 'FreeRun3_1');
@@ -204,7 +204,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cid  = trim($_POST['content_id']  ?? '');
         $sort = (int)($_POST['sort_order'] ?? 0);
         $pdo->prepare("UPDATE content_items SET sort_order = ? WHERE id = ?")->execute([$sort,$cid]);
-        $flash = 'Sort order updated.';
+        $flash = 'Price for "' . htmlspecialchars($cid) . '" set to ' . $sort . ' coins.';
     }
 
     if ($act === 'update_hash') {
@@ -656,6 +656,108 @@ input[type=search]{background:#161b22;border:1px solid #30363d;border-radius:4px
     <?php endforeach; ?>
   </table>
 
+  <h2>Custom Skins</h2>
+  <table id="content-skin-tbl">
+    <tr><th>Price</th><th>ID</th><th>Slot key</th><th>Display name</th><th>Body material</th><th>Texture URL</th><th>Hash</th><th>Status</th><th>Actions</th></tr>
+    <?php foreach ($content_items as $c): if ($c['type'] !== 'skin') continue; ?>
+    <tr>
+      <td><?= (int)$c['sort_order'] ?> coins</td>
+      <td><code><?= htmlspecialchars($c['id']) ?></code></td>
+      <td><?= htmlspecialchars($c['data_key']) ?></td>
+      <td><?= htmlspecialchars($c['name']) ?></td>
+      <td><?= htmlspecialchars($c['material_name']) ?></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($c['url']) ?>"><?= htmlspecialchars($c['url']) ?></td>
+      <td style="white-space:nowrap">
+        <?php if (!empty($c['file_hash'])): ?>
+          <code title="<?= htmlspecialchars($c['file_hash']) ?>" style="color:#58a6ff"><?= substr(htmlspecialchars($c['file_hash']),0,8) ?>…</code>
+        <?php else: ?>
+          <span style="color:#8b949e">none</span>
+        <?php endif; ?>
+        <form method="POST" style="display:inline;margin-left:4px">
+          <input type="hidden" name="act" value="update_hash">
+          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
+          <input type="text" name="file_hash" id="fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>" placeholder="md5 hex" maxlength="32"
+                 style="width:90px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"
+                 value="<?= htmlspecialchars($c['file_hash'],ENT_QUOTES) ?>">
+          <button class="action-btn" type="submit" style="font-size:11px">Set</button>
+          <button type="button" class="action-btn" style="font-size:11px;margin-left:2px"
+            onclick="calcHash('<?= htmlspecialchars($c['url'],ENT_QUOTES) ?>',document.getElementById('fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>'),this,true)">Calc</button>
+        </form>
+      </td>
+      <td class="<?= $c['enabled'] ? 'pos' : 'neg' ?>"><?= $c['enabled'] ? 'enabled' : 'disabled' ?></td>
+      <td>
+        <form method="POST" style="display:inline">
+          <input type="hidden" name="act" value="toggle_content">
+          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
+          <button class="action-btn" type="submit"><?= $c['enabled'] ? 'Disable' : 'Enable' ?></button>
+        </form>
+        <form method="POST" style="display:inline;margin-left:4px">
+          <input type="hidden" name="act" value="reorder_content">
+          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
+          <input type="number" name="sort_order" value="<?= (int)$c['sort_order'] ?>" min="0" style="width:70px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px">
+          <button class="action-btn" type="submit" style="font-size:11px">Set Price</button>
+        </form>
+        <form method="POST" style="display:inline" onsubmit="return confirm('Delete this item?')">
+          <input type="hidden" name="act" value="delete_content">
+          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
+          <button class="action-btn" type="submit" style="color:#f85149">Delete</button>
+        </form>
+      </td>
+    </tr>
+    <?php endforeach; ?>
+  </table>
+
+  <h2>Custom Guns</h2>
+  <table id="content-gun-tbl">
+    <tr><th>Price</th><th>ID</th><th>Gun key</th><th>Display name</th><th>Material</th><th>Data URL</th><th>Hash</th><th>Status</th><th>Actions</th></tr>
+    <?php foreach ($content_items as $c): if ($c['type'] !== 'gun') continue; ?>
+    <tr>
+      <td><?= (int)$c['sort_order'] ?> coins</td>
+      <td><code><?= htmlspecialchars($c['id']) ?></code></td>
+      <td><?= htmlspecialchars($c['data_key']) ?></td>
+      <td><?= htmlspecialchars($c['name']) ?></td>
+      <td><?= htmlspecialchars($c['material_name']) ?></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($c['url']) ?>"><?= htmlspecialchars($c['url']) ?></td>
+      <td style="white-space:nowrap">
+        <?php if (!empty($c['file_hash'])): ?>
+          <code title="<?= htmlspecialchars($c['file_hash']) ?>" style="color:#58a6ff"><?= substr(htmlspecialchars($c['file_hash']),0,8) ?>…</code>
+        <?php else: ?>
+          <span style="color:#8b949e">none</span>
+        <?php endif; ?>
+        <form method="POST" style="display:inline;margin-left:4px">
+          <input type="hidden" name="act" value="update_hash">
+          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
+          <input type="text" name="file_hash" id="fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>" placeholder="md5 hex" maxlength="32"
+                 style="width:90px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"
+                 value="<?= htmlspecialchars($c['file_hash'],ENT_QUOTES) ?>">
+          <button class="action-btn" type="submit" style="font-size:11px">Set</button>
+          <button type="button" class="action-btn" style="font-size:11px;margin-left:2px"
+            onclick="calcHash('<?= htmlspecialchars($c['url'],ENT_QUOTES) ?>',document.getElementById('fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>'),this,true)">Calc</button>
+        </form>
+      </td>
+      <td class="<?= $c['enabled'] ? 'pos' : 'neg' ?>"><?= $c['enabled'] ? 'enabled' : 'disabled' ?></td>
+      <td>
+        <form method="POST" style="display:inline">
+          <input type="hidden" name="act" value="toggle_content">
+          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
+          <button class="action-btn" type="submit"><?= $c['enabled'] ? 'Disable' : 'Enable' ?></button>
+        </form>
+        <form method="POST" style="display:inline;margin-left:4px">
+          <input type="hidden" name="act" value="reorder_content">
+          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
+          <input type="number" name="sort_order" value="<?= (int)$c['sort_order'] ?>" min="0" style="width:70px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px">
+          <button class="action-btn" type="submit" style="font-size:11px">Set Price</button>
+        </form>
+        <form method="POST" style="display:inline" onsubmit="return confirm('Delete this item?')">
+          <input type="hidden" name="act" value="delete_content">
+          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
+          <button class="action-btn" type="submit" style="color:#f85149">Delete</button>
+        </form>
+      </td>
+    </tr>
+    <?php endforeach; ?>
+  </table>
+
   <h2>Add Content Item</h2>
   <details id="add-content-box">
     <summary>Add new item</summary>
@@ -668,6 +770,8 @@ input[type=search]{background:#161b22;border:1px solid #30363d;border-radius:4px
             <option value="map">map</option>
             <option value="texture">texture</option>
             <option value="data">data</option>
+            <option value="skin">skin</option>
+            <option value="gun">gun</option>
           </select>
         </div>
         <div class="form-row">
@@ -694,15 +798,15 @@ input[type=search]{background:#161b22;border:1px solid #30363d;border-radius:4px
             onclick="calcHash(document.getElementById('add-curl').value,document.getElementById('add-fhash'),this,false)">Calc from URL</button>
         </div>
         <div id="cf-mat" class="form-row" style="display:none">
-          <label>Material name</label>
-          <input type="text" name="material_name" placeholder="pistol_body">
+          <label id="cf-mat-label">Material name</label>
+          <input type="text" name="material_name" id="cf-mat-input" placeholder="pistol_body">
         </div>
         <div id="cf-key" class="form-row" style="display:none">
-          <label>Data key</label>
-          <input type="text" name="data_key" placeholder="weapons_config">
+          <label id="cf-key-label">Data key</label>
+          <input type="text" name="data_key" id="cf-key-input" placeholder="weapons_config">
         </div>
         <div class="form-row">
-          <label>Sort order</label>
+          <label id="sort-order-label">Sort order</label>
           <input type="number" name="sort_order" value="0" style="max-width:80px">
         </div>
         <button type="submit">Add</button>
@@ -744,8 +848,34 @@ function updateContentForm() {
   var t = document.getElementById('ctype-sel').value;
   document.getElementById('cf-thumb').style.display = t==='map'     ? '' : 'none';
   document.getElementById('cf-hash' ).style.display = '';  // always show; Calc works for all types
-  document.getElementById('cf-mat' ).style.display = t==='texture' ? '' : 'none';
-  document.getElementById('cf-key' ).style.display = t==='data'    ? '' : 'none';
+  document.getElementById('cf-mat' ).style.display = (t==='texture'||t==='skin'||t==='gun') ? '' : 'none';
+  document.getElementById('cf-key' ).style.display = (t==='data'   ||t==='skin'||t==='gun') ? '' : 'none';
+
+  var matLabel  = document.getElementById('cf-mat-label');
+  var keyLabel  = document.getElementById('cf-key-label');
+  var keyInput  = document.getElementById('cf-key-input');
+  var matInput  = document.getElementById('cf-mat-input');
+  var sortLabel = document.getElementById('sort-order-label');
+
+  if (t === 'skin') {
+    matLabel.textContent  = 'Body material (e.g. Skin_34_2)';
+    matInput.placeholder  = 'Skin_34_2';
+    keyLabel.textContent  = 'Slot key (e.g. Skin_34)';
+    keyInput.placeholder  = 'Skin_34';
+    sortLabel.textContent = 'Price (coins)';
+  } else if (t === 'gun') {
+    matLabel.textContent  = 'Material name';
+    matInput.placeholder  = 'gun_body';
+    keyLabel.textContent  = 'Gun key (e.g. AK)';
+    keyInput.placeholder  = 'AK';
+    sortLabel.textContent = 'Price (coins)';
+  } else {
+    matLabel.textContent  = 'Material name';
+    matInput.placeholder  = 'pistol_body';
+    keyLabel.textContent  = 'Data key';
+    keyInput.placeholder  = 'weapons_config';
+    sortLabel.textContent = 'Sort order';
+  }
 }
 function filterTable(id, q) {
   q = q.toLowerCase();
