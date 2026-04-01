@@ -27,7 +27,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.56";
+        public const  string Version = "2.0.57";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -3005,12 +3005,15 @@ namespace CNRMods
             Material baseMat = vanillaBody[0];
             string   equippedDlcId = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
 
-            // If CurSettedSkinName is one of the 33 vanilla skins, the user has a vanilla
-            // skin equipped — don't let a stale CNR_EquippedDLCSkin override skinUsingId.
+            // vanillaSkinActive: true only when CurSettedSkinName is a vanilla skin AND
+            // CNR_EquippedDLCSkin is empty (cleared when a vanilla skin was last equipped).
+            // If CNR_EquippedDLCSkin is set, a DLC skin was last equipped — even if
+            // CurSettedSkinName still holds the old vanilla name (it is never updated for DLC).
             string curVanillaSkin = PlayerPrefs.GetString("CurSettedSkinName", "");
             bool vanillaSkinActive = false;
-            foreach (var sn in vanillaNames)
-                if (sn == curVanillaSkin) { vanillaSkinActive = true; break; }
+            if (string.IsNullOrEmpty(equippedDlcId))
+                foreach (var sn in vanillaNames)
+                    if (sn == curVanillaSkin) { vanillaSkinActive = true; break; }
 
             for (int i = 0; i < _dlcSkins.Length; i++)
             {
