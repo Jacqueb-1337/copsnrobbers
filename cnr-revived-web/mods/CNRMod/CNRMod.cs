@@ -27,7 +27,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.1.3";
+        public const  string Version = "2.1.4";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -415,6 +415,8 @@ namespace CNRMods
             }
         }
 
+        float _heartbeatTimer = 0f;
+        int   _heartbeatCount = 0;
         private void Update()
         {
             _pollTimer -= Time.deltaTime;
@@ -465,13 +467,12 @@ namespace CNRMods
             string roomName = GetRoomName(pnt);
             ModEntry.Log("Room: " + (roomName ?? "(unknown)"));
 
-            SetRoomProp(pnt, "CNR_MOD_VERSION", ModEntry.Version);
-            ModEntry.BroadcastDlcSkin(PlayerPrefs.GetString("CNR_EquippedDLCSkin", ""));
+            // Delay Photon property broadcasts by a few seconds to avoid triggering
+            // the game's OnRoomPropertiesUpdate / OnPhotonPlayerPropertiesChanged
+            // handlers during room initialization, which ANR-freezes on slow devices.
+            StartCoroutine(BroadcastPropsDelayed(pnt));
 
-            // If we joined a room while already in a game scene (e.g. joining a match
-            // in progress), OnLevelWasLoaded won't fire again so CNRRemoteSkinRenderer
-            // never gets spawned. Spawn it here if the current scene is a game scene
-            // and it isn't already present.
+            // Spawn skin renderer immediately — just GameObject creation, no Photon calls.
             if (ContentManager.OfficialSkins.Length > 0 &&
                 FindObjectOfType(typeof(CNRRemoteSkinRenderer)) == null)
             {
@@ -486,16 +487,15 @@ namespace CNRMods
                 }
             }
 
+            // Map operations are async (coroutines) so start them immediately.
             if (asMaster)
             {
                 string url = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
                 if (!string.IsNullOrEmpty(url))
                 {
                     SetRoomProp(pnt, "CNR_MAP_URL", url);
-                    // Tell node server — clients will query it on join
                     if (!string.IsNullOrEmpty(ModEntry.WebUrl) && !string.IsNullOrEmpty(roomName))
                         StartCoroutine(PostRoomToServer(roomName, url));
-                    // Download for local spawn
                     StartCoroutine(DownloadMap(url));
                     ModEntry.Log("Master: registered map " + url);
                 }
@@ -503,17 +503,25 @@ namespace CNRMods
             else
             {
                 if (!string.IsNullOrEmpty(ModEntry.WebUrl) && !string.IsNullOrEmpty(roomName))
-                {
-                    // Fetch URL from node server, then cache + MapLoader polling will spawn it
                     StartCoroutine(FetchAndCacheMap(roomName));
-                }
                 else
                 {
-                    // Fallback: read Photon room prop directly
                     string roomUrl = GetRoomPropStr(pnt, "CNR_MAP_URL");
                     if (!string.IsNullOrEmpty(roomUrl)) StartCoroutine(DownloadMap(roomUrl));
                 }
             }
+        }
+
+        // Broadcasts our mod version and DLC skin as Photon player properties after a
+        // short delay so the game's own property-change callbacks don't fire during the
+        // room-join initialization sequence (causes ANR freeze on slow devices like WSA).
+        private IEnumerator BroadcastPropsDelayed(Type pnt)
+        {
+            yield return new WaitForSeconds(3f);
+            // Set as PLAYER property so CheckKickPlayers can read it.
+            SetPlayerProp(pnt, "CNR_MOD_VERSION", ModEntry.Version);
+            ModEntry.BroadcastDlcSkin(PlayerPrefs.GetString("CNR_EquippedDLCSkin", ""));
+            ModEntry.Log("Props broadcast (delayed): v" + ModEntry.Version);
         }
 
         private void OnLeftRoom()
@@ -3534,6 +3542,7 @@ namespace CNRMods
             return null;
         }
 
+        int _updateCount = 0;
         void Update()
         {
             if (Time.time < _nextPoll) return;
