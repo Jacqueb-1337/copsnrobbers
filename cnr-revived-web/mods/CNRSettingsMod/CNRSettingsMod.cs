@@ -1046,10 +1046,10 @@ namespace CNRSettingsMod
         // Tuned for ~1.3 m peak height, ~0.25 s rise, ~0.25 s fall (0.50 s total).
         // Compare: original arc was ~0.9 m peak, 1.0 s total, uniform/flat.
         // Peak formula: h = (JumpInitialVel - 9.81)² / (2 * |JumpAscendGrav|)
-        //   JumpInitialVel=24 → ~2.5 m,  =22 → ~1.8 m,  =20 → ~1.3 m,  =18 → ~0.8 m
+        //   JumpInitialVel=24 → ~2.5 m,  =22 → ~1.8 m,  =20 → ~1.3 m,  =18 → ~0.8 m,  =14 → ~0.2 m
         private bool  _ownJumpActive = false;
         private float _ownJumpVelY   = 0f;
-        private const float JumpInitialVel  = 20f;   // m/s our upward vel at takeoff
+        private const float JumpInitialVel  = 14f;   // m/s our upward vel at takeoff
         private const float JumpAscendGrav  = -41f;  // d/dt(_ownJumpVelY) while rising
         private const float JumpDescendGrav = -56f;  // d/dt(_ownJumpVelY) while falling
 
