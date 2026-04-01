@@ -27,7 +27,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.46";
+        public const  string Version = "2.0.55";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -48,6 +48,79 @@ namespace CNRMods
         }
 
         private static bool _loaded = false;
+
+        // ── Photon DLC skin broadcast helpers ─────────────────────────────────
+        // Called by CNRSkinStoreHook (equip) and RedirectHook (room join).
+        // Advertises the local player's equipped DLC skin ID to all other room members.
+        public static void BroadcastDlcSkin(string skinId)
+        {
+            try
+            {
+                Type pnt = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                { Type t = asm.GetType("PhotonNetwork"); if (t != null) { pnt = t; break; } }
+                if (pnt == null) return;
+                var playerProp = pnt.GetProperty("player", BindingFlags.Static | BindingFlags.Public);
+                if (playerProp == null) return;
+                var player = playerProp.GetValue(null, null);
+                if (player == null) return;
+                var ht = new System.Collections.Hashtable();
+                ht["CNR_DLC_SKIN"] = skinId ?? "";
+                var setProp = player.GetType().GetMethod("SetCustomProperties",
+                    new Type[] { typeof(System.Collections.Hashtable) });
+                if (setProp != null) setProp.Invoke(player, new object[] { ht });
+                Log("BroadcastDlcSkin: " + (skinId ?? "(none)"));
+            }
+            catch (Exception ex) { Log("BroadcastDlcSkin error: " + ex.Message); }
+        }
+
+        // Reads CNR_DLC_SKIN from a Photon PhotonPlayer object (passed as object to avoid hard dep).
+        public static string ReadDlcSkinProp(object photonPlayer)
+        {
+            try
+            {
+                var cp = photonPlayer.GetType().GetProperty("customProperties",
+                    BindingFlags.Instance | BindingFlags.Public);
+                if (cp == null) return null;
+                var ht = cp.GetValue(photonPlayer, null) as System.Collections.Hashtable;
+                return (ht != null && ht.ContainsKey("CNR_DLC_SKIN")) ? ht["CNR_DLC_SKIN"] as string : null;
+            }
+            catch { return null; }
+        }
+
+        // Returns all current Photon otherPlayers as an object[] (empty on error/offline).
+        public static object[] GetPhotonOtherPlayers()
+        {
+            try
+            {
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    Type t = asm.GetType("PhotonNetwork");
+                    if (t == null) continue;
+                    var op = t.GetProperty("otherPlayers", BindingFlags.Static | BindingFlags.Public);
+                    if (op == null) continue;
+                    var arr = op.GetValue(null, null) as System.Array;
+                    if (arr == null) return new object[0];
+                    var result = new object[arr.Length];
+                    for (int i = 0; i < arr.Length; i++) result[i] = arr.GetValue(i);
+                    return result;
+                }
+            }
+            catch { }
+            return new object[0];
+        }
+
+        // Returns the actorNumber (ID) of a Photon PhotonPlayer object.
+        public static int GetPhotonPlayerId(object photonPlayer)
+        {
+            try
+            {
+                var p = photonPlayer.GetType().GetProperty("ID",
+                    BindingFlags.Instance | BindingFlags.Public);
+                return p != null ? (int)p.GetValue(photonPlayer, null) : -1;
+            }
+            catch { return -1; }
+        }
 
         public static void Load()
         {
@@ -392,6 +465,7 @@ namespace CNRMods
             ModEntry.Log("Room: " + (roomName ?? "(unknown)"));
 
             SetRoomProp(pnt, "CNR_MOD_VERSION", ModEntry.Version);
+            ModEntry.BroadcastDlcSkin(PlayerPrefs.GetString("CNR_EquippedDLCSkin", ""));
 
             if (asMaster)
             {
@@ -2182,31 +2256,52 @@ namespace CNRMods
         public string Hash = "";   // MD5 of the data file
     }
 
+    public class OfficialSkinEntry
+    {
+        public string Id          = "";  // e.g. "skin_steve"
+        public string SkinName    = "";  // internal slot: "Skin_34"
+        public string DisplayName = "";  // shown in shop: "Steve"
+        public int    Price       = 0;   // coin price
+        public string MaterialName = ""; // body+hand material: "Skin_34_2"
+        public string Url         = "";  // PNG texture URL
+        public string Hash        = "";  // MD5 of PNG
+    }
+
+    public class OfficialGunEntry
+    {
+        public string Id          = "";  // e.g. "gun_laserrifle"
+        public string GunName     = "";  // internal key: "LaserRifle"
+        public string DisplayName = "";  // shown in shop
+        public int    Price       = 0;   // coin price
+        public string MaterialName = ""; // gun material name
+        public string Url         = "";  // content URL
+        public string Hash        = "";  // MD5
+    }
+
     // Raw JSON deserialization targets (field names match server JSON keys)
     class CManifestMap     { public string id = ""; public string name = ""; public string url = ""; public string thumbnail_url = ""; public string hash = ""; public string thumbnail_hash = ""; }
     class CManifestTexture { public string id = ""; public string material_name = ""; public string url = ""; public string hash = ""; }
     class CManifestData    { public string id = ""; public string key = ""; public string url = ""; public string hash = ""; }
-    class CManifest
-    {
-        public string           manifest_version = "";
-        public CManifestMap[]     maps     = new CManifestMap[0];
-        public CManifestTexture[] textures = new CManifestTexture[0];
-        public CManifestData[]    data     = new CManifestData[0];
-    }
+    class CManifestSkin    { public string id = ""; public string name = ""; public string display_name = ""; public int price = 0; public string material_name = ""; public string url = ""; public string hash = ""; }
+    class CManifestGun     { public string id = ""; public string name = ""; public string display_name = ""; public int price = 0; public string material_name = ""; public string url = ""; public string hash = ""; }
 
     public class ContentManager : MonoBehaviour
     {
         private const string ContentUrl    = "https://play.jacqueb.me/economy/content.php";
         public  const string MapCacheDir   = "/storage/emulated/0/CNRMods/content_cache/maps/";
-        private const string TexCacheDir   = "/storage/emulated/0/CNRMods/content_cache/textures/";
+        public  const string TexCacheDir   = "/storage/emulated/0/CNRMods/content_cache/textures/";
         private const string ThumbCacheDir = "/storage/emulated/0/CNRMods/content_cache/thumbs/";
         private const string DataCacheDir  = "/storage/emulated/0/CNRMods/content_cache/data/";
+        public  const string SkinCacheDir  = "/storage/emulated/0/CNRMods/content_cache/skins/";
+        public  const string GunCacheDir   = "/storage/emulated/0/CNRMods/content_cache/guns/";
         private const string ManifestCache = "/storage/emulated/0/CNRMods/content_cache/manifest.json";
         private const string VersionPref   = "CNRMod_ContentVersion";
 
         public static OfficialMapEntry[]     OfficialMaps     = new OfficialMapEntry[0];
         public static OfficialTextureEntry[] OfficialTextures = new OfficialTextureEntry[0];
         public static OfficialDataEntry[]    OfficialData     = new OfficialDataEntry[0];
+        public static OfficialSkinEntry[]    OfficialSkins    = new OfficialSkinEntry[0];
+        public static OfficialGunEntry[]     OfficialGuns     = new OfficialGunEntry[0];
         public static bool Ready = false;
 
         // material name (lowercase) → Texture2D loaded from file
@@ -2218,6 +2313,12 @@ namespace CNRMods
         {
             Texture2D t;
             return _thumbCache.TryGetValue(id, out t) ? t : null;
+        }
+
+        public static Texture2D GetSkinTexture(string id)
+        {
+            Texture2D t;
+            return _texCache.TryGetValue(id, out t) ? t : null;
         }
 
         void Start()
@@ -2232,6 +2333,21 @@ namespace CNRMods
         {
             if (_texCache.Count > 0)
                 StartCoroutine(ApplyTextureSwaps());
+            // Inject DLC skins into the store UI when StoreScene loads
+            if (Application.loadedLevelName == "StoreScene" && OfficialSkins.Length > 0)
+            {
+                var go = new GameObject("CNRSkinStoreHook");
+                go.AddComponent<CNRSkinStoreHook>();
+            }
+            // Apply DLC skin textures to remote player characters in game scenes
+            string[] gameScenes = { "FreeRun3_1","FreeRun4_1","FreeRun5_1","FreeRun6_1","FreeRun7_1",
+                                    "FreeRun8_1","FreeRun9_1","FreeRun10_1","FreeRun11_1","FreeRun12_1",
+                                    "FreeRun13_1","FreeRun14_1","FreeRun15_1","CRScene1" };
+            if (Array.IndexOf(gameScenes, Application.loadedLevelName) >= 0 && OfficialSkins.Length > 0)
+            {
+                var go = new GameObject("CNRRemoteSkinRenderer");
+                go.AddComponent<CNRRemoteSkinRenderer>();
+            }
         }
 
         static void EnsureDirs()
@@ -2241,7 +2357,7 @@ namespace CNRMods
                 string[] dirs = new string[]
                 {
                     "/storage/emulated/0/CNRMods/content_cache/",
-                    MapCacheDir, TexCacheDir, ThumbCacheDir, DataCacheDir
+                    MapCacheDir, TexCacheDir, ThumbCacheDir, DataCacheDir, SkinCacheDir, GunCacheDir
                 };
                 foreach (string d in dirs)
                     if (!Directory.Exists(d)) Directory.CreateDirectory(d);
@@ -2262,6 +2378,12 @@ namespace CNRMods
                     string p = TexCacheDir + te.Id + ".png";
                     if (File.Exists(p)) LoadTexFile(te.Id, p);
                 }
+                // Pre-load cached skin textures
+                foreach (var sk in OfficialSkins)
+                {
+                    string p = SkinCacheDir + sk.Id + ".png";
+                    if (File.Exists(p)) LoadTexFile(sk.Id, p);
+                }
                 // Pre-load cached map thumbnails
                 foreach (var om in OfficialMaps)
                 {
@@ -2279,7 +2401,8 @@ namespace CNRMods
                     PlayerPrefs.Save();
                 }
                 ModEntry.Log("ContentManager: cache loaded — maps=" + OfficialMaps.Length
-                    + " tex=" + OfficialTextures.Length + " data=" + OfficialData.Length);
+                    + " tex=" + OfficialTextures.Length + " data=" + OfficialData.Length
+                    + " skins=" + OfficialSkins.Length + " guns=" + OfficialGuns.Length);
             }
             catch (Exception ex) { ModEntry.Log("ContentManager: LoadCachedManifest error: " + ex.Message); }
             Ready = true;
@@ -2377,6 +2500,40 @@ namespace CNRMods
                     }
                 }
             }
+            foreach (var sk in OfficialSkins)
+            {
+                if (!string.IsNullOrEmpty(sk.Hash))
+                {
+                    string p = SkinCacheDir + sk.Id + ".png";
+                    if (File.Exists(p))
+                    {
+                        string got = ComputeMD5(p);
+                        if (got != sk.Hash.ToLower())
+                        {
+                            ModEntry.Log("ContentManager: skin hash mismatch [" + sk.Id + "] — deleting");
+                            try { File.Delete(p); } catch {}
+                            allOk = false;
+                        }
+                    }
+                }
+            }
+            foreach (var g in OfficialGuns)
+            {
+                if (!string.IsNullOrEmpty(g.Hash))
+                {
+                    string p = GunCacheDir + g.Id;
+                    if (File.Exists(p))
+                    {
+                        string got = ComputeMD5(p);
+                        if (got != g.Hash.ToLower())
+                        {
+                            ModEntry.Log("ContentManager: gun hash mismatch [" + g.Id + "] — deleting");
+                            try { File.Delete(p); } catch {}
+                            allOk = false;
+                        }
+                    }
+                }
+            }
             return allOk;
         }
 
@@ -2416,18 +2573,21 @@ namespace CNRMods
 
             Ready = true;
             ModEntry.Log("ContentManager ready — maps=" + OfficialMaps.Length
-                + " tex=" + OfficialTextures.Length + " data=" + OfficialData.Length);
+                + " tex=" + OfficialTextures.Length + " data=" + OfficialData.Length
+                + " skins=" + OfficialSkins.Length + " guns=" + OfficialGuns.Length);
         }
 
-        static void ParseManifest(string json)
+        public static void ParseManifest(string json)
         {
             try
             {
-                // Extract the three arrays from the wrapper object manually,
+                // Extract the named arrays from the wrapper object manually,
                 // then defer to JsonFx for each typed array.
                 var maps     = ExtractArray(json, "maps");
                 var textures = ExtractArray(json, "textures");
                 var data     = ExtractArray(json, "data");
+                var skinsRaw = ExtractArray(json, "skins");
+                var gunsRaw  = ExtractArray(json, "guns");
 
                 var rawMaps = string.IsNullOrEmpty(maps) ? new CManifestMap[0]
                     : JsonReader.Deserialize<CManifestMap[]>(maps) ?? new CManifestMap[0];
@@ -2435,6 +2595,10 @@ namespace CNRMods
                     : JsonReader.Deserialize<CManifestTexture[]>(textures) ?? new CManifestTexture[0];
                 var rawData = string.IsNullOrEmpty(data) ? new CManifestData[0]
                     : JsonReader.Deserialize<CManifestData[]>(data) ?? new CManifestData[0];
+                var rawSkins = string.IsNullOrEmpty(skinsRaw) ? new CManifestSkin[0]
+                    : JsonReader.Deserialize<CManifestSkin[]>(skinsRaw) ?? new CManifestSkin[0];
+                var rawGuns  = string.IsNullOrEmpty(gunsRaw) ? new CManifestGun[0]
+                    : JsonReader.Deserialize<CManifestGun[]>(gunsRaw) ?? new CManifestGun[0];
 
                 var mList = new List<OfficialMapEntry>();
                 foreach (var m in rawMaps)
@@ -2453,6 +2617,18 @@ namespace CNRMods
                     if (!string.IsNullOrEmpty(d.id) && !string.IsNullOrEmpty(d.url))
                         dList.Add(new OfficialDataEntry { Id = d.id, Key = d.key, Url = d.url, Hash = d.hash ?? "" });
                 OfficialData = dList.ToArray();
+
+                var sList = new List<OfficialSkinEntry>();
+                foreach (var s in rawSkins)
+                    if (!string.IsNullOrEmpty(s.id) && !string.IsNullOrEmpty(s.url))
+                        sList.Add(new OfficialSkinEntry { Id = s.id, SkinName = s.name, DisplayName = s.display_name, Price = s.price, MaterialName = s.material_name, Url = s.url, Hash = s.hash ?? "" });
+                OfficialSkins = sList.ToArray();
+
+                var gList = new List<OfficialGunEntry>();
+                foreach (var g in rawGuns)
+                    if (!string.IsNullOrEmpty(g.id) && !string.IsNullOrEmpty(g.url))
+                        gList.Add(new OfficialGunEntry { Id = g.id, GunName = g.name, DisplayName = g.display_name, Price = g.price, MaterialName = g.material_name, Url = g.url, Hash = g.hash ?? "" });
+                OfficialGuns = gList.ToArray();
             }
             catch (Exception ex) { ModEntry.Log("ContentManager: ParseManifest error: " + ex.Message); }
         }
@@ -2540,6 +2716,36 @@ namespace CNRMods
                     }
                 }
             }
+            foreach (var sk in OfficialSkins)
+            {
+                string path = SkinCacheDir + sk.Id + ".png";
+                yield return StartCoroutine(DownloadFile(sk.Url, path, "skin:" + sk.Id));
+                if (File.Exists(path))
+                {
+                    if (!string.IsNullOrEmpty(sk.Hash) && ComputeMD5(path) != sk.Hash.ToLower())
+                    {
+                        ModEntry.Log("ContentManager: skin download hash mismatch [" + sk.Id + "] — deleting");
+                        try { File.Delete(path); } catch {}
+                    }
+                    else LoadTexFile(sk.Id, path);
+                }
+            }
+            foreach (var g in OfficialGuns)
+            {
+                // Gun URL may point to a JSON bundle or a texture; derive extension from URL
+                string ext  = g.Url.EndsWith(".png") ? ".png" : ".json";
+                string path = GunCacheDir + g.Id + ext;
+                yield return StartCoroutine(DownloadFile(g.Url, path, "gun:" + g.Id));
+                if (File.Exists(path) && !string.IsNullOrEmpty(g.Hash))
+                {
+                    string got = ComputeMD5(path);
+                    if (got != g.Hash.ToLower())
+                    {
+                        ModEntry.Log("ContentManager: gun download hash mismatch [" + g.Id + "] — deleting");
+                        try { File.Delete(path); } catch {}
+                    }
+                }
+            }
         }
 
         IEnumerator DownloadFile(string url, string dest, string label)
@@ -2595,6 +2801,38 @@ namespace CNRMods
                 if (_texCache.ContainsKey(te.Id))
                     matToTex[te.MaterialName] = _texCache[te.Id];
             }
+            // Skin textures: apply to both body material (e.g. Skin_34_2) and head material (Skin_34_1)
+            foreach (var sk in OfficialSkins)
+            {
+                Texture2D tex;
+                if (!_texCache.TryGetValue(sk.Id, out tex)) continue;
+                matToTex[sk.MaterialName] = tex;                      // e.g. Skin_34_2
+                if (!string.IsNullOrEmpty(sk.SkinName))
+                    matToTex[sk.SkinName + "_1"] = tex;               // e.g. Skin_34_1 (head)
+            }
+            // DLC skin equip overlay: if a DLC skin is equipped, apply its texture to the
+            // player's currently-selected vanilla skin slot materials (e.g. Skin_1_2, Skin_1_1)
+            string dlcId = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
+            if (!string.IsNullOrEmpty(dlcId))
+            {
+                Texture2D dlcTex;
+                if (_texCache.TryGetValue(dlcId, out dlcTex))
+                {
+                    try
+                    {
+                        GSkinItemInfo curSkinInfo = GrowthManagerKit.GetCurSettedSkinInfo();
+                        if (curSkinInfo != null && !string.IsNullOrEmpty(curSkinInfo.mBodyMaterialName))
+                        {
+                            matToTex[curSkinInfo.mBodyMaterialName] = dlcTex;
+                            if (!string.IsNullOrEmpty(curSkinInfo.mHeadMaterialName))
+                                matToTex[curSkinInfo.mHeadMaterialName] = dlcTex;
+                            ModEntry.Log("ContentManager: DLC skin overlay [" + dlcId + "] -> "
+                                + curSkinInfo.mBodyMaterialName + ", " + curSkinInfo.mHeadMaterialName);
+                        }
+                    }
+                    catch (Exception ex) { ModEntry.Log("ContentManager: DLC overlay error: " + ex.Message); }
+                }
+            }
             if (matToTex.Count == 0) yield break;
 
             int swapped = 0;
@@ -2636,6 +2874,398 @@ namespace CNRMods
                 }
             }
             return null;
+        }
+
+        // Trigger a fresh manifest fetch + download pass (e.g. from the Downloads panel refresh button)
+        public static void RequestRefresh()
+        {
+            var cm = (ContentManager)(object)FindObjectOfType(typeof(ContentManager));
+            if (cm != null) cm.StartCoroutine(cm.FetchAndSync());
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  CNR SKIN STORE HOOK — extends vanilla skin shop with DLC skins
+    // ══════════════════════════════════════════════════════════════════════════
+    // Spawned in StoreScene by ContentManager.OnLevelWasLoaded.
+    // Extends UIStoreDirector's internal arrays to include downloaded DLC skins,
+    // then disables the vanilla skin nav UIStoreBtnEvent components and adds our
+    // CNRSkinBtnInterceptor to intercept clicks using our extended navigation.
+    public class CNRSkinStoreHook : MonoBehaviour
+    {
+        // ── Reflection cache ──────────────────────────────────────────────────
+        static FieldInfo  _fi_curSkinId, _fi_skinUsingId, _fi_skinNameList,
+                          _fi_gSkinItemInfo, _fi_hatSkin, _fi_bodySkin;
+        static MethodInfo _mi_SetSkinData, _mi_SkinSetUnlock;
+        static bool       _reflReady;
+
+        static void EnsureReflection()
+        {
+            if (_reflReady) return;
+            var t = typeof(UIStoreDirector);
+            _fi_curSkinId    = t.GetField("curSkinId",    BindingFlags.NonPublic | BindingFlags.Instance);
+            _fi_skinUsingId  = t.GetField("skinUsingId",  BindingFlags.NonPublic | BindingFlags.Instance);
+            _fi_skinNameList = t.GetField("skinNameList",  BindingFlags.NonPublic | BindingFlags.Instance);
+            _fi_gSkinItemInfo= t.GetField("gSkinItemInfo", BindingFlags.Public    | BindingFlags.Instance);
+            _fi_hatSkin      = t.GetField("hatSkin",       BindingFlags.Public    | BindingFlags.Instance);
+            _fi_bodySkin     = t.GetField("bodySkin",      BindingFlags.Public    | BindingFlags.Instance);
+            _mi_SetSkinData  = t.GetMethod("SetSkinData",  BindingFlags.NonPublic | BindingFlags.Instance);
+            _mi_SkinSetUnlock= t.GetMethod("SkinSetUnlockBtnPressed", BindingFlags.Public | BindingFlags.Instance);
+            _reflReady = true;
+        }
+
+        // ── State ─────────────────────────────────────────────────────────────
+        UIStoreDirector _store;
+        string[]        _extNames;
+        GSkinItemInfo[] _extInfo;
+        Material[]      _extHat;
+        Material[]      _extBody;
+        int             _total;
+        int             _dlcStart = 33;
+        // Parallel array: dlcSkins[i] matches _extInfo[_dlcStart + i]
+        OfficialSkinEntry[] _dlcSkins;
+
+        // ── Public accessors for CNRSkinBtnInterceptor ────────────────────────
+        public int CurSkinId
+        {
+            get { return (int)_fi_curSkinId.GetValue(_store); }
+            set { _fi_curSkinId.SetValue(_store, value); }
+        }
+        public int SkinUsingId
+        {
+            get { return (int)_fi_skinUsingId.GetValue(_store); }
+            set { _fi_skinUsingId.SetValue(_store, value); }
+        }
+        public int Total      { get { return _total; } }
+        public int DlcStart   { get { return _dlcStart; } }
+        public OfficialSkinEntry GetDlcEntry(int idx) { return _dlcSkins[idx - _dlcStart]; }
+        public GSkinItemInfo     GetExtInfo(int idx)  { return _extInfo[idx]; }
+
+        void Start() { StartCoroutine(Setup()); }
+
+        IEnumerator Setup()
+        {
+            yield return new WaitForSeconds(0.6f);
+            _store = UIStoreDirector.mInstance;
+            if (_store == null)
+            { ModEntry.Log("CNRSkinStoreHook: UIStoreDirector not found"); Destroy(gameObject); yield break; }
+            EnsureReflection();
+            if (_fi_curSkinId == null)
+            { ModEntry.Log("CNRSkinStoreHook: reflection failed"); Destroy(gameObject); yield break; }
+
+            // Always fetch a fresh manifest before building so price/display changes on the
+            // server are reflected immediately, regardless of the local cache.
+            var www = new WWW("https://play.jacqueb.me/economy/content.php");
+            yield return www;
+            if (string.IsNullOrEmpty(www.error) && !string.IsNullOrEmpty(www.text))
+            {
+                ContentManager.ParseManifest(www.text);
+                ModEntry.Log("CNRSkinStoreHook: refreshed manifest from server");
+            }
+            else
+            {
+                ModEntry.Log("CNRSkinStoreHook: manifest refresh failed (" + (www.error ?? "empty") + "), using cache");
+            }
+
+            BuildExtended();
+            InjectArrays();
+            InterceptNavButtons();
+            ModEntry.Log("CNRSkinStoreHook: ready — " + _total + " skins (" + (_total - _dlcStart) + " DLC)");
+        }
+
+        void BuildExtended()
+        {
+            // Read the vanilla arrays already set up by UIStoreDirector.Start()
+            var vanillaHat   = (Material[])_fi_hatSkin.GetValue(_store);
+            var vanillaBody  = (Material[])_fi_bodySkin.GetValue(_store);
+            _dlcStart = vanillaHat.Length; // 33
+
+            // Collect only downloaded DLC skins
+            var dlc = new List<OfficialSkinEntry>();
+            foreach (var sk in ContentManager.OfficialSkins)
+                if (File.Exists(ContentManager.SkinCacheDir + sk.Id + ".png"))
+                    dlc.Add(sk);
+            _dlcSkins = dlc.ToArray();
+
+            _total    = _dlcStart + _dlcSkins.Length;
+            _extNames = new string[_total];
+            _extInfo  = new GSkinItemInfo[_total];
+            _extHat   = new Material[_total];
+            _extBody  = new Material[_total];
+
+            // Copy vanilla
+            var vanillaNames = GrowthManagerKit.GetAllSkinNameList();
+            var vanillaInfo  = (GSkinItemInfo[])_fi_gSkinItemInfo.GetValue(_store);
+            Array.Copy(vanillaNames, _extNames, _dlcStart);
+            Array.Copy(vanillaInfo,  _extInfo,  _dlcStart);
+            Array.Copy(vanillaHat,   _extHat,   _dlcStart);
+            Array.Copy(vanillaBody,  _extBody,  _dlcStart);
+
+            // Base material to borrow shader from
+            Material baseMat = vanillaBody[0];
+            string   equippedDlcId = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
+
+            for (int i = 0; i < _dlcSkins.Length; i++)
+            {
+                var sk  = _dlcSkins[i];
+                int idx = _dlcStart + i;
+
+                _extNames[idx] = sk.SkinName.Length > 0 ? sk.SkinName : ("CNR_DLC_" + i);
+
+                bool owned = PlayerPrefs.GetInt("CNR_DLC_owned_" + sk.Id, 0) != 0;
+
+                var info = new GSkinItemInfo();
+                info.mName             = _extNames[idx];
+                info.mPurchasedType    = GItemPurchaseType.CoinsPurchase;
+                info.mUnlockCLevel     = 1;
+                info.mPrice            = sk.Price;
+                info.mNameDisplay      = sk.DisplayName;
+                info.mLogoSpriteName   = "Skin_1";   // fallback — no sprite atlas entry for DLC
+                info.mIsEnabled        = owned;
+                info.mHeadMaterialName = sk.SkinName + "_1";
+                info.mBodyMaterialName = sk.MaterialName;
+                info.mHandMaterialName = sk.MaterialName;
+                _extInfo[idx] = info;
+
+                // Runtime material from downloaded texture
+                Texture2D tex = ContentManager.GetSkinTexture(sk.Id);
+                var mat = new Material(baseMat.shader);
+                mat.CopyPropertiesFromMaterial(baseMat);
+                if (tex != null) mat.mainTexture = tex;
+                mat.name = sk.MaterialName;
+                _extHat[idx]  = mat;
+                _extBody[idx] = mat;
+
+                // Fix skinUsingId if this DLC skin is the one currently equipped
+                if (equippedDlcId == sk.Id && owned)
+                    _fi_skinUsingId.SetValue(_store, idx);
+            }
+        }
+
+        public void InjectArrays()
+        {
+            _fi_skinNameList.SetValue(_store, _extNames);
+            _fi_gSkinItemInfo.SetValue(_store, _extInfo);
+            _fi_hatSkin.SetValue(_store, _extHat);
+            _fi_bodySkin.SetValue(_store, _extBody);
+        }
+
+        public void RefreshSetSkinData()
+        {
+            _mi_SetSkinData.Invoke(_store, null);
+        }
+
+        // Re-injects arrays after vanilla GetSkinData() overwrites them (e.g. after purchase)
+        public IEnumerator ReInjectAfterFrame()
+        {
+            yield return null;
+            InjectArrays();
+            _mi_SetSkinData.Invoke(_store, null);
+        }
+
+        void InterceptNavButtons()
+        {
+            // Use Resources.FindObjectsOfTypeAll so inactive GOs are included.
+            // The skin tab panel is inactive at store load time (store opens on weapons tab),
+            // so FindObjectsOfType returns 0 results.
+            var allBtnEvents = (UIStoreBtnEvent[])Resources.FindObjectsOfTypeAll(typeof(UIStoreBtnEvent));
+            ModEntry.Log("CNRSkinStoreHook: scanning " + allBtnEvents.Length + " UIStoreBtnEvent(s)");
+            foreach (var evt in allBtnEvents)
+            {
+                var bn = evt.buttonName;
+                if (bn == UIStoreBtnEvent.ButtonName.LeftSkin  ||
+                    bn == UIStoreBtnEvent.ButtonName.RightSkin  ||
+                    bn == UIStoreBtnEvent.ButtonName.SkinSetUnlock)
+                {
+                    evt.enabled = false;
+                    var interceptor = evt.gameObject.AddComponent<CNRSkinBtnInterceptor>();
+                    interceptor.Hook   = this;
+                    interceptor.BtnTag = bn;
+                    ModEntry.Log("CNRSkinStoreHook: intercepted " + bn);
+                }
+            }
+        }
+
+        // ── Button handlers (called by CNRSkinBtnInterceptor) ─────────────────
+        public void OnLeft()
+        {
+            CurSkinId = (CurSkinId - 1 + _total) % _total;
+            _mi_SetSkinData.Invoke(_store, null);
+        }
+
+        public void OnRight()
+        {
+            CurSkinId = (CurSkinId + 1) % _total;
+            _mi_SetSkinData.Invoke(_store, null);
+        }
+
+        public void OnSetUnlock()
+        {
+            int cur = CurSkinId;
+            if (cur < _dlcStart)
+            {
+                // Vanilla skin — let the original method handle it, then re-inject our arrays
+                _mi_SkinSetUnlock.Invoke(_store, null);
+                StartCoroutine(ReInjectAfterFrame());
+                return;
+            }
+
+            // DLC skin
+            var sk   = _dlcSkins[cur - _dlcStart];
+            var info = _extInfo[cur];
+
+            if (!info.mIsEnabled)
+            {
+                // Purchase attempt
+                int coins = GrowthManagerKit.GetCoins();
+                if (coins < info.mPrice)
+                {
+                    ModEntry.Log("CNR: not enough coins for DLC skin \"" + info.mNameDisplay
+                        + "\" (need " + info.mPrice + ", have " + coins + ")");
+                    // Reuse the vanilla "not enough coins" tip panel if accessible
+                    var tipLabel = GameObject.Find("Label(SkinTip)") ?? GameObject.Find("Label(Tips)");
+                    if (tipLabel != null)
+                        tipLabel.GetComponent<UILabel>().text =
+                            "Not enough coins!\nNeed " + info.mPrice + "  Have " + coins;
+                    return;
+                }
+                UserDataController.AddCoins(-info.mPrice);
+                PlayerPrefs.SetInt("CNR_DLC_owned_" + sk.Id, 1);
+                PlayerPrefs.Save();
+                info.mIsEnabled = true;
+                _extInfo[cur] = info;
+                ModEntry.Log("CNR: purchased DLC skin \"" + info.mNameDisplay + "\"");
+                _mi_SetSkinData.Invoke(_store, null);
+            }
+            else
+            {
+                // Equip / un-equip
+                if (cur == SkinUsingId) return; // already equipped
+                PlayerPrefs.SetString("CNR_EquippedDLCSkin", sk.Id);
+                PlayerPrefs.Save();
+                SkinUsingId = cur;
+                _mi_SetSkinData.Invoke(_store, null);
+                ModEntry.Log("CNR: equipped DLC skin \"" + info.mNameDisplay + "\"");
+                ModEntry.BroadcastDlcSkin(sk.Id);
+            }
+        }
+    }
+
+    // Attached to each intercepted skin nav button GO; routes NGUI OnClick to CNRSkinStoreHook.
+    public class CNRSkinBtnInterceptor : MonoBehaviour
+    {
+        public CNRSkinStoreHook          Hook;
+        public UIStoreBtnEvent.ButtonName BtnTag;
+
+        void OnClick()
+        {
+            if (Hook == null) return;
+            switch (BtnTag)
+            {
+                case UIStoreBtnEvent.ButtonName.LeftSkin:     Hook.OnLeft();      break;
+                case UIStoreBtnEvent.ButtonName.RightSkin:    Hook.OnRight();     break;
+                case UIStoreBtnEvent.ButtonName.SkinSetUnlock: Hook.OnSetUnlock(); break;
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  CNR REMOTE SKIN RENDERER — applies DLC skin textures to other players
+    // ══════════════════════════════════════════════════════════════════════════
+    // Spawned in game scenes by ContentManager.OnLevelWasLoaded.
+    // Polls Photon otherPlayers, reads their CNR_DLC_SKIN custom prop, and if
+    // the local client has that skin downloaded, swaps the texture on their
+    // remote-player character's renderers.
+    public class CNRRemoteSkinRenderer : MonoBehaviour
+    {
+        // Renderer sub-paths used by EnemyController.Start() to assign skin materials
+        static readonly string[] EnemyRendererPaths = {
+            "GameObject/1_3/handrightup/handright_Animation/handright_new",
+            "GameObject/EnemyAnimation/1_1/head_new",
+            "GameObject/EnemyAnimation/1_2/trunk_new",
+            "GameObject/EnemyAnimation/1_4/legright_new",
+            "GameObject/EnemyAnimation/1_005/legleft_new",
+            "GameObject/EnemyAnimation/1_006/handleft_new",
+        };
+
+        // Tracks which photon actor IDs we've already applied a DLC skin to;
+        // value is the skinId applied so we can re-apply if they change skin.
+        Dictionary<int, string> _applied = new Dictionary<int, string>();
+        float _nextPoll = 2f;   // first poll after 2s so characters have spawned
+
+        void Update()
+        {
+            if (Time.time < _nextPoll) return;
+            _nextPoll = Time.time + 2f;
+            PollRemotePlayers();
+        }
+
+        void PollRemotePlayers()
+        {
+            object[] others = ModEntry.GetPhotonOtherPlayers();
+            var activeIds = new HashSet<int>();
+            foreach (object ph in others)
+            {
+                if (ph == null) continue;
+                int    actorId = ModEntry.GetPhotonPlayerId(ph);
+                activeIds.Add(actorId);
+                string dlcId   = ModEntry.ReadDlcSkinProp(ph);
+                if (string.IsNullOrEmpty(dlcId)) continue;
+
+                string prev;
+                if (_applied.TryGetValue(actorId, out prev) && prev == dlcId) continue;
+
+                Texture2D tex = ContentManager.GetSkinTexture(dlcId);
+                if (tex == null) continue;  // we don't have this skin downloaded
+
+                if (ApplyToActor(actorId, tex))
+                {
+                    _applied[actorId] = dlcId;
+                    ModEntry.Log("CNRRemoteSkins: applied [" + dlcId + "] to actor " + actorId);
+                }
+            }
+            // Clean up departed actors
+            var gone = new List<int>();
+            foreach (int id in _applied.Keys) if (!activeIds.Contains(id)) gone.Add(id);
+            foreach (int id in gone) _applied.Remove(id);
+        }
+
+        bool ApplyToActor(int actorId, Texture2D tex)
+        {
+            // Find every MonoBehaviour that looks like a PhotonView owned by this actor
+            var all = (MonoBehaviour[])FindObjectsOfType(typeof(MonoBehaviour));
+            foreach (var mb in all)
+            {
+                if (mb == null) continue;
+                var ownerProp = mb.GetType().GetProperty("ownerId",
+                    BindingFlags.Instance | BindingFlags.Public);
+                if (ownerProp == null) continue;
+                int oid;
+                try { oid = (int)ownerProp.GetValue(mb, null); } catch { continue; }
+                if (oid != actorId) continue;
+                if (ApplyToTransform(mb.transform, tex)) return true;
+            }
+            return false;
+        }
+
+        bool ApplyToTransform(Transform root, Texture2D tex)
+        {
+            // Walk up to find the character root that contains EnemyAnimation
+            Transform charRoot = root;
+            for (int i = 0; i < 6 && charRoot.parent != null; i++)
+            {
+                if (charRoot.Find("GameObject/EnemyAnimation") != null) break;
+                charRoot = charRoot.parent;
+            }
+            bool any = false;
+            foreach (string path in EnemyRendererPaths)
+            {
+                Transform node = charRoot.Find(path);
+                if (node == null) continue;
+                Renderer r = (Renderer)(object)node.gameObject.GetComponent(typeof(Renderer));
+                if (r != null) { r.material.mainTexture = tex; any = true; }
+            }
+            return any;
         }
     }
 
@@ -3079,6 +3709,19 @@ namespace CNRMods
         private Rect        _ecoMailWinRect;
         private Rect        _ecoAcctWinRect;
         private int         _mailDeleteConfirmId = -1; // mail id awaiting delete confirmation (-1 = none)
+        private bool        _showDownloads   = false;
+        private Vector2     _dlScroll        = Vector2.zero;
+        private Rect        _dlWinRect;
+        private bool        _dlBatchRunning  = false;
+        private int         _dlBatchDone     = 0;
+        private int         _dlBatchTotal    = 0;
+        private string      _dlBatchCurrent  = "";
+        private int         _dlBatchType     = -1;  // -1=all, 0=maps, 1=tex, 2=skins, 3=guns
+        private bool        _dlExpandMaps    = false;
+        private bool        _dlExpandTex     = false;
+        private bool        _dlExpandSkins   = false;
+        private bool        _dlExpandGuns    = false;
+        private float       _dlRefreshTime   = -30f;
         private UICamera[]  _nguiCameras = null;   // cached for click-through blocking
         private bool        _nguiBlocked = false;
         private GameObject  _goRecordBtn    = null;   // Recordings button GO — anchor for settings btn
@@ -6357,7 +7000,7 @@ namespace CNRMods
             // Keep NGUI cameras disabled while any IMGUI overlay is open.
             // UICamera reads Input.touches/GetMouseButtonDown() directly, so
             // Event.current.Use() alone cannot block NGUI button clicks.
-            SetNguiBlocking(_showEcoMail || _showEcoAccount || _showMpDialog);
+            SetNguiBlocking(_showEcoMail || _showEcoAccount || _showMpDialog || _showDownloads);
 
             // Reconnect loop — runs even while GUI overlay is open
             if (!Ready && !_reconnectRunning)
@@ -6783,6 +7426,7 @@ namespace CNRMods
             _ecoDbgLog   = false;
             _showEcoMail    = false;
             _showEcoAccount = false;
+            _showDownloads  = false;
             _goHelpBtn        = null;
             _goRecordBtn      = null;
             _goAgreementBtn   = null;
@@ -7001,6 +7645,13 @@ namespace CNRMods
                     Event.current.Use();
                 return;
             }
+            if (_showDownloads)
+            {
+                EcoDrawDownloadsOverlay();
+                if (Event.current.type != EventType.Repaint && Event.current.type != EventType.Layout)
+                    Event.current.Use();
+                return;
+            }
 
             // Don't draw mail/settings icons while the Mod Manager overlay is open
             if (ModManagerIsOpen()) return;
@@ -7088,6 +7739,19 @@ namespace CNRMods
                 if (GUI.Button(new Rect(mailX, mailY, mailW, mailH), mailLabel, sbMail)) EcoOpenMail();
             }
 
+            // ── Downloads button — to the right of the mail button ────────────
+            float dlX = mailX + mailW + pad;
+            float dlY = mailY;
+            float dlW = mailW;
+            float dlH = mailH;
+            int dlMissing = DlCountMissing();
+            GUIStyle sbDl = new GUIStyle(sb);
+            sbDl.normal.textColor = dlMissing > 0 ? new Color(0.4f, 0.88f, 1f) : new Color(0.5f, 0.9f, 0.5f);
+            string dlLabel = _dlBatchRunning
+                ? ("..." + _dlBatchDone + "/" + _dlBatchTotal)
+                : (dlMissing > 0 ? "DL (" + dlMissing + ")" : "DL");
+            if (GUI.Button(new Rect(dlX, dlY, dlW, dlH), dlLabel, sbDl)) EcoOpenDownloads();
+
             // ── Draw settings/account button ──────────────────────────────────
             if (_texSettingsIcon != null)
             {
@@ -7114,6 +7778,387 @@ namespace CNRMods
             _showEcoMail   = true;
             _ecoMailScroll = Vector2.zero;
             StartCoroutine(FetchInbox());
+        }
+
+        private void EcoOpenDownloads()
+        {
+            if (Time.unscaledTime - _ecoLastToggle < 0.5f) return;
+            _ecoLastToggle = Time.unscaledTime;
+            _showDownloads = true;
+            _dlScroll      = Vector2.zero;
+        }
+
+        private void EcoDrawDownloadsOverlay()
+        {
+            float vw = ECO_REF_W;
+            float vh = Screen.height / (Screen.width / ECO_REF_W);
+            GUI.Button(new Rect(0, 0, vw, vh), GUIContent.none, GUIStyle.none);
+            GUI.color = new Color(0f, 0f, 0f, 0.88f);
+            GUI.DrawTexture(new Rect(0, 0, vw, vh), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            float w = Mathf.Min(vw * 0.96f, 480f);
+            float h = Mathf.Min(vh * 0.92f, 560f);
+            _dlWinRect = new Rect((vw - w) * 0.5f, (vh - h) * 0.5f, w, h);
+            GUIStyle wBg = new GUIStyle(GUI.skin.window);
+            wBg.normal.background   = EcoMkTex(2, 2, new Color(0.10f, 0.10f, 0.12f, 0.97f));
+            wBg.onNormal.background = wBg.normal.background;
+            wBg.fontSize = 15;
+            _dlWinRect = GUI.Window(9905, _dlWinRect, EcoDownloadsWindow, "  Downloads", wBg);
+        }
+
+        private void EcoDownloadsWindow(int id)
+        {
+            float closeH  = 38f;
+            float topArea = 36f;
+            float scrollH = _dlWinRect.height - topArea - 56f - closeH;
+            GUIStyle vScr = new GUIStyle(GUI.skin.verticalScrollbar); vScr.fixedWidth = 30f;
+
+            // ── Top bar: Refresh + Download All ──────────────────────────────
+            GUILayout.Space(4f);
+            GUILayout.BeginHorizontal();
+            float sinceRefresh = Time.unscaledTime - _dlRefreshTime;
+            GUI.enabled = !_dlBatchRunning && sinceRefresh > 5f;
+            if (GUILayout.Button("Refresh", EcoBtnSt(13, new Color(0.7f, 0.7f, 0.7f)),
+                                 GUILayout.Width(78f), GUILayout.Height(26f)))
+            {
+                _dlRefreshTime = Time.unscaledTime;
+                ContentManager.RequestRefresh();
+            }
+            GUI.enabled = true;
+            GUILayout.Space(6f);
+            if (_dlBatchRunning && _dlBatchType == -1)
+            {
+                GUIStyle progSt = EcoHintSt();
+                progSt.normal.textColor = new Color(0.4f, 0.9f, 1f);
+                GUILayout.Label(_dlBatchCurrent + "  (" + _dlBatchDone + "/" + _dlBatchTotal + ")",
+                    progSt, GUILayout.ExpandWidth(true));
+            }
+            else
+            {
+                int totalMissing = DlCountMissing();
+                string allLabel = totalMissing == 0
+                    ? "All downloaded"
+                    : "Download All  (" + totalMissing + " missing)";
+                Color allColor = totalMissing == 0
+                    ? new Color(0.35f, 0.75f, 0.35f)
+                    : new Color(0.3f, 0.82f, 1f);
+                GUI.enabled = totalMissing > 0 && !_dlBatchRunning;
+                if (GUILayout.Button(allLabel, EcoBtnSt(13, allColor), GUILayout.ExpandWidth(true), GUILayout.Height(26f)))
+                    StartCoroutine(BatchDownload(-1));
+                GUI.enabled = true;
+            }
+            GUILayout.EndHorizontal();
+            GUILayout.Space(4f);
+
+            // ── Scrollable type rows ──────────────────────────────────────────
+            _dlScroll = GUILayout.BeginScrollView(_dlScroll, false, true,
+                GUIStyle.none, vScr,
+                GUILayout.Width(_dlWinRect.width - 4f), GUILayout.Height(scrollH));
+            GUILayout.Space(2f);
+            bool anyContent = false;
+            if (ContentManager.OfficialMaps.Length > 0)
+            {
+                anyContent = true;
+                DlTypeRow("Maps", 0, ContentManager.OfficialMaps.Length, DlCountCached(0));
+                if (_dlExpandMaps)
+                {
+                    foreach (var m in ContentManager.OfficialMaps)
+                        DlItemStatus(m.Name.Length > 0 ? m.Name : m.Id,
+                            File.Exists(ContentManager.MapCacheDir + m.Id + ".json"));
+                    GUILayout.Space(4f);
+                }
+            }
+            if (ContentManager.OfficialTextures.Length > 0)
+            {
+                anyContent = true;
+                DlTypeRow("Textures", 1, ContentManager.OfficialTextures.Length, DlCountCached(1));
+                if (_dlExpandTex)
+                {
+                    foreach (var t in ContentManager.OfficialTextures)
+                        DlItemStatus(t.Id, File.Exists(ContentManager.TexCacheDir + t.Id + ".png"));
+                    GUILayout.Space(4f);
+                }
+            }
+            if (ContentManager.OfficialSkins.Length > 0)
+            {
+                anyContent = true;
+                DlTypeRow("Skins", 2, ContentManager.OfficialSkins.Length, DlCountCached(2));
+                if (_dlExpandSkins)
+                {
+                    string equipped = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
+                    foreach (var s in ContentManager.OfficialSkins)
+                    {
+                        bool skinCached   = File.Exists(ContentManager.SkinCacheDir + s.Id + ".png");
+                        bool isEquipped   = equipped == s.Id;
+                        GUILayout.BeginHorizontal();
+                        GUILayout.Space(14f);
+                        GUIStyle lblSt = EcoHintSt();
+                        lblSt.normal.textColor = skinCached
+                            ? new Color(0.5f, 0.95f, 0.5f)
+                            : new Color(0.9f, 0.55f, 0.55f);
+                        GUILayout.Label(s.DisplayName.Length > 0 ? s.DisplayName : s.Id,
+                            lblSt, GUILayout.ExpandWidth(true));
+                        if (skinCached)
+                        {
+                            // Equipping is done through the Shop — show status only.
+                            GUIStyle stSt = EcoHintSt();
+                            stSt.alignment = TextAnchor.MiddleRight;
+                            bool owned = PlayerPrefs.GetInt("CNR_DLC_owned_" + s.Id, 0) != 0;
+                            if (isEquipped)
+                            {
+                                stSt.normal.textColor = new Color(0.35f, 0.9f, 0.45f);
+                                GUILayout.Label("Equipped \u2713", stSt, GUILayout.Width(80f));
+                            }
+                            else if (owned)
+                            {
+                                stSt.normal.textColor = new Color(0.75f, 0.75f, 0.75f);
+                                GUILayout.Label("Owned", stSt, GUILayout.Width(80f));
+                            }
+                            else
+                            {
+                                stSt.normal.textColor = new Color(0.85f, 0.75f, 0.35f);
+                                GUILayout.Label("Go to Shop", stSt, GUILayout.Width(80f));
+                            }
+                        }
+                        else
+                        {
+                            GUIStyle stSt = EcoHintSt();
+                            stSt.alignment = TextAnchor.MiddleRight;
+                            stSt.normal.textColor = new Color(0.85f, 0.45f, 0.45f);
+                            GUILayout.Label("missing", stSt, GUILayout.Width(56f));
+                        }
+                        GUILayout.EndHorizontal();
+                        GUILayout.Space(1f);
+                    }
+                    GUILayout.Space(4f);
+                }
+            }
+            if (ContentManager.OfficialGuns.Length > 0)
+            {
+                anyContent = true;
+                DlTypeRow("Guns", 3, ContentManager.OfficialGuns.Length, DlCountCached(3));
+                if (_dlExpandGuns)
+                {
+                    foreach (var g in ContentManager.OfficialGuns)
+                    {
+                        string ext  = g.Url.EndsWith(".png") ? ".png" : ".json";
+                        DlItemStatus(g.DisplayName.Length > 0 ? g.DisplayName : g.Id,
+                            File.Exists(ContentManager.GunCacheDir + g.Id + ext));
+                    }
+                    GUILayout.Space(4f);
+                }
+            }
+            if (!anyContent)
+            {
+                GUIStyle mt = EcoLblSt();
+                mt.normal.textColor = new Color(0.55f, 0.55f, 0.65f);
+                mt.alignment = TextAnchor.MiddleCenter;
+                GUILayout.Label(ContentManager.Ready ? "No content in manifest." : "Manifest not yet loaded.",
+                    mt, GUILayout.Height(80f));
+            }
+            GUILayout.Space(6f);
+            GUILayout.EndScrollView();
+
+            float bx = (_dlWinRect.width - 160f) * 0.5f;
+            float by = _dlWinRect.height - closeH - 6f;
+            if (GUI.Button(new Rect(bx, by, 160f, closeH - 4f), "  Close  ", EcoBtnSt(22, Color.white)))
+            { _showDownloads = false; _ecoLastToggle = Time.unscaledTime; }
+        }
+
+        // One row per content type: title, X/Y count, optional Download button, expand toggle
+        private void DlTypeRow(string typeName, int typeIndex, int total, int cached)
+        {
+            int  missing      = total - cached;
+            bool isRunning    = _dlBatchRunning && _dlBatchType == typeIndex;
+            bool expanded     = DlGetExpanded(typeIndex);
+            GUILayout.BeginHorizontal();
+            GUIStyle titleSt = EcoLblSt();
+            titleSt.fontStyle = FontStyle.Bold;
+            titleSt.fontSize  = 14;
+            titleSt.normal.textColor = missing == 0
+                ? new Color(0.5f, 0.95f, 0.5f)
+                : new Color(1f, 0.85f, 0.3f);
+            GUILayout.Label(typeName, titleSt, GUILayout.ExpandWidth(true));
+            GUIStyle countSt = EcoHintSt();
+            countSt.normal.textColor = missing == 0
+                ? new Color(0.4f, 0.9f, 0.4f)
+                : new Color(0.75f, 0.75f, 0.75f);
+            GUILayout.Label(cached + "/" + total, countSt, GUILayout.Width(38f));
+            if (isRunning)
+            {
+                GUIStyle pSt = EcoHintSt();
+                pSt.normal.textColor = new Color(0.4f, 0.9f, 1f);
+                GUILayout.Label(_dlBatchDone + "/" + _dlBatchTotal, pSt, GUILayout.Width(52f));
+            }
+            else if (missing > 0)
+            {
+                GUI.enabled = !_dlBatchRunning;
+                if (GUILayout.Button("Download", EcoBtnSt(12, new Color(0.3f, 0.8f, 1f)),
+                                     GUILayout.Width(84f), GUILayout.Height(26f)))
+                    StartCoroutine(BatchDownload(typeIndex));
+                GUI.enabled = true;
+            }
+            else
+            {
+                GUILayout.Space(88f);
+            }
+            if (GUILayout.Button(expanded ? "\u25b2" : "\u25bc",
+                                 EcoBtnSt(11, new Color(0.65f, 0.65f, 0.65f)),
+                                 GUILayout.Width(28f), GUILayout.Height(26f)))
+                DlSetExpanded(typeIndex, !expanded);
+            GUILayout.EndHorizontal();
+            GUILayout.Space(3f);
+        }
+
+        // Read-only item row inside an expanded type section
+        private void DlItemStatus(string label, bool cached)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(14f);
+            GUIStyle lblSt = EcoHintSt();
+            lblSt.normal.textColor = cached
+                ? new Color(0.5f, 0.95f, 0.5f)
+                : new Color(0.9f, 0.55f, 0.55f);
+            GUILayout.Label(label, lblSt, GUILayout.ExpandWidth(true));
+            GUIStyle stSt = EcoHintSt();
+            stSt.alignment = TextAnchor.MiddleRight;
+            stSt.normal.textColor = cached
+                ? new Color(0.4f, 0.8f, 0.4f)
+                : new Color(0.85f, 0.45f, 0.45f);
+            GUILayout.Label(cached ? "cached" : "missing", stSt, GUILayout.Width(56f));
+            GUILayout.EndHorizontal();
+            GUILayout.Space(1f);
+        }
+
+        private bool DlGetExpanded(int t)
+        {
+            switch (t)
+            {
+                case 0: return _dlExpandMaps;
+                case 1: return _dlExpandTex;
+                case 2: return _dlExpandSkins;
+                case 3: return _dlExpandGuns;
+                default: return false;
+            }
+        }
+
+        private void DlSetExpanded(int t, bool v)
+        {
+            switch (t)
+            {
+                case 0: _dlExpandMaps  = v; break;
+                case 1: _dlExpandTex   = v; break;
+                case 2: _dlExpandSkins = v; break;
+                case 3: _dlExpandGuns  = v; break;
+            }
+        }
+
+        private int DlCountCached(int typeIndex)
+        {
+            int n = 0;
+            switch (typeIndex)
+            {
+                case 0:
+                    foreach (var m in ContentManager.OfficialMaps)
+                        if (File.Exists(ContentManager.MapCacheDir + m.Id + ".json")) n++;
+                    break;
+                case 1:
+                    foreach (var t in ContentManager.OfficialTextures)
+                        if (File.Exists(ContentManager.TexCacheDir + t.Id + ".png")) n++;
+                    break;
+                case 2:
+                    foreach (var s in ContentManager.OfficialSkins)
+                        if (File.Exists(ContentManager.SkinCacheDir + s.Id + ".png")) n++;
+                    break;
+                case 3:
+                    foreach (var g in ContentManager.OfficialGuns)
+                    {
+                        string ext = g.Url.EndsWith(".png") ? ".png" : ".json";
+                        if (File.Exists(ContentManager.GunCacheDir + g.Id + ext)) n++;
+                    }
+                    break;
+            }
+            return n;
+        }
+
+        private int DlCountMissing()
+        {
+            int total  = ContentManager.OfficialMaps.Length + ContentManager.OfficialTextures.Length
+                       + ContentManager.OfficialSkins.Length + ContentManager.OfficialGuns.Length;
+            int cached = DlCountCached(0) + DlCountCached(1) + DlCountCached(2) + DlCountCached(3);
+            return total - cached;
+        }
+
+        private IEnumerator DlSingleFile(string url, string dest)
+        {
+            var www = new WWW(url);
+            yield return www;
+            if (!string.IsNullOrEmpty(www.error))
+            { ModEntry.Log("DlPanel: error: " + url + " -> " + www.error); yield break; }
+            try { File.WriteAllBytes(dest, www.bytes); }
+            catch (Exception ex) { ModEntry.Log("DlPanel: write error " + dest + ": " + ex.Message); }
+        }
+
+        // typeFilter: -1=all, 0=maps, 1=textures, 2=skins, 3=guns
+        private IEnumerator BatchDownload(int typeFilter)
+        {
+            if (_dlBatchRunning) yield break;
+            _dlBatchRunning = true;
+            _dlBatchType    = typeFilter;
+            _dlBatchDone    = 0;
+            _dlBatchCurrent = "";
+            var urls   = new List<string>();
+            var dests  = new List<string>();
+            var labels = new List<string>();
+            if (typeFilter == -1 || typeFilter == 0)
+            {
+                foreach (var m in ContentManager.OfficialMaps)
+                {
+                    string path = ContentManager.MapCacheDir + m.Id + ".json";
+                    if (!File.Exists(path))
+                    { urls.Add(m.Url); dests.Add(path); labels.Add(m.Name.Length > 0 ? m.Name : m.Id); }
+                }
+            }
+            if (typeFilter == -1 || typeFilter == 1)
+            {
+                foreach (var t in ContentManager.OfficialTextures)
+                {
+                    string path = ContentManager.TexCacheDir + t.Id + ".png";
+                    if (!File.Exists(path))
+                    { urls.Add(t.Url); dests.Add(path); labels.Add(t.Id); }
+                }
+            }
+            if (typeFilter == -1 || typeFilter == 2)
+            {
+                foreach (var s in ContentManager.OfficialSkins)
+                {
+                    string path = ContentManager.SkinCacheDir + s.Id + ".png";
+                    if (!File.Exists(path))
+                    { urls.Add(s.Url); dests.Add(path); labels.Add(s.DisplayName.Length > 0 ? s.DisplayName : s.Id); }
+                }
+            }
+            if (typeFilter == -1 || typeFilter == 3)
+            {
+                foreach (var g in ContentManager.OfficialGuns)
+                {
+                    string ext  = g.Url.EndsWith(".png") ? ".png" : ".json";
+                    string path = ContentManager.GunCacheDir + g.Id + ext;
+                    if (!File.Exists(path))
+                    { urls.Add(g.Url); dests.Add(path); labels.Add(g.DisplayName.Length > 0 ? g.DisplayName : g.Id); }
+                }
+            }
+            _dlBatchTotal = urls.Count;
+            if (_dlBatchTotal == 0) { _dlBatchRunning = false; _dlBatchType = -1; yield break; }
+            for (int i = 0; i < urls.Count; i++)
+            {
+                _dlBatchCurrent = labels[i];
+                yield return StartCoroutine(DlSingleFile(urls[i], dests[i]));
+                _dlBatchDone++;
+            }
+            _dlBatchRunning = false;
+            _dlBatchCurrent = "";
+            _dlBatchType    = -1;
+            ModEntry.Log("DlPanel: batch done (" + _dlBatchDone + " files, type=" + typeFilter + ")");
         }
 
         private void EcoOpenAccount()

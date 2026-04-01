@@ -7,22 +7,22 @@ using UnityEngine;
 // Token: 0x020002A1 RID: 673
 public class MainMenuDirector : MonoBehaviour
 {
-	// Token: 0x06001217 RID: 4631 RVA: 0x0008D284 File Offset: 0x0008B484
+	// Token: 0x06001217 RID: 4631
 	public MainMenuDirector()
 	{
 	}
 
 	// Token: 0x14000014 RID: 20
-	// (add) Token: 0x06001218 RID: 4632 RVA: 0x0000E4B0 File Offset: 0x0000C6B0
-	// (remove) Token: 0x06001219 RID: 4633 RVA: 0x0000E4C7 File Offset: 0x0000C6C7
+	// (add) Token: 0x06001218 RID: 4632
+	// (remove) Token: 0x06001219 RID: 4633
 	public static event MainMenuDirector.FacebookEventHandler OnFacebook;
 
 	// Token: 0x14000015 RID: 21
-	// (add) Token: 0x0600121A RID: 4634 RVA: 0x0000E4DE File Offset: 0x0000C6DE
-	// (remove) Token: 0x0600121B RID: 4635 RVA: 0x0000E4F5 File Offset: 0x0000C6F5
+	// (add) Token: 0x0600121A RID: 4634
+	// (remove) Token: 0x0600121B RID: 4635
 	public static event MainMenuDirector.TwitterEventHandler OnTwitter;
 
-	// Token: 0x0600121C RID: 4636 RVA: 0x0008D2D0 File Offset: 0x0008B4D0
+	// Token: 0x0600121C RID: 4636
 	public void GetGiftPackBtnPressed()
 	{
 		AutoGiftInfo autoGiftInfo = GrowthManagerKit.RecevieOneGift();
@@ -37,7 +37,7 @@ public class MainMenuDirector : MonoBehaviour
 		base.audio.PlayOneShot(this.slotAudio[2]);
 	}
 
-	// Token: 0x0600121D RID: 4637 RVA: 0x0008D394 File Offset: 0x0008B594
+	// Token: 0x0600121D RID: 4637
 	private IEnumerator ShowGiftPackPanel(float seconds)
 	{
 		yield return new WaitForSeconds(seconds);
@@ -45,7 +45,7 @@ public class MainMenuDirector : MonoBehaviour
 		yield break;
 	}
 
-	// Token: 0x0600121E RID: 4638 RVA: 0x0008D3C0 File Offset: 0x0008B5C0
+	// Token: 0x0600121E RID: 4638
 	public void CloseGiftPackPanelBtnPressed()
 	{
 		this.rootGiftNumLabel.text = "x " + GrowthManagerKit.GetCurGiftBoxTotal().ToString();
@@ -55,7 +55,7 @@ public class MainMenuDirector : MonoBehaviour
 		this.backgroundAudio.GetComponent<AudioSource>().Play();
 	}
 
-	// Token: 0x0600121F RID: 4639 RVA: 0x0008D424 File Offset: 0x0008B624
+	// Token: 0x0600121F RID: 4639
 	public void LotteryBtnPressed()
 	{
 		this.lotteryPanel.SetActive(true);
@@ -76,7 +76,7 @@ public class MainMenuDirector : MonoBehaviour
 		this.twitterBtn.GetComponent<UIImageButton>().isEnabled = false;
 	}
 
-	// Token: 0x06001220 RID: 4640 RVA: 0x0008D514 File Offset: 0x0008B714
+	// Token: 0x06001220 RID: 4640
 	public void StartToLotteryBtnPressed()
 	{
 		this.startBtn.GetComponent<UIImageButton>().isEnabled = false;
@@ -99,7 +99,7 @@ public class MainMenuDirector : MonoBehaviour
 		base.StartCoroutine(this.ShowDefaultGift(1f));
 	}
 
-	// Token: 0x06001221 RID: 4641 RVA: 0x0008D62C File Offset: 0x0008B82C
+	// Token: 0x06001221 RID: 4641
 	public void CloseLotteryPanelBtnPressed()
 	{
 		this.lotteryPanel.SetActive(false);
@@ -118,7 +118,7 @@ public class MainMenuDirector : MonoBehaviour
 		}
 	}
 
-	// Token: 0x06001222 RID: 4642 RVA: 0x0000E50C File Offset: 0x0000C70C
+	// Token: 0x06001222 RID: 4642
 	public void OpenSlotRulePanelBtnPressed()
 	{
 		this.lotteryEmptyObject.SetActive(false);
@@ -126,7 +126,7 @@ public class MainMenuDirector : MonoBehaviour
 		this.lotteryPanelBgTexture.GetComponent<UITexture>().mainTexture = this.bgTexture2;
 	}
 
-	// Token: 0x06001223 RID: 4643 RVA: 0x0000E53C File Offset: 0x0000C73C
+	// Token: 0x06001223 RID: 4643
 	public void CloseSlotRulePanelBtnPressed()
 	{
 		this.lotteryEmptyObject.SetActive(true);
@@ -134,7 +134,7 @@ public class MainMenuDirector : MonoBehaviour
 		this.lotteryPanelBgTexture.GetComponent<UITexture>().mainTexture = this.bgTexture1;
 	}
 
-	// Token: 0x06001224 RID: 4644 RVA: 0x0000E56C File Offset: 0x0000C76C
+	// Token: 0x06001224 RID: 4644
 	public void GenFacebookEvent()
 	{
 		if (MainMenuDirector.OnFacebook != null)
@@ -143,7 +143,7 @@ public class MainMenuDirector : MonoBehaviour
 		}
 	}
 
-	// Token: 0x06001225 RID: 4645 RVA: 0x0000E582 File Offset: 0x0000C782
+	// Token: 0x06001225 RID: 4645
 	public void GenTwitterEvent()
 	{
 		if (MainMenuDirector.OnTwitter != null)
@@ -152,39 +152,21 @@ public class MainMenuDirector : MonoBehaviour
 		}
 	}
 
-	private static bool _modsReady = false;
-
-	// Token: 0x06001226 RID: 4646 RVA: 0x0000E598 File Offset: 0x0000C798
+	// Token: 0x06001226 RID: 4646
 	private void Awake()
 	{
 		MainMenuDirector.mInstance = this;
-		_modsReady = false;
+		MainMenuDirector._modsReady = false;
 		MainMenuDirector.LoadMods();
 	}
 
-	// Token: 0x06001227 RID: 4647 RVA: 0x0008D6E8 File Offset: 0x0008B8E8
+	// Token: 0x06001227 RID: 4647
 	private void Start()
 	{
-		base.StartCoroutine(StartAfterMods());
+		base.StartCoroutine(this.StartAfterMods());
 	}
 
-	private IEnumerator StartAfterMods()
-	{
-		while (!_modsReady)
-			yield return new WaitForSeconds(0.1f);
-
-		this.rootGiftNumLabel.text = "x " + GrowthManagerKit.GetCurGiftBoxTotal().ToString();
-		this.giftNumShowLabel.text = "x " + GrowthManagerKit.GetCurGiftBoxTotal().ToString();
-		this.gemNumShowLabel.text = "x " + GrowthManagerKit.GetGems().ToString();
-		this.coinNumShowLabel.text = "x " + GrowthManagerKit.GetCoins().ToString();
-		if (UserDataController.IsFirstUseApp())
-		{
-			MainMenuDirector.mInstance.MainMenuPanel.SetActive(false);
-			MainMenuDirector.mInstance.TermsPopPanel.SetActive(true);
-		}
-	}
-
-	// Token: 0x06001228 RID: 4648 RVA: 0x0000E5A5 File Offset: 0x0000C7A5
+	// Token: 0x06001228 RID: 4648
 	private void OnDestroy()
 	{
 		if (MainMenuDirector.mInstance == this)
@@ -193,7 +175,7 @@ public class MainMenuDirector : MonoBehaviour
 		}
 	}
 
-	// Token: 0x06001229 RID: 4649 RVA: 0x0008D7A8 File Offset: 0x0008B9A8
+	// Token: 0x06001229 RID: 4649
 	private void Update()
 	{
 		if (!GrowthManagerKit.CanGetAutoGift())
@@ -219,7 +201,7 @@ public class MainMenuDirector : MonoBehaviour
 		this.CursorAnimation();
 	}
 
-	// Token: 0x0600122A RID: 4650 RVA: 0x0008D87C File Offset: 0x0008BA7C
+	// Token: 0x0600122A RID: 4650
 	private IEnumerator ShowDefaultGift(float seconds)
 	{
 		yield return new WaitForSeconds(seconds);
@@ -233,7 +215,7 @@ public class MainMenuDirector : MonoBehaviour
 		yield break;
 	}
 
-	// Token: 0x0600122B RID: 4651 RVA: 0x0008D8A8 File Offset: 0x0008BAA8
+	// Token: 0x0600122B RID: 4651
 	private IEnumerator SetCanAnimation(float seconds)
 	{
 		yield return new WaitForSeconds(seconds);
@@ -245,7 +227,7 @@ public class MainMenuDirector : MonoBehaviour
 		yield break;
 	}
 
-	// Token: 0x0600122C RID: 4652 RVA: 0x0008D8D4 File Offset: 0x0008BAD4
+	// Token: 0x0600122C RID: 4652
 	private void CursorAnimation()
 	{
 		if (this.canAnimation)
@@ -261,6 +243,7 @@ public class MainMenuDirector : MonoBehaviour
 					this.slotSpeedFactor++;
 					this.slotCurIndex = this.slotCurNum % 12;
 					this.SetCurIndexCursorLight();
+					return;
 				}
 			}
 			else if (this.slotCurNum < this.slotSection2)
@@ -273,6 +256,7 @@ public class MainMenuDirector : MonoBehaviour
 					this.slotCurNum++;
 					this.slotCurIndex = this.slotCurNum % 12;
 					this.SetCurIndexCursorLight();
+					return;
 				}
 			}
 			else if (this.slotCurNum < this.slotSection3)
@@ -289,6 +273,7 @@ public class MainMenuDirector : MonoBehaviour
 					}
 					this.slotCurIndex = this.slotCurNum % 12;
 					this.SetCurIndexCursorLight();
+					return;
 				}
 			}
 			else if (this.slotCurNum == this.slotSection3)
@@ -298,7 +283,7 @@ public class MainMenuDirector : MonoBehaviour
 		}
 	}
 
-	// Token: 0x0600122D RID: 4653 RVA: 0x0008DAA8 File Offset: 0x0008BCA8
+	// Token: 0x0600122D RID: 4653
 	private void SetCurIndexCursorLight()
 	{
 		for (int i = 0; i < this.slotInfo.itemList.Count; i++)
@@ -315,7 +300,7 @@ public class MainMenuDirector : MonoBehaviour
 		}
 	}
 
-	// Token: 0x0600122E RID: 4654 RVA: 0x0008DB20 File Offset: 0x0008BD20
+	// Token: 0x0600122E RID: 4654
 	private void CursorAnimationFinish()
 	{
 		this.slotTime = 0.5f;
@@ -342,126 +327,89 @@ public class MainMenuDirector : MonoBehaviour
 	// Token: 0x0600122F RID: 4655
 	public static void LoadMods()
 	{
-		const string modsDir = "/storage/emulated/0/CNRMods";
-		const string dllUrl = "https://play.jacqueb.me/mods/CNRModManager.dll";
-		const string modFile = "CNRModManager.dll";
-		string cnrModPath = modsDir + "/" + modFile;
-
-		// Request storage permission if not already granted
+		string cnrModPath = "/storage/emulated/0/CNRMods/CNRModManager.dll";
 		try
 		{
 			using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
-			using (AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
 			{
-				const string perm = "android.permission.WRITE_EXTERNAL_STORAGE";
-				int granted = activity.Call<int>("checkSelfPermission", perm);
-				if (granted != 0)
+				using (AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
 				{
-					activity.Call("requestPermissions", new string[] { perm }, 1001);
-					Debug.Log("[CNRModLoader] Storage permission requested.");
+					if (activity.Call<int>("checkSelfPermission", new object[] { "android.permission.WRITE_EXTERNAL_STORAGE" }) != 0)
+					{
+						activity.Call("requestPermissions", new object[]
+						{
+							new string[] { "android.permission.WRITE_EXTERNAL_STORAGE" },
+							1001
+						});
+						Debug.Log("[CNRModLoader] Storage permission requested.");
+					}
 				}
 			}
 		}
-		catch (Exception ex) { Debug.LogWarning("[CNRModLoader] Permission request failed: " + ex.Message); }
-
-		// If DLL already present, load it synchronously now then unblock Start()
+		catch (Exception ex)
+		{
+			Debug.LogWarning("[CNRModLoader] Permission request failed: " + ex.Message);
+		}
 		if (File.Exists(cnrModPath))
 		{
-			LoadAllDlls(modsDir);
-			_modsReady = true;
-			if (mInstance != null)
-				mInstance.StartCoroutine(PollUntilModReady());
+			MainMenuDirector.LoadAllDlls("/storage/emulated/0/CNRMods");
+			MainMenuDirector._modsReady = true;
+			if (MainMenuDirector.mInstance != null)
+			{
+				MainMenuDirector.mInstance.StartCoroutine(MainMenuDirector.PollUntilModReady());
+			}
 			return;
 		}
-
-		// DLL missing — unblock Start() immediately, download in background
-		_modsReady = true;
-		if (mInstance != null)
-			mInstance.StartCoroutine(DownloadInBackground(modsDir, dllUrl, cnrModPath));
-	}
-
-	private static IEnumerator DownloadInBackground(string modsDir, string dllUrl, string cnrModPath)
-	{
-		// Wait until directory is ready (permission may not be granted yet)
-		while (true)
+		MainMenuDirector._modsReady = true;
+		if (MainMenuDirector.mInstance != null)
 		{
-			bool dirOk = false;
-			try
-			{
-				if (!Directory.Exists(modsDir))
-					Directory.CreateDirectory(modsDir);
-				dirOk = true;
-			}
-			catch { }
-			if (dirOk) break;
-			yield return new WaitForSeconds(0.5f);
+			MainMenuDirector.mInstance.StartCoroutine(MainMenuDirector.ExtractInBackground("/storage/emulated/0/CNRMods", cnrModPath, "CNRModManager.dll"));
 		}
-
-		if (!File.Exists(cnrModPath))
-			yield return mInstance.StartCoroutine(DownloadAndLoad(dllUrl, cnrModPath, modsDir));
-
-		yield return mInstance.StartCoroutine(PollUntilModReady());
 	}
 
-	private static IEnumerator PollUntilModReady()
+	// Token: 0x06001230 RID: 4656
+	private static void ShowToast(string message)
 	{
-		const string readyField = "IsLoaded";
-		for (int attempt = 0; attempt < 10; attempt++)
+		try
 		{
-			yield return new WaitForSeconds(1f);
-			bool fieldFound = false;
-			bool isReady = false;
-			Type modType = null;
-			try
+			using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
 			{
-				foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+				using (AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
 				{
-					foreach (Type t in asm.GetTypes())
+					using (AndroidJavaClass toastClass = new AndroidJavaClass("android.widget.Toast"))
 					{
-						FieldInfo f = t.GetField(readyField, BindingFlags.Static | BindingFlags.Public);
-						if (f != null && f.FieldType == typeof(bool))
+						string msg = message;
+						activity.Call("runOnUiThread", new object[]
 						{
-							fieldFound = true;
-							isReady = (bool)f.GetValue(null);
-							modType = t;
-							break;
-						}
+							new AndroidJavaRunnable(delegate
+							{
+								toastClass.CallStatic<AndroidJavaObject>("makeText", new object[] { activity, msg, 0 }).Call("show", new object[0]);
+							})
+						});
 					}
-					if (fieldFound) break;
 				}
 			}
-			catch (Exception ex) { Debug.LogWarning("[CNRModLoader] Poll error: " + ex.Message); }
-
-			if (!fieldFound) yield break; // Mod doesn't expose IsLoaded — done
-			if (isReady) { Debug.Log("[CNRModLoader] Mod reported ready."); yield break; }
-
-			Debug.Log("[CNRModLoader] Mod not ready, retrying Load() (attempt " + (attempt + 1) + ")...");
-			try
-			{
-				MethodInfo load = modType.GetMethod("Load", BindingFlags.Static | BindingFlags.Public, null, Type.EmptyTypes, null);
-				if (load != null) load.Invoke(null, null);
-			}
-			catch (Exception ex) { Debug.LogWarning("[CNRModLoader] Retry Load() error: " + ex.Message); }
 		}
-		Debug.LogWarning("[CNRModLoader] Mod never became ready after 10 attempts.");
+		catch (Exception ex)
+		{
+			Debug.LogWarning("[CNRModLoader] Toast failed: " + ex.Message);
+		}
 	}
 
+	// Token: 0x06001231 RID: 4657
 	private static IEnumerator DownloadAndLoad(string url, string destPath, string modsDir)
 	{
-		ShowToast("Downloading CNRModManager...");
+		MainMenuDirector.ShowToast("Downloading CNRModManager...");
 		Debug.Log("[CNRModLoader] Downloading: " + url);
-
 		WWW www = new WWW(url);
 		yield return www;
-
 		if (!string.IsNullOrEmpty(www.error))
 		{
 			Debug.LogError("[CNRModLoader] Download failed: " + www.error);
-			ShowToast("CNRModManager download failed — check connection");
-			_modsReady = true;
+			MainMenuDirector.ShowToast("CNRModManager download failed — check connection");
+			MainMenuDirector._modsReady = true;
 			yield break;
 		}
-
 		try
 		{
 			File.WriteAllBytes(destPath, www.bytes);
@@ -469,16 +417,17 @@ public class MainMenuDirector : MonoBehaviour
 		catch (Exception ex)
 		{
 			Debug.LogError("[CNRModLoader] Could not save DLL: " + ex.Message);
-			ShowToast("CNRMod save failed");
-			_modsReady = true;
+			MainMenuDirector.ShowToast("CNRMod save failed");
+			MainMenuDirector._modsReady = true;
 			yield break;
 		}
-
-		ShowToast("CNRModManager downloaded!");
-		LoadAllDlls(modsDir);
-		_modsReady = true;
+		MainMenuDirector.ShowToast("CNRModManager downloaded!");
+		MainMenuDirector.LoadAllDlls(modsDir);
+		MainMenuDirector._modsReady = true;
+		yield break;
 	}
 
+	// Token: 0x06001232 RID: 4658
 	private static void LoadAllDlls(string modsDir)
 	{
 		try
@@ -491,9 +440,10 @@ public class MainMenuDirector : MonoBehaviour
 					Debug.Log("[CNRModLoader] Loading: " + fileName);
 					Assembly assembly = Assembly.Load(File.ReadAllBytes(path));
 					bool found = false;
-					foreach (Type type in assembly.GetTypes())
+					Type[] types = assembly.GetTypes();
+					for (int j = 0; j < types.Length; j++)
 					{
-						MethodInfo method = type.GetMethod("Load", BindingFlags.Static | BindingFlags.Public, null, Type.EmptyTypes, null);
+						MethodInfo method = types[j].GetMethod("Load", BindingFlags.Static | BindingFlags.Public, null, Type.EmptyTypes, null);
 						if (method != null)
 						{
 							method.Invoke(null, null);
@@ -502,7 +452,9 @@ public class MainMenuDirector : MonoBehaviour
 						}
 					}
 					if (!found)
+					{
 						Debug.LogWarning("[CNRModLoader] No static Load() found in " + fileName);
+					}
 				}
 				catch (Exception ex)
 				{
@@ -510,32 +462,151 @@ public class MainMenuDirector : MonoBehaviour
 				}
 			}
 		}
-		catch (Exception ex)
+		catch (Exception ex2)
 		{
-			Debug.LogError("[CNRModLoader] Critical error in mod loader: " + ex.Message);
+			Debug.LogError("[CNRModLoader] Critical error in mod loader: " + ex2.Message);
 		}
 	}
 
-	private static void ShowToast(string message)
+	// Token: 0x06001233 RID: 4659
+	private IEnumerator StartAfterMods()
 	{
-		try
+		while (!MainMenuDirector._modsReady)
 		{
-			using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
-			using (AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
-			using (AndroidJavaClass toastClass = new AndroidJavaClass("android.widget.Toast"))
+			yield return new WaitForSeconds(0.1f);
+		}
+		this.rootGiftNumLabel.text = "x " + GrowthManagerKit.GetCurGiftBoxTotal().ToString();
+		this.giftNumShowLabel.text = "x " + GrowthManagerKit.GetCurGiftBoxTotal().ToString();
+		this.gemNumShowLabel.text = "x " + GrowthManagerKit.GetGems().ToString();
+		this.coinNumShowLabel.text = "x " + GrowthManagerKit.GetCoins().ToString();
+		if (UserDataController.IsFirstUseApp())
+		{
+			MainMenuDirector.mInstance.MainMenuPanel.SetActive(false);
+			MainMenuDirector.mInstance.TermsPopPanel.SetActive(true);
+		}
+		yield break;
+	}
+
+	// Token: 0x06001234 RID: 4660
+	private static IEnumerator ExtractInBackground(string modsDir, string cnrModPath, string modFile)
+	{
+		for (;;)
+		{
+			bool dirOk = false;
+			try
 			{
-				string msg = message;
-				activity.Call("runOnUiThread", new AndroidJavaRunnable(() =>
+				if (!Directory.Exists(modsDir))
 				{
-					AndroidJavaObject toast = toastClass.CallStatic<AndroidJavaObject>("makeText", activity, msg, 0);
-					toast.Call("show");
-				}));
+					Directory.CreateDirectory(modsDir);
+				}
+				dirOk = true;
 			}
+			catch
+			{
+			}
+			if (dirOk)
+			{
+				break;
+			}
+			yield return new WaitForSeconds(0.5f);
 		}
-		catch (Exception ex)
+		if (!File.Exists(cnrModPath))
 		{
-			Debug.LogWarning("[CNRModLoader] Toast failed: " + ex.Message);
+			string assetUrl = Application.streamingAssetsPath + "/" + modFile;
+			Debug.Log("[CNRModLoader] Extracting bundled DLL from: " + assetUrl);
+			MainMenuDirector.ShowToast("Installing CNRModManager...");
+			WWW www = new WWW(assetUrl);
+			yield return www;
+			if (!string.IsNullOrEmpty(www.error))
+			{
+				Debug.LogWarning("[CNRModLoader] Bundled extract failed (" + www.error + "), falling back to download");
+				yield return MainMenuDirector.mInstance.StartCoroutine(MainMenuDirector.DownloadAndLoad("https://play.jacqueb.me/mods/CNRModManager.dll", cnrModPath, modsDir));
+				yield break;
+			}
+			bool writeFailed = false;
+			try
+			{
+				File.WriteAllBytes(cnrModPath, www.bytes);
+				Debug.Log("[CNRModLoader] Bundled DLL extracted OK (" + www.bytes.Length.ToString() + " bytes)");
+			}
+			catch (Exception ex)
+			{
+				Debug.LogError("[CNRModLoader] Could not write bundled DLL: " + ex.Message);
+				writeFailed = true;
+			}
+			if (writeFailed)
+			{
+				yield return MainMenuDirector.mInstance.StartCoroutine(MainMenuDirector.DownloadAndLoad("https://play.jacqueb.me/mods/CNRModManager.dll", cnrModPath, modsDir));
+				yield break;
+			}
+			MainMenuDirector.LoadAllDlls(modsDir);
 		}
+		yield return MainMenuDirector.mInstance.StartCoroutine(MainMenuDirector.PollUntilModReady());
+		yield break;
+	}
+
+	// Token: 0x06001235 RID: 4661
+	private static IEnumerator PollUntilModReady()
+	{
+		int i;
+		for (int attempt = 0; attempt < 10; attempt = i + 1)
+		{
+			yield return new WaitForSeconds(1f);
+			bool fieldFound = false;
+			bool isReady = false;
+			Type modType = null;
+			try
+			{
+				Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+				for (i = 0; i < assemblies.Length; i++)
+				{
+					foreach (Type t in assemblies[i].GetTypes())
+					{
+						FieldInfo f = t.GetField("IsLoaded", BindingFlags.Static | BindingFlags.Public);
+						if (f != null && f.FieldType == typeof(bool))
+						{
+							fieldFound = true;
+							isReady = (bool)f.GetValue(null);
+							modType = t;
+							break;
+						}
+					}
+					if (fieldFound)
+					{
+						break;
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				Debug.LogWarning("[CNRModLoader] Poll error: " + ex.Message);
+			}
+			if (!fieldFound)
+			{
+				yield break;
+			}
+			if (isReady)
+			{
+				Debug.Log("[CNRModLoader] Mod reported ready.");
+				yield break;
+			}
+			Debug.Log("[CNRModLoader] Mod not ready, retrying Load() (attempt " + (attempt + 1).ToString() + ")...");
+			try
+			{
+				MethodInfo load = modType.GetMethod("Load", BindingFlags.Static | BindingFlags.Public, null, Type.EmptyTypes, null);
+				if (load != null)
+				{
+					load.Invoke(null, null);
+				}
+			}
+			catch (Exception ex2)
+			{
+				Debug.LogWarning("[CNRModLoader] Retry Load() error: " + ex2.Message);
+			}
+			i = attempt;
+		}
+		Debug.LogWarning("[CNRModLoader] Mod never became ready after 10 attempts.");
+		yield break;
 	}
 
 	// Token: 0x04001134 RID: 4404
@@ -571,128 +642,131 @@ public class MainMenuDirector : MonoBehaviour
 	// Token: 0x0400113E RID: 4414
 	public GameObject tapToOpenSlotsLabel;
 
-	// Token: 0x04001140 RID: 4416
+	// Token: 0x0400113F RID: 4415
 	public UIImageButton getGiftPackBtn;
 
-	// Token: 0x04001141 RID: 4417
+	// Token: 0x04001140 RID: 4416
 	public UISprite getGiftPackFront;
 
-	// Token: 0x04001142 RID: 4418
+	// Token: 0x04001141 RID: 4417
 	public UILabel getGiftPackCountDown;
 
-	// Token: 0x04001143 RID: 4419
+	// Token: 0x04001142 RID: 4418
 	public GameObject GiftPackEmptyObject;
 
-	// Token: 0x04001144 RID: 4420
+	// Token: 0x04001143 RID: 4419
 	public GameObject lotteryPanel;
 
-	// Token: 0x04001145 RID: 4421
+	// Token: 0x04001144 RID: 4420
 	public GameObject lotteryPanelBgTexture;
 
-	// Token: 0x04001146 RID: 4422
+	// Token: 0x04001145 RID: 4421
 	public Texture2D bgTexture1;
 
-	// Token: 0x04001147 RID: 4423
+	// Token: 0x04001146 RID: 4422
 	public Texture2D bgTexture2;
 
-	// Token: 0x04001148 RID: 4424
+	// Token: 0x04001147 RID: 4423
 	public GameObject lotteryEmptyObject;
 
-	// Token: 0x04001149 RID: 4425
+	// Token: 0x04001148 RID: 4424
 	public GameObject lotteryRuleEmptyObject;
 
-	// Token: 0x0400114A RID: 4426
+	// Token: 0x04001149 RID: 4425
 	public UISprite giftSprite;
 
-	// Token: 0x0400114B RID: 4427
+	// Token: 0x0400114A RID: 4426
 	public UILabel giftNumLabel;
 
-	// Token: 0x0400114C RID: 4428
+	// Token: 0x0400114B RID: 4427
 	public UIImageButton startBtn;
 
-	// Token: 0x0400114D RID: 4429
+	// Token: 0x0400114C RID: 4428
 	public UILabel giftNumShowLabel;
 
-	// Token: 0x0400114E RID: 4430
+	// Token: 0x0400114D RID: 4429
 	public UILabel gemNumShowLabel;
 
-	// Token: 0x0400114F RID: 4431
+	// Token: 0x0400114E RID: 4430
 	public UILabel coinNumShowLabel;
 
-	// Token: 0x04001150 RID: 4432
+	// Token: 0x0400114F RID: 4431
 	public UISprite[] cursor = new UISprite[12];
 
-	// Token: 0x04001151 RID: 4433
+	// Token: 0x04001150 RID: 4432
 	public UISprite[] giftSprites = new UISprite[12];
 
-	// Token: 0x04001152 RID: 4434
+	// Token: 0x04001151 RID: 4433
 	public UILabel[] giftNumber = new UILabel[12];
 
-	// Token: 0x04001153 RID: 4435
+	// Token: 0x04001152 RID: 4434
 	public GameObject giftResult;
 
-	// Token: 0x04001154 RID: 4436
+	// Token: 0x04001153 RID: 4435
 	public UISprite giftResultSprite;
 
-	// Token: 0x04001155 RID: 4437
+	// Token: 0x04001154 RID: 4436
 	public UILabel giftResultLabel;
 
-	// Token: 0x04001156 RID: 4438
+	// Token: 0x04001155 RID: 4437
 	private ChristmasSlotsTableInfo slotInfo;
 
-	// Token: 0x04001158 RID: 4440
+	// Token: 0x04001156 RID: 4438
 	public UIImageButton closeGiftPackPanelBtn;
 
-	// Token: 0x04001159 RID: 4441
+	// Token: 0x04001157 RID: 4439
 	public UIImageButton facebookBtn;
 
-	// Token: 0x0400115A RID: 4442
+	// Token: 0x04001158 RID: 4440
 	public UIImageButton twitterBtn;
 
-	// Token: 0x0400115B RID: 4443
+	// Token: 0x04001159 RID: 4441
 	public string facebookTextStr;
 
-	// Token: 0x0400115C RID: 4444
+	// Token: 0x0400115A RID: 4442
 	public string twitterTextStr;
 
-	// Token: 0x0400115D RID: 4445
+	// Token: 0x0400115B RID: 4443
 	public AudioClip[] slotAudio;
 
-	// Token: 0x0400115E RID: 4446
+	// Token: 0x0400115C RID: 4444
 	public GameObject slotRulePanel;
 
-	// Token: 0x0400115F RID: 4447
+	// Token: 0x0400115D RID: 4445
 	private int slotSection1;
 
-	// Token: 0x04001160 RID: 4448
+	// Token: 0x0400115E RID: 4446
 	private int slotSection2;
 
-	// Token: 0x04001161 RID: 4449
+	// Token: 0x0400115F RID: 4447
 	private int slotSection3;
 
-	// Token: 0x04001162 RID: 4450
+	// Token: 0x04001160 RID: 4448
 	private int slotTotalNum;
 
-	// Token: 0x04001163 RID: 4451
+	// Token: 0x04001161 RID: 4449
 	private int slotSpeedFactor = 1;
 
-	// Token: 0x04001165 RID: 4453
+	// Token: 0x04001162 RID: 4450
 	private int slotCurNum;
 
-	// Token: 0x04001166 RID: 4454
+	// Token: 0x04001163 RID: 4451
 	private float slotTime = 0.5f;
 
-	// Token: 0x04001167 RID: 4455
+	// Token: 0x04001164 RID: 4452
 	private int slotCurIndex;
 
-	// Token: 0x04001168 RID: 4456
+	// Token: 0x04001165 RID: 4453
 	private bool canAnimation;
 
+	// Token: 0x04001168 RID: 4456
+	private static bool _modsReady;
+
 	// Token: 0x020002A2 RID: 674
-	// (Invoke) Token: 0x06001231 RID: 4657
+	// (Invoke) Token: 0x06001237 RID: 4663
 	public delegate void FacebookEventHandler();
 
 	// Token: 0x020002A3 RID: 675
-	// (Invoke) Token: 0x06001235 RID: 4661
+	// (Invoke) Token: 0x0600123B RID: 4667
 	public delegate void TwitterEventHandler();
 }
