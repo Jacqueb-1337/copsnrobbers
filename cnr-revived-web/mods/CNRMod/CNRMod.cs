@@ -27,7 +27,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.58";
+        public const  string Version = "2.0.59";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -2339,6 +2339,12 @@ namespace CNRMods
                 var go = new GameObject("CNRSkinStoreHook");
                 go.AddComponent<CNRSkinStoreHook>();
             }
+            // Inject owned DLC skins into the profile screen's skin selector
+            if (Application.loadedLevelName == "ProfileScene" && OfficialSkins.Length > 0)
+            {
+                var go = new GameObject("CNRProfileHook");
+                go.AddComponent<CNRProfileHook>();
+            }
             // Apply DLC skin textures to remote player characters in game scenes
             string[] gameScenes = { "FreeRun3_1","FreeRun4_1","FreeRun5_1","FreeRun6_1","FreeRun7_1",
                                     "FreeRun8_1","FreeRun9_1","FreeRun10_1","FreeRun11_1","FreeRun12_1",
@@ -3189,6 +3195,267 @@ namespace CNRMods
                 case UIStoreBtnEvent.ButtonName.LeftSkin:     Hook.OnLeft();      break;
                 case UIStoreBtnEvent.ButtonName.RightSkin:    Hook.OnRight();     break;
                 case UIStoreBtnEvent.ButtonName.SkinSetUnlock: Hook.OnSetUnlock(); break;
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  CNR PROFILE HOOK — extends profile screen skin selector with DLC skins
+    // ══════════════════════════════════════════════════════════════════════════
+    // Spawned in ProfileScene by ContentManager.OnLevelWasLoaded.
+    // After UIProfileDirector.Start() has run GetSkinData(), injects owned+
+    // downloaded DLC skins into the internal arrays so the Left/Right buttons
+    // include them. Intercepts LeftSkin/RightSkin/SetSkin buttons so that DLC
+    // equips update CNR_EquippedDLCSkin rather than calling SetCurSettedSkin.
+    public class CNRProfileHook : MonoBehaviour
+    {
+        // ── Reflection cache ──────────────────────────────────────────────────
+        static FieldInfo  _fi_gSkinItemInfo, _fi_skinNameList,
+                          _fi_hatSkin, _fi_bodySkin,
+                          _fi_skinNum, _fi_idList,
+                          _fi_curSkinId, _fi_curSkinIndexinIdList, _fi_skinUsingId;
+        static MethodInfo _mi_SetSkinData;
+        static bool       _reflReady;
+
+        static void EnsureReflection()
+        {
+            if (_reflReady) return;
+            var t = typeof(UIProfileDirector);
+            _fi_gSkinItemInfo        = t.GetField("gSkinItemInfo",        BindingFlags.NonPublic | BindingFlags.Instance);
+            _fi_skinNameList         = t.GetField("skinNameList",         BindingFlags.NonPublic | BindingFlags.Instance);
+            _fi_hatSkin              = t.GetField("hatSkin",              BindingFlags.Public    | BindingFlags.Instance);
+            _fi_bodySkin             = t.GetField("bodySkin",             BindingFlags.Public    | BindingFlags.Instance);
+            _fi_skinNum              = t.GetField("skinNum",              BindingFlags.NonPublic | BindingFlags.Instance);
+            _fi_idList               = t.GetField("idList",               BindingFlags.Public    | BindingFlags.Instance);
+            _fi_curSkinId            = t.GetField("curSkinId",            BindingFlags.NonPublic | BindingFlags.Instance);
+            _fi_curSkinIndexinIdList = t.GetField("curSkinIndexinIdList", BindingFlags.NonPublic | BindingFlags.Instance);
+            _fi_skinUsingId          = t.GetField("skinUsingId",          BindingFlags.NonPublic | BindingFlags.Instance);
+            _mi_SetSkinData          = t.GetMethod("SetSkinData",         BindingFlags.NonPublic | BindingFlags.Instance);
+            _reflReady = true;
+        }
+
+        // ── State ─────────────────────────────────────────────────────────────
+        UIProfileDirector   _profile;
+        int                 _vanillaCount;    // # entries in idList after vanilla GetSkinData()
+        int                 _dlcMatStart = 33; // DLC materials always start at index 33
+        OfficialSkinEntry[] _dlcSkins;
+
+        // ── Accessors ─────────────────────────────────────────────────────────
+        int CurSkinId
+        {
+            get { return (int)_fi_curSkinId.GetValue(_profile); }
+            set { _fi_curSkinId.SetValue(_profile, value); }
+        }
+        int CurSkinIndexInIdList
+        {
+            get { return (int)_fi_curSkinIndexinIdList.GetValue(_profile); }
+            set { _fi_curSkinIndexinIdList.SetValue(_profile, value); }
+        }
+        int SkinUsingId
+        {
+            get { return (int)_fi_skinUsingId.GetValue(_profile); }
+            set { _fi_skinUsingId.SetValue(_profile, value); }
+        }
+
+        void Start() { StartCoroutine(Setup()); }
+
+        IEnumerator Setup()
+        {
+            yield return new WaitForSeconds(0.4f);
+            _profile = UIProfileDirector.mInstance;
+            if (_profile == null)
+            { ModEntry.Log("CNRProfileHook: UIProfileDirector not found"); Destroy(gameObject); yield break; }
+
+            EnsureReflection();
+            if (_fi_curSkinId == null)
+            { ModEntry.Log("CNRProfileHook: reflection failed"); Destroy(gameObject); yield break; }
+
+            BuildAndInject();
+
+            if (_dlcSkins == null || _dlcSkins.Length == 0)
+            { ModEntry.Log("CNRProfileHook: no owned DLC skins"); Destroy(gameObject); yield break; }
+
+            InterceptButtons();
+
+            // If a DLC skin is currently equipped, jump the profile view to it.
+            string equippedDlcId = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
+            if (!string.IsNullOrEmpty(equippedDlcId))
+            {
+                for (int i = 0; i < _dlcSkins.Length; i++)
+                {
+                    if (_dlcSkins[i].Id == equippedDlcId)
+                    {
+                        int listIdx = _vanillaCount + i;
+                        int matIdx  = _dlcMatStart  + i;
+                        CurSkinIndexInIdList = listIdx;
+                        CurSkinId            = matIdx;
+                        SkinUsingId          = matIdx;
+                        _mi_SetSkinData.Invoke(_profile, null);
+                        break;
+                    }
+                }
+            }
+
+            ModEntry.Log("CNRProfileHook: ready — " + (_vanillaCount + _dlcSkins.Length)
+                + " skins (" + _dlcSkins.Length + " DLC)");
+        }
+
+        void BuildAndInject()
+        {
+            var vanillaHat    = (Material[])_fi_hatSkin.GetValue(_profile);
+            var vanillaBody   = (Material[])_fi_bodySkin.GetValue(_profile);
+            _dlcMatStart      = vanillaHat.Length; // 33
+
+            var vanillaInfo   = (GSkinItemInfo[])_fi_gSkinItemInfo.GetValue(_profile);
+            var vanillaNames  = (string[])_fi_skinNameList.GetValue(_profile);
+            var vanillaIdList = (int[])_fi_idList.GetValue(_profile);
+            _vanillaCount     = vanillaInfo != null ? vanillaInfo.Length : 0;
+
+            // Only include DLC skins that are owned and have their texture cached locally.
+            var dlc = new List<OfficialSkinEntry>();
+            foreach (var sk in ContentManager.OfficialSkins)
+                if (PlayerPrefs.GetInt("CNR_DLC_owned_" + sk.Id, 0) != 0 &&
+                    File.Exists(ContentManager.SkinCacheDir + sk.Id + ".png"))
+                    dlc.Add(sk);
+            _dlcSkins = dlc.ToArray();
+
+            if (_dlcSkins.Length == 0) return;
+
+            int total      = _vanillaCount + _dlcSkins.Length;
+            var extInfo    = new GSkinItemInfo[total];
+            var extNames   = new string[total];
+            var extIdList  = new int[total];
+            var extHat     = new Material[_dlcMatStart + _dlcSkins.Length];
+            var extBody    = new Material[_dlcMatStart + _dlcSkins.Length];
+
+            if (_vanillaCount > 0)
+            {
+                Array.Copy(vanillaInfo,   extInfo,   _vanillaCount);
+                Array.Copy(vanillaNames,  extNames,  _vanillaCount);
+                Array.Copy(vanillaIdList, extIdList, _vanillaCount);
+            }
+            Array.Copy(vanillaHat,  extHat,  _dlcMatStart);
+            Array.Copy(vanillaBody, extBody, _dlcMatStart);
+
+            Material baseMat = vanillaBody[0];
+            for (int i = 0; i < _dlcSkins.Length; i++)
+            {
+                var sk      = _dlcSkins[i];
+                int listIdx = _vanillaCount + i;
+                int matIdx  = _dlcMatStart  + i;
+
+                extNames[listIdx]  = sk.SkinName.Length > 0 ? sk.SkinName : ("CNR_DLC_" + i);
+
+                var info = new GSkinItemInfo();
+                info.mName           = extNames[listIdx];
+                info.mNameDisplay    = sk.DisplayName;
+                info.mIsEnabled      = true;
+                info.mLogoSpriteName = "Skin_1";
+                extInfo[listIdx]     = info;
+
+                // idList is 1-based; SetSkinData uses idList[idx]-1 as the material index.
+                extIdList[listIdx] = matIdx + 1;
+
+                Texture2D tex = ContentManager.GetSkinTexture(sk.Id);
+                var mat = new Material(baseMat.shader);
+                mat.CopyPropertiesFromMaterial(baseMat);
+                if (tex != null) mat.mainTexture = tex;
+                mat.name       = sk.MaterialName;
+                extHat[matIdx]  = mat;
+                extBody[matIdx] = mat;
+            }
+
+            _fi_gSkinItemInfo.SetValue(_profile, extInfo);
+            _fi_skinNameList.SetValue(_profile,  extNames);
+            _fi_idList.SetValue(_profile,         extIdList);
+            _fi_skinNum.SetValue(_profile,         total);
+            _fi_hatSkin.SetValue(_profile,         extHat);
+            _fi_bodySkin.SetValue(_profile,        extBody);
+        }
+
+        void InterceptButtons()
+        {
+            var allBtnEvents = (UIProfileBtnEvent[])Resources.FindObjectsOfTypeAll(typeof(UIProfileBtnEvent));
+            ModEntry.Log("CNRProfileHook: scanning " + allBtnEvents.Length + " UIProfileBtnEvent(s)");
+            foreach (var evt in allBtnEvents)
+            {
+                var bn = evt.buttonName;
+                if (bn == UIProfileBtnEvent.ButtonName.LeftSkin  ||
+                    bn == UIProfileBtnEvent.ButtonName.RightSkin ||
+                    bn == UIProfileBtnEvent.ButtonName.SetSkin)
+                {
+                    evt.enabled = false;
+                    var interceptor    = evt.gameObject.AddComponent<CNRProfileBtnInterceptor>();
+                    interceptor.Hook   = this;
+                    interceptor.BtnTag = bn;
+                    ModEntry.Log("CNRProfileHook: intercepted " + bn);
+                }
+            }
+        }
+
+        // ── Button handlers (called by CNRProfileBtnInterceptor) ──────────────
+        public void OnLeft()
+        {
+            int total  = _vanillaCount + _dlcSkins.Length;
+            int idx    = (CurSkinIndexInIdList - 1 + total) % total;
+            var idList = (int[])_fi_idList.GetValue(_profile);
+            CurSkinIndexInIdList = idx;
+            CurSkinId            = idList[idx] - 1;
+            _mi_SetSkinData.Invoke(_profile, null);
+        }
+
+        public void OnRight()
+        {
+            int total  = _vanillaCount + _dlcSkins.Length;
+            int idx    = (CurSkinIndexInIdList + 1) % total;
+            var idList = (int[])_fi_idList.GetValue(_profile);
+            CurSkinIndexInIdList = idx;
+            CurSkinId            = idList[idx] - 1;
+            _mi_SetSkinData.Invoke(_profile, null);
+        }
+
+        public void OnSetSkin()
+        {
+            int cur = CurSkinIndexInIdList;
+            if (cur < _vanillaCount)
+            {
+                // Vanilla slot — delegate to the real handler, then clear DLC pref.
+                _profile.SetSkinBtnPressed();
+                PlayerPrefs.DeleteKey("CNR_EquippedDLCSkin");
+                PlayerPrefs.Save();
+                return;
+            }
+
+            int dlcIdx = cur - _vanillaCount;
+            if (dlcIdx >= _dlcSkins.Length) return;
+            var sk     = _dlcSkins[dlcIdx];
+            int matIdx = _dlcMatStart + dlcIdx;
+
+            if (matIdx == SkinUsingId) return; // already equipped
+
+            PlayerPrefs.SetString("CNR_EquippedDLCSkin", sk.Id);
+            PlayerPrefs.Save();
+            SkinUsingId = matIdx;
+            _mi_SetSkinData.Invoke(_profile, null);
+            ModEntry.Log("CNRProfileHook: equipped DLC skin \"" + sk.DisplayName + "\"");
+            ModEntry.BroadcastDlcSkin(sk.Id);
+        }
+    }
+
+    // Attached to each intercepted profile skin button GO; routes NGUI OnClick to CNRProfileHook.
+    public class CNRProfileBtnInterceptor : MonoBehaviour
+    {
+        public CNRProfileHook               Hook;
+        public UIProfileBtnEvent.ButtonName BtnTag;
+
+        void OnClick()
+        {
+            if (Hook == null) return;
+            switch (BtnTag)
+            {
+                case UIProfileBtnEvent.ButtonName.LeftSkin:  Hook.OnLeft();    break;
+                case UIProfileBtnEvent.ButtonName.RightSkin: Hook.OnRight();   break;
+                case UIProfileBtnEvent.ButtonName.SetSkin:   Hook.OnSetSkin(); break;
             }
         }
     }
