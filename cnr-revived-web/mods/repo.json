@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "Official CNR Mods",
   "mods": [
     {
@@ -221,11 +221,26 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.46",
+      "latestVersion": "2.0.55",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.55",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.55.dll",
+          "changelog": "Skin shop: always fetches a fresh manifest from the server when the store opens, so price and display name changes are reflected immediately without waiting for a manifest version bump."
+        },
+        {
+          "version": "2.0.48",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.48.dll",
+          "changelog": "Added Downloads panel: a DL button appears next to the Mail button on the main menu. The panel lists all content items (maps, textures, skins, guns) with per-item downloaded/missing status and individual Download buttons. A 'Download All Missing' batch button downloads all absent files with live progress. The DL button badge shows count of missing files."
+        },
+        {
+          "version": "2.0.47",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.47.dll",
+          "changelog": "ContentManager: added skin and gun DLC types. Skins are downloaded as PNGs, loaded into Texture2D, and swapped onto both body (Skin_N_2) and head (Skin_N_1) materials at runtime. Server manifest now returns skins[] and guns[] arrays. Admin panel supports adding/managing skin and gun content entries."
+        },
         {
           "version": "2.0.46",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.46.dll",
