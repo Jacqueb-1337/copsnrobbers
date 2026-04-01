@@ -27,7 +27,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.1.0";
+        public const  string Version = "2.1.3";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -432,7 +432,8 @@ namespace CNRMods
                 Type pnt = GetPhotonNetType();
                 if (pnt == null) { if (_pollDebugCount++ < 3) ModEntry.Log("PollRoomState: PhotonNetwork type not found"); return; }
 
-                bool nowInRoom = GetStaticBool(pnt, "inRoom");
+                // This PUN version has no PhotonNetwork.inRoom — check room != null instead.
+                bool nowInRoom = GetStaticObj(pnt, "room") != null;
                 bool nowMaster = nowInRoom && GetStaticBool(pnt, "isMasterClient");
 
                 // Log first 15 polls so we can see what Photon is returning
@@ -466,6 +467,24 @@ namespace CNRMods
 
             SetRoomProp(pnt, "CNR_MOD_VERSION", ModEntry.Version);
             ModEntry.BroadcastDlcSkin(PlayerPrefs.GetString("CNR_EquippedDLCSkin", ""));
+
+            // If we joined a room while already in a game scene (e.g. joining a match
+            // in progress), OnLevelWasLoaded won't fire again so CNRRemoteSkinRenderer
+            // never gets spawned. Spawn it here if the current scene is a game scene
+            // and it isn't already present.
+            if (ContentManager.OfficialSkins.Length > 0 &&
+                FindObjectOfType(typeof(CNRRemoteSkinRenderer)) == null)
+            {
+                string[] gameScenes = { "FreeRun3_1","FreeRun4_1","FreeRun5_1","FreeRun6_1","FreeRun7_1",
+                                        "FreeRun8_1","FreeRun9_1","FreeRun10_1","FreeRun11_1","FreeRun12_1",
+                                        "FreeRun13_1","FreeRun14_1","FreeRun15_1","CRScene1" };
+                if (Array.IndexOf(gameScenes, Application.loadedLevelName) >= 0)
+                {
+                    var go = new GameObject("CNRRemoteSkinRenderer");
+                    go.AddComponent<CNRRemoteSkinRenderer>();
+                    ModEntry.Log("OnEnteredRoom: spawned CNRRemoteSkinRenderer (already in game scene)");
+                }
+            }
 
             if (asMaster)
             {
@@ -838,6 +857,19 @@ namespace CNRMods
             }
             catch { }
             return false;
+        }
+
+        private static object GetStaticObj(Type t, string name)
+        {
+            try
+            {
+                PropertyInfo p = t.GetProperty(name, BindingFlags.Static | BindingFlags.Public);
+                if (p != null) return p.GetValue(null, null);
+                FieldInfo f = t.GetField(name, BindingFlags.Static | BindingFlags.Public);
+                if (f != null) return f.GetValue(null);
+            }
+            catch { }
+            return null;
         }
 
         private static object GetPhotonServerSettings()
@@ -3484,6 +3516,24 @@ namespace CNRMods
         Dictionary<int, string> _applied = new Dictionary<int, string>();
         float _nextPoll = 2f;   // first poll after 2s so characters have spawned
 
+        // Cached PhotonView type + ownerId property so ApplyToActor doesn't scan
+        // every MonoBehaviour in the scene (which causes multi-second freezes).
+        static Type         _pvType       = null;
+        static PropertyInfo _pvOwnerIdProp = null;
+        static Type GetPhotonViewType()
+        {
+            if (_pvType != null) return _pvType;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type t = asm.GetType("PhotonView");
+                if (t == null) continue;
+                _pvType        = t;
+                _pvOwnerIdProp = t.GetProperty("ownerId", BindingFlags.Instance | BindingFlags.Public);
+                return _pvType;
+            }
+            return null;
+        }
+
         void Update()
         {
             if (Time.time < _nextPoll) return;
@@ -3523,18 +3573,20 @@ namespace CNRMods
 
         bool ApplyToActor(int actorId, Texture2D tex)
         {
-            // Find every MonoBehaviour that looks like a PhotonView owned by this actor
-            var all = (MonoBehaviour[])FindObjectsOfType(typeof(MonoBehaviour));
-            foreach (var mb in all)
+            // Scan only PhotonView components (a handful per scene) instead of every
+            // MonoBehaviour, which caused multi-second ANR freezes on WSA/slow devices.
+            Type pvType = GetPhotonViewType();
+            if (pvType == null || _pvOwnerIdProp == null) return false;
+            var views = FindObjectsOfType(pvType);
+            foreach (var viewObj in views)
             {
-                if (mb == null) continue;
-                var ownerProp = mb.GetType().GetProperty("ownerId",
-                    BindingFlags.Instance | BindingFlags.Public);
-                if (ownerProp == null) continue;
+                if (viewObj == null) continue;
                 int oid;
-                try { oid = (int)ownerProp.GetValue(mb, null); } catch { continue; }
+                try { oid = (int)_pvOwnerIdProp.GetValue(viewObj, null); } catch { continue; }
                 if (oid != actorId) continue;
-                if (ApplyToTransform(mb.transform, tex)) return true;
+                Component view = viewObj as Component;
+                if (view == null) continue;
+                if (ApplyToTransform(view.transform, tex)) return true;
             }
             return false;
         }
