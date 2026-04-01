@@ -221,11 +221,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.58",
+      "latestVersion": "2.0.59",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.59",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.59.dll",
+          "changelog": "Profile screen skin selector now includes owned DLC skins. Navigate Left/Right through DLC skins and equip them from the profile screen just like the store."
+        },
         {
           "version": "2.0.58",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.58.dll",
