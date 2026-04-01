@@ -20,20 +20,21 @@ define('SPIN_COOLDOWN_SECS', 86400); // 24 h
 $pdo = db();
 
 // --- check eligibility -------------------------------------------------------
-$row = $pdo->prepare("SELECT last_spin_at FROM wheel_spins WHERE player_id=?");
+$row = $pdo->prepare("SELECT last_spin_at, bonus_spins FROM wheel_spins WHERE player_id=?");
 $row->execute([$player_id]);
 $spin = $row->fetch();
 $now = time();
 
+$bonus        = $spin ? (int)$spin['bonus_spins'] : 0;
 $eligible     = !$spin || ($now - (int)$spin['last_spin_at']) >= SPIN_COOLDOWN_SECS;
 $next_spin_at = $spin ? ((int)$spin['last_spin_at'] + SPIN_COOLDOWN_SECS) : 0;
 
 if ($action === 'check') {
-    ok(['eligible' => $eligible, 'next_spin_at' => $eligible ? 0 : $next_spin_at]);
+    ok(['eligible' => $eligible || $bonus > 0, 'next_spin_at' => ($eligible || $bonus > 0) ? 0 : $next_spin_at, 'bonus_spins' => $bonus]);
 }
 
 if ($action !== 'spin') fail('action must be check or spin');
-if (!$eligible) fail('not eligible yet: next spin at ' . $next_spin_at);
+if (!$eligible && $bonus <= 0) fail('not eligible yet: next spin at ' . $next_spin_at);
 
 // --- pick prize --------------------------------------------------------------
 // Weighted table: [prize_type, prize_amount, weight]
@@ -71,10 +72,18 @@ try {
             ->execute([$player_id, $prize_amount, $now]);
     }
 
-    // upsert spin timestamp
-    $pdo->prepare("INSERT INTO wheel_spins (player_id,last_spin_at) VALUES (?,?)
-                   ON CONFLICT(player_id) DO UPDATE SET last_spin_at=excluded.last_spin_at")
-        ->execute([$player_id, $now]);
+    // upsert spin timestamp / bonus_spins
+    if ($bonus > 0 && !$eligible) {
+        // Using a bonus spin — decrement bonus but don't reset the cooldown
+        $pdo->prepare("UPDATE wheel_spins SET bonus_spins = bonus_spins - 1 WHERE player_id = ?")
+            ->execute([$player_id]);
+    } else {
+        // Normal cooldown spin — reset last_spin_at, preserve remaining bonus
+        $pdo->prepare(
+            "INSERT INTO wheel_spins (player_id, last_spin_at, bonus_spins) VALUES (?, ?, 0)
+             ON CONFLICT(player_id) DO UPDATE SET last_spin_at = excluded.last_spin_at"
+        )->execute([$player_id, $now]);
+    }
 
     $pdo->commit();
 } catch (Exception $e) {
@@ -85,10 +94,17 @@ try {
 $cur = $pdo->prepare("SELECT coins, gems FROM accounts WHERE id=?");
 $cur->execute([$player_id]);
 $b = $cur->fetch();
+
+$wsAfter = $pdo->prepare("SELECT bonus_spins FROM wheel_spins WHERE player_id = ?");
+$wsAfter->execute([$player_id]);
+$wsRow = $wsAfter->fetch();
+$bonus_after = $wsRow ? (int)$wsRow['bonus_spins'] : 0;
+
 ok([
     'prize_type'   => $prize_type,
     'prize_amount' => $prize_amount,
     'coins'        => (int)$b['coins'],
     'gems'         => (int)$b['gems'],
     'next_spin_at' => $now + SPIN_COOLDOWN_SECS,
+    'bonus_spins'  => $bonus_after,
 ]);

@@ -447,12 +447,27 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.20",
+      "latestVersion": "2.0.23",
       "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.23",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.23.dll",
+          "changelog": "Jump height reduced to slightly above vanilla (JumpInitialVel 10)."
+        },
+        {
+          "version": "2.0.22",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.22.dll",
+          "changelog": "Jump height tuned to slightly above vanilla (~1.0 m, JumpInitialVel 19)."
+        },
+        {
+          "version": "2.0.21",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.21.dll",
+          "changelog": "Reduced jump height (JumpInitialVel 14)."
+        },
         {
           "version": "2.0.20",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.20.dll",
