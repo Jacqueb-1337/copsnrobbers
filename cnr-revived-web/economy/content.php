@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 $pdo = db();
 
 $rows = $pdo->query(
-    "SELECT id, type, name, url, thumbnail_url, file_hash, thumbnail_hash, material_name, data_key
+    "SELECT id, type, name, url, thumbnail_url, file_hash, thumbnail_hash, material_name, data_key, sort_order
        FROM content_items
       WHERE enabled = 1
       ORDER BY type, sort_order ASC, created_at ASC"
@@ -26,6 +26,8 @@ $rows = $pdo->query(
 $maps     = [];
 $textures = [];
 $data     = [];
+$skins    = [];
+$guns     = [];
 
 foreach ($rows as $r) {
     switch ($r['type']) {
@@ -55,6 +57,28 @@ foreach ($rows as $r) {
                 'hash' => $r['file_hash'] ?? '',
             ];
             break;
+        case 'skin':
+            $skins[] = [
+                'id'            => $r['id'],
+                'slot_key'      => $r['data_key'],
+                'name'          => $r['name'],
+                'material_name' => $r['material_name'],
+                'url'           => $r['url'],
+                'hash'          => $r['file_hash'] ?? '',
+                'price'         => (int)$r['sort_order'],
+            ];
+            break;
+        case 'gun':
+            $guns[] = [
+                'id'            => $r['id'],
+                'gun_key'       => $r['data_key'],
+                'name'          => $r['name'],
+                'material_name' => $r['material_name'],
+                'url'           => $r['url'],
+                'hash'          => $r['file_hash'] ?? '',
+                'price'         => (int)$r['sort_order'],
+            ];
+            break;
     }
 }
 
@@ -67,4 +91,6 @@ echo json_encode([
     'maps'             => $maps,
     'textures'         => $textures,
     'data'             => $data,
+    'skins'            => $skins,
+    'guns'             => $guns,
 ]);
