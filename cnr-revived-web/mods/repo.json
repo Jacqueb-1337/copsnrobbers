@@ -221,11 +221,26 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.0.60",
+      "latestVersion": "2.1.0",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.1.0",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.0.dll",
+          "changelog": "Fix username resets: display name changes are now pushed to the server immediately instead of waiting for next app restart. Server placeholders (New Player / Player) can no longer overwrite a real local name on reconnect."
+        },
+        {
+          "version": "2.0.62",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.62.dll",
+          "changelog": "Gift wheel spins via server mail. Admin can send X bonus spins to players; inbox displays spin rewards; bonus spins bypass the 24h cooldown server-side."
+        },
+        {
+          "version": "2.0.61",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.61.dll",
+          "changelog": "Admin can now gift wheel spins via server mail. Mail rewards show 'X wheel spin(s)' in the inbox. Claiming a spin-mail credits bonus spins server-side; players can spin the wheel beyond the 24h cooldown when bonus spins are available."
+        },
         {
           "version": "2.0.60",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.0.60.dll",
@@ -432,12 +447,17 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "2.0.19",
+      "latestVersion": "2.0.20",
       "minVersion": "2.0.4",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.0.20",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.20.dll",
+          "changelog": "Reduced jump height (JumpInitialVel 14). Old DLL on devices still had 24f (~2.5 m) due to missed deploy."
+        },
         {
           "version": "2.0.19",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.19.dll",
