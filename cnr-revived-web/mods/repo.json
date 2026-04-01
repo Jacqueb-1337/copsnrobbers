@@ -221,11 +221,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.1.4",
+      "latestVersion": "2.1.5",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.1.5",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.5.dll",
+          "changelog": "Replace all SetCustomProperties calls with Photon RaiseEvent (event code 199): skin, mod version, and map URL are now distributed directly over Photon events rather than player/room custom properties. Hooks PhotonNetwork.OnEventCall to receive events without going through SendMonoMessage. Master re-broadcasts map URL whenever a new joiner announces their version. Fixes: official pre-cached maps now correctly distribute URL to joining clients; no more SetCustomProperties calls that could trigger SendMonoMessage during join."
+        },
         {
           "version": "2.1.4",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.4.dll",
