@@ -27,7 +27,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.57";
+        public const  string Version = "2.0.58";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -2970,6 +2970,15 @@ namespace CNRMods
             BuildExtended();
             InjectArrays();
             InterceptNavButtons();
+
+            // If a DLC skin was last equipped, jump curSkinId to it so the shop opens
+            // directly on that skin instead of the old vanilla skin slot.
+            if (SkinUsingId >= _dlcStart)
+            {
+                CurSkinId = SkinUsingId;
+                _mi_SetSkinData.Invoke(_store, null);
+            }
+
             ModEntry.Log("CNRSkinStoreHook: ready — " + _total + " skins (" + (_total - _dlcStart) + " DLC)");
         }
 
