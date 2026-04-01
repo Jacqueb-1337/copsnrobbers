@@ -27,7 +27,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.0.60";
+        public const  string Version = "2.1.0";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -3577,8 +3577,12 @@ namespace CNRMods
         public static string[] MailBodies   = new string[0];
         public static int[]    MailCoins    = new int[0];
         public static int[]    MailGems     = new int[0];
+        public static int[]    MailSpins    = new int[0];
         public static bool[]   MailClaimed  = new bool[0];
         public static int      MailUnread   = 0;
+
+        // ── Gift wheel state (updated by DoWheelSpin / DoClaimMail responses) ─
+        public static int WheelBonusSpins = 0;
 
         // ── CNRSettingsMod integration ────────────────────────────────────────
         /// <summary>Set by CNRSettingsMod on startup; changes Account button label to "Settings".</summary>
@@ -3721,6 +3725,29 @@ namespace CNRMods
             ApplyDisplayName(www.text);
         }
 
+        // Pushes a mid-session display name change to the server via register.php.
+        // register.php will update the DB if the name is not a placeholder.
+        private IEnumerator PushDisplayName(string newName)
+        {
+            string androidId = GetAndroidId();
+            if (!string.IsNullOrEmpty(androidId) && !string.IsNullOrEmpty(_token))
+            {
+                string url  = ModEntry.EconomyUrl + "/register.php";
+                string body = "player_id="    + Uri.EscapeDataString(androidId) +
+                              "&display_name=" + Uri.EscapeDataString(newName) +
+                              "&token="        + Uri.EscapeDataString(_token);
+                var hdrs = new System.Collections.Hashtable();
+                hdrs["Content-Type"] = "application/x-www-form-urlencoded";
+                var www = new WWW(url, System.Text.Encoding.UTF8.GetBytes(body), hdrs);
+                yield return www;
+                if (string.IsNullOrEmpty(www.error))
+                    ModEntry.Log("EcoHook: pushed name change → " + newName);
+                else
+                    ModEntry.Log("EcoHook: name push failed: " + www.error);
+            }
+            _namePushRunning = false;
+        }
+
         private void ApplyServerBalance(string json)
         {
             string coinsStr = ModEntry.ParseJsonValue(json, "coins");
@@ -3794,17 +3821,23 @@ namespace CNRMods
 
         // Applies server's canonical display_name to LocalMultiplayerNickName if different.
         // Called after every register/relogin so all linked devices stay name-synced.
+        // Rule: never let a placeholder server name overwrite a real local name — that
+        // would reset a freshly-changed username if the server hasn't received it yet.
+        private static readonly string[] _namePlaceholders = { "Player", "New Player", "" };
         private void ApplyDisplayName(string json)
         {
             string serverName = ModEntry.ParseJsonStringValue(json, "display_name");
             if (string.IsNullOrEmpty(serverName)) return;
             string localName = PlayerPrefs.GetString("LocalMultiplayerNickName", "");
-            if (localName != serverName)
-            {
-                ModEntry.Log("EcoHook: name sync " + localName + " → " + serverName);
-                PlayerPrefs.SetString("LocalMultiplayerNickName", serverName);
-                PlayerPrefs.Save();
-            }
+            if (localName == serverName) return;
+            bool localIsPlaceholder  = System.Array.IndexOf(_namePlaceholders, localName)  >= 0;
+            bool serverIsPlaceholder = System.Array.IndexOf(_namePlaceholders, serverName) >= 0;
+            // Don't downgrade a real local name with a stale placeholder from the server
+            if (!localIsPlaceholder && serverIsPlaceholder) return;
+            ModEntry.Log("EcoHook: name sync " + localName + " → " + serverName);
+            PlayerPrefs.SetString("LocalMultiplayerNickName", serverName);
+            PlayerPrefs.Save();
+            _lastKnownName = serverName;
         }
 
         // ── Progression sync helpers ──────────────────────────────────────────
@@ -3975,6 +4008,8 @@ namespace CNRMods
         private float _reconnectTimer   = 0f;   // countdown until next login retry
         private bool  _reconnectRunning = false;
         private string _connectError    = "";   // last connection error to show in UI
+        private string _lastKnownName   = null; // tracks LocalMultiplayerNickName; null = not yet initialised
+        private bool  _namePushRunning  = false;
         private float _inboxTimer = 0f;
         private const float InboxInterval = 60f;
 
@@ -7309,6 +7344,17 @@ namespace CNRMods
 
             if (!Ready) return;
 
+            // Live name-change detection: push to server immediately when player renames
+            string currentName = PlayerPrefs.GetString("LocalMultiplayerNickName", "Player");
+            if (_lastKnownName == null) _lastKnownName = currentName; // initialise on first Ready frame
+            if (!_namePushRunning && currentName != _lastKnownName &&
+                System.Array.IndexOf(_namePlaceholders, currentName) < 0)
+            {
+                _lastKnownName = currentName;
+                _namePushRunning = true;
+                StartCoroutine(PushDisplayName(currentName));
+            }
+
             // Periodically refresh mail inbox — only when server is reachable
             if (ServerUp)
             {
@@ -7554,6 +7600,9 @@ namespace CNRMods
                 // a local delta (which would double-spend/earn on the server)
                 _lastCoins = coins; _lastGems = gems;
             }
+            string bonusStr = ModEntry.ParseJsonValue(www.text, "bonus_spins");
+            int bonusSpins;
+            if (int.TryParse(bonusStr, out bonusSpins)) WheelBonusSpins = bonusSpins;
             // Mark as claimed locally so UI updates immediately
             for (int i = 0; i < MailIds.Length; i++)
                 if (MailIds[i] == mailId) { MailClaimed[i] = true; break; }
@@ -7585,14 +7634,16 @@ namespace CNRMods
             var bod  = new System.Collections.Generic.List<string>(MailBodies);
             var coins = new System.Collections.Generic.List<int>(MailCoins);
             var gems  = new System.Collections.Generic.List<int>(MailGems);
+            var spns  = new System.Collections.Generic.List<int>(MailSpins);
             var cl   = new System.Collections.Generic.List<bool>(MailClaimed);
             int idx = ids.IndexOf(mailId);
-            if (idx >= 0) { ids.RemoveAt(idx); subj.RemoveAt(idx); bod.RemoveAt(idx); coins.RemoveAt(idx); gems.RemoveAt(idx); cl.RemoveAt(idx); }
+            if (idx >= 0) { ids.RemoveAt(idx); subj.RemoveAt(idx); bod.RemoveAt(idx); coins.RemoveAt(idx); gems.RemoveAt(idx); spns.RemoveAt(idx); cl.RemoveAt(idx); }
             MailIds      = ids.ToArray();
             MailSubjects = subj.ToArray();
             MailBodies   = bod.ToArray();
             MailCoins    = coins.ToArray();
             MailGems     = gems.ToArray();
+            MailSpins    = spns.ToArray();
             MailClaimed  = cl.ToArray();
             int unread = 0;
             for (int i = 0; i < MailClaimed.Length; i++) if (!MailClaimed[i]) unread++;
@@ -7620,14 +7671,14 @@ namespace CNRMods
             if (arrStart < 0 || arrEnd <= arrStart)
             {
                 MailIds = new int[0]; MailSubjects = new string[0]; MailBodies = new string[0];
-                MailCoins = new int[0]; MailGems = new int[0]; MailClaimed = new bool[0]; MailUnread = 0;
+                MailCoins = new int[0]; MailGems = new int[0]; MailSpins = new int[0]; MailClaimed = new bool[0]; MailUnread = 0;
                 return;
             }
             string arr = json.Substring(arrStart + 1, arrEnd - arrStart - 1).Trim();
             if (arr.Length == 0)
             {
                 MailIds = new int[0]; MailSubjects = new string[0]; MailBodies = new string[0];
-                MailCoins = new int[0]; MailGems = new int[0]; MailClaimed = new bool[0]; MailUnread = 0;
+                MailCoins = new int[0]; MailGems = new int[0]; MailSpins = new int[0]; MailClaimed = new bool[0]; MailUnread = 0;
                 return;
             }
             var ids      = new System.Collections.Generic.List<int>();
@@ -7635,25 +7686,28 @@ namespace CNRMods
             var bodies   = new System.Collections.Generic.List<string>();
             var coinsL   = new System.Collections.Generic.List<int>();
             var gemsL    = new System.Collections.Generic.List<int>();
+            var spinsL   = new System.Collections.Generic.List<int>();
             var claimL   = new System.Collections.Generic.List<bool>();
             string[] objs = arr.Split(new string[]{"},{"}, StringSplitOptions.RemoveEmptyEntries);
             foreach (string obj in objs)
             {
-                int id, c, g;
+                int id, c, g, sp;
                 int.TryParse(ModEntry.ParseJsonValue(obj, "id")    ?? "0", out id);
                 int.TryParse(ModEntry.ParseJsonValue(obj, "coins") ?? "0", out c);
                 int.TryParse(ModEntry.ParseJsonValue(obj, "gems")  ?? "0", out g);
+                int.TryParse(ModEntry.ParseJsonValue(obj, "spins") ?? "0", out sp);
                 string sub   = ModEntry.ParseJsonValue(obj, "subject") ?? "";
                 string bod   = ModEntry.ParseJsonValue(obj, "body")    ?? "";
                 string clStr = ModEntry.ParseJsonValue(obj, "claimed") ?? "0";
                 bool cl = (clStr == "1" || clStr == "true");
-                ids.Add(id); subjects.Add(sub); bodies.Add(bod); coinsL.Add(c); gemsL.Add(g); claimL.Add(cl);
+                ids.Add(id); subjects.Add(sub); bodies.Add(bod); coinsL.Add(c); gemsL.Add(g); spinsL.Add(sp); claimL.Add(cl);
             }
             MailIds      = ids.ToArray();
             MailSubjects = subjects.ToArray();
             MailBodies   = bodies.ToArray();
             MailCoins    = coinsL.ToArray();
             MailGems     = gemsL.ToArray();
+            MailSpins    = spinsL.ToArray();
             MailClaimed  = claimL.ToArray();
             int unread = 0;
             for (int i = 0; i < claimL.Count; i++) if (!claimL[i]) unread++;
@@ -7685,6 +7739,7 @@ namespace CNRMods
             string prizeAmtStr = ModEntry.ParseJsonValue(www.text, "prize_amount");
             string coinsStr    = ModEntry.ParseJsonValue(www.text, "coins");
             string gemsStr     = ModEntry.ParseJsonValue(www.text, "gems");
+            string bonusStr    = ModEntry.ParseJsonValue(www.text, "bonus_spins");
             int prizeAmt, coins, gems;
             int.TryParse(prizeAmtStr, out prizeAmt);
             int.TryParse(coinsStr,    out coins);
@@ -7696,6 +7751,8 @@ namespace CNRMods
             PlayerPrefs.Save();
             ServerCoins = coins; ServerGems = gems;
             _lastCoins = coins; _lastGems = gems;
+            int bonusSpins;
+            if (int.TryParse(bonusStr, out bonusSpins)) WheelBonusSpins = bonusSpins;
             onDone(prizeType, prizeAmt, coins, gems);
         }
 
@@ -8655,14 +8712,16 @@ namespace CNRMods
                     string bod  = i < MailBodies.Length   ? MailBodies[i]   : "";
                     int    c    = i < MailCoins.Length    ? MailCoins[i]    : 0;
                     int    g    = i < MailGems.Length     ? MailGems[i]     : 0;
+                    int    sp   = i < MailSpins.Length    ? MailSpins[i]    : 0;
                     GUILayout.Label(subj, cl ? claimedSt : subjSt);
                     if (bod.Length > 0) GUILayout.Label(bod, bodySt);
-                    if (c > 0 || g > 0)
+                    if (c > 0 || g > 0 || sp > 0)
                     {
                         string rwd = "";
                         if (c > 0) rwd += c + " coins";
                         if (c > 0 && g > 0) rwd += "  +  ";
                         if (g > 0) rwd += g + " gems";
+                        if (sp > 0) { if (rwd.Length > 0) rwd += "  +  "; rwd += sp + " wheel spin" + (sp > 1 ? "s" : ""); }
                         GUILayout.Label("Reward: " + rwd, rewardSt);
                     }
                     GUILayout.Space(4f);
