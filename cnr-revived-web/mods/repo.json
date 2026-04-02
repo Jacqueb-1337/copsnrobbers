@@ -515,6 +515,11 @@
         {
           "version": "2.0.25",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.25.dll",
+          "changelog": "wow that was a terrible change. fixed jump arc again. "
+        },
+        {
+          "version": "2.0.25",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-2.0.25.dll",
           "changelog": "adjusted jump height again because arch was too short"
         },
         {
