@@ -221,11 +221,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.1.8",
+      "latestVersion": "2.1.9",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.1.9",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.9.dll",
+          "changelog": "Fix RespawnWatcher using Photon isMasterClient instead of actual game team to pick spawn side. Now reads CNRMultiplayerManager.mInstance.myPlayerInfo.mTeam via reflection (TeamType.Cop = escape/police spawn, TeamType.Robber = enemy spawn). Also fixed double-respawn: watcher now only overrides native respawn if the game placed the player more than 20u from the custom spawn position."
+        },
         {
           "version": "2.1.8",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.8.dll",

@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.1.8";
+        public const  string Version = "2.1.9";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -2336,10 +2336,46 @@ namespace CNRMods
             private GameObject _isDiedObj;
             private bool _wasDeadLastFrame;
 
+            // Read the player's actual in-game team via reflection.
+            // TeamType.Cop == escape side (master / police);
+            // TeamType.Robber == enemy side.
+            // Falls back to IsMaster if reflection fails.
+            private bool IsCopTeam()
+            {
+                try
+                {
+                    Type mgrType = null;
+                    foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        Type t = asm.GetType("CNRMultiplayerManager");
+                        if (t != null) { mgrType = t; break; }
+                    }
+                    if (mgrType == null) return ModEntry.IsMaster;
+                    FieldInfo inst = mgrType.GetField("mInstance",
+                        BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (inst == null) return ModEntry.IsMaster;
+                    object mgr = inst.GetValue(null);
+                    if (mgr == null) return ModEntry.IsMaster;
+                    FieldInfo piField = mgrType.GetField("myPlayerInfo",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (piField == null) return ModEntry.IsMaster;
+                    object pi = piField.GetValue(mgr);
+                    if (pi == null) return ModEntry.IsMaster;
+                    FieldInfo teamField = pi.GetType().GetField("mTeam",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (teamField == null) return ModEntry.IsMaster;
+                    object team = teamField.GetValue(pi);
+                    // TeamType.Robber == enemy (non-cop), anything else (Cop / Nil) → escape side
+                    return team == null || team.ToString() != "Robber";
+                }
+                catch { return ModEntry.IsMaster; }
+            }
+
             private Vector3 GetMySpawn()
             {
-                if (ModEntry.IsMaster && HasEscape) return EscapeSpawn;
-                if (!ModEntry.IsMaster && HasEnemy) return EnemySpawn;
+                bool isCop = IsCopTeam();
+                if (isCop  && HasEscape) return EscapeSpawn;
+                if (!isCop && HasEnemy)  return EnemySpawn;
                 if (HasEscape) return EscapeSpawn;
                 if (HasEnemy)  return EnemySpawn;
                 return Vector3.zero;
@@ -2366,14 +2402,29 @@ namespace CNRMods
 
                 bool isDead = _isDiedObj != null && _isDiedObj.activeSelf;
 
-                // Transition: was dead last frame, now alive → player just respawned
+                // Transition: was dead last frame, now alive → player just respawned.
+                // Wait one frame so the game's native respawn has already positioned the player,
+                // then check if they ended up outside the custom map bounds; only override if so.
                 if (_wasDeadLastFrame && !isDead)
                 {
                     Vector3 spawn = GetMySpawn();
                     if (spawn != Vector3.zero)
                     {
-                        DoTeleport(spawn);
-                        ModEntry.Log("RespawnWatcher: respawned, teleported to " + spawn);
+                        GameObject player = GameObject.Find("ExampleCharacter");
+                        // Only override if native respawn put the player more than 20 units
+                        // from the custom spawn (i.e. the game used a donor-map position).
+                        float dist = player != null
+                            ? Vector3.Distance(player.transform.position, spawn)
+                            : float.MaxValue;
+                        if (dist > 20f)
+                        {
+                            DoTeleport(spawn);
+                            ModEntry.Log("RespawnWatcher: native spawn was " + dist.ToString("F1") + "u from custom — overriding to " + spawn);
+                        }
+                        else
+                        {
+                            ModEntry.Log("RespawnWatcher: native spawn OK (dist=" + dist.ToString("F1") + "u), no override");
+                        }
                     }
                 }
                 _wasDeadLastFrame = isDead;
