@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.0";
+        public  const string Version = "3.0.1";
 
         public static void Load()
         {
@@ -273,6 +273,10 @@ namespace CNRSettingsMod
         private KeyCode[] _kbKeys         = new KeyCode[KBM_BIND_COUNT];
         private int      _captureIdx      = -1;    // bind being captured; -1=none
         private int      _captureCooldown = 0;     // frames to skip before detecting input
+
+        // -- KBM pointer capture (Android 8+ / API 26+) ----------------------
+        private CapturedPointerListener _capListener   = null;
+        private bool                    _captureActive = false;
 
         // -- KBM reflection (joystick) ----------------------------------------
         private MonoBehaviour _kbmJoystick      = null;
@@ -1328,9 +1332,11 @@ namespace CNRSettingsMod
             if (_kbKeys[12] != KeyCode.None && Input.GetKeyDown(_kbKeys[12]))
                 KbmHandleChat();
 
-            // Fire
+            // Fire — supplement Unity mouse button state with capture listener LMB state
+            // because old Unity may not process mouse buttons in onCapturedPointerEvent.
+            bool capLmb = _captureActive && _capListener != null && _capListener.lmbHeld;
             bool fireHeld = (_kbKeys[0] == KeyCode.Mouse0)
-                ? Input.GetMouseButton(0)
+                ? (Input.GetMouseButton(0) || capLmb)
                 : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
             if (fireHeld
                 && (object)PlayerLogic.mInstance != null
@@ -1528,21 +1534,32 @@ namespace CNRSettingsMod
             TouchJumpDetect();
             OwnJumpPhysics();
             ApplySensitivity();
-            // KBM mouse look — use mousePosition delta because Input.GetAxis("Mouse X/Y")
-            // returns 0 on old Unity/Android for hardware mouse. Without requestPointerCapture,
-            // Screen.lockCursor is a no-op on Android so the cursor can move freely and
-            // Input.mousePosition tracks it correctly.
+            // KBM mouse look.
+            // With pointer capture active (API 26+): drain true unbounded relative deltas
+            // from the CapturedPointerListener; these are immune to screen-edge clamping.
+            // Fallback (capture unavailable): track Input.mousePosition delta — works until
+            // the cursor hits a screen edge, since Screen.lockCursor is a no-op on Android.
             if (_kbmEnabled && _cursorLocked && !_showSettings)
             {
-                Vector3 curPos = Input.mousePosition;
-                if (_lastMousePosValid)
+                if (_captureActive && _capListener != null)
                 {
-                    float mx = (curPos.x - _lastMousePos.x) * 0.05f;
-                    float my = (curPos.y - _lastMousePos.y) * 0.05f;
-                    if (mx != 0f || my != 0f) KbmInjectMouseLook(mx, my);
+                    float cdx = _capListener.DrainDx();
+                    float cdy = _capListener.DrainDy();
+                    if (cdx != 0f || cdy != 0f)
+                        KbmInjectMouseLook(cdx * 0.05f, -cdy * 0.05f);
                 }
-                _lastMousePos      = curPos;
-                _lastMousePosValid = true;
+                else
+                {
+                    Vector3 curPos = Input.mousePosition;
+                    if (_lastMousePosValid)
+                    {
+                        float mx = (curPos.x - _lastMousePos.x) * 0.05f;
+                        float my = (curPos.y - _lastMousePos.y) * 0.05f;
+                        if (mx != 0f || my != 0f) KbmInjectMouseLook(mx, my);
+                    }
+                    _lastMousePos      = curPos;
+                    _lastMousePosValid = true;
+                }
             }
             else
             {
@@ -2859,15 +2876,66 @@ namespace CNRSettingsMod
         private void KbmSetCursorLocked(bool locked)
         {
             _cursorLocked      = locked;
-            _lastMousePosValid = false; // avoid camera jump on cursor state change
+            _lastMousePosValid = false;
             Screen.lockCursor  = locked;
             Screen.showCursor  = !locked;
-            KbmAndroidPointerIcon(locked);
+            if (locked) KbmStartPointerCapture();
+            else        KbmStopPointerCapture();
         }
 
-        // Hide/show hardware mouse cursor on Android using PointerIcon.TYPE_NULL (API 24+).
-        // Does NOT use requestPointerCapture so mouse events route normally through Unity.
-        private void KbmAndroidPointerIcon(bool hide)
+        // Request Android pointer capture (API 26+) so the OS delivers true unbounded
+        // relative mouse deltas via onCapturedPointerEvent instead of absolute position.
+        // This also hides the cursor at the OS level and prevents mouse clicks leaking
+        // into the view as standard motion events.
+        private void KbmStartPointerCapture()
+        {
+            try
+            {
+                if (_capListener == null) _capListener = new CapturedPointerListener();
+                _capListener.Reset();
+                var player    = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                var activity  = player.GetStatic<AndroidJavaObject>("currentActivity");
+                var window    = activity.Call<AndroidJavaObject>("getWindow");
+                var decorView = window.Call<AndroidJavaObject>("getDecorView");
+                decorView.Call("requestFocus");
+                decorView.Call("setOnCapturedPointerListener", _capListener);
+                decorView.Call("requestPointerCapture");
+                _captureActive = true;
+                SettingsModEntry.Log("KBM: pointer capture started");
+            }
+            catch (Exception ex)
+            {
+                _captureActive = false;
+                SettingsModEntry.Log("KBM: pointer capture unavailable (" + ex.Message + "), falling back to mousePosition delta");
+                // Fallback: just hide the pointer icon (API 24+ TYPE_NULL)
+                KbmPointerIconNull(true);
+            }
+        }
+
+        private void KbmStopPointerCapture()
+        {
+            bool wasActive = _captureActive;
+            _captureActive = false;
+            try
+            {
+                var player    = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                var activity  = player.GetStatic<AndroidJavaObject>("currentActivity");
+                var window    = activity.Call<AndroidJavaObject>("getWindow");
+                var decorView = window.Call<AndroidJavaObject>("getDecorView");
+                if (wasActive)
+                {
+                    decorView.Call("releasePointerCapture");
+                    decorView.Call("setOnCapturedPointerListener", (object)null);
+                }
+                // Reset cursor to OS default
+                KbmPointerIconNull(false);
+                decorView.Call("setPointerIcon", (object)null);
+            }
+            catch (Exception) { }
+        }
+
+        // Fallback: hide cursor via PointerIcon.TYPE_NULL (API 24+) without capture.
+        private void KbmPointerIconNull(bool hide)
         {
             try
             {
@@ -2879,13 +2947,8 @@ namespace CNRSettingsMod
                 {
                     var ctx     = activity.Call<AndroidJavaObject>("getApplicationContext");
                     var piClass = new AndroidJavaClass("android.view.PointerIcon");
-                    // TYPE_NULL = 0 makes the cursor invisible without capturing events
                     var icon    = piClass.CallStatic<AndroidJavaObject>("getSystemIcon", ctx, 0);
                     decorView.Call("setPointerIcon", icon);
-                }
-                else
-                {
-                    decorView.Call("setPointerIcon", (object)null); // reset to default
                 }
             }
             catch (Exception) { }
@@ -3306,6 +3369,65 @@ namespace CNRSettingsMod
                 if (root == null) continue;
                 SettingsModEntry.Log("=== Deep scan: " + rootName + " ===");
                 LogChildrenRecursive(root.transform, 0, 6); // max depth 6
+            }
+        }
+
+        // =====================================================================
+        // Captured pointer listener (Android 8+ / API 26+)
+        // Implements View.OnCapturedPointerListener via AndroidJavaProxy.
+        // Called on the Android UI thread; drain methods are called from Unity game thread.
+        // ARM word-sized reads/writes are atomic, so no lock needed for these simple fields.
+        // =====================================================================
+        private class CapturedPointerListener : AndroidJavaProxy
+        {
+            // Raw accumulated relative mouse delta since last drain.
+            private volatile float _dx;
+            private volatile float _dy;
+            // Mouse button state (set/cleared from Android UI thread, read on game thread).
+            public volatile bool lmbHeld;
+
+            // Android MotionEvent constants
+            private const int AXIS_RELATIVE_X   = 27;
+            private const int AXIS_RELATIVE_Y   = 28;
+            private const int ACTION_MOVE        = 2;
+            private const int ACTION_HOVER_MOVE  = 7;
+            private const int ACTION_BUTTON_PRESS   = 11;
+            private const int ACTION_BUTTON_RELEASE  = 12;
+            private const int BUTTON_PRIMARY     = 1;
+
+            public CapturedPointerListener()
+                : base("android.view.View$OnCapturedPointerListener") { }
+
+            public void Reset() { _dx = 0f; _dy = 0f; lmbHeld = false; }
+
+            // Called by Unity game thread each frame to atomically read+clear delta.
+            public float DrainDx() { float v = _dx; _dx = 0f; return v; }
+            public float DrainDy() { float v = _dy; _dy = 0f; return v; }
+
+            // Java callback: View.OnCapturedPointerListener.onCapturedPointer(View, MotionEvent)
+            bool onCapturedPointer(AndroidJavaObject view, AndroidJavaObject e)
+            {
+                try
+                {
+                    int action = e.Call<int>("getActionMasked");
+                    if (action == ACTION_MOVE || action == ACTION_HOVER_MOVE)
+                    {
+                        _dx += e.Call<float>("getAxisValue", AXIS_RELATIVE_X);
+                        _dy += e.Call<float>("getAxisValue", AXIS_RELATIVE_Y);
+                    }
+                    else if (action == ACTION_BUTTON_PRESS)
+                    {
+                        if (e.Call<int>("getActionButton") == BUTTON_PRIMARY)
+                            lmbHeld = true;
+                    }
+                    else if (action == ACTION_BUTTON_RELEASE)
+                    {
+                        if (e.Call<int>("getActionButton") == BUTTON_PRIMARY)
+                            lmbHeld = false;
+                    }
+                }
+                catch (Exception) { }
+                return true;
             }
         }
 
