@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.0.8";
+        public const  string Version = "3.1.0";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9709,8 +9709,16 @@ namespace CNRMods
         private GameObject _zone2Go;
         private Vector3    _zone1Base;
         private Vector3    _zone2Base;
-        private GameObject _copFlagMarker;
-        private GameObject _robFlagMarker;
+        private GameObject _zone1Flag;     // qizi (flag mesh) detached from Stronghold_1
+        private GameObject _zone2Flag;     // qizi (flag mesh) detached from Stronghold_2
+        private Vector3    _zone1FlagBase; // world position of qizi at rest on pole 1
+        private Vector3    _zone2FlagBase; // world position of qizi at rest on pole 2
+        private Renderer   _zone1RingRend; // bz_1 renderer (ring) for zone 1
+        private Renderer   _zone1FlagRend; // qizi renderer (cloth) for zone 1
+        private Renderer   _zone2RingRend; // bz_1 renderer (ring) for zone 2
+        private Renderer   _zone2FlagRend; // qizi renderer (cloth) for zone 2
+        private static readonly Color OwnFlagColor   = new Color(0.15f, 0.9f, 0.15f);
+        private static readonly Color EnemyFlagColor = new Color(1f,    0.3f, 0.3f);
 
         private string _myId     = "";
         private bool   _inited   = false;
@@ -9767,13 +9775,17 @@ namespace CNRMods
             if (sh1 != null) sh1.enabled = false;
             if (sh2 != null) sh2.enabled = false;
 
+            // Detach qizi flag meshes and cache renderers for per-client recoloring in Update().
+            _zone1Flag = SetupZoneVisuals(_zone1Go, out _zone1RingRend, out _zone1FlagRend);
+            _zone2Flag = SetupZoneVisuals(_zone2Go, out _zone2RingRend, out _zone2FlagRend);
+            if (_zone1Flag != null) _zone1FlagBase = _zone1Flag.transform.position;
+            if (_zone2Flag != null) _zone2FlagBase = _zone2Flag.transform.position;
+
             // Attach CTF trigger handlers.
             CtfZone z1 = _zone1Go.AddComponent<CtfZone>(); z1.FlagId = 1; z1.Hook = this;
             CtfZone z2 = _zone2Go.AddComponent<CtfZone>(); z2.FlagId = 2; z2.Hook = this;
 
             _inited = true;
-            _copFlagMarker = CreateFlagMarker("CNR_CopFlag",    new Color(0.4f, 0.7f, 1f));
-            _robFlagMarker = CreateFlagMarker("CNR_RobberFlag", new Color(1f, 0.35f, 0.35f));
             ModEntry.Log("CtfHook: init done. zone1=" + _zone1Base + " zone2=" + _zone2Base);
         }
 
@@ -9782,14 +9794,6 @@ namespace CNRMods
             if (!_inited || CNRMultiplayerManager.mInstance == null) return;
 
             bool isAuthority = (CNRMultiplayerManager.mInstance.serverId == _myId);
-
-            // Move zone GOs to current logical position (base or drop point).
-            if (_zone1Go != null)
-                _zone1Go.transform.position = (CtfMode.CopFlagStatus == CtfMode.DROPPED)
-                    ? CtfMode.CopDropPos : _zone1Base;
-            if (_zone2Go != null)
-                _zone2Go.transform.position = (CtfMode.RobberFlagStatus == CtfMode.DROPPED)
-                    ? CtfMode.RobberDropPos : _zone2Base;
 
             // Detect local death and drop carried flags; also publish carrier position for visuals.
             PlayerInfo myInfo = CNRMultiplayerManager.mInstance.myPlayerInfo;
@@ -9804,10 +9808,21 @@ namespace CNRMods
                 if (CtfMode.RobberFlagStatus == _myId) CtfMode.RobberCarrierPos = myInfo.mPosition;
             }
 
-            // Update flag visual markers (all clients).
-            UpdateFlagMarker(_copFlagMarker, CtfMode.CopFlagStatus, _zone1Base,
-                             CtfMode.CopDropPos, CtfMode.CopCarrierPos);
-            UpdateFlagMarker(_robFlagMarker, CtfMode.RobberFlagStatus, _zone2Base,
+            // Recolor flags per-client: own flag = green (protect), enemy flag = red (capture).
+            {
+                bool isCop   = myInfo != null && myInfo.mTeam == TeamType.Cop;
+                Color z1c    = isCop ? OwnFlagColor : EnemyFlagColor; // zone1 = cop base
+                Color z2c    = isCop ? EnemyFlagColor : OwnFlagColor; // zone2 = robber base
+                if (_zone1RingRend != null) _zone1RingRend.material.color = z1c;
+                if (_zone1FlagRend != null) _zone1FlagRend.material.color = z1c;
+                if (_zone2RingRend != null) _zone2RingRend.material.color = z2c;
+                if (_zone2FlagRend != null) _zone2FlagRend.material.color = z2c;
+            }
+
+            // Update real flag mesh positions (all clients).
+            UpdateFlagMarker(_zone1Flag, CtfMode.CopFlagStatus,    _zone1FlagBase,
+                             CtfMode.CopDropPos,    CtfMode.CopCarrierPos);
+            UpdateFlagMarker(_zone2Flag, CtfMode.RobberFlagStatus, _zone2FlagBase,
                              CtfMode.RobberDropPos, CtfMode.RobberCarrierPos);
 
             // Drive the built-in Stronghold flag HUD sprites to show CTF flag safety.
@@ -9947,49 +9962,53 @@ namespace CNRMods
             return "Carried";
         }
 
-        void UpdateFlagMarker(GameObject marker, string status, Vector3 basePos,
+        // Find and detach the qizi flag mesh from a zone GO so it can be moved freely.
+        // Outputs the ring (bz_1) and flag (qizi) renderers for dynamic recoloring in Update().
+        static GameObject SetupZoneVisuals(GameObject zoneGo, out Renderer ringRend, out Renderer flagRend)
+        {
+            ringRend = null; flagRend = null;
+            Transform bz    = zoneGo.transform.Find("BZ/bz_1");
+            Transform qPath = zoneGo.transform.Find("BZ/q/qizi");
+            if (bz != null) ringRend = bz.GetComponent<Renderer>();
+            if (qPath == null) return null;
+            GameObject qizi = qPath.gameObject;
+            flagRend = qizi.GetComponent<Renderer>();
+            // Detach from hierarchy so we can reposition independently of the zone GO.
+            qizi.transform.parent = null;
+            return qizi;
+        }
+
+        void UpdateFlagMarker(GameObject flagMesh, string status, Vector3 basePos,
                               Vector3 dropPos, Vector3 carrierPos)
         {
-            if (marker == null) return;
+            if (flagMesh == null) return;
             if (string.IsNullOrEmpty(status))
             {
-                marker.SetActive(true);
-                marker.transform.position = basePos + Vector3.up;
+                // At base: return mesh to its original pole position.
+                flagMesh.SetActive(true);
+                flagMesh.transform.position = basePos;
                 return;
             }
             if (status == CtfMode.DROPPED)
             {
-                marker.SetActive(true);
-                marker.transform.position = dropPos + new Vector3(0f, 0.4f, 0f);
+                // Dropped on the ground.
+                flagMesh.SetActive(true);
+                flagMesh.transform.position = dropPos + new Vector3(0f, 0.5f, 0f);
                 return;
             }
-            // Being carried.
-            marker.SetActive(true);
+            // Being carried -- float above the carrier's head.
+            flagMesh.SetActive(true);
             Vector3 pos;
             if (status == _myId)
             {
-                // Local player -- use real-time transform.
                 GameObject pg = GameObject.FindWithTag("Player");
                 pos = pg != null ? pg.transform.position : carrierPos;
             }
             else
             {
-                // Remote carrier -- use last broadcast position (updated every 0.5 s).
                 pos = carrierPos;
             }
-            marker.transform.position = pos + new Vector3(0f, 2.2f, 0f);
-        }
-
-        static GameObject CreateFlagMarker(string name, Color col)
-        {
-            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            go.name = name;
-            go.transform.localScale = new Vector3(0.15f, 0.6f, 0.15f);
-            Collider c = go.GetComponent<Collider>();
-            if (c != null) Destroy(c);
-            Renderer r = go.GetComponent<Renderer>();
-            if (r != null) r.material.color = col;
-            return go;
+            flagMesh.transform.position = pos + new Vector3(0f, 2.2f, 0f);
         }
     }
 
