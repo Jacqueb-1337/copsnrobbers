@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.0.1";
+        public const  string Version = "3.0.2";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9566,9 +9566,10 @@ namespace CNRMods
     // onto the CTF checkbox (a deactivated GO can't re-activate itself).
     public class CtfCheckBoxInjector : MonoBehaviour
     {
-        private bool       _injected = false;
+        private bool       _injected  = false;
         private GameObject _shGo;
         private GameObject _ctfGo;
+        private float      _diagTimer = 0f;
 
         void Update()
         {
@@ -9582,6 +9583,20 @@ namespace CNRMods
             // because a deactivated MonoBehaviour stops receiving Update calls.
             if (_shGo != null && _ctfGo != null)
                 _ctfGo.SetActive(_shGo.activeSelf);
+
+            // Periodic diagnostic: log state every 3 s so we can see if mirroring works.
+            _diagTimer += Time.deltaTime;
+            if (_diagTimer >= 3f)
+            {
+                _diagTimer = 0f;
+                if (_shGo != null && _ctfGo != null)
+                    ModEntry.Log("CtfDBG: shSelf=" + _shGo.activeSelf
+                        + " shHier=" + _shGo.activeInHierarchy
+                        + " ctfSelf=" + _ctfGo.activeSelf
+                        + " ctfHier=" + _ctfGo.activeInHierarchy
+                        + " ctfPos=" + _ctfGo.transform.localPosition
+                        + " shPos=" + _shGo.transform.localPosition);
+            }
         }
 
         private bool TryInject()
@@ -9593,6 +9608,21 @@ namespace CNRMods
             GameObject tdmGo = msd.mModeCheckBoxTDM;
             if (_shGo == null) return false;
 
+            // Log NGUI layout info so we can diagnose position/clipping issues.
+            Transform par = _shGo.transform.parent;
+            Vector3 pos = _shGo.transform.localPosition;
+            bool hasGrid  = par != null && par.GetComponent("UIGrid")  != null;
+            bool hasTable = par != null && par.GetComponent("UITable") != null;
+            ModEntry.Log("CtfInject: shGo=" + _shGo.name
+                + " parent=" + (par != null ? par.name : "null")
+                + " localPos=" + pos
+                + " activeSelf=" + _shGo.activeSelf
+                + " activeInHier=" + _shGo.activeInHierarchy
+                + " UIGrid=" + hasGrid + " UITable=" + hasTable);
+            if (tdmGo != null)
+                ModEntry.Log("CtfInject: tdmGo=" + tdmGo.name
+                    + " localPos=" + tdmGo.transform.localPosition);
+
             // Prevent SH/TDM clicks from leaving PendingCtf=true.
             if (_shGo.GetComponent<ClearCtfOnClick>() == null)    _shGo.AddComponent<ClearCtfOnClick>();
             if (tdmGo != null && tdmGo.GetComponent<ClearCtfOnClick>() == null) tdmGo.AddComponent<ClearCtfOnClick>();
@@ -9603,7 +9633,6 @@ namespace CNRMods
             _ctfGo.transform.parent       = _shGo.transform.parent;
             _ctfGo.transform.localScale   = _shGo.transform.localScale;
             // Place it 32 NGUI units below the SH checkbox.
-            Vector3 pos = _shGo.transform.localPosition;
             _ctfGo.transform.localPosition = new Vector3(pos.x, pos.y - 32f, pos.z);
 
             // Remove ModeSelectCheckBox -- it uses GrowthGameModeTag which has no CTF
@@ -9617,10 +9646,23 @@ namespace CNRMods
             CtfCheckBoxBehaviour beh = _ctfGo.AddComponent<CtfCheckBoxBehaviour>();
             beh.Init();
 
+            // If a UIGrid drives the layout, tell it to reposition so our new child is included.
+            if (hasGrid)
+            {
+                MonoBehaviour grid = par.GetComponent("UIGrid") as MonoBehaviour;
+                if (grid != null)
+                {
+                    var fi = grid.GetType().GetField("repositionNow",
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                    if (fi != null) fi.SetValue(grid, true);
+                }
+            }
+
             // Start hidden; first Update() tick will set the correct state.
             _ctfGo.SetActive(false);
 
-            ModEntry.Log("CtfCheckBoxInjector: CTF checkbox injected");
+            ModEntry.Log("CtfCheckBoxInjector: CTF checkbox injected at localPos="
+                + _ctfGo.transform.localPosition);
             return true;
         }
     }
