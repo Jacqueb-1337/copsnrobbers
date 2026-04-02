@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.0.0";
+        public const  string Version = "3.0.1";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9538,20 +9538,15 @@ namespace CNRMods
     // Drives the cloned CTF checkbox in the WW-Create panel.
     public class CtfCheckBoxBehaviour : MonoBehaviour
     {
-        private GameObject _shGo;
         private UICheckbox _cb;
 
-        public void Init(GameObject shGo)
+        public void Init()
         {
-            _shGo = shGo;
-            _cb   = ((Component)this).GetComponent<UICheckbox>();
+            _cb = ((Component)this).GetComponent<UICheckbox>();
         }
 
         void Update()
         {
-            // Mirror the visibility of the SH checkbox (same map-support gate).
-            if (_shGo != null)
-                ((Component)this).gameObject.SetActive(_shGo.activeSelf);
             if (_cb != null)
                 _cb.isChecked = CtfMode.PendingCtf;
         }
@@ -9566,18 +9561,27 @@ namespace CNRMods
         }
     }
 
-    // Spawned when the "MultiplayerSelect" scene loads.
-    // Clones the SH checkbox to create a CTF checkbox beneath it, and attaches
-    // ClearCtfOnClick to SH/TDM so clicking them clears PendingCtf.
+    // Spawned when the "MultiplayerSelect" scene loads.  Stays alive for the
+    // lifetime of the scene so it can keep mirroring the SH checkbox visibility
+    // onto the CTF checkbox (a deactivated GO can't re-activate itself).
     public class CtfCheckBoxInjector : MonoBehaviour
     {
-        private bool _injected = false;
+        private bool       _injected = false;
+        private GameObject _shGo;
+        private GameObject _ctfGo;
 
         void Update()
         {
-            if (_injected) return;
-            try   { _injected = TryInject(); }
-            catch (Exception ex) { ModEntry.Log("CtfCheckBoxInjector: " + ex.Message); _injected = true; }
+            if (!_injected)
+            {
+                try   { _injected = TryInject(); }
+                catch (Exception ex) { ModEntry.Log("CtfCheckBoxInjector: " + ex.Message); _injected = true; }
+                return;
+            }
+            // Mirror SH checkbox visibility.  Must be done here (not in CtfCheckBoxBehaviour)
+            // because a deactivated MonoBehaviour stops receiving Update calls.
+            if (_shGo != null && _ctfGo != null)
+                _ctfGo.SetActive(_shGo.activeSelf);
         }
 
         private bool TryInject()
@@ -9585,36 +9589,38 @@ namespace CNRMods
             if (MultiplayerSelectDirector.mInstance == null) return false;
             MultiplayerSelectDirector msd = MultiplayerSelectDirector.mInstance;
 
-            GameObject shGo  = msd.mModeCheckBoxSH;
+            _shGo = msd.mModeCheckBoxSH;
             GameObject tdmGo = msd.mModeCheckBoxTDM;
-            if (shGo == null) return false;
+            if (_shGo == null) return false;
 
             // Prevent SH/TDM clicks from leaving PendingCtf=true.
-            if (shGo.GetComponent<ClearCtfOnClick>() == null)    shGo.AddComponent<ClearCtfOnClick>();
+            if (_shGo.GetComponent<ClearCtfOnClick>() == null)    _shGo.AddComponent<ClearCtfOnClick>();
             if (tdmGo != null && tdmGo.GetComponent<ClearCtfOnClick>() == null) tdmGo.AddComponent<ClearCtfOnClick>();
 
             // Clone SH checkbox as the CTF checkbox.
-            GameObject ctfGo           = (GameObject)UnityEngine.Object.Instantiate(shGo);
-            ctfGo.name                 = "ModeCheckBox_CTF";
-            ctfGo.transform.parent     = shGo.transform.parent;
-            ctfGo.transform.localScale = shGo.transform.localScale;
+            _ctfGo                        = (GameObject)UnityEngine.Object.Instantiate(_shGo);
+            _ctfGo.name                   = "ModeCheckBox_CTF";
+            _ctfGo.transform.parent       = _shGo.transform.parent;
+            _ctfGo.transform.localScale   = _shGo.transform.localScale;
             // Place it 32 NGUI units below the SH checkbox.
-            Vector3 pos = shGo.transform.localPosition;
-            ctfGo.transform.localPosition = new Vector3(pos.x, pos.y - 32f, pos.z);
+            Vector3 pos = _shGo.transform.localPosition;
+            _ctfGo.transform.localPosition = new Vector3(pos.x, pos.y - 32f, pos.z);
 
             // Remove ModeSelectCheckBox -- it uses GrowthGameModeTag which has no CTF
             // value; keeping it would corrupt curModeSet on every Update tick.
-            MonoBehaviour orig = ctfGo.GetComponent("ModeSelectCheckBox") as MonoBehaviour;
+            MonoBehaviour orig = _ctfGo.GetComponent("ModeSelectCheckBox") as MonoBehaviour;
             if (orig != null) Destroy(orig);
 
-            UILabel lbl = ctfGo.GetComponentInChildren<UILabel>();
+            UILabel lbl = _ctfGo.GetComponentInChildren<UILabel>();
             if (lbl != null) lbl.text = "CTF";
 
-            CtfCheckBoxBehaviour beh = ctfGo.AddComponent<CtfCheckBoxBehaviour>();
-            beh.Init(shGo);
+            CtfCheckBoxBehaviour beh = _ctfGo.AddComponent<CtfCheckBoxBehaviour>();
+            beh.Init();
+
+            // Start hidden; first Update() tick will set the correct state.
+            _ctfGo.SetActive(false);
 
             ModEntry.Log("CtfCheckBoxInjector: CTF checkbox injected");
-            Destroy(this);
             return true;
         }
     }
