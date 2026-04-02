@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.0.2";
+        public const  string Version = "3.0.3";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -158,6 +158,7 @@ namespace CNRMods
         {
             if (_loaded) { Log("CNRMod: already loaded, skipping"); return; }
             _loaded = true;
+            try { File.WriteAllText(LogPath, ""); } catch { }
             RegisterMod("CNRMod", Version);
             Log("=== CNRMod Load() v" + Version + " ===");
             try
@@ -9632,8 +9633,13 @@ namespace CNRMods
             _ctfGo.name                   = "ModeCheckBox_CTF";
             _ctfGo.transform.parent       = _shGo.transform.parent;
             _ctfGo.transform.localScale   = _shGo.transform.localScale;
-            // Place it 32 NGUI units below the SH checkbox.
-            _ctfGo.transform.localPosition = new Vector3(pos.x, pos.y - 32f, pos.z);
+            // Step = gap between TDM and SH checkboxes; place CTF one step below SH.
+            // Falls back to -0.2 if TDM isn't available.
+            float step = (tdmGo != null)
+                ? Mathf.Abs(tdmGo.transform.localPosition.y - pos.y)
+                : 0.2f;
+            if (step < 0.001f) step = 0.2f;
+            _ctfGo.transform.localPosition = new Vector3(pos.x, pos.y - step, pos.z);
 
             // Remove ModeSelectCheckBox -- it uses GrowthGameModeTag which has no CTF
             // value; keeping it would corrupt curModeSet on every Update tick.
