@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.1";
+        public  const string Version = "3.0.2";
 
         public static void Load()
         {
@@ -1199,32 +1199,19 @@ namespace CNRSettingsMod
         {
             if (!_inGameScene) return;
 
-            // Conditionally set UICamera.useMouse.
-            // On Android, UICamera.Start() hardcodes useMouse=false.
-            // We only re-enable it when KBM mode is active AND the cursor is
-            // unlocked (i.e. the user has the pointer visible and needs to click
-            // HUD elements with a hardware mouse).
-            //
-            // Forcing useMouse=true unconditionally causes ProcessMouse() to fire
-            // on every frame alongside ProcessTouches().  On Android,
-            // simulateMouseWithTouches maps touch[0] → mouse button 0, so
-            // ProcessMouse routes NGUI events to whatever widget is under touch[0].
-            // When touch[0] IS the fire button, this NGUI processing interferes
-            // with JoyStickController's Physics.Raycast-based fire detection,
-            // preventing one-finger firing.  With touch[1] as fire (and touch[0]
-            // on a non-fire area) the interference doesn't affect the fire button,
-            // which is why two-finger fire worked even with the bug.
-            //
-            // With useMouse=false (Android default), ProcessMouse() never runs and
-            // touch events flow exclusively through ProcessTouches() — hardware
-            // mouse clicks still work via Unity's simulateMouseWithTouches.
+            // Set UICamera.useMouse.
+            // In KBM mode: always true so hardware mouse clicks reach NGUI in all states
+            // (menus, pause, HUD buttons). The previous logic toggled this off when the
+            // cursor was 'locked', which silently broke all mouse clicking.
+            // In pure touch mode: leave at Android default (false) so ProcessMouse()
+            // doesn't interfere with ProcessTouches() via simulateMouseWithTouches.
             _uiCamCacheAge -= Time.deltaTime;
             if (_uiCamCache.Length == 0 || _uiCamCacheAge <= 0f)
             {
                 _uiCamCache    = (UICamera[])FindObjectsOfType(typeof(UICamera));
                 _uiCamCacheAge = 2f;
             }
-            bool wantMouse = _kbmEnabled && !_cursorLocked;
+            bool wantMouse = _kbmEnabled;
             foreach (UICamera cam in _uiCamCache)
                 if (cam != null) cam.useMouse = wantMouse;
 
@@ -1332,11 +1319,9 @@ namespace CNRSettingsMod
             if (_kbKeys[12] != KeyCode.None && Input.GetKeyDown(_kbKeys[12]))
                 KbmHandleChat();
 
-            // Fire — supplement Unity mouse button state with capture listener LMB state
-            // because old Unity may not process mouse buttons in onCapturedPointerEvent.
-            bool capLmb = _captureActive && _capListener != null && _capListener.lmbHeld;
+            // Fire
             bool fireHeld = (_kbKeys[0] == KeyCode.Mouse0)
-                ? (Input.GetMouseButton(0) || capLmb)
+                ? Input.GetMouseButton(0)
                 : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
             if (fireHeld
                 && (object)PlayerLogic.mInstance != null
@@ -1535,18 +1520,18 @@ namespace CNRSettingsMod
             OwnJumpPhysics();
             ApplySensitivity();
             // KBM mouse look.
-            // With pointer capture active (API 26+): drain true unbounded relative deltas
-            // from the CapturedPointerListener; these are immune to screen-edge clamping.
-            // Fallback (capture unavailable): track Input.mousePosition delta — works until
-            // the cursor hits a screen edge, since Screen.lockCursor is a no-op on Android.
+            // Use Input.GetAxis("Mouse X/Y") which returns raw hardware mouse delta
+            // regardless of where the cursor is on screen — no screen-edge clamping.
+            // Fallback to mousePosition delta if GetAxis returns zero (shouldn't happen
+            // with a real external mouse but covers edge cases with older Unity builds).
             if (_kbmEnabled && _cursorLocked && !_showSettings)
             {
-                if (_captureActive && _capListener != null)
+                float axX = Input.GetAxis("Mouse X");
+                float axY = Input.GetAxis("Mouse Y");
+                if (axX != 0f || axY != 0f)
                 {
-                    float cdx = _capListener.DrainDx();
-                    float cdy = _capListener.DrainDy();
-                    if (cdx != 0f || cdy != 0f)
-                        KbmInjectMouseLook(cdx * 0.05f, -cdy * 0.05f);
+                    KbmInjectMouseLook(axX * 3f, axY * 3f);
+                    _lastMousePosValid = false;
                 }
                 else
                 {
@@ -2877,81 +2862,10 @@ namespace CNRSettingsMod
         {
             _cursorLocked      = locked;
             _lastMousePosValid = false;
-            Screen.lockCursor  = locked;
-            Screen.showCursor  = !locked;
-            if (locked) KbmStartPointerCapture();
-            else        KbmStopPointerCapture();
-        }
-
-        // Request Android pointer capture (API 26+) so the OS delivers true unbounded
-        // relative mouse deltas via onCapturedPointerEvent instead of absolute position.
-        // This also hides the cursor at the OS level and prevents mouse clicks leaking
-        // into the view as standard motion events.
-        private void KbmStartPointerCapture()
-        {
-            try
-            {
-                if (_capListener == null) _capListener = new CapturedPointerListener();
-                _capListener.Reset();
-                var player    = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-                var activity  = player.GetStatic<AndroidJavaObject>("currentActivity");
-                var window    = activity.Call<AndroidJavaObject>("getWindow");
-                var decorView = window.Call<AndroidJavaObject>("getDecorView");
-                decorView.Call("requestFocus");
-                decorView.Call("setOnCapturedPointerListener", _capListener);
-                decorView.Call("requestPointerCapture");
-                _captureActive = true;
-                SettingsModEntry.Log("KBM: pointer capture started");
-            }
-            catch (Exception ex)
-            {
-                _captureActive = false;
-                SettingsModEntry.Log("KBM: pointer capture unavailable (" + ex.Message + "), falling back to mousePosition delta");
-                // Fallback: just hide the pointer icon (API 24+ TYPE_NULL)
-                KbmPointerIconNull(true);
-            }
-        }
-
-        private void KbmStopPointerCapture()
-        {
-            bool wasActive = _captureActive;
-            _captureActive = false;
-            try
-            {
-                var player    = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-                var activity  = player.GetStatic<AndroidJavaObject>("currentActivity");
-                var window    = activity.Call<AndroidJavaObject>("getWindow");
-                var decorView = window.Call<AndroidJavaObject>("getDecorView");
-                if (wasActive)
-                {
-                    decorView.Call("releasePointerCapture");
-                    decorView.Call("setOnCapturedPointerListener", (object)null);
-                }
-                // Reset cursor to OS default
-                KbmPointerIconNull(false);
-                decorView.Call("setPointerIcon", (object)null);
-            }
-            catch (Exception) { }
-        }
-
-        // Fallback: hide cursor via PointerIcon.TYPE_NULL (API 24+) without capture.
-        private void KbmPointerIconNull(bool hide)
-        {
-            try
-            {
-                var player    = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-                var activity  = player.GetStatic<AndroidJavaObject>("currentActivity");
-                var window    = activity.Call<AndroidJavaObject>("getWindow");
-                var decorView = window.Call<AndroidJavaObject>("getDecorView");
-                if (hide)
-                {
-                    var ctx     = activity.Call<AndroidJavaObject>("getApplicationContext");
-                    var piClass = new AndroidJavaClass("android.view.PointerIcon");
-                    var icon    = piClass.CallStatic<AndroidJavaObject>("getSystemIcon", ctx, 0);
-                    decorView.Call("setPointerIcon", icon);
-                }
-            }
-            catch (Exception) { }
+            // Screen.lockCursor is a no-op on Android; skip it to avoid side effects.
+            // Cursor visibility: hide when locked (gameplay) so it's less distracting,
+            // but useMouse stays true so clicks always work regardless.
+            Screen.showCursor = !locked;
         }
 
         private IEnumerator AutoLockAfterLoad()
