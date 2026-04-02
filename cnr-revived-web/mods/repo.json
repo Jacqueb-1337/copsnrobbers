@@ -221,11 +221,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "2.1.7",
+      "latestVersion": "2.1.8",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "2.1.8",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.8.dll",
+          "changelog": "Fix master (and promoted master) invisible to all clients until respawn: HoldAtLoadingPos now captures and holds the player at their natural donor-scene spawn position instead of Y=4800, which the game's out-of-bounds/death logic treats as a kill. Fix 3-second delay before holding: TriggerBuildIfIdle is now called on mapUrl event receipt (not after HTTP download), so the player is frozen immediately and WaitAndSpawn polls while download runs concurrently. Fix DLC remote skins not applying: ApplyToTransform now uses GetComponentsInChildren to find all Renderer children and matches any Skin_* material by name, replacing the fragile hardcoded transform-path approach."
+        },
         {
           "version": "2.1.7",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-2.1.7.dll",
