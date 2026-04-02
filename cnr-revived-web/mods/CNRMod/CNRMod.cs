@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.0.5";
+        public const  string Version = "3.0.6";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9579,7 +9579,8 @@ namespace CNRMods
         private bool       _injected = false;
         private GameObject _shGo;
         private GameObject _ctfGo;
-        private UILabel    _ctfLabel; // cached so we can re-assert "CTF" every frame
+        private UICheckbox _shCb;
+        private UILabel    _ctfLabel;
 
         void Update()
         {
@@ -9592,13 +9593,12 @@ namespace CNRMods
             var msd = MultiplayerSelectDirector.mInstance;
             if (_ctfGo == null || msd == null) return;
 
-            // CTF checkbox is visible whenever this map supports Stronghold/CTF.
+            // Show CTF checkbox only on maps that support Stronghold.
             bool mapOk = msd.isCurMapSupportThisMode(GrowthGameModeTag.tStronghold);
             _ctfGo.SetActive(mapOk);
 
-            // Re-assert label text each frame: UILocalize resets it on every SetActive(true).
-            if (mapOk && _ctfLabel != null && _ctfLabel.text != "CTF")
-                _ctfLabel.text = "CTF";
+            // Force label text every frame -- UILocalize resets it on each OnEnable.
+            if (_ctfLabel != null) _ctfLabel.text = "CTF";
         }
 
         void LateUpdate()
@@ -9607,19 +9607,15 @@ namespace CNRMods
             var msd = MultiplayerSelectDirector.mInstance;
             if (msd == null) return;
 
-            // If any non-Stronghold mode was selected while CTF was pending, auto-clear.
-            // This handles KC, FFA, and any other mode without needing ClearCtfOnClick on each.
+            // Auto-clear PendingCtf when user switches to any non-Stronghold mode.
             if (CtfMode.PendingCtf && msd.curModeSet != GrowthGameModeTag.tStronghold)
                 CtfMode.PendingCtf = false;
 
-            // While CTF is pending, hide the SH checkbox entirely.
-            // ModeSelectCheckBox.Update() (runs before LateUpdate) forces SH.isChecked=true
-            // every frame because we set curModeSet=tStronghold for the room; hiding the whole
-            // GO is simpler and more reliable than fighting isChecked each frame.
-            if (_shGo != null)
-                _shGo.SetActive(
-                    msd.isCurMapSupportThisMode(GrowthGameModeTag.tStronghold)
-                    && !CtfMode.PendingCtf);
+            // Keep SH checkbox UNCHECKED (not hidden) while CTF is pending.
+            // ModeSelectCheckBox.Update() forces SH.isChecked=true every frame because
+            // curModeSet==tStronghold; we override it here after Update has run.
+            if (_shCb != null && CtfMode.PendingCtf)
+                _shCb.isChecked = false;
         }
 
         private bool TryInject()
@@ -9631,9 +9627,9 @@ namespace CNRMods
             GameObject tdmGo = msd.mModeCheckBoxTDM;
             if (_shGo == null) return false;
 
-            // ClearCtfOnClick on SH: if SH becomes visible again and user clicks it,
-            // PendingCtf should clear (LateUpdate auto-clear doesn't cover this case
-            // since curModeSet==tStronghold for both SH and CTF).
+            _shCb = _shGo.GetComponent<UICheckbox>();
+
+            // Clicking SH while it is visible must clear the CTF pending flag.
             if (_shGo.GetComponent<ClearCtfOnClick>() == null) _shGo.AddComponent<ClearCtfOnClick>();
 
             // Clone SH checkbox as the CTF checkbox.
@@ -9649,15 +9645,15 @@ namespace CNRMods
             if (step < 0.001f) step = 0.2f;
             _ctfGo.transform.localPosition = new Vector3(pos.x, pos.y - step, pos.z);
 
-            // Remove ModeSelectCheckBox -- it has no CTF enum value and would corrupt
-            // curModeSet and isChecked state on every Update tick.
+            // Remove ModeSelectCheckBox immediately -- it would corrupt curModeSet on every tick.
             MonoBehaviour orig = _ctfGo.GetComponent("ModeSelectCheckBox") as MonoBehaviour;
-            if (orig != null) Destroy(orig);
+            if (orig != null) DestroyImmediate(orig);
 
-            // Remove all UILocalize components so our custom text is not overwritten
-            // when the GO is deactivated and re-activated (UILocalize fires on OnEnable).
+            // Remove UILocalize immediately (DestroyImmediate, not Destroy) so it cannot fire
+            // OnEnable on the same frame we call SetActive later and reset "CTF" back to the
+            // original localized string.
             foreach (UILocalize loc in _ctfGo.GetComponentsInChildren<UILocalize>())
-                Destroy(loc);
+                DestroyImmediate(loc);
 
             _ctfLabel = _ctfGo.GetComponentInChildren<UILabel>();
             if (_ctfLabel != null) _ctfLabel.text = "CTF";
