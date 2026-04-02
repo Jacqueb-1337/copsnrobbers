@@ -34,12 +34,22 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.26";
+        public  const string Version = "2.0.27";
 
         public static void Load()
         {
             try
             {
+                // Guard against duplicate instances: LoadMods() is called once per
+                // MainMenuDirector.Awake(), which fires on every scene transition back
+                // to the main menu.  Without this check each round trip adds another
+                // SettingsModHook MonoBehaviour, and OwnJumpPhysics() gets called N
+                // times per frame after N matches — multiplying jump height by N.
+                if (GameObject.Find("CNRSettingsMod") != null)
+                {
+                    Log("CNRSettingsMod already running — skipping duplicate Load()");
+                    return;
+                }
                 GameObject go = new GameObject("CNRSettingsMod");
                 go.AddComponent<SettingsModHook>();
                 GameObject.DontDestroyOnLoad(go);
@@ -1107,7 +1117,6 @@ namespace CNRSettingsMod
         {
             yield return null;
             yield return null;
-            DumpAllSprites();
             if (!_menuSpsCached) CacheMenuSystemSprites();
         }
 
@@ -3223,16 +3232,6 @@ namespace CNRSettingsMod
                 if (_visGOs[i] == null) _visGOs[i] = GameObject.Find(VIS_ITEMS[i].goName);
                 if (_visGOs[i] != null) _visGOs[i].SetActive(_visOn[i]);
             }
-
-            // Log Panel(Control) children for discovery
-            GameObject controlPanel = GameObject.Find("Panel(Control)");
-            if (controlPanel != null)
-                foreach (Transform child in controlPanel.transform)
-                    SettingsModEntry.Log("Panel(Control) child: [" + child.name + "]");
-
-            // Broad scene scan -- log all root GOs and immediate children
-            // so we can identify unknown HUD element names from the log
-            LogSceneHud();
 
             // Drag GOs
             for (int i = 0; i < DRAG_COUNT; i++)
