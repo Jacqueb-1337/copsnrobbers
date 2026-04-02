@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.0.3";
+        public const  string Version = "3.0.4";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9472,17 +9472,20 @@ namespace CNRMods
         public static string  RobberFlagStatus = AT_BASE;
         public static Vector3 CopDropPos;
         public static Vector3 RobberDropPos;
+        public static Vector3 CopCarrierPos;     // updated every frame by the carrier, broadcast in state
+        public static Vector3 RobberCarrierPos;
         public static int     CopScore         = 0;
         public static int     RobberScore      = 0;
         public const  int     WinScore         = 3;
 
         // Pack full state into a single string for event 199 {ctf_s:"..."}.
-        // Format: copScore|robberScore|copStatus|robberStatus|cx,cy,cz|rx,ry,rz
+        // Format: copScore|robberScore|copStatus|robberStatus|cdrop|rdrop|ccarrier|rcarrier
         public static string PackState()
         {
             return CopScore + "|" + RobberScore + "|"
-                 + CopFlagStatus + "|" + RobberFlagStatus + "|"
-                 + Vec3Str(CopDropPos) + "|" + Vec3Str(RobberDropPos);
+                 + (CopFlagStatus ?? "") + "|" + (RobberFlagStatus ?? "") + "|"
+                 + Vec3Str(CopDropPos) + "|" + Vec3Str(RobberDropPos) + "|"
+                 + Vec3Str(CopCarrierPos) + "|" + Vec3Str(RobberCarrierPos);
         }
 
         public static void UnpackState(string s)
@@ -9497,6 +9500,11 @@ namespace CNRMods
                 RobberFlagStatus = p[3];
                 ParseVec(p[4], ref CopDropPos);
                 ParseVec(p[5], ref RobberDropPos);
+                if (p.Length >= 8)
+                {
+                    ParseVec(p[6], ref CopCarrierPos);
+                    ParseVec(p[7], ref RobberCarrierPos);
+                }
             }
             catch { }
         }
@@ -9525,6 +9533,8 @@ namespace CNRMods
             RobberFlagStatus = AT_BASE;
             CopDropPos       = Vector3.zero;
             RobberDropPos    = Vector3.zero;
+            CopCarrierPos    = Vector3.zero;
+            RobberCarrierPos = Vector3.zero;
             CopScore         = 0;
             RobberScore      = 0;
         }
@@ -9567,10 +9577,10 @@ namespace CNRMods
     // onto the CTF checkbox (a deactivated GO can't re-activate itself).
     public class CtfCheckBoxInjector : MonoBehaviour
     {
-        private bool       _injected  = false;
+        private bool       _injected = false;
         private GameObject _shGo;
         private GameObject _ctfGo;
-        private float      _diagTimer = 0f;
+        private UICheckbox _shCb;   // cached so LateUpdate can override ModeSelectCheckBox.Update
 
         void Update()
         {
@@ -9580,24 +9590,23 @@ namespace CNRMods
                 catch (Exception ex) { ModEntry.Log("CtfCheckBoxInjector: " + ex.Message); _injected = true; }
                 return;
             }
-            // Mirror SH checkbox visibility.  Must be done here (not in CtfCheckBoxBehaviour)
+            // Mirror SH checkbox visibility -- must be here (not in CtfCheckBoxBehaviour)
             // because a deactivated MonoBehaviour stops receiving Update calls.
             if (_shGo != null && _ctfGo != null)
                 _ctfGo.SetActive(_shGo.activeSelf);
+        }
 
-            // Periodic diagnostic: log state every 3 s so we can see if mirroring works.
-            _diagTimer += Time.deltaTime;
-            if (_diagTimer >= 3f)
-            {
-                _diagTimer = 0f;
-                if (_shGo != null && _ctfGo != null)
-                    ModEntry.Log("CtfDBG: shSelf=" + _shGo.activeSelf
-                        + " shHier=" + _shGo.activeInHierarchy
-                        + " ctfSelf=" + _ctfGo.activeSelf
-                        + " ctfHier=" + _ctfGo.activeInHierarchy
-                        + " ctfPos=" + _ctfGo.transform.localPosition
-                        + " shPos=" + _shGo.transform.localPosition);
-            }
+        void LateUpdate()
+        {
+            if (!_injected) return;
+            // ModeSelectCheckBox.Update() (runs before LateUpdate) sets SH.isChecked=true
+            // whenever curModeSet==tStronghold.  Override it here so SH appears unchecked
+            // while CTF is pending, and CTF appears unchecked when SH is selected normally.
+            if (_shCb != null)
+                _shCb.isChecked = !CtfMode.PendingCtf
+                    && MultiplayerSelectDirector.mInstance != null
+                    && MultiplayerSelectDirector.mInstance.curModeSet == GrowthGameModeTag.tStronghold
+                    && !CtfMode.PendingCtf;
         }
 
         private bool TryInject()
@@ -9609,40 +9618,28 @@ namespace CNRMods
             GameObject tdmGo = msd.mModeCheckBoxTDM;
             if (_shGo == null) return false;
 
-            // Log NGUI layout info so we can diagnose position/clipping issues.
-            Transform par = _shGo.transform.parent;
-            Vector3 pos = _shGo.transform.localPosition;
-            bool hasGrid  = par != null && par.GetComponent("UIGrid")  != null;
-            bool hasTable = par != null && par.GetComponent("UITable") != null;
-            ModEntry.Log("CtfInject: shGo=" + _shGo.name
-                + " parent=" + (par != null ? par.name : "null")
-                + " localPos=" + pos
-                + " activeSelf=" + _shGo.activeSelf
-                + " activeInHier=" + _shGo.activeInHierarchy
-                + " UIGrid=" + hasGrid + " UITable=" + hasTable);
-            if (tdmGo != null)
-                ModEntry.Log("CtfInject: tdmGo=" + tdmGo.name
-                    + " localPos=" + tdmGo.transform.localPosition);
+            _shCb = _shGo.GetComponent<UICheckbox>();
 
             // Prevent SH/TDM clicks from leaving PendingCtf=true.
             if (_shGo.GetComponent<ClearCtfOnClick>() == null)    _shGo.AddComponent<ClearCtfOnClick>();
             if (tdmGo != null && tdmGo.GetComponent<ClearCtfOnClick>() == null) tdmGo.AddComponent<ClearCtfOnClick>();
 
             // Clone SH checkbox as the CTF checkbox.
+            Transform par = _shGo.transform.parent;
+            Vector3 pos   = _shGo.transform.localPosition;
             _ctfGo                        = (GameObject)UnityEngine.Object.Instantiate(_shGo);
             _ctfGo.name                   = "ModeCheckBox_CTF";
-            _ctfGo.transform.parent       = _shGo.transform.parent;
+            _ctfGo.transform.parent       = par;
             _ctfGo.transform.localScale   = _shGo.transform.localScale;
-            // Step = gap between TDM and SH checkboxes; place CTF one step below SH.
-            // Falls back to -0.2 if TDM isn't available.
+            // Step = gap between TDM and SH checkboxes so CTF sits evenly beneath SH.
             float step = (tdmGo != null)
                 ? Mathf.Abs(tdmGo.transform.localPosition.y - pos.y)
                 : 0.2f;
             if (step < 0.001f) step = 0.2f;
             _ctfGo.transform.localPosition = new Vector3(pos.x, pos.y - step, pos.z);
 
-            // Remove ModeSelectCheckBox -- it uses GrowthGameModeTag which has no CTF
-            // value; keeping it would corrupt curModeSet on every Update tick.
+            // Remove ModeSelectCheckBox -- it has no CTF enum value and would corrupt
+            // curModeSet and isChecked state on every Update tick.
             MonoBehaviour orig = _ctfGo.GetComponent("ModeSelectCheckBox") as MonoBehaviour;
             if (orig != null) Destroy(orig);
 
@@ -9652,23 +9649,10 @@ namespace CNRMods
             CtfCheckBoxBehaviour beh = _ctfGo.AddComponent<CtfCheckBoxBehaviour>();
             beh.Init();
 
-            // If a UIGrid drives the layout, tell it to reposition so our new child is included.
-            if (hasGrid)
-            {
-                MonoBehaviour grid = par.GetComponent("UIGrid") as MonoBehaviour;
-                if (grid != null)
-                {
-                    var fi = grid.GetType().GetField("repositionNow",
-                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                    if (fi != null) fi.SetValue(grid, true);
-                }
-            }
-
-            // Start hidden; first Update() tick will set the correct state.
+            // Start hidden; next Update() tick will match SH visibility state.
             _ctfGo.SetActive(false);
 
-            ModEntry.Log("CtfCheckBoxInjector: CTF checkbox injected at localPos="
-                + _ctfGo.transform.localPosition);
+            ModEntry.Log("CtfCheckBoxInjector: CTF checkbox injected");
             return true;
         }
     }
@@ -9695,6 +9679,8 @@ namespace CNRMods
         private GameObject _zone2Go;
         private Vector3    _zone1Base;
         private Vector3    _zone2Base;
+        private GameObject _copFlagMarker;
+        private GameObject _robFlagMarker;
 
         private string _myId     = "";
         private bool   _inited   = false;
@@ -9756,6 +9742,8 @@ namespace CNRMods
             CtfZone z2 = _zone2Go.AddComponent<CtfZone>(); z2.FlagId = 2; z2.Hook = this;
 
             _inited = true;
+            _copFlagMarker = CreateFlagMarker("CNR_CopFlag",    new Color(0.4f, 0.7f, 1f));
+            _robFlagMarker = CreateFlagMarker("CNR_RobberFlag", new Color(1f, 0.35f, 0.35f));
             ModEntry.Log("CtfHook: init done. zone1=" + _zone1Base + " zone2=" + _zone2Base);
         }
 
@@ -9773,7 +9761,7 @@ namespace CNRMods
                 _zone2Go.transform.position = (CtfMode.RobberFlagStatus == CtfMode.DROPPED)
                     ? CtfMode.RobberDropPos : _zone2Base;
 
-            // Detect local death and drop carried flags.
+            // Detect local death and drop carried flags; also publish carrier position for visuals.
             PlayerInfo myInfo = CNRMultiplayerManager.mInstance.myPlayerInfo;
             if (myInfo != null)
             {
@@ -9781,6 +9769,32 @@ namespace CNRMods
                 if (cur == PlayerStatus.dead && _prevStatus != PlayerStatus.dead)
                     OnLocalPlayerDied(myInfo);
                 _prevStatus = cur;
+                // Keep carrier positions current so remote clients can track the flag marker.
+                if (CtfMode.CopFlagStatus    == _myId) CtfMode.CopCarrierPos    = myInfo.mPosition;
+                if (CtfMode.RobberFlagStatus == _myId) CtfMode.RobberCarrierPos = myInfo.mPosition;
+            }
+
+            // Update flag visual markers (all clients).
+            UpdateFlagMarker(_copFlagMarker, CtfMode.CopFlagStatus, _zone1Base,
+                             CtfMode.CopDropPos, CtfMode.CopCarrierPos);
+            UpdateFlagMarker(_robFlagMarker, CtfMode.RobberFlagStatus, _zone2Base,
+                             CtfMode.RobberDropPos, CtfMode.RobberCarrierPos);
+
+            // Drive the built-in Stronghold flag HUD sprites to show CTF flag safety.
+            // holdState_1 = zone-1 (cop base / cop flag): copHold = flag safe, robberHold = flag stolen/dropped.
+            // holdState_2 = zone-2 (robber base / robber flag): robberHold = flag safe, copHold = flag stolen/dropped.
+            // HUD reads: both robberHold → copFlagSprite=0 / robberFlagSprite=1 ("robbers took cop flag" warning).
+            //           both copHold    → copFlagSprite=1 / robberFlagSprite=0 ("cops took robber flag" warning).
+            //           mixed           → both sprites at 0.5 (neutral / flags safe or both stolen).
+            if (CNRMultiplayerManager.mInstance != null && CNRMultiplayerManager.mInstance.myModeInfo != null)
+            {
+                var shInfo = CNRMultiplayerManager.mInstance.myModeInfo.mStrongholdInfo;
+                shInfo.holdState_1 = string.IsNullOrEmpty(CtfMode.CopFlagStatus)
+                    ? StrongholdHoldState.copHold     // cop flag at base = safe
+                    : StrongholdHoldState.robberHold; // cop flag stolen / dropped = warning
+                shInfo.holdState_2 = string.IsNullOrEmpty(CtfMode.RobberFlagStatus)
+                    ? StrongholdHoldState.robberHold  // robber flag at base = safe
+                    : StrongholdHoldState.copHold;    // robber flag stolen / dropped = warning
             }
 
             if (!isAuthority) return;
@@ -9829,16 +9843,17 @@ namespace CNRMods
             if (myInfo == null) return;
             TeamType myTeam = myInfo.mTeam;
 
-            if (flagId == 1) // entering Cop base zone
+            if (flagId == 1) // Zone 1 = cop base / cop flag spawn
             {
-                // Robber picks up the cop flag.
-                if (myTeam == TeamType.Robber && CtfMode.CopFlagStatus == CtfMode.AT_BASE)
-                { CtfMode.CopFlagStatus = _myId; BroadcastState(); ModEntry.Log("CtfHook: robber picked cop flag"); return; }
-                // Cop returns their own dropped flag.
+                // Robber picks up the cop flag (at base or dropped by a dead cop).
+                if (myTeam == TeamType.Robber && !string.IsNullOrEmpty(_myId)
+                    && (CtfMode.CopFlagStatus == CtfMode.AT_BASE || CtfMode.CopFlagStatus == CtfMode.DROPPED))
+                { CtfMode.CopFlagStatus = _myId; BroadcastState(); return; }
+                // Cop returns their own dropped flag to base.
                 if (myTeam == TeamType.Cop && CtfMode.CopFlagStatus == CtfMode.DROPPED)
                 { CtfMode.CopFlagStatus = CtfMode.AT_BASE; BroadcastState(); return; }
-                // Cop delivers the robber flag home -- score.
-                if (myTeam == TeamType.Cop && CtfMode.RobberFlagStatus == _myId)
+                // Cop delivers the robber flag home -- score!
+                if (myTeam == TeamType.Cop && !string.IsNullOrEmpty(_myId) && CtfMode.RobberFlagStatus == _myId)
                 {
                     CtfMode.CopScore++; CtfMode.RobberFlagStatus = CtfMode.AT_BASE;
                     BroadcastState(); ModEntry.Log("CtfHook: COP SCORES! " + CtfMode.CopScore);
@@ -9846,16 +9861,17 @@ namespace CNRMods
                     return;
                 }
             }
-            else // flagId == 2: entering Robber base zone
+            else // Zone 2 = robber base / robber flag spawn
             {
-                // Cop picks up the robber flag.
-                if (myTeam == TeamType.Cop && CtfMode.RobberFlagStatus == CtfMode.AT_BASE)
-                { CtfMode.RobberFlagStatus = _myId; BroadcastState(); ModEntry.Log("CtfHook: cop picked robber flag"); return; }
-                // Robber returns their own dropped flag.
+                // Cop picks up the robber flag (at base or dropped by a dead robber).
+                if (myTeam == TeamType.Cop && !string.IsNullOrEmpty(_myId)
+                    && (CtfMode.RobberFlagStatus == CtfMode.AT_BASE || CtfMode.RobberFlagStatus == CtfMode.DROPPED))
+                { CtfMode.RobberFlagStatus = _myId; BroadcastState(); return; }
+                // Robber returns their own dropped flag to base.
                 if (myTeam == TeamType.Robber && CtfMode.RobberFlagStatus == CtfMode.DROPPED)
                 { CtfMode.RobberFlagStatus = CtfMode.AT_BASE; BroadcastState(); return; }
-                // Robber delivers the cop flag home -- score.
-                if (myTeam == TeamType.Robber && CtfMode.CopFlagStatus == _myId)
+                // Robber delivers the cop flag home -- score!
+                if (myTeam == TeamType.Robber && !string.IsNullOrEmpty(_myId) && CtfMode.CopFlagStatus == _myId)
                 {
                     CtfMode.RobberScore++; CtfMode.CopFlagStatus = CtfMode.AT_BASE;
                     BroadcastState(); ModEntry.Log("CtfHook: ROBBER SCORES! " + CtfMode.RobberScore);
@@ -9896,9 +9912,54 @@ namespace CNRMods
 
         static string FlagText(string s)
         {
-            if (s == CtfMode.AT_BASE) return "At base";
+            if (string.IsNullOrEmpty(s)) return "At base";
             if (s == CtfMode.DROPPED) return "DROPPED!";
-            return "Carried by " + s;
+            return "Carried";
+        }
+
+        void UpdateFlagMarker(GameObject marker, string status, Vector3 basePos,
+                              Vector3 dropPos, Vector3 carrierPos)
+        {
+            if (marker == null) return;
+            if (string.IsNullOrEmpty(status))
+            {
+                marker.SetActive(true);
+                marker.transform.position = basePos + Vector3.up;
+                return;
+            }
+            if (status == CtfMode.DROPPED)
+            {
+                marker.SetActive(true);
+                marker.transform.position = dropPos + new Vector3(0f, 0.4f, 0f);
+                return;
+            }
+            // Being carried.
+            marker.SetActive(true);
+            Vector3 pos;
+            if (status == _myId)
+            {
+                // Local player -- use real-time transform.
+                GameObject pg = GameObject.FindWithTag("Player");
+                pos = pg != null ? pg.transform.position : carrierPos;
+            }
+            else
+            {
+                // Remote carrier -- use last broadcast position (updated every 0.5 s).
+                pos = carrierPos;
+            }
+            marker.transform.position = pos + new Vector3(0f, 2.2f, 0f);
+        }
+
+        static GameObject CreateFlagMarker(string name, Color col)
+        {
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            go.name = name;
+            go.transform.localScale = new Vector3(0.15f, 0.6f, 0.15f);
+            Collider c = go.GetComponent<Collider>();
+            if (c != null) Destroy(c);
+            Renderer r = go.GetComponent<Renderer>();
+            if (r != null) r.material.color = col;
+            return go;
         }
     }
 
