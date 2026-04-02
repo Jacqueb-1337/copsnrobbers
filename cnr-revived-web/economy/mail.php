@@ -29,9 +29,9 @@ function auto_purge_mail($pdo, $player_id) {
     $del->execute([$player_id, $excess]);
     $deleted = $del->rowCount();
     if ($deleted < $excess) {
-        // Still over — delete oldest unclaimed items with no rewards
+        // Still over — delete oldest unclaimed items with no rewards (no coins, gems, OR spins)
         $del2 = $pdo->prepare(
-            "DELETE FROM player_mail WHERE player_id = ? AND coins = 0 AND gems = 0
+            "DELETE FROM player_mail WHERE player_id = ? AND coins = 0 AND gems = 0 AND spins = 0
                ORDER BY id ASC LIMIT ?"
         );
         $del2->execute([$player_id, $excess - $deleted]);
