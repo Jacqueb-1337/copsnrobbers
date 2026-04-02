@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.0";
+        public const  string Version = "3.1.1";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9550,12 +9550,12 @@ namespace CNRMods
         private UILabel  _lbl;
         private string   _labelText;
 
-        public void Init(bool isCTF, string labelText, UISprite checkSprite)
+        public void Init(bool isCTF, string labelText, UISprite checkSprite, UILabel label)
         {
             _isCTF       = isCTF;
             _labelText   = labelText;
             _checkSprite = checkSprite;
-            _lbl         = GetComponentInChildren<UILabel>();
+            _lbl         = label;
             if (_lbl != null) _lbl.text = labelText;
         }
 
@@ -9652,7 +9652,7 @@ namespace CNRMods
             if (lbl != null) lbl.text = labelText;
 
             CnrModeButton btn = go.AddComponent<CnrModeButton>();
-            btn.Init(isCTF, labelText, checkSprite);
+            btn.Init(isCTF, labelText, checkSprite, lbl);
 
             // Start hidden; CtfCheckBoxInjector.Update() controls visibility.
             go.SetActive(false);
@@ -9780,6 +9780,9 @@ namespace CNRMods
             _zone2Flag = SetupZoneVisuals(_zone2Go, out _zone2RingRend, out _zone2FlagRend);
             if (_zone1Flag != null) _zone1FlagBase = _zone1Flag.transform.position;
             if (_zone2Flag != null) _zone2FlagBase = _zone2Flag.transform.position;
+            // Normalize zone scales -- zones may have different parent hierarchy scales.
+            if (_zone1Flag != null && _zone2Flag != null)
+                _zone2Flag.transform.localScale = _zone1Flag.transform.localScale;
 
             // Attach CTF trigger handlers.
             CtfZone z1 = _zone1Go.AddComponent<CtfZone>(); z1.FlagId = 1; z1.Hook = this;
@@ -9964,18 +9967,33 @@ namespace CNRMods
 
         // Find and detach the qizi flag mesh from a zone GO so it can be moved freely.
         // Outputs the ring (bz_1) and flag (qizi) renderers for dynamic recoloring in Update().
+        // Both renderers have their materials replaced with a flat Unlit/Color so that color
+        // set in Update() is never multiplied by the underlying texture.
         static GameObject SetupZoneVisuals(GameObject zoneGo, out Renderer ringRend, out Renderer flagRend)
         {
             ringRend = null; flagRend = null;
             Transform bz    = zoneGo.transform.Find("BZ/bz_1");
             Transform qPath = zoneGo.transform.Find("BZ/q/qizi");
-            if (bz != null) ringRend = bz.GetComponent<Renderer>();
+            if (bz != null)
+            {
+                ringRend = bz.GetComponent<Renderer>();
+                SwapToUnlit(ringRend);
+            }
             if (qPath == null) return null;
             GameObject qizi = qPath.gameObject;
             flagRend = qizi.GetComponent<Renderer>();
+            SwapToUnlit(flagRend);
             // Detach from hierarchy so we can reposition independently of the zone GO.
             qizi.transform.parent = null;
             return qizi;
+        }
+
+        static void SwapToUnlit(Renderer r)
+        {
+            if (r == null) return;
+            Shader s = Shader.Find("Unlit/Color");
+            if (s == null) return;
+            r.material = new Material(s);
         }
 
         void UpdateFlagMarker(GameObject flagMesh, string status, Vector3 basePos,
