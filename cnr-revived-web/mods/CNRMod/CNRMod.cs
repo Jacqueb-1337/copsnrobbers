@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.2.0";
+        public const  string Version = "2.2.1";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -2310,6 +2310,14 @@ namespace CNRMods
                 if (ShouldPreserveRoot(go.name, preserve))
                 {
                     if (preservedNames.Length < 300) preservedNames.Append(go.name).Append("|");
+                    continue;
+                }
+                // Preserve any Photon-networked object (player characters are renamed to
+                // the player's display name after PhotonNetwork.Instantiate, so they won't
+                // match the name-based preserve list above).
+                if (go.GetComponent<PhotonView>() != null)
+                {
+                    if (preservedNames.Length < 300) preservedNames.Append(go.name).Append("(PV)|");
                     continue;
                 }
 
