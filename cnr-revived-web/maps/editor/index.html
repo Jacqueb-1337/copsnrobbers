@@ -1,0 +1,1715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CNR Map Builder</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #12121e; color: #dde; font-family: 'Segoe UI', sans-serif; font-size: 13px; display: flex; flex-direction: column; height: 100vh; overflow: hidden; user-select: none; }
+
+/* ── Toolbar ── */
+#toolbar { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: #1a1a2e; border-bottom: 1px solid #252545; flex-shrink: 0; }
+#toolbar h1 { font-size: 13px; color: #e94560; margin-right: 4px; white-space: nowrap; }
+.sep { width: 1px; background: #252545; align-self: stretch; margin: 0 2px; }
+.btn { padding: 4px 10px; border: 1px solid #333360; background: #1a1a2e; color: #dde; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+.btn:hover { background: #252545; }
+.btn.active { background: #e94560; color: #fff; border-color: #e94560; }
+.btn.green { background: #1a3a22; border-color: #2d6a4f; }
+.btn.green:hover { background: #2d6a4f; }
+.file-btn { position: relative; overflow: hidden; }
+.file-btn input[type=file] { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+#donor-select { background: #12121e; border: 1px solid #333360; border-radius: 4px; color: #dde; padding: 3px 8px; font-size: 12px; cursor: pointer; outline: none; max-width: 140px; height: 26px; }
+#donor-select:focus { border-color: #e94560; }
+
+/* ── Main layout ── */
+#main { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Side panels ── */
+.panel { width: 220px; background: #1a1a2e; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+#left-panel { border-right: 1px solid #252545; }
+#right-panel { border-left: 1px solid #252545; overflow-y: auto; }
+.panel-section { padding: 8px; border-bottom: 1px solid #252545; flex-shrink: 0; }
+.panel-section h3 { font-size: 10px; text-transform: uppercase; color: #666688; margin-bottom: 6px; letter-spacing: 1px; }
+.search-input { width: 100%; background: #12121e; border: 1px solid #333360; border-radius: 3px; color: #dde; padding: 4px 6px; font-size: 12px; outline: none; }
+.search-input:focus { border-color: #e94560; }
+
+/* ── Palette ── */
+#palette-list { overflow-y: auto; flex: 1; }
+.palette-item { padding: 5px 10px; cursor: pointer; border-bottom: 1px solid #1e1e30; font-size: 12px; display: flex; align-items: center; gap: 5px; }
+.palette-item:hover { background: #252545; }
+.palette-item.active { background: #e94560; color: #fff; }
+.palette-item .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.palette-item .mat-tag { font-size: 10px; color: #666688; flex-shrink: 0; }
+.palette-item.active .mat-tag { color: #ffcccc; }
+.mat-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+.palette-section-header { padding: 4px 10px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #555577; background: #161622; border-bottom: 1px solid #1e1e30; }
+
+/* ── Viewport ── */
+#viewport { flex: 1; position: relative; overflow: hidden; }
+#viewport canvas { display: block; }
+#empty-hint { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; gap: 8px; }
+#empty-hint h2 { font-size: 20px; color: #e94560; }
+#empty-hint p { color: #666688; }
+#kbd-hint { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.55); padding: 4px 12px; border-radius: 10px; font-size: 11px; color: #666688; pointer-events: none; white-space: nowrap; }
+#placing-hint { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(233,69,96,.85); color: #fff; padding: 5px 14px; border-radius: 10px; font-size: 12px; pointer-events: none; display: none; }
+
+/* ── Properties ── */
+.vec3-group { margin-bottom: 8px; }
+.vec3-label { font-size: 11px; color: #666688; margin-bottom: 3px; font-weight: 600; letter-spacing: .5px; }
+.prop-row { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; }
+.prop-row label { width: 12px; font-size: 11px; color: #888; flex-shrink: 0; }
+.prop-input { flex: 1; width: 0; background: #12121e; border: 1px solid #333360; border-radius: 3px; color: #dde; padding: 3px 5px; font-size: 12px; outline: none; }
+.prop-input:focus { border-color: #e94560; }
+select { width: 100%; background: #12121e; border: 1px solid #333360; border-radius: 3px; color: #dde; padding: 4px 6px; font-size: 12px; cursor: pointer; outline: none; }
+select:focus { border-color: #e94560; }
+.action-btns { display: flex; gap: 4px; }
+.action-btns .btn { flex: 1; text-align: center; padding: 5px 4px; }
+.btn-del { background: #2a1010; border-color: #5a2020; }
+.btn-del:hover { background: #5a2020; }
+
+/* ── Scene list ── */
+#scene-list-wrap { flex-shrink: 0; }
+.scene-list-item { padding: 4px 10px; font-size: 11px; cursor: pointer; border-bottom: 1px solid #1e1e30; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #8888aa; }
+.scene-list-item:hover { background: #252545; color: #dde; }
+.scene-list-item.selected { color: #e94560; }
+
+/* ── Bottom bar ── */
+#bottom-bar { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: #1a1a2e; border-top: 1px solid #252545; flex-shrink: 0; }
+#status { font-size: 11px; color: #666688; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #12121e; }
+::-webkit-scrollbar-thumb { background: #333360; border-radius: 3px; }
+
+/* ── Collidable + groups ── */
+.toggle-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+.toggle-row label { font-size:12px; cursor:pointer; }
+.toggle-row input[type=checkbox] { cursor:pointer; accent-color:#e94560; }
+#groups-panel { flex-shrink: 0; }
+.group-header { display:flex; align-items:center; gap:4px; padding:4px 8px; background:#161622; border-bottom:1px solid #1e1e30; cursor:pointer; user-select:none; }
+.group-header:hover { background:#1e1e30; }
+.collapse-arrow { font-size:9px; color:#555577; flex-shrink:0; transition:transform 0.1s; }
+.section-collapse-btn { background:none; border:none; color:#555577; font-size:10px; cursor:pointer; padding:0 3px; line-height:1; float:right; }
+.section-collapse-btn:hover { color:#aaaacc; }
+.group-name-lbl { flex:1; font-size:11px; font-weight:600; color:#aaaacc; }
+.group-xform-btn { font-size:10px; padding:1px 5px; margin-left:2px; }
+.group-entry { display:flex; align-items:center; padding:3px 6px 3px 22px; font-size:11px; cursor:pointer; border-bottom:1px solid #1a1a28; color:#666688; }
+.group-entry .ge-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.group-entry .ge-rm { flex-shrink:0; background:none; border:none; color:#444466; font-size:11px; cursor:pointer; padding:0 2px; line-height:1; }
+.group-entry .ge-rm:hover { color:#e94560; }
+.group-entry:hover { background:#252545; color:#dde; }
+.group-entry.selected { color:#e94560; }
+.group-entry.is-colbox { color:#44aaff; }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>◈ CNR Map Builder</h1>
+  <div class="sep"></div>
+  <label class="btn file-btn" title="Load a custom map JSON or raw scene dump">
+    📂 Load Map
+    <input type="file" id="map-input" accept=".json">
+  </label>
+  <div class="sep"></div>
+  <span style="color:#8888aa;font-size:11px;white-space:nowrap">Donor:</span>
+  <select id="donor-select" title="Switch donor reference map — updates ghost blocks and palette">
+    <option value="">-- none --</option>
+  </select>
+  <div class="sep"></div>
+  <div style="display:flex;gap:3px">
+    <button class="btn active" id="btn-move"   title="Move (W)">✥ Move</button>
+    <button class="btn"        id="btn-rotate" title="Rotate (E)">↺ Rot</button>
+    <button class="btn"        id="btn-scale"  title="Scale (R)">⤡ Scale</button>
+  </div>
+  <div class="sep"></div>
+  <button class="btn active" id="btn-donor" title="Toggle donor reference">👁 Donor</button>
+  <button class="btn active" id="btn-grid"  title="Toggle grid">⊞ Grid</button>
+  <button class="btn active" id="btn-colliders" title="Toggle collision box wireframes">⬡ Colliders</button>
+</div>
+
+<div id="main">
+
+  <!-- LEFT: palette -->
+  <div class="panel" id="left-panel">
+    <div class="panel-section">
+      <h3>Object Palette</h3>
+      <input class="search-input" id="palette-search" placeholder="Filter objects…" autocomplete="off">
+    </div>
+    <div id="palette-list">
+      <div style="padding:14px 10px;color:#555577;font-size:12px">Load a scene JSON to populate the palette.</div>
+    </div>
+  </div>
+
+  <!-- CENTER: viewport -->
+  <div id="viewport">
+    <div id="empty-hint">
+      <h2>CNR Map Builder</h2>
+      <p>Pick a <strong style="color:#dde">Donor</strong> map from the dropdown to start a blank map</p>
+      <p style="margin-top:4px">— or use <strong style="color:#dde">Load Map</strong> to open a saved custom map</p>
+    </div>
+    <div id="placing-hint">Click to place · Esc to cancel</div>
+    <div id="kbd-hint">WASD Pan · Q/E Rotate gizmo · R Scale gizmo · Del Delete · Ctrl+D Clone · Ctrl+Z Undo · Ctrl+Shift+Z Redo</div>
+  </div>
+
+  <!-- RIGHT: properties -->
+  <div class="panel" id="right-panel">
+    <div class="panel-section">
+      <h3>Selected Object</h3>
+      <div id="sel-name" style="font-size:11px;color:#8888aa;word-break:break-all;line-height:1.4">None</div>
+    </div>
+    <div class="panel-section">
+      <div class="vec3-group">
+        <div class="vec3-label">Position</div>
+        <div class="prop-row"><label>X</label><input class="prop-input" id="px" type="number" step="0.1"></div>
+        <div class="prop-row"><label>Y</label><input class="prop-input" id="py" type="number" step="0.1"></div>
+        <div class="prop-row"><label>Z</label><input class="prop-input" id="pz" type="number" step="0.1"></div>
+      </div>
+      <div class="vec3-group">
+        <div class="vec3-label">Size</div>
+        <div class="prop-row"><label>X</label><input class="prop-input" id="sx" type="number" step="0.1" min="0.01"></div>
+        <div class="prop-row"><label>Y</label><input class="prop-input" id="sy" type="number" step="0.1" min="0.01"></div>
+        <div class="prop-row"><label>Z</label><input class="prop-input" id="sz" type="number" step="0.1" min="0.01"></div>
+      </div>
+      <div class="vec3-group">
+        <div class="vec3-label">Rotation °</div>
+        <div class="prop-row"><label>X</label><input class="prop-input" id="rx" type="number" step="1"></div>
+        <div class="prop-row"><label>Y</label><input class="prop-input" id="ry" type="number" step="1"></div>
+        <div class="prop-row"><label>Z</label><input class="prop-input" id="rz" type="number" step="1"></div>
+      </div>
+    </div>
+    <div class="panel-section">
+      <h3>Material</h3>
+      <select id="mat-sel">
+        <option value="Default-Diffuse">Default (grey)</option>
+        <option value="snow">snow</option>
+        <option value="planks_spruce">planks_spruce</option>
+        <option value="planks_oak">planks_oak</option>
+        <option value="planks_jungle">planks_jungle</option>
+        <option value="sand">sand</option>
+        <option value="sandstone_normal">sandstone_normal</option>
+        <option value="sandstone_side">sandstone_side</option>
+        <option value="sandstone_top">sandstone_top</option>
+        <option value="stone">stone</option>
+        <option value="stonebrick">stonebrick</option>
+        <option value="cobblestone">cobblestone</option>
+        <option value="cobblestone_mossy">cobblestone_mossy</option>
+        <option value="brick">brick</option>
+        <option value="hellrock">hellrock</option>
+        <option value="dirt">dirt</option>
+        <option value="grass_top">grass_top</option>
+        <option value="grass_side">grass_side</option>
+        <option value="ice">ice</option>
+        <option value="gravel">gravel</option>
+        <option value="nether_brick">nether_brick</option>
+        <option value="wood1">wood1</option>
+        <option value="wood_spruce1">wood_spruce1</option>
+      </select>
+    </div>
+    <div class="panel-section">
+      <div class="toggle-row">
+        <input type="checkbox" id="chk-collidable" checked>
+        <label for="chk-collidable">Collidable</label>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#666688;margin-top:2px">
+        <span>Group:</span>
+        <span id="sel-group-name" style="color:#aaaacc;flex:1">—</span>
+        <button class="btn" id="btn-move-group" style="font-size:10px;padding:2px 5px;display:none" title="Transform all objects in this group together (G)">⇄ Move Group</button>
+        <button class="btn" id="btn-ungroup" style="font-size:10px;padding:2px 5px" title="Remove from group">✕</button>
+      </div>
+    </div>
+    <div class="panel-section">
+      <div class="action-btns">
+        <button class="btn" id="btn-clone">Clone</button>
+        <button class="btn btn-del" id="btn-del">Delete</button>
+      </div>
+    </div>
+    <div class="panel-section" style="flex-shrink:0">
+      <h3 style="display:flex;align-items:center">
+        <button class="section-collapse-btn" id="btn-toggle-scene-list" title="Collapse/expand scene objects">▶</button>
+        Scene Objects (<span id="obj-count">0</span>)
+      </h3>
+    </div>
+    <div id="scene-list-wrap">
+      <div id="scene-list"></div>
+    </div>
+    <div class="panel-section" style="flex-shrink:0">
+      <h3>Groups (<span id="group-count">0</span>)</h3>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <button class="btn" id="btn-new-group" style="flex:1;font-size:11px">+ New Group</button>
+        <button class="btn" id="btn-add-to-group" style="flex:1;font-size:11px" title="Add selected to a group">➕ Add</button>
+      </div>
+    </div>
+    <div id="groups-panel"></div>
+  </div>
+
+</div>
+
+<div id="bottom-bar">
+  <span style="color:#666688;font-size:11px">Place marker:</span>
+  <button class="btn" id="btn-enemy"  style="background:#2a0f00;border-color:#7a3000">⚔ Enemy</button>
+  <button class="btn" id="btn-escape" style="background:#00200a;border-color:#008030">✦ Escape</button>
+  <button class="btn" id="btn-colbox" style="background:#0a0a2e;border-color:#3040a0">⬡ Col Box</button>
+  <button class="btn" id="btn-player" style="background:#001a30;border-color:#005080">▶ Player</button>
+  <div class="sep"></div>
+  <span id="status">Ready — load a scene JSON to start building</span>
+  <div style="flex:1"></div>
+  <label style="font-size:11px;color:#666688;white-space:nowrap;margin-right:2px;">Ambient:</label>
+  <input type="color" id="ambient-color" value="#c8c8c8" title="Map ambient light color (applied at runtime via RenderSettings.ambientLight)" style="width:28px;height:22px;border:1px solid #333360;border-radius:3px;cursor:pointer;padding:1px;vertical-align:middle;">
+  <button class="btn green" id="btn-export">⬇ Export JSON</button>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls }    from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+// ─── Config ──────────────────────────────────────────────────────────────────
+
+const TEX_DIR = 'textures/';
+
+const MAT_TEX = {
+  snow:               'snow.png',
+  planks_spruce:      'planks_spruce.png',
+  planks_oak:         'planks_oak.png',
+  planks_jungle:      'planks_jungle.png',
+  sand:               'sand.png',
+  sandstone_normal:   'sandstone_normal.png',
+  sandstone_side:     'sandstone_side.png',
+  sandstone_top:      'sandstone_top.png',
+  stone:              'stone.png',
+  stonebrick:         'stonebrick.png',
+  cobblestone:        'cobblestone.png',
+  cobblestone_mossy:  'cobblestone_mossy.png',
+  brick:              'brick.png',
+  hellrock:           'hellrock.png',
+  dirt:               'dirt.png',
+  grass_top:          'grass_top.png',
+  grass_side:         'grass_side.png',
+  ice:                'ice.png',
+  gravel:             'gravel.png',
+  nether_brick:       'nether_brick.png',
+  wood1:              'wood1.png',
+  wood_spruce1:       'wood_spruce1.png',
+  'Default-Diffuse':  null,
+};
+
+// CSS color for palette dot
+const MAT_CSS = {
+  snow:               '#ddeeff',
+  planks_spruce:      '#7a5020',
+  planks_oak:         '#c8a84b',
+  planks_jungle:      '#5a8030',
+  sand:               '#d4c040',
+  sandstone_normal:   '#c8b060',
+  stone:              '#888',
+  stonebrick:         '#666',
+  cobblestone:        '#777',
+  brick:              '#993322',
+  hellrock:           '#882200',
+  dirt:               '#7a4820',
+  ice:                '#aaddff',
+  gravel:             '#888',
+  nether_brick:       '#552200',
+  wood1:              '#8b6020',
+  'Default-Diffuse':  '#aaa',
+};
+
+// Paths to skip entirely
+const SKIP_EXACT     = new Set(['Cube', 'IsDied', 'IsPause', 'IsFireOnline']);
+const SKIP_CONTAINS  = ['_UIDrawCall', 'ExampleCharacter/LookObject', 'ExampleCharacter/Capsule'];
+// Paths that are spawn markers (not geometry)
+const IS_MARKER_KEYS = ['EnemyPosition', 'EscapePosition', 'PlayerPosition'];
+
+function shouldSkip(path) {
+  if (SKIP_EXACT.has(path)) return true;
+  for (const s of SKIP_CONTAINS) if (path.includes(s)) return true;
+  return false;
+}
+function isMarker(path) {
+  return IS_MARKER_KEYS.some(k => path.includes(k));
+}
+
+// ─── Three.js setup ──────────────────────────────────────────────────────────
+
+const vp       = document.getElementById('viewport');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+renderer.setClearColor(0x0e0e1a);
+vp.appendChild(renderer.domElement);
+
+const scene  = new THREE.Scene();
+scene.fog    = new THREE.Fog(0x0e0e1a, 300, 700);
+
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 1200);
+camera.position.set(105, 50, 154);
+camera.lookAt(105, 5, 77);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+sun.position.set(80, 120, 40);
+sun.castShadow = true;
+scene.add(sun);
+
+const gridHelper = new THREE.GridHelper(300, 60, 0x222244, 0x1a1a30);
+scene.add(gridHelper);
+
+// Invisible floor for mouse picking
+const floorMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(800, 800),
+  new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
+);
+floorMesh.name    = '__floor__';
+floorMesh.rotation.x = -Math.PI / 2;
+scene.add(floorMesh);
+
+const orbitCtrl = new OrbitControls(camera, renderer.domElement);
+orbitCtrl.enableDamping = true;
+orbitCtrl.dampingFactor = 0.08;
+orbitCtrl.target.set(105, 5, 77);
+
+const tc = new TransformControls(camera, renderer.domElement);
+tc.addEventListener('dragging-changed', e => {
+  orbitCtrl.enabled = !e.value;
+  if (e.value) {
+    // Drag START — capture before-state for undo (skip: group pivot calls pushUndo on its own)
+    if (!appState.groupPivot) pushUndo();
+  } else {
+    // Drag END
+    if (appState.groupPivot) {
+      finalizeGroupTransform();
+    } else if (appState.mode === 'scale' && appState.sel) {
+      bakeScale(appState.sel);
+      syncPropsFromMesh(appState.sel);
+    }
+  }
+});
+tc.addEventListener('objectChange', () => {
+  if (appState.sel) syncPropsFromMesh(appState.sel);
+});
+scene.add(tc);
+
+// ─── Groups ──────────────────────────────────────────────────────────────────
+
+const donorGroup  = new THREE.Group(); donorGroup.name  = '__donor__';
+const placedGroup = new THREE.Group(); placedGroup.name = '__placed__';
+scene.add(donorGroup, placedGroup);
+
+// ─── App state ───────────────────────────────────────────────────────────────
+
+const appState = {
+  donorName:    '',
+  mode:         'translate',
+  sel:          null,   // selected placed THREE.Mesh
+  ghost:        null,   // mesh following mouse during placement
+  ghostData:    null,   // JSON data for ghost
+  markerType:   null,   // 'enemy'|'escape'|'player' when placing marker
+  texCache:     {},     // matName → THREE.Texture
+  markerIdx:    { enemy: 0, escape: 0, player: 0 },
+  // WASD state
+  keys:         {},
+  // Undo/redo stacks — each entry is a JSON snapshot of placedGroup
+  undoStack:    [],
+  redoStack:    [],
+  idCounter:    0,
+  groups:       {},      // { gid: { name, members: Set<string> } }
+  colBoxVisible: true,
+  groupPivot:   null,
+  activeGroupId: null,
+  sceneListCollapsed: true,
+  groupsCollapsed:    new Set(), // gids that are currently collapsed
+};
+
+// ─── Undo / Redo ─────────────────────────────────────────────────────────────
+
+function snapshotPlaced() {
+  const items = [];
+  placedGroup.traverse(o => {
+    if (!o.isMesh) return;
+    const ud = o.userData;
+    items.push({
+      id:        ud.id,
+      path:      ud.path,
+      mesh:      ud.mesh,
+      mat:       ud.mat,
+      color:     ud.color,
+      size:      [...ud.size],
+      pos:       [o.position.x, o.position.y, o.position.z],
+      rot:       [THREE.MathUtils.radToDeg(o.rotation.x),
+                  THREE.MathUtils.radToDeg(o.rotation.y),
+                  THREE.MathUtils.radToDeg(o.rotation.z)],
+      isMarker:  ud.isMarker  || false,
+      isColBox:  ud.isColBox  || false,
+      collidable: ud.collidable !== false,
+      groupId:   ud.groupId   || null,
+    });
+  });
+  const groups = {};
+  for (const [gid, g] of Object.entries(appState.groups))
+    groups[gid] = { name: g.name, members: [...g.members] };
+  return JSON.stringify({ items, groups, idCounter: appState.idCounter });
+}
+
+function pushUndo() {
+  appState.undoStack.push(snapshotPlaced());
+  if (appState.undoStack.length > 60) appState.undoStack.shift();
+  appState.redoStack.length = 0;
+}
+
+function restoreSnapshot(snap) {
+  while (placedGroup.children.length) {
+    const c = placedGroup.children[0];
+    c.geometry?.dispose();
+    (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => m.dispose());
+    placedGroup.remove(c);
+  }
+  if (appState.groupPivot) {
+    [...appState.groupPivot.children].forEach(m => { if (m.isMesh) placedGroup.attach(m); });
+    scene.remove(appState.groupPivot);
+    appState.groupPivot = null;
+    appState.activeGroupId = null;
+  }
+  tc.detach();
+  appState.sel = null;
+  document.getElementById('sel-name').textContent = 'None';
+  clearInputs();
+
+  const parsed = JSON.parse(snap);
+  const items  = Array.isArray(parsed) ? parsed : (parsed.items || []);
+
+  // Restore groups
+  appState.groups = {};
+  if (!Array.isArray(parsed) && parsed.groups) {
+    for (const [gid, g] of Object.entries(parsed.groups))
+      appState.groups[gid] = { name: g.name, members: new Set(g.members) };
+  }
+  if (!Array.isArray(parsed) && parsed.idCounter)
+    appState.idCounter = parsed.idCounter;
+
+  for (const obj of items) {
+    if (obj.isMarker) {
+      const colorMap = { EnemyPosition: 0xff3300, EscapePosition: 0x00ee66, PlayerPosition: 0x0088ff };
+      let col = 0xffffff;
+      for (const [k, v] of Object.entries(colorMap)) if (obj.path.includes(k)) { col = v; break; }
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(0.6, 8, 6),
+        new THREE.MeshBasicMaterial({ color: col })
+      );
+      m.position.set(obj.pos[0], obj.pos[1], obj.pos[2]);
+      m.userData = { ...obj };
+      placedGroup.add(m);
+    } else if (obj.isColBox) {
+      placedGroup.add(makeCollisionBox(obj));
+    } else {
+      placedGroup.add(makeBox(obj, 1.0));
+    }
+  }
+  refreshSceneList();
+  refreshGroupsPanel();
+}
+
+function undo() {
+  if (!appState.undoStack.length) return;
+  appState.redoStack.push(snapshotPlaced());
+  restoreSnapshot(appState.undoStack.pop());
+  setStatus('Undo');
+}
+
+function redo() {
+  if (!appState.redoStack.length) return;
+  appState.undoStack.push(snapshotPlaced());
+  restoreSnapshot(appState.redoStack.pop());
+  setStatus('Redo');
+}
+
+// ─── Texture cache ───────────────────────────────────────────────────────────
+
+const texLoader = new THREE.TextureLoader();
+
+function getTex(matName) {
+  if (matName in appState.texCache) return appState.texCache[matName];
+  const file = MAT_TEX[matName];
+  if (!file) { appState.texCache[matName] = null; return null; }
+  const t = texLoader.load(TEX_DIR + file, undefined, undefined, () => {
+    appState.texCache[matName] = null;
+  });
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  appState.texCache[matName] = t;
+  return t;
+}
+
+// Pre-warm all textures so they're ready when the donor loads
+Object.keys(MAT_TEX).forEach(getTex);
+
+// Build six face materials with tiled texture
+function buildMaterials(matName, size, opacity) {
+  const tex = getTex(matName);
+  const base = tex ? 0xffffff : 0xaaaaaa;
+  // BoxGeometry face order: +X, -X, +Y(top), -Y(bot), +Z, -Z
+  // face tile sizes: [uSize, vSize]
+  const [sx, sy, sz] = size;
+  const faceSizes = [
+    [sz, sy], [sz, sy],   // ±X
+    [sx, sz], [sx, sz],   // ±Y
+    [sx, sy], [sx, sy],   // ±Z
+  ];
+  return faceSizes.map(([u, v]) => {
+    const m = new THREE.MeshLambertMaterial({
+      color: base,
+      transparent: opacity < 1,
+      opacity,
+      depthWrite: opacity >= 1,
+    });
+    if (tex) {
+      m.map = tex.clone();
+      m.map.needsUpdate = true;
+      m.map.wrapS = m.map.wrapT = THREE.RepeatWrapping;
+      m.map.repeat.set(Math.max(u, 0.01) / 2, Math.max(v, 0.01) / 2);
+    }
+    return m;
+  });
+}
+
+function rebuildMaterials(mesh) {
+  const ud  = mesh.userData;
+  const mats = buildMaterials(ud.mat, ud.size, 1.0);
+  mesh.material.forEach(m => m.dispose());
+  mesh.material = mats;
+}
+
+// ─── Mesh factory ────────────────────────────────────────────────────────────
+
+function makeBox(data, opacity = 1.0) {
+  const size = (data.size && data.size.every(v => v > 0)) ? data.size : [1, 1, 1];
+  const [sx, sy, sz] = size;
+  const geo  = new THREE.BoxGeometry(sx, sy, sz);
+  const mats = buildMaterials(data.mat || 'Default-Diffuse', size, opacity);
+  const mesh = new THREE.Mesh(geo, mats);
+  mesh.position.set(data.pos[0], data.pos[1], data.pos[2]);
+  if (data.rot && data.rot.length >= 3) {
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(data.rot[0]),
+      THREE.MathUtils.degToRad(data.rot[1]),
+      THREE.MathUtils.degToRad(data.rot[2])
+    );
+  }
+  mesh.castShadow    = opacity >= 1;
+  mesh.receiveShadow = opacity >= 1;
+  mesh.userData      = {
+    id:        data.id || generateId(),
+    path:      data.path,
+    mesh:      data.mesh,
+    mat:       data.mat || 'Default-Diffuse',
+    color:     data.color || [0,0,0],
+    size:      [...size],
+    rot:       data.rot ? [...data.rot] : undefined,
+    collidable: data.collidable !== false,
+    groupId:   data.groupId || null,
+    isColBox:  false,
+  };
+  return mesh;
+}
+
+function generateId() { return 'id' + (++appState.idCounter); }
+
+function makeCollisionBox(data) {
+  const size = (data.size && data.size.every(v => v > 0)) ? data.size : [1, 1, 1];
+  const [sx, sy, sz] = size;
+  const geo  = new THREE.BoxGeometry(sx, sy, sz);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
+  mesh.position.set(data.pos[0], data.pos[1], data.pos[2]);
+  if (data.rot && data.rot.length >= 3)
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(data.rot[0]),
+      THREE.MathUtils.degToRad(data.rot[1]),
+      THREE.MathUtils.degToRad(data.rot[2])
+    );
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color: 0x44aaff })
+  );
+  edges.name    = '__colbox_edge__';
+  edges.visible = appState.colBoxVisible;
+  mesh.add(edges);
+  mesh.userData = {
+    id:        data.id || generateId(),
+    path:      data.path || 'CollisionBox',
+    mesh:      'Cube',
+    mat:       'Default-Diffuse',
+    color:     [0, 0, 0],
+    size:      [...size],
+    rot:       data.rot ? [...data.rot] : undefined,
+    collidable: true,
+    groupId:   data.groupId || null,
+    isColBox:  true,
+  };
+  return mesh;
+}
+
+function refreshColliderEdgesVisibility() {
+  placedGroup.traverse(o => {
+    if (o.name === '__colbox_edge__') o.visible = appState.colBoxVisible;
+  });
+  if (appState.ghost) {
+    const e = appState.ghost.getObjectByName('__colbox_edge__');
+    if (e) e.visible = appState.colBoxVisible;
+  }
+}
+
+function makeMarker(type, worldPos) {
+  const colors = { enemy: 0xff3300, escape: 0x00ee66, player: 0x0088ff };
+  const geo  = new THREE.SphereGeometry(0.6, 8, 6);
+  const mat  = new THREE.MeshBasicMaterial({ color: colors[type] });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(worldPos);
+  const prefixes = {
+    enemy:  'EnemyPositionBloodMap/EnemyPosition',
+    escape: 'EscapePositionBloodMap/EscapePosition',
+    player: 'ExampleCharacter/PlayerPosition',
+  };
+  appState.markerIdx[type]++;
+  const path = type === 'player'
+    ? prefixes.player
+    : prefixes[type] + appState.markerIdx[type];
+  mesh.userData = {
+    id: generateId(), path, mesh: 'Sphere', mat: 'Default-Diffuse',
+    color: [255, 255, 255], size: [1, 1, 1], isMarker: true,
+    collidable: false, groupId: null, isColBox: false,
+  };
+  return mesh;
+}
+
+function bakeScale(mesh) {
+  if (!mesh.userData.size || mesh.userData.isMarker) return;
+  const s  = mesh.scale;
+  const ns = [mesh.userData.size[0] * s.x, mesh.userData.size[1] * s.y, mesh.userData.size[2] * s.z];
+  mesh.geometry.dispose();
+  mesh.geometry      = new THREE.BoxGeometry(...ns);
+  mesh.userData.size = ns;
+  mesh.scale.set(1, 1, 1);
+  if (mesh.userData.isColBox) {
+    const edge = mesh.getObjectByName('__colbox_edge__');
+    if (edge) { edge.geometry.dispose(); edge.geometry = new THREE.EdgesGeometry(mesh.geometry); }
+  } else {
+    rebuildMaterials(mesh);
+  }
+}
+
+// ─── Load donor scene ────────────────────────────────────────────────────────
+
+function loadDonorScene(json, frameCamera = true) {
+  // Clear existing donor ghosts
+  while (donorGroup.children.length) {
+    const c = donorGroup.children[0];
+    c.geometry?.dispose();
+    (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => m.dispose());
+    donorGroup.remove(c);
+  }
+
+  appState.donorName = json.donor || appState.donorName;
+  document.getElementById('empty-hint').style.display = 'none';
+  // Sync dropdown selection
+  const _sel = document.getElementById('donor-select');
+  if ([..._sel.options].some(o => o.value === appState.donorName)) _sel.value = appState.donorName;
+
+  const geomObjs = [];
+
+  for (const obj of (json.objects || [])) {
+    if (shouldSkip(obj.path)) continue;
+    if (isMarker(obj.path))   continue;
+    if (!obj.size || obj.size.some(v => v <= 0)) continue;
+    if (!obj.pos  || obj.pos.length < 3)         continue;
+
+    const m = makeBox(obj, 0.35);
+    m.userData.__isDonor = true;
+    donorGroup.add(m);
+    geomObjs.push(obj);
+  }
+
+  buildPalette(geomObjs);
+
+  if (frameCamera && donorGroup.children.length) {
+    const box    = new THREE.Box3().setFromObject(donorGroup);
+    const center = box.getCenter(new THREE.Vector3());
+    const span   = box.getSize(new THREE.Vector3());
+    const dist   = Math.max(span.x, span.y, span.z) * 0.9;
+    camera.position.set(center.x, center.y + dist * 0.6, center.z - dist * 0.7);
+    orbitCtrl.target.copy(center);
+    gridHelper.position.set(center.x, 0, center.z);
+    floorMesh.position.set(center.x, 0, center.z);
+  }
+
+  setStatus(`Donor loaded: ${appState.donorName} — ${geomObjs.length} objects in palette`);
+}
+
+// ─── Change donor map ────────────────────────────────────────────────────────
+
+async function changeDonor(name, frame = true) {
+  if (!name) return;
+  try {
+    const resp = await fetch('donors/' + name + '.json');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    // Ensure donor name is set (flat-array wraps won't have it)
+    json.donor = json.donor || name;
+    loadDonorScene(json, frame);
+  } catch(e) {
+    setStatus(`Could not load donor "${name}": ${e.message}`);
+    // Revert dropdown to last valid selection
+    document.getElementById('donor-select').value = appState.donorName || '';
+  }
+}
+
+// ─── Load map file (unified entry point for Load Map button) ─────────────────
+
+async function loadMapFile(json) {
+  const isArray   = Array.isArray(json);
+  const objArr    = isArray ? json : (json.objects || []);
+  const donorName = isArray ? '' : (json.donor || '');
+
+  // Restore ambient color if saved in the map JSON
+  if (!isArray && Array.isArray(json.ambient) && json.ambient.length >= 3) {
+    const [ar, ag, ab] = json.ambient;
+    const hexStr = '#' + [ar, ag, ab].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+    document.getElementById('ambient-color').value = hexStr;
+  }
+
+  document.getElementById('empty-hint').style.display = 'none';
+
+  if (donorName) {
+    // Load the named donor as ghost reference + palette (no camera frame yet)
+    await changeDonor(donorName, false);
+  }
+
+  // Determine if this is a custom map (has donor + placed objects) or a raw scene dump
+  const isCustomMap = !isArray && donorName && objArr.length > 0;
+
+  if (isCustomMap) {
+    // Clear currently placed objects
+    while (placedGroup.children.length) {
+      const c = placedGroup.children[0];
+      c.geometry?.dispose();
+      (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => m.dispose());
+      placedGroup.remove(c);
+    }
+    tc.detach();
+    appState.sel = null;
+
+    let count = 0;
+    for (const obj of objArr) {
+      if (shouldSkip(obj.path)) continue;
+      if (!obj.pos || obj.pos.length < 3) continue;
+
+      if (isMarker(obj.path)) {
+        const colorMap = { EnemyPosition: 0xff3300, EscapePosition: 0x00ee66, PlayerPosition: 0x0088ff };
+        let col = 0xffffff;
+        for (const [k, v] of Object.entries(colorMap)) if (obj.path.includes(k)) { col = v; break; }
+        const mesh = new THREE.Mesh(
+          new THREE.SphereGeometry(0.6, 8, 6),
+          new THREE.MeshBasicMaterial({ color: col })
+        );
+        mesh.position.set(obj.pos[0], obj.pos[1], obj.pos[2]);
+        mesh.userData = { id: generateId(), path: obj.path, mesh: 'Sphere', mat: 'Default-Diffuse', color: [255,255,255], size: [1,1,1], isMarker: true, collidable: false, groupId: null, isColBox: false };
+        placedGroup.add(mesh);
+      } else if (obj.isColBox) {
+        if (!obj.size || obj.size.some(v => v <= 0)) continue;
+        placedGroup.add(makeCollisionBox(obj));
+      } else {
+        if (!obj.size || obj.size.some(v => v <= 0)) continue;
+        placedGroup.add(makeBox(obj, 1.0));
+      }
+      count++;
+    }
+
+    // Reconstruct groups
+    if (json.groups && json.groups.length) {
+      for (const gData of json.groups) {
+        const gid = createGroup(gData.name);
+        const g   = appState.groups[gid];
+        if (gData.memberPaths && gData.memberPaths.length) {
+          const paths = new Set(gData.memberPaths);
+          placedGroup.traverse(o => {
+            if (o.isMesh && paths.has(o.userData.path) && !g.members.has(o.userData.id)) {
+              g.members.add(o.userData.id);
+              o.userData.groupId = gid;
+            }
+          });
+        }
+      }
+    }
+
+    refreshSceneList();
+    refreshGroupsPanel();
+
+    // Frame camera on placed objects (falling back to donor ghost)
+    const target = placedGroup.children.length ? placedGroup : donorGroup;
+    if (target.children.length) {
+      const box    = new THREE.Box3().setFromObject(target);
+      const center = box.getCenter(new THREE.Vector3());
+      const span   = box.getSize(new THREE.Vector3());
+      const dist   = Math.max(span.x, span.y, span.z) * 0.9;
+      camera.position.set(center.x, center.y + dist * 0.6, center.z - dist * 0.7);
+      orbitCtrl.target.copy(center);
+      gridHelper.position.set(center.x, 0, center.z);
+      floorMesh.position.set(center.x, 0, center.z);
+    }
+    setStatus(`Loaded ${count} placed objects (donor: ${donorName})`);
+  } else {
+    // Raw scene dump — load directly as donor reference (ghost + palette)
+    const effectiveName = donorName || appState.donorName || 'Custom';
+    loadDonorScene({ donor: effectiveName, objects: objArr }, true);
+  }
+}
+
+// ─── Palette ─────────────────────────────────────────────────────────────────
+
+function buildPalette(items) {
+  const list = document.getElementById('palette-list');
+  list.innerHTML = '';
+
+  // Group by material
+  const byMat = {};
+  for (const obj of items) {
+    const m = obj.mat || 'Default-Diffuse';
+    (byMat[m] = byMat[m] || []).push(obj);
+  }
+
+  for (const [mat, objs] of Object.entries(byMat)) {
+    const hdr = document.createElement('div');
+    hdr.className   = 'palette-section-header';
+    hdr.textContent = mat;
+    list.appendChild(hdr);
+
+    for (const obj of objs) {
+      const div  = document.createElement('div');
+      div.className    = 'palette-item';
+      div.dataset.path = obj.path;
+      div.title        = obj.path;
+
+      const dot  = document.createElement('div');
+      dot.className = 'mat-dot';
+      dot.style.background = MAT_CSS[mat] || '#888';
+
+      const name = document.createElement('span');
+      name.className   = 'name';
+      name.textContent = obj.path.split('/').pop();
+
+      const tag = document.createElement('span');
+      tag.className   = 'mat-tag';
+      tag.textContent = `${obj.size[0]}×${obj.size[1]}×${obj.size[2]}`;
+
+      div.append(dot, name, tag);
+      div.addEventListener('click', () => beginPlace(obj));
+      list.appendChild(div);
+    }
+  }
+
+  // Search
+  const search = document.getElementById('palette-search');
+  search.oninput = () => {
+    const q = search.value.toLowerCase();
+    list.querySelectorAll('.palette-item').forEach(el => {
+      el.style.display = el.title.toLowerCase().includes(q) ? '' : 'none';
+    });
+    list.querySelectorAll('.palette-section-header').forEach(el => {
+      el.style.display = '';
+    });
+  };
+}
+
+// ─── Placement ───────────────────────────────────────────────────────────────
+
+function beginPlace(data) {
+  cancelPlace();
+  appState.ghostData = data;
+  appState.ghost     = makeBox({ ...data, pos: [0, data.size[1] / 2, 0] }, 0.55);
+  scene.add(appState.ghost);
+  tc.detach();
+  document.getElementById('placing-hint').style.display = 'block';
+  document.querySelectorAll('.palette-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.path === data.path)
+  );
+  setStatus(`Placing "${data.path.split('/').pop()}" — click to place, Esc to cancel`);
+}
+
+function beginPlaceMarker(type) {
+  cancelPlace();
+  appState.markerType = type;
+  const colors = { enemy: 0xff3300, escape: 0x00ee66, player: 0x0088ff };
+  appState.ghost = new THREE.Mesh(
+    new THREE.SphereGeometry(0.6, 8, 6),
+    new THREE.MeshBasicMaterial({ color: colors[type], transparent: true, opacity: 0.6 })
+  );
+  appState.ghost.position.y = 0.6;
+  scene.add(appState.ghost);
+  tc.detach();
+  document.getElementById('placing-hint').style.display = 'block';
+  setStatus(`Placing ${type} marker — click to place, Esc to cancel`);
+}
+
+function cancelPlace() {
+  if (appState.ghost) { scene.remove(appState.ghost); appState.ghost = null; }
+  appState.ghostData  = null;
+  appState.markerType = null;
+  document.getElementById('placing-hint').style.display = 'none';
+  document.querySelectorAll('.palette-item').forEach(el => el.classList.remove('active'));
+}
+
+function commitPlace(worldPos) {
+  let mesh;
+  if (appState.ghostData) {
+    const gd  = appState.ghostData;
+    const pos = [+worldPos.x.toFixed(3), +(gd.size[1] / 2).toFixed(3), +worldPos.z.toFixed(3)];
+    const data = { ...gd, pos };
+    mesh = gd.isColBox ? makeCollisionBox(data) : makeBox(data, 1.0);
+  } else if (appState.markerType) {
+    mesh = makeMarker(appState.markerType, new THREE.Vector3(worldPos.x, 0.6, worldPos.z));
+  }
+  if (!mesh) return;
+  pushUndo();
+  placedGroup.add(mesh);
+  cancelPlace();
+  select(mesh);
+  refreshSceneList();
+}
+
+// ─── Raycasting helpers ──────────────────────────────────────────────────────
+
+const ray   = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+function ndcFromEvent(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.x =  ((e.clientX - r.left) / r.width)  * 2 - 1;
+  mouse.y = -((e.clientY - r.top)  / r.height) * 2 + 1;
+}
+
+function floorHit() {
+  ray.setFromCamera(mouse, camera);
+  const hits = ray.intersectObject(floorMesh);
+  return hits.length ? hits[0].point : null;
+}
+
+// ─── Mouse interaction ───────────────────────────────────────────────────────
+
+let _downPt = null;
+
+renderer.domElement.addEventListener('pointerdown', e => {
+  _downPt = { x: e.clientX, y: e.clientY };
+});
+
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!_downPt) return;
+  const dx = e.clientX - _downPt.x, dy = e.clientY - _downPt.y;
+  _downPt = null;
+  if (dx * dx + dy * dy > 25) return; // was a drag
+
+  ndcFromEvent(e);
+
+  // Placement commit
+  if (appState.ghost) {
+    const pt = floorHit();
+    if (pt) commitPlace(pt);
+    return;
+  }
+
+  // Selection — check placed objects first, then donor (click-to-copy)
+  ray.setFromCamera(mouse, camera);
+  const placedMeshes = [], donorMeshes = [];
+  placedGroup.traverse(o => { if (o.isMesh) placedMeshes.push(o); });
+  donorGroup.traverse(o  => { if (o.isMesh) donorMeshes.push(o); });
+
+  const hitsP = ray.intersectObjects(placedMeshes, false);
+  if (hitsP.length) { select(hitsP[0].object); return; }
+
+  const hitsD = ray.intersectObjects(donorMeshes, false);
+  if (hitsD.length) {
+    // Click on donor object → start placing a copy of it
+    beginPlace(hitsD[0].object.userData);
+    return;
+  }
+
+  select(null);
+});
+
+renderer.domElement.addEventListener('pointermove', e => {
+  if (!appState.ghost) return;
+  ndcFromEvent(e);
+  const pt = floorHit();
+  if (!pt) return;
+  if (appState.ghostData) {
+    appState.ghost.position.set(pt.x, appState.ghostData.size[1] / 2, pt.z);
+  } else {
+    appState.ghost.position.set(pt.x, 0.6, pt.z);
+  }
+});
+
+// ─── Selection ───────────────────────────────────────────────────────────────
+
+function select(mesh) {
+  appState.sel = mesh;
+  if (mesh) {
+    tc.attach(mesh);
+    tc.setMode(appState.mode);
+    syncPropsFromMesh(mesh);
+    document.getElementById('sel-name').textContent = mesh.userData.path || '(unnamed)';
+  } else {
+    tc.detach();
+    document.getElementById('sel-name').textContent = 'None';
+    clearInputs();
+  }
+  // Collidable checkbox
+  const chk = document.getElementById('chk-collidable');
+  if (mesh && !mesh.userData.isMarker) {
+    chk.checked  = mesh.userData.isColBox ? true : (mesh.userData.collidable !== false);
+    chk.disabled = !!mesh.userData.isColBox;
+  } else {
+    chk.checked  = true;
+    chk.disabled = true;
+  }
+  // Group label + Move Group button
+  const gname   = document.getElementById('sel-group-name');
+  const moveGrp = document.getElementById('btn-move-group');
+  if (mesh && mesh.userData.groupId && appState.groups[mesh.userData.groupId]) {
+    gname.textContent   = appState.groups[mesh.userData.groupId].name;
+    moveGrp.style.display = '';
+  } else {
+    gname.textContent   = '—';
+    moveGrp.style.display = 'none';
+  }
+  refreshSceneList();
+  refreshGroupsPanel();
+}
+
+function syncPropsFromMesh(mesh) {
+  const p = mesh.position, r = mesh.rotation, s = mesh.userData.size || [1,1,1];
+  setInput('px', p.x); setInput('py', p.y); setInput('pz', p.z);
+  setInput('sx', s[0]); setInput('sy', s[1]); setInput('sz', s[2]);
+  setInput('rx', THREE.MathUtils.radToDeg(r.x));
+  setInput('ry', THREE.MathUtils.radToDeg(r.y));
+  setInput('rz', THREE.MathUtils.radToDeg(r.z));
+  const matSel = document.getElementById('mat-sel');
+  matSel.disabled = !!mesh.userData.isColBox;
+  if (!mesh.userData.isColBox && [...matSel.options].some(o => o.value === mesh.userData.mat))
+    matSel.value = mesh.userData.mat;
+}
+
+function setInput(id, v) { document.getElementById(id).value = isNaN(v) ? '' : (+v.toFixed(3)); }
+
+function clearInputs() {
+  ['px','py','pz','sx','sy','sz','rx','ry','rz'].forEach(id => document.getElementById(id).value = '');
+}
+
+// Properties → mesh
+function applyProps() {
+  const m = appState.sel;
+  if (!m) return;
+  const px = +document.getElementById('px').value,
+        py = +document.getElementById('py').value,
+        pz = +document.getElementById('pz').value;
+  if (isFinite(px) && isFinite(py) && isFinite(pz)) m.position.set(px, py, pz);
+
+  const rx = +document.getElementById('rx').value,
+        ry = +document.getElementById('ry').value,
+        rz = +document.getElementById('rz').value;
+  if (isFinite(rx) && isFinite(ry) && isFinite(rz))
+    m.rotation.set(THREE.MathUtils.degToRad(rx), THREE.MathUtils.degToRad(ry), THREE.MathUtils.degToRad(rz));
+
+  const sx = +document.getElementById('sx').value,
+        sy = +document.getElementById('sy').value,
+        sz = +document.getElementById('sz').value;
+  if (isFinite(sx) && isFinite(sy) && isFinite(sz) && sx > 0 && sy > 0 && sz > 0) {
+    const cur = m.userData.size;
+    if (cur[0] !== sx || cur[1] !== sy || cur[2] !== sz) {
+      m.geometry.dispose();
+      m.geometry = new THREE.BoxGeometry(sx, sy, sz);
+      m.userData.size = [sx, sy, sz];
+      if (m.userData.isColBox) {
+        const edge = m.getObjectByName('__colbox_edge__');
+        if (edge) { edge.geometry.dispose(); edge.geometry = new THREE.EdgesGeometry(m.geometry); }
+      } else {
+        rebuildMaterials(m);
+      }
+    }
+  }
+}
+
+['px','py','pz','sx','sy','sz','rx','ry','rz'].forEach(id =>
+  document.getElementById(id).addEventListener('change', applyProps)
+);
+
+document.getElementById('mat-sel').addEventListener('change', e => {
+  const m = appState.sel;
+  if (!m || m.userData.isMarker) return;
+  m.userData.mat = e.target.value;
+  rebuildMaterials(m);
+});
+
+// ─── Scene list ──────────────────────────────────────────────────────────────
+
+function refreshSceneList() {
+  const items = [];
+  placedGroup.traverse(o => { if (o.isMesh) items.push(o); });
+  document.getElementById('obj-count').textContent = items.length;
+
+  const wrap = document.getElementById('scene-list-wrap');
+  const collapsed = appState.sceneListCollapsed;
+  wrap.style.display = collapsed ? 'none' : '';
+  const arrow = document.getElementById('btn-toggle-scene-list');
+  if (arrow) arrow.textContent = collapsed ? '▶' : '▼';
+
+  const list = document.getElementById('scene-list');
+  list.innerHTML = '';
+  if (collapsed) return;
+  items.forEach((o, i) => {
+    const div = document.createElement('div');
+    div.className = 'scene-list-item' + (o === appState.sel ? ' selected' : '');
+    if (o.userData.isColBox) div.style.color = (o === appState.sel ? '' : '#44aaff');
+    const label = (o.userData.path || '').split('/').pop();
+    div.textContent = `${i + 1}. ${o.userData.isColBox ? '\u2b21 ' : ''}${label}`;
+    div.title       = o.userData.path || '';
+    div.addEventListener('click', () => {
+      select(o);
+      orbitCtrl.target.copy(o.position);
+    });
+    list.appendChild(div);
+  });
+}
+
+// ─── Group management ─────────────────────────────────────────────────────────
+
+function getMeshById(id) {
+  let found = null;
+  placedGroup.traverse(o => { if (o.isMesh && o.userData.id === id) found = o; });
+  // Members may be reparented to the pivot during an active group transform
+  if (!found && appState.groupPivot) {
+    appState.groupPivot.traverse(o => { if (o.isMesh && o.userData.id === id) found = o; });
+  }
+  return found;
+}
+
+function createGroup(name) {
+  const gid = 'g' + generateId();
+  appState.groups[gid] = { name: name || 'Group', members: new Set() };
+  return gid;
+}
+
+function addMeshToGroup(mesh, gid) {
+  if (mesh.userData.groupId && appState.groups[mesh.userData.groupId])
+    appState.groups[mesh.userData.groupId].members.delete(mesh.userData.id);
+  mesh.userData.groupId = gid;
+  if (gid && appState.groups[gid])
+    appState.groups[gid].members.add(mesh.userData.id);
+  refreshGroupsPanel();
+  if (appState.sel === mesh) {
+    const gname = document.getElementById('sel-group-name');
+    gname.textContent = (gid && appState.groups[gid]) ? appState.groups[gid].name : '\u2014';
+  }
+}
+
+function removeFromGroup(mesh) { addMeshToGroup(mesh, null); }
+
+function deleteGroup(gid) {
+  placedGroup.traverse(o => { if (o.isMesh && o.userData.groupId === gid) o.userData.groupId = null; });
+  delete appState.groups[gid];
+  refreshGroupsPanel();
+}
+
+function beginGroupTransform(groupId) {
+  if (appState.groupPivot) finalizeGroupTransform();
+  const g = appState.groups[groupId];
+  if (!g) return;
+  const members = [];
+  placedGroup.traverse(o => { if (o.isMesh && g.members.has(o.userData.id)) members.push(o); });
+  if (!members.length) { setStatus('Group has no placed members'); return; }
+  const center = new THREE.Vector3();
+  members.forEach(m => center.add(m.getWorldPosition(new THREE.Vector3())));
+  center.divideScalar(members.length);
+  const pivot = new THREE.Object3D();
+  pivot.position.copy(center);
+  scene.add(pivot);
+  pivot.updateWorldMatrix(true, true); // ensure world matrix is current before reparenting
+  members.forEach(m => pivot.attach(m));
+  appState.groupPivot    = pivot;
+  appState.activeGroupId = groupId;
+  tc.attach(pivot);
+  tc.setMode(appState.mode);
+  setStatus(`Transforming group \u201c${g.name}\u201d (${members.length} objects) \u2014 drag gizmo, release to finish`);
+}
+
+function finalizeGroupTransform(silent = false) {
+  const pivot = appState.groupPivot;
+  if (!pivot) return;
+  const members = [...pivot.children].filter(c => c.isMesh);
+  members.forEach(child => {
+    placedGroup.attach(child);           // preserves world position/rotation
+    // Bake any scale the pivot applied into each object's geometry + userData.size
+    const s = child.scale;
+    if (Math.abs(s.x - 1) > 1e-4 || Math.abs(s.y - 1) > 1e-4 || Math.abs(s.z - 1) > 1e-4) {
+      bakeScale(child);
+    }
+  });
+  scene.remove(pivot);
+  appState.groupPivot    = null;
+  appState.activeGroupId = null;
+  tc.detach();
+  // Refresh props panel if the currently selected mesh was part of this group
+  if (appState.sel && members.includes(appState.sel)) syncPropsFromMesh(appState.sel);
+  if (!silent) {
+    pushUndo();
+    refreshSceneList();
+    refreshGroupsPanel();
+    setStatus('Group transform applied');
+  }
+}
+
+function refreshGroupsPanel() {
+  const panel = document.getElementById('groups-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+  const entries = Object.entries(appState.groups);
+  document.getElementById('group-count').textContent = entries.length;
+  for (const [gid, g] of entries) {
+    // Default-collapse new groups on first render
+    if (!appState.groupsCollapsed.has(gid + '_seen')) {
+      appState.groupsCollapsed.add(gid);
+      appState.groupsCollapsed.add(gid + '_seen');
+    }
+    const isCollapsed = appState.groupsCollapsed.has(gid);
+
+    const hdr = document.createElement('div');
+    hdr.className = 'group-header';
+
+    const arrow = document.createElement('span');
+    arrow.className = 'collapse-arrow';
+    arrow.textContent = isCollapsed ? '▶' : '▼';
+    arrow.addEventListener('click', e => {
+      e.stopPropagation();
+      if (appState.groupsCollapsed.has(gid)) appState.groupsCollapsed.delete(gid);
+      else appState.groupsCollapsed.add(gid);
+      refreshGroupsPanel();
+    });
+
+    const lbl = document.createElement('span');
+    lbl.className   = 'group-name-lbl';
+    lbl.textContent = `📦 ${g.name} (${g.members.size})`;
+    lbl.addEventListener('click', e => {
+      e.stopPropagation();
+      if (appState.groupsCollapsed.has(gid)) appState.groupsCollapsed.delete(gid);
+      else appState.groupsCollapsed.add(gid);
+      refreshGroupsPanel();
+    });
+
+    const xBtn = document.createElement('button');
+    xBtn.className   = 'btn group-xform-btn';
+    xBtn.textContent = '⇄ Transform';
+    xBtn.title       = 'Transform all members together';
+    xBtn.addEventListener('click', e => { e.stopPropagation(); beginGroupTransform(gid); });
+    const cBtn = document.createElement('button');
+    cBtn.className   = 'btn group-xform-btn';
+    cBtn.textContent = '⧉ Clone';
+    cBtn.title       = 'Clone all members into a new group';
+    cBtn.addEventListener('click', e => { e.stopPropagation(); cloneGroup(gid); });
+    const dBtn = document.createElement('button');
+    dBtn.className   = 'btn btn-del group-xform-btn';
+    dBtn.textContent = '✕';
+    dBtn.title       = 'Delete group (objects remain)';
+    dBtn.addEventListener('click', e => { e.stopPropagation(); deleteGroup(gid); });
+    hdr.append(arrow, lbl, xBtn, cBtn, dBtn);
+    panel.appendChild(hdr);
+
+    if (isCollapsed) continue;
+
+    for (const memberId of g.members) {
+      const mesh = getMeshById(memberId);
+      const div  = document.createElement('div');
+      const isColBox = mesh && mesh.userData.isColBox;
+      div.className = 'group-entry' + (mesh === appState.sel ? ' selected' : '') + (isColBox ? ' is-colbox' : '');
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'ge-name';
+      nameSpan.textContent = mesh ? (mesh.userData.path || memberId).split('/').pop() : `[missing: ${memberId}]`;
+      nameSpan.title = mesh ? (mesh.userData.path || memberId) : memberId;
+      if (mesh) nameSpan.addEventListener('click', () => { select(mesh); orbitCtrl.target.copy(mesh.position); });
+
+      const rmBtn = document.createElement('button');
+      rmBtn.className = 'ge-rm';
+      rmBtn.textContent = '✕';
+      rmBtn.title = 'Remove from group';
+      rmBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (mesh) { pushUndo(); removeFromGroup(mesh); refreshSceneList(); }
+      });
+
+      div.append(nameSpan, rmBtn);
+      panel.appendChild(div);
+    }
+  }
+}
+
+// ─── Clone / Delete ──────────────────────────────────────────────────────────
+
+function cloneGroup(groupId) {
+  const g = appState.groups[groupId];
+  if (!g) return;
+
+  // If this group is currently being pivot-transformed, commit it silently first
+  // so members are back in placedGroup and have correct world positions
+  if (appState.activeGroupId === groupId && appState.groupPivot) {
+    finalizeGroupTransform(true);
+  }
+
+  const members = [];
+  placedGroup.traverse(o => { if (o.isMesh && g.members.has(o.userData.id)) members.push(o); });
+  if (!members.length) { setStatus('Group has no objects to clone'); return; }
+
+  // Compute world-space AABB for offset (use expandByObject which works in world space)
+  const box = new THREE.Box3();
+  members.forEach(m => box.expandByObject(m));
+  const offset = (box.max.x - box.min.x) + 0.5;
+
+  pushUndo();
+  const newGid = createGroup(g.name + ' copy');
+  const clones = members.map(m => {
+    // Use world position so offset is always in world space regardless of parent
+    const wp = m.getWorldPosition(new THREE.Vector3());
+    const data = {
+      ...m.userData,
+      id:      null,
+      groupId: null,
+      pos: [wp.x + offset, wp.y, wp.z],
+    };
+    const nm = m.userData.isColBox ? makeCollisionBox(data) : makeBox(data, 1.0);
+    placedGroup.add(nm);
+    addMeshToGroup(nm, newGid);
+    return nm;
+  });
+
+  // Select the first clone so the user sees something is selected
+  select(clones[0]);
+  refreshSceneList();
+  refreshGroupsPanel();
+  setStatus(`Cloned group \u201c${g.name}\u201d \u2192 \u201c${g.name} copy\u201d (${clones.length} objects)`);
+}
+
+function cloneSelected() {
+  const m = appState.sel;
+  if (!m || m.userData.isMarker) return;
+  pushUndo();
+  const data = {
+    ...m.userData,
+    id:      null,  // fresh id
+    groupId: null,  // don't auto-clone into same group
+    pos: [m.position.x + m.userData.size[0] + 0.5, m.position.y, m.position.z],
+  };
+  const nm = m.userData.isColBox ? makeCollisionBox(data) : makeBox(data, 1.0);
+  placedGroup.add(nm);
+  select(nm);
+  refreshSceneList();
+}
+
+function deleteSelected() {
+  const m = appState.sel;
+  if (!m) return;
+  if (m.userData.groupId && appState.groups[m.userData.groupId])
+    appState.groups[m.userData.groupId].members.delete(m.userData.id);
+  pushUndo();
+  tc.detach();
+  placedGroup.remove(m);
+  m.geometry?.dispose();
+  (Array.isArray(m.material) ? m.material : [m.material]).forEach(x => x.dispose());
+  select(null);
+  refreshSceneList();
+  refreshGroupsPanel();
+}
+
+document.getElementById('btn-clone').addEventListener('click', cloneSelected);
+document.getElementById('btn-del').addEventListener('click', deleteSelected);
+
+// ─── Keyboard ────────────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', e => {
+  appState.keys[e.key.toLowerCase()] = true;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+  // Ctrl+Z / Ctrl+Shift+Z
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    e.preventDefault();
+    e.shiftKey ? redo() : undo();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); return; }
+
+  switch (e.key) {
+    case 'q': case 'Q': setMode('translate'); break;
+    case 'e': case 'E': setMode('rotate');    break;
+    case 'r': case 'R': setMode('scale');     break;
+    case 'g': case 'G': {
+      // Start group transform for the selected object's group
+      const m = appState.sel;
+      if (m && m.userData.groupId) beginGroupTransform(m.userData.groupId);
+      else if (appState.groupPivot) finalizeGroupTransform();
+      break;
+    }
+    case 'Escape':
+      if (appState.groupPivot) { finalizeGroupTransform(); }
+      else { cancelPlace(); }
+      break;
+    case 'Delete': case 'Backspace': deleteSelected(); break;
+    case 'd': case 'D':
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); cloneSelected(); }
+      break;
+  }
+});
+
+document.addEventListener('keyup', e => { appState.keys[e.key.toLowerCase()] = false; });
+
+// ─── Toolbar ─────────────────────────────────────────────────────────────────
+
+function setMode(mode) {
+  appState.mode = mode;
+  tc.setMode(mode);
+  ['translate','rotate','scale'].forEach(m =>
+    document.getElementById('btn-' + (m === 'translate' ? 'move' : m))
+      .classList.toggle('active', m === mode)
+  );
+}
+
+// Called each frame — moves camera target+position together for WASD pan
+function tickWASD(dt) {
+  const k = appState.keys;
+  if (!k['w'] && !k['a'] && !k['s'] && !k['d']) return;
+  // Camera forward projected onto XZ plane
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  forward.y = 0; forward.normalize();
+  const right = new THREE.Vector3();
+  right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+  const speed = 30; // world units / second
+  const delta = new THREE.Vector3();
+  if (k['w']) delta.addScaledVector(forward,  speed * dt);
+  if (k['s']) delta.addScaledVector(forward, -speed * dt);
+  if (k['a']) delta.addScaledVector(right,   -speed * dt);
+  if (k['d']) delta.addScaledVector(right,    speed * dt);
+
+  camera.position.add(delta);
+  orbitCtrl.target.add(delta);
+}
+
+document.getElementById('btn-move').addEventListener('click', () => setMode('translate'));
+document.getElementById('btn-rotate').addEventListener('click', () => setMode('rotate'));
+document.getElementById('btn-scale').addEventListener('click', () => setMode('scale'));
+
+document.getElementById('btn-donor').addEventListener('click', () => {
+  donorGroup.visible = !donorGroup.visible;
+  document.getElementById('btn-donor').classList.toggle('active', donorGroup.visible);
+});
+
+document.getElementById('btn-grid').addEventListener('click', () => {
+  gridHelper.visible = !gridHelper.visible;
+  document.getElementById('btn-grid').classList.toggle('active', gridHelper.visible);
+});
+
+document.getElementById('btn-colliders').addEventListener('click', () => {
+  appState.colBoxVisible = !appState.colBoxVisible;
+  refreshColliderEdgesVisibility();
+  document.getElementById('btn-colliders').classList.toggle('active', appState.colBoxVisible);
+});
+
+document.getElementById('chk-collidable').addEventListener('change', e => {
+  const m = appState.sel;
+  if (!m || m.userData.isMarker || m.userData.isColBox) return;
+  m.userData.collidable = e.target.checked;
+});
+
+document.getElementById('btn-move-group').addEventListener('click', () => {
+  const m = appState.sel;
+  if (!m || !m.userData.groupId) { setStatus('Select an object that belongs to a group'); return; }
+  beginGroupTransform(m.userData.groupId);
+});
+
+document.getElementById('btn-ungroup').addEventListener('click', () => {
+  const m = appState.sel;
+  if (!m) { setStatus('Select an object first'); return; }
+  removeFromGroup(m);
+  setStatus('Removed from group');
+});
+
+document.getElementById('btn-toggle-scene-list').addEventListener('click', () => {
+  appState.sceneListCollapsed = !appState.sceneListCollapsed;
+  refreshSceneList();
+});
+
+document.getElementById('btn-new-group').addEventListener('click', () => {
+  const name = prompt('Group name:', 'Group ' + (Object.keys(appState.groups).length + 1));
+  if (!name) return;
+  const gid = createGroup(name);
+  refreshGroupsPanel();
+  setStatus(`Created group "${name}"`);
+  const m = appState.sel;
+  if (m && !m.userData.isMarker) {
+    if (confirm(`Add selected object to "${name}"?`)) addMeshToGroup(m, gid);
+  }
+});
+
+document.getElementById('btn-add-to-group').addEventListener('click', () => {
+  const m = appState.sel;
+  if (!m || m.userData.isMarker) { setStatus('Select an object first'); return; }
+  const entries = Object.entries(appState.groups);
+  if (!entries.length) { setStatus('No groups — create one first'); return; }
+  const choices = entries.map(([, g], i) => `${i + 1}: ${g.name}`).join('\n');
+  const ans = prompt(`Add "${(m.userData.path || '').split('/').pop()}" to which group?\n${choices}\n\n(number, or 0 to remove from group)`);
+  if (ans === null) return;
+  const idx = parseInt(ans) - 1;
+  if (ans.trim() === '0') { removeFromGroup(m); setStatus('Removed from group'); return; }
+  if (idx < 0 || idx >= entries.length) { setStatus('Invalid selection'); return; }
+  addMeshToGroup(m, entries[idx][0]);
+  setStatus(`Added to group "${entries[idx][1].name}"`);
+});
+
+function readJsonFile(input, callback) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try { callback(JSON.parse(ev.target.result)); }
+    catch (err) { setStatus('Error parsing JSON: ' + err.message); }
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
+
+document.getElementById('map-input').addEventListener('change', e =>
+  readJsonFile(e.target, json => loadMapFile(json))
+);
+
+document.getElementById('donor-select').addEventListener('change', e => {
+  if (e.target.value) changeDonor(e.target.value, true);
+});
+
+// ─── Marker buttons ──────────────────────────────────────────────────────────
+
+document.getElementById('btn-enemy').addEventListener('click',  () => beginPlaceMarker('enemy'));
+document.getElementById('btn-escape').addEventListener('click', () => beginPlaceMarker('escape'));
+document.getElementById('btn-player').addEventListener('click', () => beginPlaceMarker('player'));
+document.getElementById('btn-colbox').addEventListener('click', () => {
+  cancelPlace();
+  const data = { isColBox: true, path: 'CollisionBox', mesh: 'Cube', mat: 'Default-Diffuse', color: [0,0,0], size: [2, 2, 2] };
+  appState.ghostData = data;
+  appState.ghost = makeCollisionBox({ ...data, pos: [0, 1, 0] });
+  scene.add(appState.ghost);
+  tc.detach();
+  document.getElementById('placing-hint').style.display = 'block';
+  setStatus('Placing Collision Box \u2014 click to place, Esc to cancel');
+});
+
+// ─── Export ──────────────────────────────────────────────────────────────────
+
+document.getElementById('btn-export').addEventListener('click', () => {
+  const objects = [];
+  placedGroup.traverse(o => {
+    if (!o.isMesh) return;
+    const ud  = o.userData;
+    const pos = [+o.position.x.toFixed(3), +o.position.y.toFixed(3), +o.position.z.toFixed(3)];
+    const rx  = THREE.MathUtils.radToDeg(o.rotation.x);
+    const ry  = THREE.MathUtils.radToDeg(o.rotation.y);
+    const rz  = THREE.MathUtils.radToDeg(o.rotation.z);
+    const entry = {
+      path:      ud.path  || 'Custom/Object' + objects.length,
+      mesh:      ud.mesh  || 'Combined Mesh (root: scene)',
+      mat:       ud.mat   || 'Default-Diffuse',
+      color:     ud.color || [0, 0, 0],
+      pos,
+      size:      [...(ud.size || [1, 1, 1])].map(v => +v.toFixed(3)),
+      collidable: ud.collidable !== false,
+    };
+    if (ud.isColBox)    entry.isColBox = true;
+    if (ud.isMarker)    entry.isMarker = true;
+    if (Math.abs(rx) > 0.01 || Math.abs(ry) > 0.01 || Math.abs(rz) > 0.01)
+      entry.rot = [+rx.toFixed(2), +ry.toFixed(2), +rz.toFixed(2)];
+    objects.push(entry);
+  });
+
+  // Serialize groups using member paths (duplicates resolved by first match on load)
+  const groups = [];
+  for (const [, g] of Object.entries(appState.groups)) {
+    const memberPaths = [];
+    for (const mid of g.members) {
+      const mesh = getMeshById(mid);
+      if (mesh) memberPaths.push(mesh.userData.path);
+    }
+    groups.push({ name: g.name, memberPaths });
+  }
+
+  // Read ambient color from picker → [R, G, B] 0-255
+  const ambHex = document.getElementById('ambient-color').value;
+  const ambR = parseInt(ambHex.slice(1, 3), 16);
+  const ambG = parseInt(ambHex.slice(3, 5), 16);
+  const ambB = parseInt(ambHex.slice(5, 7), 16);
+  const out  = JSON.stringify({ donor: appState.donorName || 'FreeRun5_1', ambient: [ambR, ambG, ambB], objects, groups }, null, 2);
+  const blob = new Blob([out], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: (appState.donorName || 'map') + '_custom.json' });
+  a.click();
+  URL.revokeObjectURL(url);
+  setStatus(`Exported ${objects.length} objects, ${groups.length} group(s)`);
+});
+
+// ─── Resize ──────────────────────────────────────────────────────────────────
+
+function resize() {
+  const w = vp.clientWidth, h = vp.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── Status ──────────────────────────────────────────────────────────────────
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+// ─── Init: populate donor dropdown from manifest ────────────────────────────
+
+(async function initDonors() {
+  try {
+    const resp = await fetch('donors/manifest.json');
+    if (!resp.ok) return;
+    const names = await resp.json();
+    const sel = document.getElementById('donor-select');
+    for (const name of names) {
+      const opt = document.createElement('option');
+      opt.value = opt.textContent = name;
+      sel.appendChild(opt);
+    }
+  } catch(e) { /* manifest unavailable — dropdown stays empty */ }
+})();
+
+// ─── Render loop ─────────────────────────────────────────────────────────────
+
+let _lastT = performance.now();
+(function loop() {
+  requestAnimationFrame(loop);
+  const now = performance.now();
+  const dt  = Math.min((now - _lastT) / 1000, 0.1);
+  _lastT    = now;
+  tickWASD(dt);
+  orbitCtrl.update();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>
