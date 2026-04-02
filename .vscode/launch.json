@@ -61,6 +61,33 @@
             "args": [],
             "cwd": "${workspaceFolder}/node_server",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "CNR: Build & Release (interactive)",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "${workspaceFolder}/build_and_release.ps1",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "createTemporaryIntegratedConsole": true
+        },
+        {
+            "name": "CNR: Quick patch CNRMod (patch + deploy + commit)",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "${workspaceFolder}/build_and_release.ps1",
+            "args": ["-ModName", "CNRMod", "-Bump", "patch", "-UpdateRepo", "-Deploy", "-Commit"],
+            "cwd": "${workspaceFolder}",
+            "createTemporaryIntegratedConsole": true
+        },
+        {
+            "name": "CNR: Build only (no bump, no deploy, no commit)",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "${workspaceFolder}/build_and_release.ps1",
+            "args": ["-NoBump", "-NoRepo", "-NoDeploy", "-NoCommit"],
+            "cwd": "${workspaceFolder}",
+            "createTemporaryIntegratedConsole": true
         }
     ]
 }

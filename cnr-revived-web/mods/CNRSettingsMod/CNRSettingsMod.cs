@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "2.0.23";
+        public  const string Version = "2.0.25";
 
         public static void Load()
         {
@@ -1049,9 +1049,9 @@ namespace CNRSettingsMod
         //   JumpInitialVel=24 → ~2.5 m,  =22 → ~1.8 m,  =20 → ~1.3 m,  =19 → ~1.0 m,  =18 → ~0.8 m
         private bool  _ownJumpActive = false;
         private float _ownJumpVelY   = 0f;
-        private const float JumpInitialVel  = 10f;   // slightly above vanilla
+        private const float JumpInitialVel  = 12f;   // slightly above vanilla
         private const float JumpAscendGrav  = -41f;  // d/dt(_ownJumpVelY) while rising
-        private const float JumpDescendGrav = -56f;  // d/dt(_ownJumpVelY) while falling
+        private const float JumpDescendGrav = -46f;  // d/dt(_ownJumpVelY) while falling
 
         // -- Pause panel polling -----------------------------------------------
         private GameObject _pausePanelRef;
