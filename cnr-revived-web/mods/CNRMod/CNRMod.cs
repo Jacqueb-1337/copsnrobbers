@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.1.9";
+        public const  string Version = "2.2.0";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -81,7 +81,7 @@ namespace CNRMods
         // Inject CnrPhotonListenerProxy into NetworkingPeer.externalListener to receive CNR events.
         // NetworkingPeer.OnEvent() calls externalListener.OnEvent() after its own switch, so ALL
         // events (including custom codes like 199) reach the proxy without modifying game code.
-        // NOTE: no static guard here — checked per call against the live networkingPeer so that
+        // NOTE: no static guard here; checked per call against the live networkingPeer so that
         // a new peer instance created after a reconnect always gets the proxy installed.
         private static bool _eventListenerInstalled = false;
         public static void InstallEventListener()
@@ -369,6 +369,31 @@ namespace CNRMods
                 int end = vi;
                 while (end < json.Length && json[end] != ',' && json[end] != '}' && json[end] != ']') end++;
                 return json.Substring(vi, end - vi).Trim();
+            }
+            catch { return null; }
+        }
+
+        // Parses "key":[n,n,...] → float array.  Returns null if key absent or parse fails.
+        public static float[] ParseJsonFloatArray(string json, string key)
+        {
+            try
+            {
+                string k = "\"" + key + "\":";
+                int ki = json.IndexOf(k);
+                if (ki < 0) return null;
+                int bi = json.IndexOf('[', ki + k.Length);
+                if (bi < 0) return null;
+                int ei = json.IndexOf(']', bi + 1);
+                if (ei < 0) return null;
+                string inner = json.Substring(bi + 1, ei - bi - 1);
+                string[] parts = inner.Split(',');
+                float[] result = new float[parts.Length];
+                for (int i = 0; i < parts.Length; i++)
+                    if (!float.TryParse(parts[i].Trim(),
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out result[i]))
+                        return null;
+                return result;
             }
             catch { return null; }
         }
@@ -1841,11 +1866,18 @@ namespace CNRMods
                 ModEntry.Log("MapLoader: parsing " + json.Length + " bytes");
                 string trimmedJson = json.Trim();
                 MapObjData[] items;
+                Color? ambientColor = null;
                 if (trimmedJson.StartsWith("{"))
                 {
-                    // Wrapper format: {"donor":"FreeRun8_1","objects":[...]}
+                    // Wrapper format: {"donor":"FreeRun8_1","ambient":[R,G,B],"objects":[...]}
                     string donor = ModEntry.ParseJsonStringValue(trimmedJson, "donor");
                     if (!string.IsNullOrEmpty(donor)) ModEntry.Log("MapLoader: donor=" + donor);
+                    float[] amb = ModEntry.ParseJsonFloatArray(trimmedJson, "ambient");
+                    if (amb != null && amb.Length >= 3)
+                    {
+                        ambientColor = new Color(amb[0] / 255f, amb[1] / 255f, amb[2] / 255f);
+                        ModEntry.Log("MapLoader: ambient=[" + (int)amb[0] + "," + (int)amb[1] + "," + (int)amb[2] + "]");
+                    }
                     int arrStart = trimmedJson.IndexOf("\"objects\"");
                     arrStart = arrStart >= 0 ? trimmedJson.IndexOf('[', arrStart) : -1;
                     if (arrStart < 0) { ModEntry.Log("MapLoader: no objects array in wrapper"); yield break; }
@@ -2014,6 +2046,10 @@ namespace CNRMods
 
                 // Now hide original scene geometry (clones under [CustomMap] are safe)
                 ClearBaseScene();
+
+                // Apply map ambient lighting if provided
+                if (ambientColor.HasValue)
+                    RenderSettings.ambientLight = ambientColor.Value;
 
                 // Pass 2 — primitive fallback for anything not found in the donor
                 foreach (MapObjData obj in items)
