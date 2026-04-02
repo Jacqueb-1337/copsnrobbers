@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.0.6";
+        public const  string Version = "3.0.8";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9540,47 +9540,58 @@ namespace CNRMods
         }
     }
 
-    // Added to the SH and TDM/KC checkbox GameObjects so clicking either clears PendingCtf.
-    public class ClearCtfOnClick : MonoBehaviour
+    // Drives one owned mode button (SH or CTF).
+    // Does NOT touch SetActive on itself -- CtfCheckBoxInjector controls visibility
+    // from its own persistent Update() so the button can re-appear after being hidden.
+    public class CnrModeButton : MonoBehaviour
     {
-        void OnClick() { CtfMode.PendingCtf = false; }
-    }
+        private bool     _isCTF;
+        private UISprite _checkSprite;
+        private UILabel  _lbl;
+        private string   _labelText;
 
-    // Drives the cloned CTF checkbox in the WW-Create panel.
-    public class CtfCheckBoxBehaviour : MonoBehaviour
-    {
-        private UICheckbox _cb;
-
-        public void Init()
+        public void Init(bool isCTF, string labelText, UISprite checkSprite)
         {
-            _cb = ((Component)this).GetComponent<UICheckbox>();
+            _isCTF       = isCTF;
+            _labelText   = labelText;
+            _checkSprite = checkSprite;
+            _lbl         = GetComponentInChildren<UILabel>();
+            if (_lbl != null) _lbl.text = labelText;
         }
 
         void Update()
         {
-            if (_cb != null)
-                _cb.isChecked = CtfMode.PendingCtf;
+            // Re-assert label every frame (belt-and-suspenders vs any surviving localiser).
+            if (_lbl != null && _lbl.text != _labelText) _lbl.text = _labelText;
+
+            if (_checkSprite == null) return;
+            var msd = MultiplayerSelectDirector.mInstance;
+            if (msd == null) return;
+
+            bool isChecked = _isCTF
+                ? CtfMode.PendingCtf
+                : (msd.curModeSet == GrowthGameModeTag.tStronghold && !CtfMode.PendingCtf);
+            _checkSprite.alpha = isChecked ? 1f : 0f;
         }
 
         void OnClick()
         {
-            CtfMode.PendingCtf = true;
-            // Force Stronghold mode so the room is created on a stronghold-capable
-            // map and StrongholdModeLogic spawns the flag zone objects in-scene.
-            if (MultiplayerSelectDirector.mInstance != null)
-                MultiplayerSelectDirector.mInstance.SwitchToMode(GrowthGameModeTag.tStronghold);
+            var msd = MultiplayerSelectDirector.mInstance;
+            if (msd == null) return;
+            CtfMode.PendingCtf = _isCTF;
+            msd.SwitchToMode(GrowthGameModeTag.tStronghold);
         }
     }
 
-    // Spawned when the "MultiplayerSelect" scene loads.  Manages CTF checkbox
-    // visibility and cleans up conflicts with the Stronghold checkbox.
+    // Spawned once on a persistent GO when the "MultiplayerSelect" scene loads.
+    // Hides the original SH checkbox and takes its place with two owned buttons.
+    // The original stays permanently hidden so ModeSelectCheckBox.Update() never runs.
     public class CtfCheckBoxInjector : MonoBehaviour
     {
-        private bool       _injected = false;
-        private GameObject _shGo;
-        private GameObject _ctfGo;
-        private UICheckbox _shCb;
-        private UILabel    _ctfLabel;
+        private bool       _injected   = false;
+        private GameObject _shOriginal;
+        private GameObject _shBtn;
+        private GameObject _ctfBtn;
 
         void Update()
         {
@@ -9591,31 +9602,65 @@ namespace CNRMods
                 return;
             }
             var msd = MultiplayerSelectDirector.mInstance;
-            if (_ctfGo == null || msd == null) return;
+            if (msd == null) return;
 
-            // Show CTF checkbox only on maps that support Stronghold.
+            // Force original hidden every frame -- WWResetModeCheckBox() re-enables it on map change.
+            if (_shOriginal != null && _shOriginal.activeSelf) _shOriginal.SetActive(false);
+
+            // Control our buttons' visibility from here, not from their own Update().
+            // A deactivated MonoBehaviour cannot call SetActive(true) on itself.
             bool mapOk = msd.isCurMapSupportThisMode(GrowthGameModeTag.tStronghold);
-            _ctfGo.SetActive(mapOk);
-
-            // Force label text every frame -- UILocalize resets it on each OnEnable.
-            if (_ctfLabel != null) _ctfLabel.text = "CTF";
+            if (_shBtn  != null && _shBtn.activeSelf  != mapOk) _shBtn.SetActive(mapOk);
+            if (_ctfBtn != null && _ctfBtn.activeSelf != mapOk) _ctfBtn.SetActive(mapOk);
         }
 
         void LateUpdate()
         {
             if (!_injected) return;
+            // Auto-clear PendingCtf when user switches to any non-Stronghold mode (KC, TDM, etc.)
             var msd = MultiplayerSelectDirector.mInstance;
-            if (msd == null) return;
-
-            // Auto-clear PendingCtf when user switches to any non-Stronghold mode.
-            if (CtfMode.PendingCtf && msd.curModeSet != GrowthGameModeTag.tStronghold)
+            if (msd != null && CtfMode.PendingCtf && msd.curModeSet != GrowthGameModeTag.tStronghold)
                 CtfMode.PendingCtf = false;
+        }
 
-            // Keep SH checkbox UNCHECKED (not hidden) while CTF is pending.
-            // ModeSelectCheckBox.Update() forces SH.isChecked=true every frame because
-            // curModeSet==tStronghold; we override it here after Update has run.
-            if (_shCb != null && CtfMode.PendingCtf)
-                _shCb.isChecked = false;
+        private GameObject SpawnButton(GameObject source, bool isCTF, string labelText, Vector3 localPos)
+        {
+            // Temporarily activate source so GetComponentsInChildren reaches inactive children.
+            bool wasActive = source.activeSelf;
+            if (!wasActive) source.SetActive(true);
+
+            GameObject go = (GameObject)UnityEngine.Object.Instantiate(source);
+            go.name                    = isCTF ? "CnrBtn_CTF" : "CnrBtn_SH";
+            go.transform.parent        = source.transform.parent;
+            go.transform.localScale    = source.transform.localScale;
+            go.transform.localPosition = localPos;
+
+            if (!wasActive) source.SetActive(false);
+
+            // Strip vanilla behaviours immediately (DestroyImmediate so they can't fire again).
+            MonoBehaviour msb = go.GetComponent("ModeSelectCheckBox") as MonoBehaviour;
+            if (msb != null) DestroyImmediate(msb);
+            foreach (UILocalize loc in go.GetComponentsInChildren<UILocalize>())
+                DestroyImmediate(loc);
+
+            // Cache checkSprite before removing UICheckbox (removal clears its public fields).
+            UICheckbox cb          = go.GetComponent<UICheckbox>();
+            UISprite   checkSprite = (cb != null) ? cb.checkSprite : null;
+            if (cb != null) DestroyImmediate(cb);
+
+            UILabel lbl = go.GetComponentInChildren<UILabel>();
+            if (lbl != null) lbl.text = labelText;
+
+            CnrModeButton btn = go.AddComponent<CnrModeButton>();
+            btn.Init(isCTF, labelText, checkSprite);
+
+            // Start hidden; CtfCheckBoxInjector.Update() controls visibility.
+            go.SetActive(false);
+
+            ModEntry.Log("CtfCheckBoxInjector: spawned " + go.name
+                + " label=" + (lbl != null ? lbl.text : "null")
+                + " sprite=" + (checkSprite != null ? checkSprite.name : "null"));
+            return go;
         }
 
         private bool TryInject()
@@ -9623,46 +9668,21 @@ namespace CNRMods
             if (MultiplayerSelectDirector.mInstance == null) return false;
             MultiplayerSelectDirector msd = MultiplayerSelectDirector.mInstance;
 
-            _shGo = msd.mModeCheckBoxSH;
+            _shOriginal = msd.mModeCheckBoxSH;
+            if (_shOriginal == null) return false;
+
             GameObject tdmGo = msd.mModeCheckBoxTDM;
-            if (_shGo == null) return false;
-
-            _shCb = _shGo.GetComponent<UICheckbox>();
-
-            // Clicking SH while it is visible must clear the CTF pending flag.
-            if (_shGo.GetComponent<ClearCtfOnClick>() == null) _shGo.AddComponent<ClearCtfOnClick>();
-
-            // Clone SH checkbox as the CTF checkbox.
-            Transform par = _shGo.transform.parent;
-            Vector3 pos   = _shGo.transform.localPosition;
-            _ctfGo                        = (GameObject)UnityEngine.Object.Instantiate(_shGo);
-            _ctfGo.name                   = "ModeCheckBox_CTF";
-            _ctfGo.transform.parent       = par;
-            _ctfGo.transform.localScale   = _shGo.transform.localScale;
+            Vector3 shPos = _shOriginal.transform.localPosition;
             float step = (tdmGo != null)
-                ? Mathf.Abs(tdmGo.transform.localPosition.y - pos.y)
+                ? Mathf.Abs(tdmGo.transform.localPosition.y - shPos.y)
                 : 0.2f;
             if (step < 0.001f) step = 0.2f;
-            _ctfGo.transform.localPosition = new Vector3(pos.x, pos.y - step, pos.z);
 
-            // Remove ModeSelectCheckBox immediately -- it would corrupt curModeSet on every tick.
-            MonoBehaviour orig = _ctfGo.GetComponent("ModeSelectCheckBox") as MonoBehaviour;
-            if (orig != null) DestroyImmediate(orig);
+            _shOriginal.SetActive(false);
 
-            // Remove UILocalize immediately (DestroyImmediate, not Destroy) so it cannot fire
-            // OnEnable on the same frame we call SetActive later and reset "CTF" back to the
-            // original localized string.
-            foreach (UILocalize loc in _ctfGo.GetComponentsInChildren<UILocalize>())
-                DestroyImmediate(loc);
+            _shBtn  = SpawnButton(_shOriginal, false, "Stronghold",        shPos);
+            _ctfBtn = SpawnButton(_shOriginal, true,  "Capture the Flag",  new Vector3(shPos.x, shPos.y - step, shPos.z));
 
-            _ctfLabel = _ctfGo.GetComponentInChildren<UILabel>();
-            if (_ctfLabel != null) _ctfLabel.text = "CTF";
-
-            CtfCheckBoxBehaviour beh = _ctfGo.AddComponent<CtfCheckBoxBehaviour>();
-            beh.Init();
-
-            _ctfGo.SetActive(false);
-            ModEntry.Log("CtfCheckBoxInjector: CTF checkbox injected");
             return true;
         }
     }
