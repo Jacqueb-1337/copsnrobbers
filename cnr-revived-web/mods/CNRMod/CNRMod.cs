@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.2";
+        public const  string Version = "3.1.3";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9625,7 +9625,7 @@ namespace CNRMods
 
         private GameObject SpawnButton(GameObject source, bool isCTF, string labelText, Vector3 localPos)
         {
-            // Temporarily activate source so GetComponentsInChildren reaches inactive children.
+            // Temporarily activate source so Instantiate copies a fully-active hierarchy.
             bool wasActive = source.activeSelf;
             if (!wasActive) source.SetActive(true);
 
@@ -9637,18 +9637,19 @@ namespace CNRMods
 
             if (!wasActive) source.SetActive(false);
 
-            // Strip vanilla behaviours immediately (DestroyImmediate so they can't fire again).
+            // Strip vanilla behaviours (DestroyImmediate so they can't fire again).
+            // Use recursive helpers so inactive children are not missed.
             MonoBehaviour msb = go.GetComponent("ModeSelectCheckBox") as MonoBehaviour;
             if (msb != null) DestroyImmediate(msb);
-            foreach (UILocalize loc in go.GetComponentsInChildren<UILocalize>())
-                DestroyImmediate(loc);
+            DestroyAllInChildren<UILocalize>(go.transform);
 
             // Cache checkSprite before removing UICheckbox (removal clears its public fields).
             UICheckbox cb          = go.GetComponent<UICheckbox>();
             UISprite   checkSprite = (cb != null) ? cb.checkSprite : null;
             if (cb != null) DestroyImmediate(cb);
 
-            UILabel lbl = go.GetComponentInChildren<UILabel>();
+            // FindInChildren traverses inactive children too (GetComponentInChildren skips them).
+            UILabel lbl = FindInChildren<UILabel>(go.transform);
             if (lbl != null) lbl.text = labelText;
 
             CnrModeButton btn = go.AddComponent<CnrModeButton>();
@@ -9661,6 +9662,28 @@ namespace CNRMods
                 + " label=" + (lbl != null ? lbl.text : "null")
                 + " sprite=" + (checkSprite != null ? checkSprite.name : "null"));
             return go;
+        }
+
+        // Recursively find the first component of type T, including on inactive children.
+        static T FindInChildren<T>(Transform t) where T : Component
+        {
+            T comp = t.GetComponent<T>();
+            if (comp != null) return comp;
+            for (int i = 0; i < t.childCount; i++)
+            {
+                T found = FindInChildren<T>(t.GetChild(i));
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        // Recursively destroy all components of type T, including on inactive children.
+        static void DestroyAllInChildren<T>(Transform t) where T : Component
+        {
+            T comp = t.GetComponent<T>();
+            if (comp != null) DestroyImmediate(comp);
+            for (int i = 0; i < t.childCount; i++)
+                DestroyAllInChildren<T>(t.GetChild(i));
         }
 
         private bool TryInject()
@@ -9967,8 +9990,6 @@ namespace CNRMods
 
         // Find and detach the qizi flag mesh from a zone GO so it can be moved freely.
         // Outputs the ring (bz_1) and flag (qizi) renderers for dynamic recoloring in Update().
-        // Both renderers have their materials replaced with a flat Unlit/Color so that color
-        // set in Update() is never multiplied by the underlying texture.
         static GameObject SetupZoneVisuals(GameObject zoneGo, out Renderer ringRend, out Renderer flagRend)
         {
             ringRend = null; flagRend = null;
@@ -9977,23 +9998,25 @@ namespace CNRMods
             if (bz != null)
             {
                 ringRend = bz.GetComponent<Renderer>();
-                SwapToUnlit(ringRend);
+                BlankTexture(ringRend);
             }
             if (qPath == null) return null;
             GameObject qizi = qPath.gameObject;
             flagRend = qizi.GetComponent<Renderer>();
-            SwapToUnlit(flagRend);
-            // Detach from hierarchy so we can reposition independently of the zone GO.
+            BlankTexture(flagRend);
+            // Preserve world scale explicitly before reparenting (belt-and-suspenders for old Unity).
+            Vector3 worldScale = qizi.transform.lossyScale;
             qizi.transform.parent = null;
+            qizi.transform.localScale = worldScale;
             return qizi;
         }
 
-        static void SwapToUnlit(Renderer r)
+        // Null out the main texture on a material so r.material.color renders as a clean flat color
+        // on any standard shader (mainTex is treated as white when null → white * color = color).
+        static void BlankTexture(Renderer r)
         {
             if (r == null) return;
-            Shader s = Shader.Find("Unlit/Color");
-            if (s == null) return;
-            r.material = new Material(s);
+            r.material.mainTexture = null;
         }
 
         void UpdateFlagMarker(GameObject flagMesh, string status, Vector3 basePos,
