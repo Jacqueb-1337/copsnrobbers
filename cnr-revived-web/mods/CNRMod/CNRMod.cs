@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.1.6";
+        public const  string Version = "2.1.8";
 
         // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -579,6 +579,9 @@ namespace CNRMods
                 PlayerPrefs.SetString("CNRMod_ActiveMapURL", url);
                 PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
                 PlayerPrefs.Save();
+                // Start holding the player BEFORE the download so they are frozen
+                // as soon as the event arrives, not only after the HTTP response.
+                MapLoader.TriggerBuildIfIdle();
                 StartCoroutine(DownloadMap(url));
                 ModEntry.Log("CnrEvent: received mapUrl=" + url + ", downloading");
             }
@@ -1740,15 +1743,25 @@ namespace CNRMods
             StartCoroutine(WaitAndSpawn());
         }
 
-        // Teleports the player to LOADING_POS every frame until _holdingPlayer is cleared.
+        // Freezes the player at their current position during map construction.
+        // We do NOT move them to LOADING_POS (Y=4800) because moving out of scene bounds
+        // triggers the game's out-of-bounds / fall-death logic and permanently marks the
+        // player as invisible to all Photon peers until an explicit in-game respawn event.
         IEnumerator HoldAtLoadingPos()
         {
-            Vector3 holdPos = new Vector3(LOADING_POS.x, LOADING_POS.y, LOADING_POS.z);
+            // Capture the game's natural spawn position inside the donor scene.
+            GameObject player = GameObject.Find("ExampleCharacter");
+            Vector3 holdPos = player != null ? player.transform.position : Vector3.zero;
+            // Disable CharacterController to freeze physics-based movement.
+            var cc = player != null ? player.GetComponent<CharacterController>() : null;
+            if (cc != null) cc.enabled = false;
             while (_holdingPlayer)
             {
-                TeleportPlayer(holdPos);
+                // Pin position each frame in case animation or physics tries to drift.
+                if (player != null) player.transform.position = holdPos;
                 yield return null;
             }
+            // CC is re-enabled by TeleportToSpawn once the map is ready.
         }
 
         // Polls until cache is ready (written by RedirectHook.DownloadMap).
@@ -3659,15 +3672,6 @@ namespace CNRMods
     // remote-player character's renderers.
     public class CNRRemoteSkinRenderer : MonoBehaviour
     {
-        // Renderer sub-paths used by EnemyController.Start() to assign skin materials
-        static readonly string[] EnemyRendererPaths = {
-            "GameObject/1_3/handrightup/handright_Animation/handright_new",
-            "GameObject/EnemyAnimation/1_1/head_new",
-            "GameObject/EnemyAnimation/1_2/trunk_new",
-            "GameObject/EnemyAnimation/1_4/legright_new",
-            "GameObject/EnemyAnimation/1_005/legleft_new",
-            "GameObject/EnemyAnimation/1_006/handleft_new",
-        };
 
         // Tracks which photon actor IDs we've already applied a DLC skin to;
         // value is the skinId applied so we can re-apply if they change skin.
@@ -3759,20 +3763,32 @@ namespace CNRMods
 
         bool ApplyToTransform(Transform root, Texture2D tex)
         {
-            // Walk up to find the character root that contains EnemyAnimation
+            // Walk up to find the character root (contains EnemyAnimation subtree).
             Transform charRoot = root;
             for (int i = 0; i < 6 && charRoot.parent != null; i++)
             {
-                if (charRoot.Find("GameObject/EnemyAnimation") != null) break;
+                if (charRoot.Find("GameObject/EnemyAnimation") != null ||
+                    charRoot.Find("EnemyAnimation") != null) break;
                 charRoot = charRoot.parent;
             }
+            // Scan every Renderer on the character and apply to any vanilla skin-slot
+            // material (Skin_N_1 head / Skin_N_2 body).  Same matching strategy as
+            // ContentManager.ApplyTextureSwaps — robust against hierarchy changes.
             bool any = false;
-            foreach (string path in EnemyRendererPaths)
+            Component[] renderers = charRoot.GetComponentsInChildren(typeof(Renderer));
+            foreach (Component comp in renderers)
             {
-                Transform node = charRoot.Find(path);
-                if (node == null) continue;
-                Renderer r = (Renderer)(object)node.gameObject.GetComponent(typeof(Renderer));
-                if (r != null) { r.material.mainTexture = tex; any = true; }
+                Renderer r = comp as Renderer;
+                if (r == null || r.material == null) continue;
+                string mname = r.material.name;
+                int pi = mname.IndexOf(" (Instance)", StringComparison.OrdinalIgnoreCase);
+                if (pi >= 0) mname = mname.Substring(0, pi).Trim();
+                // Match any vanilla skin-slot material: Skin_N, Skin_N_1, Skin_N_2
+                if (mname.StartsWith("Skin_", StringComparison.OrdinalIgnoreCase))
+                {
+                    r.material.mainTexture = tex;
+                    any = true;
+                }
             }
             return any;
         }
