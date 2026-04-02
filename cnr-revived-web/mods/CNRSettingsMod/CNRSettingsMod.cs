@@ -1035,7 +1035,7 @@ namespace CNRSettingsMod
         private System.Collections.Generic.HashSet<int> _jumpTouchIds =
             new System.Collections.Generic.HashSet<int>();
 
-        // Our own jump arc — replaces JoyStickController's clunky 5-segment arc.
+        // Our own jump arc; replaces JoyStickController's clunky 5-segment arc.
         // The game permanently applies Physics.gravity (-9.81 m/s Y) to the
         // CharacterController via cc.Move in its own Update().  We add our Y on top
         // in LateUpdate.  Net Y per frame = (_ownJumpVelY + (-9.81)) * dt.
