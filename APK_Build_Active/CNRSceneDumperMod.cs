@@ -150,8 +150,13 @@ namespace CNRSceneDumperMod
 
             yield return null; // breathe
 
-            // ---- 2. Write objects.json -------------------------------------
-            WriteJson(entries, dir + "/objects.json");
+            // ---- 2. Write objects.json (wrapper format with ambient) -------
+            Color ambLight = RenderSettings.ambientLight;
+            int ambR = Mathf.RoundToInt(ambLight.r * 255);
+            int ambG = Mathf.RoundToInt(ambLight.g * 255);
+            int ambB = Mathf.RoundToInt(ambLight.b * 255);
+            SceneDumperEntry.Log("Ambient: [" + ambR + "," + ambG + "," + ambB + "]");
+            WriteJson(entries, dir + "/objects.json", scene, ambR, ambG, ambB);
             SceneDumperEntry.Log("Wrote objects.json (" + entries.Count + " objects)");
             yield return null;
 
@@ -318,14 +323,17 @@ namespace CNRSceneDumperMod
         // =====================================================================
         // JSON writer
         // =====================================================================
-        private void WriteJson(List<ObjEntry> entries, string path)
+        private void WriteJson(List<ObjEntry> entries, string path, string scene, int ambR, int ambG, int ambB)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("[");
+            sb.AppendLine("{");
+            sb.AppendLine("  \"donor\": \"" + Escape(scene) + "\",");
+            sb.AppendLine("  \"ambient\": [" + ambR + "," + ambG + "," + ambB + "],");
+            sb.AppendLine("  \"objects\": [");
             for (int i = 0; i < entries.Count; i++)
             {
                 ObjEntry e = entries[i];
-                sb.Append("  {");
+                sb.Append("    {");
                 sb.Append("\"path\":\"")  .Append(Escape(e.path)).Append("\",");
                 sb.Append("\"mesh\":\"")  .Append(Escape(e.mesh)).Append("\",");
                 sb.Append("\"mat\":\"")   .Append(Escape(e.mat)).Append("\",");
@@ -337,7 +345,8 @@ namespace CNRSceneDumperMod
                 if (i < entries.Count - 1) sb.Append(",");
                 sb.AppendLine();
             }
-            sb.AppendLine("]");
+            sb.AppendLine("  ]");
+            sb.AppendLine("}");
             File.WriteAllText(path, sb.ToString());
         }
 
