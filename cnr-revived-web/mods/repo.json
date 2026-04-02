@@ -221,11 +221,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.0.0",
+      "latestVersion": "3.0.1",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.0.1",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.0.1.dll",
+          "changelog": "fixed a bug where new ctf mode checkbox was destroying itself so never showed up for the user "
+        },
         {
           "version": "3.0.0",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.0.0.dll",
