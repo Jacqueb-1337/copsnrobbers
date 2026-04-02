@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -9,9 +9,9 @@ using Pathfinding.Serialization.JsonFx;
 
 namespace CNRMods
 {
-    // ══════════════════════════════════════════════════════════════════════════
-    //  ENTRY POINT — MainMenuDirector.LoadMods() looks for CNRMods.ModEntry.Load()
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  ENTRY POINT � MainMenuDirector.LoadMods() looks for CNRMods.ModEntry.Load()
+    // --------------------------------------------------------------------------
     public class ModEntry
     {
         private const string LogPath    = "/storage/emulated/0/CNRMods/cnrmod.log";
@@ -27,10 +27,10 @@ namespace CNRMods
         public static string EconomyUrl    = "";    // https://<host>/economy  for PHP economy API
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
-        // ── CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) ─────
-        public const  string Version = "2.2.1";
+        // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
+        public const  string Version = "2.2.2";
 
-        // ── Mod version registry — every loaded DLL registers itself here ──────────────────────────
+        // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
         public static Dictionary<string, string> RegisteredMods = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -50,7 +50,7 @@ namespace CNRMods
 
         private static bool _loaded = false;
 
-        // ── CNR event system ───────────────────────────────────────────────────
+        // -- CNR event system ---------------------------------------------------
         // Custom Photon event code for all CNR mod-to-mod communication.
         // Avoids SetCustomProperties entirely (which can trigger SendMonoMessage in old PUN).
         public const byte CNR_EVENT_CODE = 199;
@@ -188,7 +188,7 @@ namespace CNRMods
         }
 
         // Scan /sdcard/CNRMods/ for any .dll other than CNRMod.dll and call its public
-        // static Load() — this is how CNRSettingsMod.dll and others get initialized.
+        // static Load() � this is how CNRSettingsMod.dll and others get initialized.
         private static void LoadExternalMods()
         {
             const string dir = "/storage/emulated/0/CNRMods";
@@ -268,9 +268,9 @@ namespace CNRMods
                 "  VERSION=" + Version + "  KICK=" + KickNoMod);
             if (string.IsNullOrEmpty(WebUrl) && !string.IsNullOrEmpty(ServerIp))
             {
-                // IP addresses → LAN setup, plain HTTP on 1337 is fine.
-                // Hostnames (e.g. play.jacqueb.me) → public server, Android 9+ blocks cleartext;
-                // use HTTPS on standard port (requires nginx proxy: location /rooms → localhost:1337).
+                // IP addresses ? LAN setup, plain HTTP on 1337 is fine.
+                // Hostnames (e.g. play.jacqueb.me) ? public server, Android 9+ blocks cleartext;
+                // use HTTPS on standard port (requires nginx proxy: location /rooms ? localhost:1337).
                 System.Net.IPAddress dummy;
                 if (System.Net.IPAddress.TryParse(ServerIp, out dummy))
                     WebUrl = "http://" + ServerIp + ":1337";
@@ -284,7 +284,7 @@ namespace CNRMods
             Log("EconomyUrl=" + EconomyUrl);
         }
 
-        // ── Config UI protocol — called by CNRModManager via reflection ─────────────
+        // -- Config UI protocol � called by CNRModManager via reflection -------------
         // Returns rows of [key, label, type, currentValue, description]
         public static string[][] GetModConfig()
         {
@@ -293,7 +293,7 @@ namespace CNRMods
                 new string[] { "SERVER_IP",   "Server IP",            "string", ServerIp,                     "IP or hostname of the game server" },
                 new string[] { "SERVER_PORT", "Server Port",          "int",    ServerPort.ToString(),         "Port the server listens on (default 5055)" },
                 new string[] { "KICK_NO_MOD", "Kick Without Mod",     "bool",   KickNoMod ? "true" : "false", "Kick players who don't have CNRMod installed" },
-                new string[] { "APP_ID",      "Photon App ID",        "string", AppId,                        "Photon App ID — leave as CNRLan unless self-hosting" },
+                new string[] { "APP_ID",      "Photon App ID",        "string", AppId,                        "Photon App ID � leave as CNRLan unless self-hosting" },
                 new string[] { "MAP_URL",     "Custom Maps URL",      "string", MapUrl,                       "URL to a maps JSON file (blank = default maps)" },
                 new string[] { "WEB_URL",     "Web Server URL",       "string", WebUrl,                       "Node.js server URL, e.g. http://host:1337 (auto-derived if blank)" },
                 new string[] { "ECONOMY_URL", "Economy API URL",      "string", EconomyUrl,                   "Economy API URL (blank = default)" },
@@ -323,7 +323,7 @@ namespace CNRMods
             try { Debug.Log("[CNRMod] " + msg); } catch { }
         }
 
-        // port 1337 is plain HTTP — strip accidental https://
+        // port 1337 is plain HTTP � strip accidental https://
         public static string SanitizeUrl(string url)
         {
             if (url != null && url.StartsWith("https://") && url.Contains(":1337"))
@@ -373,7 +373,7 @@ namespace CNRMods
             catch { return null; }
         }
 
-        // Parses "key":[n,n,...] → float array.  Returns null if key absent or parse fails.
+        // Parses "key":[n,n,...] ? float array.  Returns null if key absent or parse fails.
         public static float[] ParseJsonFloatArray(string json, string key)
         {
             try
@@ -399,23 +399,23 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  CNR EVENT BUS — shared state populated by Photon OnEventCall receiver
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  CNR EVENT BUS � shared state populated by Photon OnEventCall receiver
+    // --------------------------------------------------------------------------
     public static class CnrEventBus
     {
         // Map URL sent by master; consumed by RedirectHook.ProcessPendingCnrEvents.
         public static string PendingMapUrl = null;
-        // actorId → received skin id (read by CNRRemoteSkinRenderer each poll)
+        // actorId ? received skin id (read by CNRRemoteSkinRenderer each poll)
         public static Dictionary<int, string> RemoteSkins = new Dictionary<int, string>();
-        // actorId → mod version announced via CNR event (used by kick logic)
+        // actorId ? mod version announced via CNR event (used by kick logic)
         public static Dictionary<int, string> PlayerVersions = new Dictionary<int, string>();
         // Set when any client sends a version announcement; master re-broadcasts mapUrl+version+skin.
         public static bool NeedMapBroadcast = false;
         // Set when a new joiner is detected; non-master players re-announce their version+skin.
         public static bool NeedSelfAnnounce = false;
 
-        // Called by PhotonNetwork.OnEventCall delegate — fires on Unity main thread.
+        // Called by PhotonNetwork.OnEventCall delegate � fires on Unity main thread.
         // Signature matches PUN v1: delegate void EventCallback(byte, object, int)
         public static void OnPhotonEventReceived(byte eventCode, object content, int senderId)
         {
@@ -459,10 +459,10 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  PHOTON LISTENER PROXY — wraps NetworkingPeer.externalListener to capture
+    // --------------------------------------------------------------------------
+    //  PHOTON LISTENER PROXY � wraps NetworkingPeer.externalListener to capture
     //  CNR custom events (code 199) forwarding everything else to the original.
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
     internal class CnrPhotonListenerProxy : IPhotonPeerListener
     {
         private readonly IPhotonPeerListener _original;
@@ -500,9 +500,9 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  REDIRECT HOOK — Photon TCP redirect + room poll + map broadcast + kick
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  REDIRECT HOOK � Photon TCP redirect + room poll + map broadcast + kick
+    // --------------------------------------------------------------------------
     public class RedirectHook : MonoBehaviour
     {
         // Overlay
@@ -566,7 +566,7 @@ namespace CNRMods
             // the user could create a new vanilla room before PollRoomState fires.
             if (_inRoom && Array.IndexOf(GameScenes, scene) < 0)
             {
-                ModEntry.Log("Scene change away from game while in room — flushing map state early");
+                ModEntry.Log("Scene change away from game while in room � flushing map state early");
                 _inRoom = false;
                 ModEntry.IsMaster = false;
                 _pendingVerify.Clear();
@@ -577,7 +577,7 @@ namespace CNRMods
 
             if (Array.IndexOf(ConnectScenes, scene) >= 0 && ModEntry.ServerIp != "")
             {
-                ModEntry.Log("Connect scene — starting LAN redirect");
+                ModEntry.Log("Connect scene � starting LAN redirect");
                 StartCoroutine(RedirectCoroutine());
             }
         }
@@ -596,7 +596,7 @@ namespace CNRMods
         // Consume events delivered by CnrEventBus.OnPhotonEventReceived.
         private void ProcessPendingCnrEvents()
         {
-            // Client received a map URL from master—download it.
+            // Client received a map URL from master�download it.
             if (!string.IsNullOrEmpty(CnrEventBus.PendingMapUrl))
             {
                 string url = CnrEventBus.PendingMapUrl;
@@ -610,7 +610,7 @@ namespace CNRMods
                 StartCoroutine(DownloadMap(url));
                 ModEntry.Log("CnrEvent: received mapUrl=" + url + ", downloading");
             }
-            // A new player announced their version — re-broadcast mapUrl+version+skin so they
+            // A new player announced their version � re-broadcast mapUrl+version+skin so they
             // know both the active map URL and this player's identity (prevents kick loop,
             // makes skins visible to late joiners).
             if (_isMaster && CnrEventBus.NeedMapBroadcast)
@@ -639,7 +639,7 @@ namespace CNRMods
             }
         }
 
-        // ── Room state machine ────────────────────────────────────────────────
+        // -- Room state machine ------------------------------------------------
         private int _pollDebugCount = 0;  // limit verbose poll logging
         private void PollRoomState()
         {
@@ -648,7 +648,7 @@ namespace CNRMods
                 Type pnt = GetPhotonNetType();
                 if (pnt == null) { if (_pollDebugCount++ < 3) ModEntry.Log("PollRoomState: PhotonNetwork type not found"); return; }
 
-                // This PUN version has no PhotonNetwork.inRoom — check room != null instead.
+                // This PUN version has no PhotonNetwork.inRoom � check room != null instead.
                 bool nowInRoom = GetStaticObj(pnt, "room") != null;
                 bool nowMaster = nowInRoom && GetStaticBool(pnt, "isMasterClient");
 
@@ -685,10 +685,10 @@ namespace CNRMods
             ModEntry.InstallEventListener();
 
             // Delay CNR event broadcast 3s so it fires after the join storm
-            // (event 255 OnPhotonPlayerConnected → SendMonoMessage → freeze on slow devices).
+            // (event 255 OnPhotonPlayerConnected ? SendMonoMessage ? freeze on slow devices).
             StartCoroutine(BroadcastPropsDelayed(pnt));
 
-            // Spawn skin renderer immediately — just GameObject creation, no Photon calls.
+            // Spawn skin renderer immediately � just GameObject creation, no Photon calls.
             if (ContentManager.OfficialSkins.Length > 0 &&
                 FindObjectOfType(typeof(CNRRemoteSkinRenderer)) == null)
             {
@@ -741,7 +741,7 @@ namespace CNRMods
             _pendingVerify.Clear();
             CnrEventBus.OnLeftRoom();
             _pollDebugCount = 0; // re-enable verbose logging for next room
-            // Don't clear map prefs if we're transitioning into a game scene —
+            // Don't clear map prefs if we're transitioning into a game scene �
             // Photon briefly reports inRoom=false during the level load, so
             // clearing here would wipe the pending custom map before MapLoader reads it.
             string currentScene = Application.loadedLevelName ?? "";
@@ -756,7 +756,7 @@ namespace CNRMods
             PlayerPrefs.Save();
         }
 
-        // ── Room name / node server helpers ────────────────────────────
+        // -- Room name / node server helpers ----------------------------
         private static string GetRoomName(Type pnt)
         {
             try
@@ -793,7 +793,7 @@ namespace CNRMods
             return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
         }
 
-        // ── Kick ──────────────────────────────────────────────────────────────
+        // -- Kick --------------------------------------------------------------
         private void CheckKickPlayers(Type pnt)
         {
             try
@@ -865,7 +865,7 @@ namespace CNRMods
             return string.Equals(other.Trim(), ModEntry.Version.Trim(), StringComparison.Ordinal);
         }
 
-        // ── Map download ──────────────────────────────────────────────────────
+        // -- Map download ------------------------------------------------------
         private IEnumerator DownloadMap(string url)
         {
             url = ModEntry.SanitizeUrl(url);
@@ -891,7 +891,7 @@ namespace CNRMods
             catch (Exception ex) { ModEntry.Log("DownloadMap save error: " + ex.Message); }
         }
 
-        // ── Photon prop helpers (read-only — write path replaced by RaiseCnrEvent) ──────────
+        // -- Photon prop helpers (read-only � write path replaced by RaiseCnrEvent) ----------
         private string GetRoomPropStr(Type pnt, string key)
         {
             try
@@ -933,7 +933,7 @@ namespace CNRMods
             return -1;
         }
 
-        // ── Redirect coroutine ────────────────────────────────────────────────
+        // -- Redirect coroutine ------------------------------------------------
         private IEnumerator RedirectCoroutine()
         {
             object settings = null;
@@ -977,7 +977,7 @@ namespace CNRMods
             ShowOverlay("LAN connection timed out.\n" + ModEntry.ServerIp);
         }
 
-        // ── Overlay ───────────────────────────────────────────────────────────
+        // -- Overlay -----------------------------------------------------------
         private void ShowOverlay(string msg)
         {
             ModEntry.Log("OVERLAY: " + msg);
@@ -1009,7 +1009,7 @@ namespace CNRMods
             GUI.color = Color.white;
         }
 
-        // ── Photon reflection helpers ─────────────────────────────────────────
+        // -- Photon reflection helpers -----------------------------------------
         private static Type GetPhotonNetType()
         {
             if (_pnt != null) return _pnt;
@@ -1230,9 +1230,9 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  CUSTOM MAPS HOOK — extended map selector with per-slot URL input box
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  CUSTOM MAPS HOOK � extended map selector with per-slot URL input box
+    // --------------------------------------------------------------------------
     public class CustomMapsHook : MonoBehaviour
     {
         static readonly string[] STANDARD_MAPS =
@@ -1259,10 +1259,10 @@ namespace CNRMods
 
         string[] _allMaps;
         bool     _hooked      = false;
-        bool     _hookAttempted = false;  // true after first attempt — prevents spam on 0-hook result
+        bool     _hookAttempted = false;  // true after first attempt � prevents spam on 0-hook result
         MSD_SubSceneInWorldWide _lastSubScene = (MSD_SubSceneInWorldWide)(-1);
         int      _virtualIdx  = 0;
-        string   _activeSlot  = "";   // non-empty → user custom slot, empty → standard/official
+        string   _activeSlot  = "";   // non-empty ? user custom slot, empty ? standard/official
         string   _urlInput    = "";
         bool     _activeIsOfficial = false;  // true when selected map is an official server map
         Font     _gameFont    = null;
@@ -1280,7 +1280,7 @@ namespace CNRMods
 
         void Awake()
         {
-            // Initial map list (no official maps yet — rebuilt in HookButtons after ContentManager loads)
+            // Initial map list (no official maps yet � rebuilt in HookButtons after ContentManager loads)
             var list = new List<string>(STANDARD_MAPS);
             list.AddRange(CUSTOM_MAPS);
             _allMaps = list.ToArray();
@@ -1295,7 +1295,7 @@ namespace CNRMods
                 list.Add("OFFICIAL_" + om.Id);
             list.AddRange(CUSTOM_MAPS);
             _allMaps = list.ToArray();
-            ModEntry.Log("CustomMaps: map list rebuilt — " + STANDARD_MAPS.Length + " std + "
+            ModEntry.Log("CustomMaps: map list rebuilt � " + STANDARD_MAPS.Length + " std + "
                 + ContentManager.OfficialMaps.Length + " official + " + CUSTOM_MAPS.Length + " custom = " + _allMaps.Length);
         }
 
@@ -1366,7 +1366,7 @@ namespace CNRMods
                     ModEntry.Log("Hooked button: " + btnName);
                 }
             }
-            // Don't reset _hooked to false on 0 — that causes infinite spam.
+            // Don't reset _hooked to false on 0 � that causes infinite spam.
             if (hooked > 0)
             {
                 _hooked = true;
@@ -1427,7 +1427,7 @@ namespace CNRMods
 
             if (stdIdx >= 0)
             {
-                // ─ Standard map ─
+                // - Standard map -
                 PlayerPrefs.SetString("CNRMod_CustomMapName", "");
                 PlayerPrefs.SetString("CNRMod_ActiveMapURL",  "");
                 PlayerPrefs.DeleteKey("CNRMod_MapCacheReady");
@@ -1442,7 +1442,7 @@ namespace CNRMods
             }
             else if (scene.StartsWith("OFFICIAL_"))
             {
-                // ─ Official server-provided map ─
+                // - Official server-provided map -
                 string omId = scene.Substring("OFFICIAL_".Length);
                 OfficialMapEntry om = null;
                 foreach (var m in ContentManager.OfficialMaps)
@@ -1512,7 +1512,7 @@ namespace CNRMods
             }
             else
             {
-                // ─ User custom map slot ─
+                // - User custom map slot -
                 string[] validDonors = new string[]{"FreeRun3_1","FreeRun5_1","FreeRun8_1"};
                 string donorPref = PlayerPrefs.GetString("CNRMod_DonorScene", "");
                 string loadScene = (Array.IndexOf(validDonors, donorPref) >= 0) ? donorPref
@@ -1638,9 +1638,9 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  MAP NAV BUTTON — attached to NGUI arrow buttons to intercept clicks
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  MAP NAV BUTTON � attached to NGUI arrow buttons to intercept clicks
+    // --------------------------------------------------------------------------
     public class MapNavButton : MonoBehaviour
     {
         public bool isNext;
@@ -1658,9 +1658,9 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  MAP LOADER — spawns cached JSON objects when a custom map scene loads
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  MAP LOADER � spawns cached JSON objects when a custom map scene loads
+    // --------------------------------------------------------------------------
     class MapObjData
     {
         public string  path;
@@ -1681,7 +1681,7 @@ namespace CNRMods
         // Base scenes used for custom map slots
         private static readonly string[] BASE_SCENES = { "FreeRun3_1", "FreeRun5_1", "FreeRun8_1" };
 
-        // Skip these — UI draw calls, player character, logic markers
+        // Skip these � UI draw calls, player character, logic markers
         private static readonly string[] SKIP_CONTAINS = new string[]
         {
             "_UIDrawCall", "ExampleCharacter", "IsDied", "IsPause", "IsFireOnline",
@@ -1697,7 +1697,7 @@ namespace CNRMods
         private bool _spawnRunning = false;
         private bool _holdingPlayer = false;
 
-        // Loading room — sealed collision cage far outside all donor maps.
+        // Loading room � sealed collision cage far outside all donor maps.
         // Player is moved here before map geometry is built so they never see
         // the donor scene or the in-progress custom-map clone pass.
         private static readonly Vector3 LOADING_POS = new Vector3(0f, 4800f, 0f);
@@ -1707,7 +1707,7 @@ namespace CNRMods
         {
             if (_loadingRoom != null) { UnityEngine.Object.Destroy(_loadingRoom); _loadingRoom = null; }
             _loadingRoom = new GameObject("[CNRMod_Loading]");
-            // Small sealed box: 8×4×8, floor at LOADING_POS.y - 2
+            // Small sealed box: 8�4�8, floor at LOADING_POS.y - 2
             const float W = 8f, H = 4f, T = 0.3f;
             float bx = LOADING_POS.x, by = LOADING_POS.y, bz = LOADING_POS.z;
             AddFaceSlab(_loadingRoom, new Vector3(bx, by - H*0.5f, bz), new Vector3(W, T, W));  // floor
@@ -1726,7 +1726,7 @@ namespace CNRMods
             if (cc != null) cc.enabled = false;
             player.transform.position = pos;
             // NOTE: Do NOT re-enable CC here.  Calling cc.enabled = true at Y=4800
-            // (outside scene physics bounds) deadlocks PhysX — all UnityWorker threads
+            // (outside scene physics bounds) deadlocks PhysX � all UnityWorker threads
             // block on the same physics job and UnityMain never processes the next frame.
             // TeleportToSpawn (and RespawnWatcher.DoTeleport) re-enable CC at the normal
             // in-scene spawn position once the map is built.
@@ -1757,7 +1757,7 @@ namespace CNRMods
             bool   cacheReady = PlayerPrefs.GetInt("CNRMod_MapCacheReady", 0) == 1 && File.Exists(CachePath);
             if (string.IsNullOrEmpty(activeUrl) && !cacheReady)
             {
-                ModEntry.Log("MapLoader: vanilla map load, no custom map pending — skipping hold");
+                ModEntry.Log("MapLoader: vanilla map load, no custom map pending � skipping hold");
                 return;
             }
             // Start holding the player at the loading position immediately so they
@@ -1817,7 +1817,7 @@ namespace CNRMods
                     yield break;
                 }
 
-                // After 3s, if RedirectHook hasn’t kicked off a download yet,
+                // After 3s, if RedirectHook hasn�t kicked off a download yet,
                 // try downloading directly from the URL the map picker saved
                 if (waited >= 3f)
                 {
@@ -1920,11 +1920,11 @@ namespace CNRMods
                 int spawned = 0;
                 var clonedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                // Pass 1 — clone actual donor GameObjects while scene is still intact
+                // Pass 1 � clone actual donor GameObjects while scene is still intact
                 foreach (MapObjData obj in items)
                 {
                     if (ShouldSkip(obj.path)) continue;
-                    // Markers are tiny — handle them in pass 2 as primitives
+                    // Markers are tiny � handle them in pass 2 as primitives
                     bool isMarker = obj.path.Contains("EscapePosition") ||
                                     obj.path.Contains("EnemyPosition")  ||
                                     obj.path.Contains("PlayerPosition");
@@ -1964,7 +1964,7 @@ namespace CNRMods
                         // Ensure all renderers visible
                         foreach (Renderer r in clone.GetComponentsInChildren<Renderer>(true))
                             r.enabled = true;
-                        // Destroy ALL colliders — they either reference the static batch mesh
+                        // Destroy ALL colliders � they either reference the static batch mesh
                         // (MeshColliders) or have a pivot-relative center that becomes wrong
                         // once we reposition the clone to the JSON bounding-box center.
                         foreach (Collider c in clone.GetComponentsInChildren<Collider>(true))
@@ -1994,7 +1994,7 @@ namespace CNRMods
 
                         // Try MeshCollider.convex for objects that are NOT part of Unity's
                         // static batch (individually authored meshes, e.g. props/stairs).
-                        // Statically batched objects have sharedMesh == null or named "Combined Mesh…"
+                        // Statically batched objects have sharedMesh == null or named "Combined Mesh�"
                         // and will fall through to the 6-face hollow-shell below.
                         bool colliderAdded = false;
                         if (obj.collidable)
@@ -2020,7 +2020,7 @@ namespace CNRMods
                             }
                         }
 
-                        // 6-face hollow-shell fallback — thin BoxCollider slabs parented to
+                        // 6-face hollow-shell fallback � thin BoxCollider slabs parented to
                         // _mapRoot (always scale 1,1,1) so bc.size == world size exactly,
                         // regardless of the clone's pivot offset or donor scale.
                         if (!colliderAdded && obj.size != null && obj.size.Length == 3
@@ -2051,7 +2051,7 @@ namespace CNRMods
                 if (ambientColor.HasValue)
                     RenderSettings.ambientLight = ambientColor.Value;
 
-                // Pass 2 — primitive fallback for anything not found in the donor
+                // Pass 2 � primitive fallback for anything not found in the donor
                 foreach (MapObjData obj in items)
                 {
                     if (ShouldSkip(obj.path)) continue;
@@ -2116,7 +2116,7 @@ namespace CNRMods
                     {
                         // Collision box: invisible but physically solid
                         if (renderer != null) renderer.enabled = false;
-                        // BoxCollider from CreatePrimitive is already solid — leave it enabled
+                        // BoxCollider from CreatePrimitive is already solid � leave it enabled
                     }
                     else if (!obj.collidable)
                     {
@@ -2128,7 +2128,7 @@ namespace CNRMods
 
                 ModEntry.Log("MapLoader: spawned " + spawned + " (" + clonedPaths.Count + " cloned, " + (spawned - clonedPaths.Count) + " primitives)");
 
-                // ── Step 4: collect spawn positions and hand off to RespawnWatcher ──
+                // -- Step 4: collect spawn positions and hand off to RespawnWatcher --
                 Vector3? escSpawn = null, enmSpawn = null;
                 foreach (MapObjData obj in items)
                 {
@@ -2159,7 +2159,7 @@ namespace CNRMods
                 if (enmSpawn.HasValue) { watcher.EnemySpawn  = enmSpawn.Value;  watcher.HasEnemy  = true; }
                 watcher.MapCentroid = watcherCentroid;
 
-                // ── Step 5: release hold and teleport to spawn ───────────────
+                // -- Step 5: release hold and teleport to spawn ---------------
                 _holdingPlayer = false;
                 TeleportToSpawn(items);
             }
@@ -2209,7 +2209,7 @@ namespace CNRMods
                     else if ((name.Contains("SpawnPoint") || name.Contains("Spawn_Point"))
                              && (escapePositions.Count > 0 || enemyPositions.Count > 0))
                     {
-                        // Generic spawn point — assign escape or enemy pool round-robin
+                        // Generic spawn point � assign escape or enemy pool round-robin
                         var pool = escapePositions.Count > 0 ? escapePositions : enemyPositions;
                         int idx  = escIdx + enmIdx;
                         go.transform.position = pool[idx % pool.Count];
@@ -2293,7 +2293,7 @@ namespace CNRMods
                 "_UIDrawCall", "UIPanel", "UICamera", "UISprite", "UILabel",
                 "Photon", "CNRMod", "[CustomMap]",
                 "ExampleCharacter", "IsDied", "IsPause",
-                // In-game HUD, controls, settings, skybox — must not lose colliders
+                // In-game HUD, controls, settings, skybox � must not lose colliders
                 "InGameMenu", "VCAnalog", "Joystick", "HUD", "Hud",
                 "MainScene", "KamcordPrefab", "CNRSettings",
                 // Environment / lighting roots
@@ -2367,7 +2367,7 @@ namespace CNRMods
             return false;
         }
 
-        // Watches for death→alive transitions each frame and re-teleports the player
+        // Watches for death?alive transitions each frame and re-teleports the player
         // to the correct team spawn.  Attached to _mapRoot so it is destroyed on reload.
         private class RespawnWatcher : MonoBehaviour
         {
@@ -2409,7 +2409,7 @@ namespace CNRMods
                         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                     if (teamField == null) return ModEntry.IsMaster;
                     object team = teamField.GetValue(pi);
-                    // TeamType.Robber == enemy (non-cop), anything else (Cop / Nil) → escape side
+                    // TeamType.Robber == enemy (non-cop), anything else (Cop / Nil) ? escape side
                     return team == null || team.ToString() != "Robber";
                 }
                 catch { return ModEntry.IsMaster; }
@@ -2446,7 +2446,7 @@ namespace CNRMods
 
                 bool isDead = _isDiedObj != null && _isDiedObj.activeSelf;
 
-                // Transition: was dead last frame, now alive → player just respawned.
+                // Transition: was dead last frame, now alive ? player just respawned.
                 // Wait one frame so the game's native respawn has already positioned the player,
                 // then check if they ended up outside the custom map bounds; only override if so.
                 if (_wasDeadLastFrame && !isDead)
@@ -2463,7 +2463,7 @@ namespace CNRMods
                         if (dist > 20f)
                         {
                             DoTeleport(spawn);
-                            ModEntry.Log("RespawnWatcher: native spawn was " + dist.ToString("F1") + "u from custom — overriding to " + spawn);
+                            ModEntry.Log("RespawnWatcher: native spawn was " + dist.ToString("F1") + "u from custom � overriding to " + spawn);
                         }
                         else
                         {
@@ -2486,33 +2486,33 @@ namespace CNRMods
         }
 
         // Rewrite the UV coordinates on Unity's default cube mesh so that each face tiles
-        // at exactly dim/2 repeats — one texture repeat per 2 world units — matching the
+        // at exactly dim/2 repeats � one texture repeat per 2 world units � matching the
         // map builder's per-face tiling formula.  We read the existing vertex normals to
         // identify which face each vertex belongs to, then map the two in-plane local
         // coordinates to the correct UV range.
         //
-        //  ±Y (top/bot): U along X (range sx/2),  V along Z (range sz/2)
-        //  ±Z (frt/bck): U along X (range sx/2),  V along Y (range sy/2)
-        //  ±X (lft/rgt): U along Z (range sz/2),  V along Y (range sy/2)
+        //  �Y (top/bot): U along X (range sx/2),  V along Z (range sz/2)
+        //  �Z (frt/bck): U along X (range sx/2),  V along Y (range sy/2)
+        //  �X (lft/rgt): U along Z (range sz/2),  V along Y (range sy/2)
         //
         // localScale must be set to (sx, sy, sz) AFTER this call so the UVs correlate
         // with the final world-space face sizes.
         private static void ApplyBoxUVs(MeshFilter mf, float sx, float sy, float sz)
         {
             Mesh mesh = mf.mesh;  // creates a per-instance copy if the mesh is shared
-            Vector3[] verts   = mesh.vertices;   // local space, each coord ∈ [−0.5, 0.5]
+            Vector3[] verts   = mesh.vertices;   // local space, each coord ? [-0.5, 0.5]
             Vector3[] normals = mesh.normals;
             var uvs = new Vector2[verts.Length];
 
-            float uY = sx * 0.5f, vY = sz * 0.5f;   // ±Y faces
-            float uZ = sx * 0.5f, vZ = sy * 0.5f;   // ±Z faces
-            float uX = sz * 0.5f, vX = sy * 0.5f;   // ±X faces
+            float uY = sx * 0.5f, vY = sz * 0.5f;   // �Y faces
+            float uZ = sx * 0.5f, vZ = sy * 0.5f;   // �Z faces
+            float uX = sz * 0.5f, vX = sy * 0.5f;   // �X faces
 
             for (int i = 0; i < verts.Length; i++)
             {
                 Vector3 n = normals[i];
                 Vector3 v = verts[i];
-                // (v.axis + 0.5) maps the local [−0.5,0.5] range to [0,1],
+                // (v.axis + 0.5) maps the local [-0.5,0.5] range to [0,1],
                 // then multiply by the desired tile count for that dimension.
                 if (Mathf.Abs(n.y) >= 0.5f)
                     uvs[i] = new Vector2((v.x + 0.5f) * uY, (v.z + 0.5f) * vY);
@@ -2525,9 +2525,9 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  CONTENT MANAGER — downloads and caches official maps, textures, data files
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  CONTENT MANAGER � downloads and caches official maps, textures, data files
+    // --------------------------------------------------------------------------
     public class OfficialMapEntry
     {
         public string Id            = "";
@@ -2602,9 +2602,9 @@ namespace CNRMods
         public static OfficialGunEntry[]     OfficialGuns     = new OfficialGunEntry[0];
         public static bool Ready = false;
 
-        // material name (lowercase) → Texture2D loaded from file
+        // material name (lowercase) ? Texture2D loaded from file
         private static Dictionary<string, Texture2D> _texCache   = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
-        // map id → Texture2D thumbnail
+        // map id ? Texture2D thumbnail
         private static Dictionary<string, Texture2D> _thumbCache = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
 
         public static Texture2D GetMapThumbnail(string id)
@@ -2700,11 +2700,11 @@ namespace CNRMods
                 // Verify hashes; delete bad files and force a re-download on next sync
                 if (!VerifyAndClean())
                 {
-                    ModEntry.Log("ContentManager: hash mismatch(es) found — clearing version to force re-download");
+                    ModEntry.Log("ContentManager: hash mismatch(es) found � clearing version to force re-download");
                     PlayerPrefs.SetString(VersionPref, "");
                     PlayerPrefs.Save();
                 }
-                ModEntry.Log("ContentManager: cache loaded — maps=" + OfficialMaps.Length
+                ModEntry.Log("ContentManager: cache loaded � maps=" + OfficialMaps.Length
                     + " tex=" + OfficialTextures.Length + " data=" + OfficialData.Length
                     + " skins=" + OfficialSkins.Length + " guns=" + OfficialGuns.Length);
             }
@@ -2746,7 +2746,7 @@ namespace CNRMods
                         string got = ComputeMD5(p);
                         if (got != m.Hash.ToLower())
                         {
-                            ModEntry.Log("ContentManager: map hash mismatch [" + m.Id + "] server=" + m.Hash + " local=" + got + " — deleting");
+                            ModEntry.Log("ContentManager: map hash mismatch [" + m.Id + "] server=" + m.Hash + " local=" + got + " � deleting");
                             try { File.Delete(p); } catch {}
                             allOk = false;
                         }
@@ -2762,7 +2762,7 @@ namespace CNRMods
                         string got = ComputeMD5(tp);
                         if (got != m.ThumbnailHash.ToLower())
                         {
-                            ModEntry.Log("ContentManager: thumb hash mismatch [" + m.Id + "] — deleting");
+                            ModEntry.Log("ContentManager: thumb hash mismatch [" + m.Id + "] � deleting");
                             try { File.Delete(tp); } catch {}
                             allOk = false;
                         }
@@ -2780,7 +2780,7 @@ namespace CNRMods
                         string got = ComputeMD5(p);
                         if (got != te.Hash.ToLower())
                         {
-                            ModEntry.Log("ContentManager: tex hash mismatch [" + te.Id + "] — deleting");
+                            ModEntry.Log("ContentManager: tex hash mismatch [" + te.Id + "] � deleting");
                             try { File.Delete(p); } catch {}
                             allOk = false;
                         }
@@ -2797,7 +2797,7 @@ namespace CNRMods
                         string got = ComputeMD5(p);
                         if (got != d.Hash.ToLower())
                         {
-                            ModEntry.Log("ContentManager: data hash mismatch [" + d.Id + "] — deleting");
+                            ModEntry.Log("ContentManager: data hash mismatch [" + d.Id + "] � deleting");
                             try { File.Delete(p); } catch {}
                             allOk = false;
                         }
@@ -2814,7 +2814,7 @@ namespace CNRMods
                         string got = ComputeMD5(p);
                         if (got != sk.Hash.ToLower())
                         {
-                            ModEntry.Log("ContentManager: skin hash mismatch [" + sk.Id + "] — deleting");
+                            ModEntry.Log("ContentManager: skin hash mismatch [" + sk.Id + "] � deleting");
                             try { File.Delete(p); } catch {}
                             allOk = false;
                         }
@@ -2831,7 +2831,7 @@ namespace CNRMods
                         string got = ComputeMD5(p);
                         if (got != g.Hash.ToLower())
                         {
-                            ModEntry.Log("ContentManager: gun hash mismatch [" + g.Id + "] — deleting");
+                            ModEntry.Log("ContentManager: gun hash mismatch [" + g.Id + "] � deleting");
                             try { File.Delete(p); } catch {}
                             allOk = false;
                         }
@@ -2876,7 +2876,7 @@ namespace CNRMods
             }
 
             Ready = true;
-            ModEntry.Log("ContentManager ready — maps=" + OfficialMaps.Length
+            ModEntry.Log("ContentManager ready � maps=" + OfficialMaps.Length
                 + " tex=" + OfficialTextures.Length + " data=" + OfficialData.Length
                 + " skins=" + OfficialSkins.Length + " guns=" + OfficialGuns.Length);
         }
@@ -2958,7 +2958,7 @@ namespace CNRMods
             catch { return null; }
         }
 
-        // Download all content items (maps → MapCacheDir, textures → TexCacheDir, data → DataCacheDir)
+        // Download all content items (maps ? MapCacheDir, textures ? TexCacheDir, data ? DataCacheDir)
         IEnumerator DownloadItems()
         {
             foreach (var m in OfficialMaps)
@@ -2970,7 +2970,7 @@ namespace CNRMods
                     string got = ComputeMD5(path);
                     if (got != m.Hash.ToLower())
                     {
-                        ModEntry.Log("ContentManager: map download hash mismatch [" + m.Id + "] expected=" + m.Hash + " got=" + got + " — deleting");
+                        ModEntry.Log("ContentManager: map download hash mismatch [" + m.Id + "] expected=" + m.Hash + " got=" + got + " � deleting");
                         try { File.Delete(path); } catch {}
                     }
                 }
@@ -2985,7 +2985,7 @@ namespace CNRMods
                     {
                         if (!string.IsNullOrEmpty(m.ThumbnailHash) && ComputeMD5(thumbPath) != m.ThumbnailHash.ToLower())
                         {
-                            ModEntry.Log("ContentManager: thumb download hash mismatch [" + m.Id + "] — deleting");
+                            ModEntry.Log("ContentManager: thumb download hash mismatch [" + m.Id + "] � deleting");
                             try { File.Delete(thumbPath); } catch {}
                         }
                         else LoadThumbFile(m.Id, thumbPath);
@@ -3000,7 +3000,7 @@ namespace CNRMods
                 {
                     if (!string.IsNullOrEmpty(te.Hash) && ComputeMD5(path) != te.Hash.ToLower())
                     {
-                        ModEntry.Log("ContentManager: tex download hash mismatch [" + te.Id + "] — deleting");
+                        ModEntry.Log("ContentManager: tex download hash mismatch [" + te.Id + "] � deleting");
                         try { File.Delete(path); } catch {}
                     }
                     else LoadTexFile(te.Id, path);
@@ -3015,7 +3015,7 @@ namespace CNRMods
                     string got = ComputeMD5(path);
                     if (got != d.Hash.ToLower())
                     {
-                        ModEntry.Log("ContentManager: data download hash mismatch [" + d.Id + "] — deleting");
+                        ModEntry.Log("ContentManager: data download hash mismatch [" + d.Id + "] � deleting");
                         try { File.Delete(path); } catch {}
                     }
                 }
@@ -3028,7 +3028,7 @@ namespace CNRMods
                 {
                     if (!string.IsNullOrEmpty(sk.Hash) && ComputeMD5(path) != sk.Hash.ToLower())
                     {
-                        ModEntry.Log("ContentManager: skin download hash mismatch [" + sk.Id + "] — deleting");
+                        ModEntry.Log("ContentManager: skin download hash mismatch [" + sk.Id + "] � deleting");
                         try { File.Delete(path); } catch {}
                     }
                     else LoadTexFile(sk.Id, path);
@@ -3045,7 +3045,7 @@ namespace CNRMods
                     string got = ComputeMD5(path);
                     if (got != g.Hash.ToLower())
                     {
-                        ModEntry.Log("ContentManager: gun download hash mismatch [" + g.Id + "] — deleting");
+                        ModEntry.Log("ContentManager: gun download hash mismatch [" + g.Id + "] � deleting");
                         try { File.Delete(path); } catch {}
                     }
                 }
@@ -3098,7 +3098,7 @@ namespace CNRMods
         {
             yield return new WaitForSeconds(0.3f);
 
-            // Build a lookup: materialName (from entry) → Texture2D
+            // Build a lookup: materialName (from entry) ? Texture2D
             var matToTex = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
             foreach (var te in OfficialTextures)
             {
@@ -3188,16 +3188,16 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  CNR SKIN STORE HOOK — extends vanilla skin shop with DLC skins
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  CNR SKIN STORE HOOK � extends vanilla skin shop with DLC skins
+    // --------------------------------------------------------------------------
     // Spawned in StoreScene by ContentManager.OnLevelWasLoaded.
     // Extends UIStoreDirector's internal arrays to include downloaded DLC skins,
     // then disables the vanilla skin nav UIStoreBtnEvent components and adds our
     // CNRSkinBtnInterceptor to intercept clicks using our extended navigation.
     public class CNRSkinStoreHook : MonoBehaviour
     {
-        // ── Reflection cache ──────────────────────────────────────────────────
+        // -- Reflection cache --------------------------------------------------
         static FieldInfo  _fi_curSkinId, _fi_skinUsingId, _fi_skinNameList,
                           _fi_gSkinItemInfo, _fi_hatSkin, _fi_bodySkin;
         static MethodInfo _mi_SetSkinData, _mi_SkinSetUnlock;
@@ -3218,7 +3218,7 @@ namespace CNRMods
             _reflReady = true;
         }
 
-        // ── State ─────────────────────────────────────────────────────────────
+        // -- State -------------------------------------------------------------
         UIStoreDirector _store;
         string[]        _extNames;
         GSkinItemInfo[] _extInfo;
@@ -3229,7 +3229,7 @@ namespace CNRMods
         // Parallel array: dlcSkins[i] matches _extInfo[_dlcStart + i]
         OfficialSkinEntry[] _dlcSkins;
 
-        // ── Public accessors for CNRSkinBtnInterceptor ────────────────────────
+        // -- Public accessors for CNRSkinBtnInterceptor ------------------------
         public int CurSkinId
         {
             get { return (int)_fi_curSkinId.GetValue(_store); }
@@ -3283,7 +3283,7 @@ namespace CNRMods
                 _mi_SetSkinData.Invoke(_store, null);
             }
 
-            ModEntry.Log("CNRSkinStoreHook: ready — " + _total + " skins (" + (_total - _dlcStart) + " DLC)");
+            ModEntry.Log("CNRSkinStoreHook: ready � " + _total + " skins (" + (_total - _dlcStart) + " DLC)");
         }
 
         void BuildExtended()
@@ -3320,7 +3320,7 @@ namespace CNRMods
 
             // vanillaSkinActive: true only when CurSettedSkinName is a vanilla skin AND
             // CNR_EquippedDLCSkin is empty (cleared when a vanilla skin was last equipped).
-            // If CNR_EquippedDLCSkin is set, a DLC skin was last equipped — even if
+            // If CNR_EquippedDLCSkin is set, a DLC skin was last equipped � even if
             // CurSettedSkinName still holds the old vanilla name (it is never updated for DLC).
             string curVanillaSkin = PlayerPrefs.GetString("CurSettedSkinName", "");
             bool vanillaSkinActive = false;
@@ -3343,7 +3343,7 @@ namespace CNRMods
                 info.mUnlockCLevel     = 1;
                 info.mPrice            = sk.Price;
                 info.mNameDisplay      = sk.DisplayName;
-                info.mLogoSpriteName   = "Skin_1";   // fallback — no sprite atlas entry for DLC
+                info.mLogoSpriteName   = "Skin_1";   // fallback � no sprite atlas entry for DLC
                 info.mIsEnabled        = owned;
                 info.mHeadMaterialName = sk.SkinName + "_1";
                 info.mBodyMaterialName = sk.MaterialName;
@@ -3410,7 +3410,7 @@ namespace CNRMods
             }
         }
 
-        // ── Button handlers (called by CNRSkinBtnInterceptor) ─────────────────
+        // -- Button handlers (called by CNRSkinBtnInterceptor) -----------------
         public void OnLeft()
         {
             CurSkinId = (CurSkinId - 1 + _total) % _total;
@@ -3428,7 +3428,7 @@ namespace CNRMods
             int cur = CurSkinId;
             if (cur < _dlcStart)
             {
-                // Vanilla skin — let the original method handle it, then re-inject our arrays
+                // Vanilla skin � let the original method handle it, then re-inject our arrays
                 _mi_SkinSetUnlock.Invoke(_store, null);
                 // Clear the DLC equipped pref so it doesn't override skinUsingId next time
                 // the shop opens (stale value would make the DLC skin appear equipped).
@@ -3497,9 +3497,9 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  CNR PROFILE HOOK — extends profile screen skin selector with DLC skins
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  CNR PROFILE HOOK � extends profile screen skin selector with DLC skins
+    // --------------------------------------------------------------------------
     // Spawned in ProfileScene by ContentManager.OnLevelWasLoaded.
     // After UIProfileDirector.Start() has run GetSkinData(), injects owned+
     // downloaded DLC skins into the internal arrays so the Left/Right buttons
@@ -3507,7 +3507,7 @@ namespace CNRMods
     // equips update CNR_EquippedDLCSkin rather than calling SetCurSettedSkin.
     public class CNRProfileHook : MonoBehaviour
     {
-        // ── Reflection cache ──────────────────────────────────────────────────
+        // -- Reflection cache --------------------------------------------------
         static FieldInfo  _fi_gSkinItemInfo, _fi_skinNameList,
                           _fi_hatSkin, _fi_bodySkin,
                           _fi_skinNum, _fi_idList,
@@ -3532,13 +3532,13 @@ namespace CNRMods
             _reflReady = true;
         }
 
-        // ── State ─────────────────────────────────────────────────────────────
+        // -- State -------------------------------------------------------------
         UIProfileDirector   _profile;
         int                 _vanillaCount;    // # entries in idList after vanilla GetSkinData()
         int                 _dlcMatStart = 33; // DLC materials always start at index 33
         OfficialSkinEntry[] _dlcSkins;
 
-        // ── Accessors ─────────────────────────────────────────────────────────
+        // -- Accessors ---------------------------------------------------------
         int CurSkinId
         {
             get { return (int)_fi_curSkinId.GetValue(_profile); }
@@ -3594,7 +3594,7 @@ namespace CNRMods
                 }
             }
 
-            ModEntry.Log("CNRProfileHook: ready — " + (_vanillaCount + _dlcSkins.Length)
+            ModEntry.Log("CNRProfileHook: ready � " + (_vanillaCount + _dlcSkins.Length)
                 + " skins (" + _dlcSkins.Length + " DLC)");
         }
 
@@ -3691,7 +3691,7 @@ namespace CNRMods
             }
         }
 
-        // ── Button handlers (called by CNRProfileBtnInterceptor) ──────────────
+        // -- Button handlers (called by CNRProfileBtnInterceptor) --------------
         public void OnLeft()
         {
             int total  = _vanillaCount + _dlcSkins.Length;
@@ -3717,7 +3717,7 @@ namespace CNRMods
             int cur = CurSkinIndexInIdList;
             if (cur < _vanillaCount)
             {
-                // Vanilla slot — delegate to the real handler, then clear DLC pref.
+                // Vanilla slot � delegate to the real handler, then clear DLC pref.
                 _profile.SetSkinBtnPressed();
                 PlayerPrefs.DeleteKey("CNR_EquippedDLCSkin");
                 PlayerPrefs.Save();
@@ -3758,9 +3758,9 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  CNR REMOTE SKIN RENDERER — applies DLC skin textures to other players
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  CNR REMOTE SKIN RENDERER � applies DLC skin textures to other players
+    // --------------------------------------------------------------------------
     // Spawned in game scenes by ContentManager.OnLevelWasLoaded.
     // Polls Photon otherPlayers, reads their CNR_DLC_SKIN custom prop, and if
     // the local client has that skin downloaded, swaps the texture on their
@@ -3868,7 +3868,7 @@ namespace CNRMods
             }
             // Scan every Renderer on the character and apply to any vanilla skin-slot
             // material (Skin_N_1 head / Skin_N_2 body).  Same matching strategy as
-            // ContentManager.ApplyTextureSwaps — robust against hierarchy changes.
+            // ContentManager.ApplyTextureSwaps � robust against hierarchy changes.
             bool any = false;
             Component[] renderers = charRoot.GetComponentsInChildren(typeof(Renderer));
             foreach (Component comp in renderers)
@@ -3889,9 +3889,9 @@ namespace CNRMods
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    //  ECONOMY HOOK — server-authoritative coins/gems sync
-    // ══════════════════════════════════════════════════════════════════════════
+    // --------------------------------------------------------------------------
+    //  ECONOMY HOOK � server-authoritative coins/gems sync
+    // --------------------------------------------------------------------------
     public class EconomyHook : MonoBehaviour
     {
         // Public state read by CNRSettingsMod to show spinner in HUD
@@ -3900,7 +3900,7 @@ namespace CNRMods
         public static int   ServerCoins = 0;
         public static int   ServerGems  = 0;
 
-        // ── Mail inbox (parallel arrays, populated by FetchInbox) ─────────────
+        // -- Mail inbox (parallel arrays, populated by FetchInbox) -------------
         public static int[]    MailIds      = new int[0];
         public static string[] MailSubjects = new string[0];
         public static string[] MailBodies   = new string[0];
@@ -3910,10 +3910,10 @@ namespace CNRMods
         public static bool[]   MailClaimed  = new bool[0];
         public static int      MailUnread   = 0;
 
-        // ── Gift wheel state (updated by DoWheelSpin / DoClaimMail responses) ─
+        // -- Gift wheel state (updated by DoWheelSpin / DoClaimMail responses) -
         public static int WheelBonusSpins = 0;
 
-        // ── CNRSettingsMod integration ────────────────────────────────────────
+        // -- CNRSettingsMod integration ----------------------------------------
         /// <summary>Set by CNRSettingsMod on startup; changes Account button label to "Settings".</summary>
         public static bool          SettingsModPresent     = false;
         /// <summary>Registered by CNRSettingsMod; called when Account/Settings button is tapped.</summary>
@@ -3953,7 +3953,7 @@ namespace CNRMods
             if (_ecoScene == "MainMenu") StartCoroutine(EcoPatchDelay());
         }
 
-        // ── Reconnect (called from Update when not Ready) ─────────────────────
+        // -- Reconnect (called from Update when not Ready) ---------------------
         private IEnumerator ReconnectAttempt()
         {
             if (string.IsNullOrEmpty(ModEntry.EconomyUrl)) { _reconnectRunning = false; yield break; }
@@ -3969,7 +3969,7 @@ namespace CNRMods
             _reconnectRunning = false;
         }
 
-        // ── Registration / initial sync ───────────────────────────────────────
+        // -- Registration / initial sync ---------------------------------------
         private IEnumerator RegisterAndSync()
         {
             if (string.IsNullOrEmpty(ModEntry.EconomyUrl)) yield break;
@@ -4018,7 +4018,7 @@ namespace CNRMods
             string newToken = ModEntry.ParseJsonStringValue(www.text, "token");
             if (string.IsNullOrEmpty(newToken))
             {
-                // Could be 409 conflict if already registered — try re-login
+                // Could be 409 conflict if already registered � try re-login
                 if (!string.IsNullOrEmpty(_token))
                     yield return StartCoroutine(ReLogin(androidId, displayName));
                 else
@@ -4070,7 +4070,7 @@ namespace CNRMods
                 var www = new WWW(url, System.Text.Encoding.UTF8.GetBytes(body), hdrs);
                 yield return www;
                 if (string.IsNullOrEmpty(www.error))
-                    ModEntry.Log("EcoHook: pushed name change → " + newName);
+                    ModEntry.Log("EcoHook: pushed name change ? " + newName);
                 else
                     ModEntry.Log("EcoHook: name push failed: " + www.error);
             }
@@ -4111,7 +4111,7 @@ namespace CNRMods
 
                     if (deltaC != 0 && deltaG != 0 && coinSpend != gemSpend)
                     {
-                        // Opposite directions — split into two transactions
+                        // Opposite directions � split into two transactions
                         if (deltaC != 0)
                             _queue.Add(new PendingTx { deltaCoins=deltaC, deltaGems=0,
                                 reason="reconcile", matchId=pfx+"_rc_c_"+ts, isSpend=coinSpend });
@@ -4150,7 +4150,7 @@ namespace CNRMods
 
         // Applies server's canonical display_name to LocalMultiplayerNickName if different.
         // Called after every register/relogin so all linked devices stay name-synced.
-        // Rule: never let a placeholder server name overwrite a real local name — that
+        // Rule: never let a placeholder server name overwrite a real local name � that
         // would reset a freshly-changed username if the server hasn't received it yet.
         private static readonly string[] _namePlaceholders = { "Player", "New Player", "" };
         private void ApplyDisplayName(string json)
@@ -4163,13 +4163,13 @@ namespace CNRMods
             bool serverIsPlaceholder = System.Array.IndexOf(_namePlaceholders, serverName) >= 0;
             // Don't downgrade a real local name with a stale placeholder from the server
             if (!localIsPlaceholder && serverIsPlaceholder) return;
-            ModEntry.Log("EcoHook: name sync " + localName + " → " + serverName);
+            ModEntry.Log("EcoHook: name sync " + localName + " ? " + serverName);
             PlayerPrefs.SetString("LocalMultiplayerNickName", serverName);
             PlayerPrefs.Save();
             _lastKnownName = serverName;
         }
 
-        // ── Progression sync helpers ──────────────────────────────────────────
+        // -- Progression sync helpers ------------------------------------------
         private static string[] _upgradeWeapons = new string[]
         {
             "AK", "M4", "Deagle", "Rifle", "AWP", "RPG", "M67", "BallisticKnife"
@@ -4186,7 +4186,7 @@ namespace CNRMods
         };
 
         // POST local progression to sync.php; apply server's authoritative merged state.
-        // ── Profile equip-tab guard ───────────────────────────────────────────
+        // -- Profile equip-tab guard -------------------------------------------
         // Returns true while UIProfileDirector's equipment (weapons) tab panel is active.
         // Uses reflection so we never hard-reference the game type.
         private bool IsProfileEquipTabOpen()
@@ -4280,7 +4280,7 @@ namespace CNRMods
                 if (exp > local) PlayerPrefs.SetInt("CharacterExp", exp);
             }
 
-            // Weapon upgrade levels — take max
+            // Weapon upgrade levels � take max
             foreach (var wk in _upgradeWeapons)
             {
                 string val = ModEntry.ParseJsonValue(json, "wl_" + wk);
@@ -4292,7 +4292,7 @@ namespace CNRMods
                 }
             }
 
-            // Weapon unlock flags (0=locked, 1=unlocked) — take max
+            // Weapon unlock flags (0=locked, 1=unlocked) � take max
             foreach (var wk in _unlockWeapons)
             {
                 string val = ModEntry.ParseJsonValue(json, "wl_" + wk);
@@ -4301,7 +4301,7 @@ namespace CNRMods
                     PlayerPrefs.SetInt(wk, 1);
             }
 
-            // Skin unlocks — union (server sends su_Skin_N=1 for each unlocked skin)
+            // Skin unlocks � union (server sends su_Skin_N=1 for each unlocked skin)
             for (int i = 1; i <= 33; i++)
             {
                 string val = ModEntry.ParseJsonValue(json, "su_Skin_" + i);
@@ -4317,7 +4317,7 @@ namespace CNRMods
 
             // Equipped slots / current skin / current armor are NOT written back from the
             // server.  Local PlayerPrefs are the authoritative source for the player's
-            // current loadout — the server only stores them as a backup.  Overwriting them
+            // current loadout � the server only stores them as a backup.  Overwriting them
             // here caused the profile gun-selection screen to revert every change the
             // player made (sync fires every ~15 s and restores the old server state).
 
@@ -4325,7 +4325,7 @@ namespace CNRMods
             ModEntry.Log("SyncProgression applied from server.");
         }
 
-        // ── Per-frame: watch for local PlayerPrefs coin/gem changes ────────────
+        // -- Per-frame: watch for local PlayerPrefs coin/gem changes ------------
         private int  _lastCoins = -1;
         private int  _lastGems  = -1;
         private float _watchTimer = 0f;
@@ -4342,12 +4342,12 @@ namespace CNRMods
         private float _inboxTimer = 0f;
         private const float InboxInterval = 60f;
 
-        // ── Main-menu IMGUI overlay ───────────────────────────────────────────
+        // -- Main-menu IMGUI overlay -------------------------------------------
         private const float ECO_REF_W   = 600f;
         private string      _ecoScene   = "";
         private bool        _ecoPatched = false;
         private bool        _ecoDbgLog  = false;
-        private GameObject  _goHelpBtn  = null;   // hidden ? button GO — position anchor
+        private GameObject  _goHelpBtn  = null;   // hidden ? button GO � position anchor
         private Camera      _ecoNguiCam = null;
         private static Font _ecoFont    = null;
         private bool        _showEcoMail    = false;
@@ -4379,16 +4379,16 @@ namespace CNRMods
         private float       _dlRefreshTime   = -30f;
         private UICamera[]  _nguiCameras = null;   // cached for click-through blocking
         private bool        _nguiBlocked = false;
-        private GameObject  _goRecordBtn    = null;   // Recordings button GO — anchor for settings btn
-        private GameObject  _goAgreementBtn = null;   // User agreement button GO — anchor for mail btn
-        private GameObject  _goMultiplayerBtn = null;  // GotoHall GO — intercepted
+        private GameObject  _goRecordBtn    = null;   // Recordings button GO � anchor for settings btn
+        private GameObject  _goAgreementBtn = null;   // User agreement button GO � anchor for mail btn
+        private GameObject  _goMultiplayerBtn = null;  // GotoHall GO � intercepted
         private bool        _showMpDialog     = false; // show "requires mods" dialog
         private bool        _mpMissingCnr     = false;
         private bool        _mpMissingStg     = false;
         private bool        _mpMissingMgr     = false;
         private bool        _mpNeedsUpdate       = false;  // required updates pending (from CNRModManager)
         private bool        _mpDownloadsMissing  = false;  // not all DLC content cached
-        private bool        _mpPendingBlock      = false;  // survives scene reload — trigger dialog on next MainMenu
+        private bool        _mpPendingBlock      = false;  // survives scene reload � trigger dialog on next MainMenu
         private bool        _mpPendingIsUpdate   = false; // true=update required  false=dll missing
         private bool        _mpPendingDownloads  = false; // true=downloads missing block
         private static FieldInfo _modMgrShowFI = null;  // cached: ModManagerHook._showWindow (to trigger open)
@@ -7647,7 +7647,7 @@ namespace CNRMods
             "GuL/D4WAP3Bwr6cFAAAAAElFTkSuQmCC";
         private Texture2D   _texSettingsIcon = null;
         private Texture2D   _texMailIcon     = null;
-        // Set to true/false by CNRModManager via reflection — no reflection needed here.
+        // Set to true/false by CNRModManager via reflection � no reflection needed here.
         public  static bool  ModManagerOpen  = false;
 
         private bool ModManagerIsOpen() { return ModManagerOpen; }
@@ -7659,7 +7659,7 @@ namespace CNRMods
             // Event.current.Use() alone cannot block NGUI button clicks.
             SetNguiBlocking(_showEcoMail || _showEcoAccount || _showMpDialog || _showDownloads);
 
-            // Reconnect loop — runs even while GUI overlay is open
+            // Reconnect loop � runs even while GUI overlay is open
             if (!Ready && !_reconnectRunning)
             {
                 _reconnectTimer -= Time.deltaTime;
@@ -7684,7 +7684,7 @@ namespace CNRMods
                 StartCoroutine(PushDisplayName(currentName));
             }
 
-            // Periodically refresh mail inbox — only when server is reachable
+            // Periodically refresh mail inbox � only when server is reachable
             if (ServerUp)
             {
                 _inboxTimer -= Time.deltaTime;
@@ -7717,7 +7717,7 @@ namespace CNRMods
 
             if (dc != 0 || dg != 0)
             {
-                // Local balance changed — queue a server transaction
+                // Local balance changed � queue a server transaction
                 bool isSpend = (dc < 0 || dg < 0);
                 string reason = isSpend ? "local_spend" : "local_earn";
                 // Generate a match_id for dedup based on timestamp + amount to
@@ -7735,7 +7735,7 @@ namespace CNRMods
                 StartCoroutine(FlushQueue());
         }
 
-        // ── Queue flush ───────────────────────────────────────────────────────
+        // -- Queue flush -------------------------------------------------------
         private IEnumerator FlushQueue()
         {
             _sending = true;
@@ -7806,8 +7806,8 @@ namespace CNRMods
             _sending = false;
         }
 
-        // ── Public API for CNRSettingsMod (wheel, explicit earn/spend) ──────────
-        /// <summary>Start a gift wheel spin — calls /wheel.php?action=spin and awards prize locally.</summary>
+        // -- Public API for CNRSettingsMod (wheel, explicit earn/spend) ----------
+        /// <summary>Start a gift wheel spin � calls /wheel.php?action=spin and awards prize locally.</summary>
         public static void RequestSetPin(string password, string pin)
         {
             var hook = (EconomyHook)(object)FindObjectOfType(typeof(EconomyHook));
@@ -7891,7 +7891,7 @@ namespace CNRMods
             }
         }
 
-        // ── Mail inbox ────────────────────────────────────────────────────────────
+        // -- Mail inbox ------------------------------------------------------------
         public static void RequestClaimMail(int mailId)
         {
             var hook = (EconomyHook)(object)FindObjectOfType(typeof(EconomyHook));
@@ -7931,7 +7931,13 @@ namespace CNRMods
             }
             string bonusStr = ModEntry.ParseJsonValue(www.text, "bonus_spins");
             int bonusSpins;
-            if (int.TryParse(bonusStr, out bonusSpins)) WheelBonusSpins = bonusSpins;
+            if (int.TryParse(bonusStr, out bonusSpins))
+            {
+                WheelBonusSpins = bonusSpins;
+                // Write into the key the game UI reads for its "x N" gift-box counter
+                PlayerPrefs.SetInt("CurChristmasGiftBoxTotal", bonusSpins);
+                PlayerPrefs.Save();
+            }
             // Mark as claimed locally so UI updates immediately
             for (int i = 0; i < MailIds.Length; i++)
                 if (MailIds[i] == mailId) { MailClaimed[i] = true; break; }
@@ -8081,11 +8087,16 @@ namespace CNRMods
             ServerCoins = coins; ServerGems = gems;
             _lastCoins = coins; _lastGems = gems;
             int bonusSpins;
-            if (int.TryParse(bonusStr, out bonusSpins)) WheelBonusSpins = bonusSpins;
+            if (int.TryParse(bonusStr, out bonusSpins))
+            {
+                WheelBonusSpins = bonusSpins;
+                PlayerPrefs.SetInt("CurChristmasGiftBoxTotal", bonusSpins);
+                PlayerPrefs.Save();
+            }
             onDone(prizeType, prizeAmt, coins, gems);
         }
 
-        // ── Main-menu overlay — scene tracking, patching, drawing ─────────────
+        // -- Main-menu overlay � scene tracking, patching, drawing -------------
         // Disable NGUI UICamera components while an overlay is open so that
         // taps handled by IMGUI don't also fire NGUI buttons behind the overlay.
         private void SetNguiBlocking(bool block)
@@ -8211,16 +8222,16 @@ namespace CNRMods
                         BindingFlags.Instance | BindingFlags.Public);
                     if (fi == null) continue;
                     int bval = (int)(object)fi.GetValue(mb);
-                    if (bval == 59 && _goHelpBtn == null)        // ToHelpScene — hide it
+                    if (bval == 59 && _goHelpBtn == null)        // ToHelpScene � hide it
                     {
                         _goHelpBtn = ((Component)(object)mb).gameObject;
                         _goHelpBtn.SetActive(false);
                     }
-                    else if (bval == 63 && _goRecordBtn == null) // ShowVideoBtn — Recordings
+                    else if (bval == 63 && _goRecordBtn == null) // ShowVideoBtn � Recordings
                     {
                         _goRecordBtn = ((Component)(object)mb).gameObject;
                     }
-                    else if (bval == 49 && _goMultiplayerBtn == null) // GotoHall — intercept
+                    else if (bval == 49 && _goMultiplayerBtn == null) // GotoHall � intercept
                     {
                         _goMultiplayerBtn = ((Component)(object)mb).gameObject;
                         // Disable original handler so our interceptor takes over
@@ -8291,7 +8302,7 @@ namespace CNRMods
 
         private void OnGUI()
         {
-            // Version watermark — top-left corner, visible in all scenes
+            // Version watermark � top-left corner, visible in all scenes
             {
                 var vs = new GUIStyle(GUI.skin.label);
                 vs.fontSize  = 22;
@@ -8359,7 +8370,7 @@ namespace CNRMods
 
             const float pad = 6f, textBtnH = 26f;
 
-            // ── Mail button — to the right of the user agreement button ───────
+            // -- Mail button � to the right of the user agreement button -------
             float mailW, mailH, mailX, mailY;
             if (_ecoNguiCam != null && _goAgreementBtn != null)
             {
@@ -8384,7 +8395,7 @@ namespace CNRMods
                 mailX = ECO_REF_W - 10f - 260f; mailY = vh - 34f;
             }
 
-            // ── Settings/Account button — to the left of the recordings button ─
+            // -- Settings/Account button � to the left of the recordings button -
             float acctW, acctH, acctX, acctY;
             if (_ecoNguiCam != null && _goRecordBtn != null)
             {
@@ -8402,7 +8413,7 @@ namespace CNRMods
                 acctX = ECO_REF_W - 10f - 120f; acctY = vh - 34f;
             }
 
-            // ── Draw mail button ──────────────────────────────────────────────
+            // -- Draw mail button ----------------------------------------------
             if (_texMailIcon != null)
             {
                 GUIStyle iconSt = new GUIStyle();
@@ -8431,7 +8442,7 @@ namespace CNRMods
                 if (GUI.Button(new Rect(mailX, mailY, mailW, mailH), mailLabel, sbMail)) EcoOpenMail();
             }
 
-            // ── Downloads button — to the right of the mail button ────────────
+            // -- Downloads button � to the right of the mail button ------------
             float dlX = mailX + mailW + pad;
             float dlY = mailY;
             float dlW = mailW;
@@ -8444,7 +8455,7 @@ namespace CNRMods
                 : (dlMissing > 0 ? "DL (" + dlMissing + ")" : "DL");
             if (GUI.Button(new Rect(dlX, dlY, dlW, dlH), dlLabel, sbDl)) EcoOpenDownloads();
 
-            // ── Draw settings/account button ──────────────────────────────────
+            // -- Draw settings/account button ----------------------------------
             if (_texSettingsIcon != null)
             {
                 GUIStyle iconSt = new GUIStyle();
@@ -8505,7 +8516,7 @@ namespace CNRMods
             float scrollH = _dlWinRect.height - topArea - 56f - closeH;
             GUIStyle vScr = new GUIStyle(GUI.skin.verticalScrollbar); vScr.fixedWidth = 30f;
 
-            // ── Top bar: Refresh + Download All ──────────────────────────────
+            // -- Top bar: Refresh + Download All ------------------------------
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
             float sinceRefresh = Time.unscaledTime - _dlRefreshTime;
@@ -8542,7 +8553,7 @@ namespace CNRMods
             GUILayout.EndHorizontal();
             GUILayout.Space(4f);
 
-            // ── Scrollable type rows ──────────────────────────────────────────
+            // -- Scrollable type rows ------------------------------------------
             _dlScroll = GUILayout.BeginScrollView(_dlScroll, false, true,
                 GUIStyle.none, vScr,
                 GUILayout.Width(_dlWinRect.width - 4f), GUILayout.Height(scrollH));
@@ -8592,7 +8603,7 @@ namespace CNRMods
                             lblSt, GUILayout.ExpandWidth(true));
                         if (skinCached)
                         {
-                            // Equipping is done through the Shop — show status only.
+                            // Equipping is done through the Shop � show status only.
                             GUIStyle stSt = EcoHintSt();
                             stSt.alignment = TextAnchor.MiddleRight;
                             bool owned = PlayerPrefs.GetInt("CNR_DLC_owned_" + s.Id, 0) != 0;
@@ -8867,7 +8878,7 @@ namespace CNRMods
             _ecoAccountMsg  = "";
         }
 
-        // ── Multiplayer blocked dialog ────────────────────────────────────────
+        // -- Multiplayer blocked dialog ----------------------------------------
         public void ShowMpMissingDialog(bool cnrOk, bool stgOk, bool mgrOk)
         {
             _mpMissingCnr = !cnrOk;
@@ -9014,7 +9025,7 @@ namespace CNRMods
                 {
                     int countdown = Mathf.CeilToInt(_reconnectTimer);
                     string errLine = string.IsNullOrEmpty(_connectError) ? "" : "\n" + _connectError;
-                    GUILayout.Label("Server offline — retrying in " + countdown + "s" + errLine, mt,
+                    GUILayout.Label("Server offline � retrying in " + countdown + "s" + errLine, mt,
                         GUILayout.Height(80f));
                 }
                 else
@@ -9099,7 +9110,7 @@ namespace CNRMods
             { _showEcoMail = false; _ecoLastToggle = Time.unscaledTime; }
         }
 
-        // ── Account panel (standalone — only shown when CNRSettingsMod absent) ──
+        // -- Account panel (standalone � only shown when CNRSettingsMod absent) --
         private void EcoDrawAccountOverlay()
         {
             float vw = ECO_REF_W;
@@ -9222,7 +9233,7 @@ namespace CNRMods
             { _showEcoAccount = false; _ecoLastToggle = Time.unscaledTime; }
         }
 
-        // ── IMGUI helpers ────────────────────────────────────────────────────────
+        // -- IMGUI helpers --------------------------------------------------------
         private static GUIStyle EcoLblSt()
         {
             GUIStyle s = new GUIStyle(GUI.skin.label);
@@ -9300,7 +9311,7 @@ namespace CNRMods
             float bestArea = 0f;
             string bestName = "(fallback)";
             // Walk the full subtree first (self + all descendants), then ancestors.
-            // Strategy 1: BoxCollider — project local-space corners through world transform + camera.
+            // Strategy 1: BoxCollider � project local-space corners through world transform + camera.
             // Using TransformPoint so UIRoot's scale is properly applied.
             BoxCollider bc = go.GetComponent<BoxCollider>();
             if (bc != null)
@@ -9320,7 +9331,7 @@ namespace CNRMods
                     bestName = "BoxCollider@" + go.name + " screen=" + (int)screenW + "x" + (int)screenH;
                 }
             }
-            // Strategy 2: UISprite/UIWidget via reflection — try property first, then field.
+            // Strategy 2: UISprite/UIWidget via reflection � try property first, then field.
             // GetComponentsInChildren(typeof(Component)) works because Component is a Unity engine base.
             Component[] subtree = go.GetComponentsInChildren(typeof(Component));
             foreach (Component wc in subtree)
@@ -9344,7 +9355,7 @@ namespace CNRMods
             return new Rect(cx - hw, cy - hh, hw * 2f, hh * 2f);
         }
 
-        // ── ANDROID_ID helper ─────────────────────────────────────────────────
+        // -- ANDROID_ID helper -------------------------------------------------
 
         private static string GetAndroidId()
         {
@@ -9361,7 +9372,7 @@ namespace CNRMods
         }
     }
 
-    // ── Multiplayer button interceptor ──────────────────────────────────────────
+    // -- Multiplayer button interceptor ------------------------------------------
     public class MpButtonInterceptor : MonoBehaviour
     {
         public EconomyHook hook;
@@ -9376,7 +9387,7 @@ namespace CNRMods
                 Application.LoadLevel("MultiPlayerSelect");
                 return;
             }
-            // Missing one or more — show dialog if hook available, otherwise block silently
+            // Missing one or more � show dialog if hook available, otherwise block silently
             if (hook != null)
                 hook.ShowMpMissingDialog(cnrOk, stgOk, mgrOk);
         }
