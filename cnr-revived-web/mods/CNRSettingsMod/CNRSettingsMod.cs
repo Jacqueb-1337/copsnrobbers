@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.17";
+        public  const string Version = "3.0.18";
 
         public static void Load()
         {
@@ -288,6 +288,10 @@ namespace CNRSettingsMod
         private float  _dbgAbsX = 0f, _dbgAbsY = 0f;  // last abs XY reported by proxy
         private volatile int _gmlFires = 0;   // total calls to GmlProxy.onGenericMotion
         private float  _gmlAbsX = 0f, _gmlAbsY = 0f;  // last abs XY reported by GmlProxy
+        private HoverProxy           _hoverProxy = null;
+        private volatile int         _hvrFires = 0;    // total calls to HoverProxy.onHover
+        private float  _hvrAbsX = 0f, _hvrAbsY = 0f;  // last abs XY reported by HoverProxy
+        private int    _winFocusFires = 0;             // onWindowFocusChanged(true) count
 
         // -- KBM Window.Callback intercept (AXIS_RELATIVE_X/Y velocity) -----
         private WindowCallbackProxy  _winProxy = null;
@@ -2353,14 +2357,13 @@ namespace CNRSettingsMod
                 dbgStyle.normal.textColor = Color.yellow;
                 string dbgText =
                     "KBM DEBUG\n" +
-                    "cap=" + _captureActive + " lock=" + _cursorLocked + "\n" +
+                    "cap=" + _captureActive + " lock=" + _cursorLocked + " focusChg=" + _winFocusFires + "\n" +
                     "src=" + _dbgSource + " dx=" + _dbgRawDx.ToString("F2") + " dy=" + _dbgRawDy.ToString("F2") + "\n" +
-                    "proxy.fires=" + _proxyFires + " | cap.fires=" + (_capListener != null ? _capListener.FireCount.ToString() : "?") + "\n" +
-                    "gml.fires=" + _gmlFires + "\n" +
-                    "proxy.abs=" + (int)_dbgAbsX + "," + (int)_dbgAbsY + "\n" +
-                    "gml.abs=" + (int)_gmlAbsX + "," + (int)_gmlAbsY + "\n" +
+                    "hvr.fires=" + _hvrFires + " abs=" + (int)_hvrAbsX + "," + (int)_hvrAbsY + "\n" +
+                    "cap.fires=" + (_capListener != null ? _capListener.FireCount.ToString() : "?") + "\n" +
+                    "proxy.fires=" + _proxyFires + " gml.fires=" + _gmlFires + "\n" +
                     "frame=" + _dbgFrame;
-                GUI.Box(new Rect(10, 10, 360, 240), dbgText, dbgStyle);
+                GUI.Box(new Rect(10, 10, 360, 220), dbgText, dbgStyle);
             }
 
             if (!_showSettings && !_hudEditMode) return;
@@ -2945,8 +2948,9 @@ namespace CNRSettingsMod
             _cursorLocked      = locked;
             _lastMousePosValid = false;
             _amlDx = 0f; _amlDy = 0f;
-            if (!locked && _winProxy != null) _winProxy.ResetAbsPos();
-            if (!locked && _gmlProxy != null) _gmlProxy.ResetAbsPos();
+            if (!locked && _winProxy   != null) _winProxy.ResetAbsPos();
+            if (!locked && _gmlProxy   != null) _gmlProxy.ResetAbsPos();
+            if (!locked && _hoverProxy != null) _hoverProxy.ResetAbsPos();
             Screen.showCursor  = !locked;
             SetAndroidPointerIcon(!locked);
             SetPointerCapture(locked);  // request/release pointer capture tied to lock state
@@ -3068,15 +3072,40 @@ namespace CNRSettingsMod
                 window.Call("setCallback", _winProxy);
                 SettingsModEntry.Log("KBM: WindowCallbackProxy installed");
 
-                // View.OnGenericMotionListener on DecorView.
-                // Window.Callback.dispatchGenericMotionEvent is NOT called for mouse hover
-                // events on Android — they go directly through the view hierarchy.
-                // A GenericMotionListener on DecorView fires for ALL generic motion events.
+                // View.OnGenericMotionListener on DecorView (catches ACTION_SCROLL etc.).
                 _gmlProxy = new GmlProxy(this);
                 AndroidJavaObject gmlDecorRef = window.Call<AndroidJavaObject>("getDecorView");
                 activity.Call("runOnUiThread", new GmlSetRunnable(gmlDecorRef, _gmlProxy, this));
-                // gmlDecorRef ownership transferred to GmlSetRunnable
-                SettingsModEntry.Log("KBM: GmlProxy registration posted to UI thread");
+                SettingsModEntry.Log("KBM: GmlProxy posted to UI thread");
+
+                // *** PRIMARY INPUT PATH ***
+                // ACTION_HOVER_MOVE goes through ViewRootImpl.dispatchHoverEvent(), NOT
+                // dispatchGenericMotionEvent. So Window.Callback and OnGenericMotionListener
+                // are both structurally unreachable for mouse hover.
+                // Solution: View.OnHoverListener on the actual Unity render surface
+                // (mUnityPlayer or its first child SurfaceView).
+                _hoverProxy = new HoverProxy(this);
+                try
+                {
+                    AndroidJavaObject mup = activity.Get<AndroidJavaObject>("mUnityPlayer");
+                    AndroidJavaObject hvrTarget;
+                    try
+                    {
+                        int cc = mup.Call<int>("getChildCount");
+                        hvrTarget = cc > 0 ? mup.Call<AndroidJavaObject>("getChildAt", 0) : mup;
+                    }
+                    catch { hvrTarget = mup; }
+                    activity.Call("runOnUiThread", new HoverSetRunnable(hvrTarget, _hoverProxy, this));
+                    SettingsModEntry.Log("KBM: HoverProxy posted to UI thread (mUnityPlayer surface)");
+                }
+                catch (Exception hEx)
+                {
+                    SettingsModEntry.Log("KBM: HoverProxy reg err: " + hEx.Message);
+                    // Fallback: try DecorView
+                    AndroidJavaObject hvrDecor = window.Call<AndroidJavaObject>("getDecorView");
+                    activity.Call("runOnUiThread", new HoverSetRunnable(hvrDecor, _hoverProxy, this));
+                    SettingsModEntry.Log("KBM: HoverProxy posted to UI thread (decor fallback)");
+                }
             }
             catch (Exception ex)
             {
@@ -3510,6 +3539,92 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
+        // HoverProxy — View.OnHoverListener on Unity's render surface.
+        // ACTION_HOVER_MOVE goes through ViewRootImpl.dispatchHoverEvent(), NOT
+        // dispatchGenericMotionEvent — so Window.Callback and OnGenericMotionListener
+        // are both dead for mouse hover.  OnHoverListener on the actual hovered view
+        // (mUnityPlayer or its SurfaceView child) intercepts before Unity sees it.
+        // Returns false so Unity still processes hover (needed for NGUI + cursor pos).
+        // =====================================================================
+        private class HoverProxy : AndroidJavaProxy
+        {
+            private const int ACTION_HOVER_MOVE = 7;
+            private readonly SettingsModHook _host;
+            private float _lastAbsX = float.MinValue;
+            private float _lastAbsY = float.MinValue;
+
+            public HoverProxy(SettingsModHook host)
+                : base("android.view.View$OnHoverListener") { _host = host; }
+
+            public void ResetAbsPos() { _lastAbsX = float.MinValue; _lastAbsY = float.MinValue; }
+
+            bool onHover(AndroidJavaObject view, AndroidJavaObject ev)
+            {
+                _host._hvrFires++;
+                try
+                {
+                    int action = ev.Call<int>("getActionMasked");
+                    if (action == ACTION_HOVER_MOVE)
+                    {
+                        // AXIS_RELATIVE only non-zero when pointer capture active
+                        float rdx = ev.Call<float>("getAxisValue", 27);
+                        float rdy = ev.Call<float>("getAxisValue", 28);
+                        if (rdx != 0f || rdy != 0f)
+                        {
+                            _host._amlDx += rdx;
+                            _host._amlDy += rdy;
+                            _host._amlGotData = true;
+                        }
+                        else
+                        {
+                            float ax = ev.Call<float>("getX");
+                            float ay = ev.Call<float>("getY");
+                            _host._hvrAbsX = ax;
+                            _host._hvrAbsY = ay;
+                            if (_lastAbsX != float.MinValue)
+                            {
+                                float ddx = ax - _lastAbsX;
+                                float ddy = ay - _lastAbsY;
+                                if (ddx != 0f || ddy != 0f)
+                                {
+                                    _host._amlDx += ddx;
+                                    _host._amlDy += ddy;
+                                    _host._amlGotData = true;
+                                }
+                            }
+                            _lastAbsX = ax;
+                            _lastAbsY = ay;
+                        }
+                    }
+                }
+                catch { }
+                return false; // let Unity process hover (NGUI + cursor tracking)
+            }
+        }
+
+        private class HoverSetRunnable : AndroidJavaProxy
+        {
+            private readonly AndroidJavaObject _view;
+            private readonly HoverProxy        _proxy;
+            private readonly SettingsModHook   _host;
+
+            public HoverSetRunnable(AndroidJavaObject view, HoverProxy proxy, SettingsModHook host)
+                : base("java.lang.Runnable") { _view = view; _proxy = proxy; _host = host; }
+
+            public void run()
+            {
+                try
+                {
+                    _view.Call("setOnHoverListener", _proxy);
+                    string cls = _view.Call<AndroidJavaObject>("getClass").Call<string>("getName");
+                    SettingsModEntry.Log("KBM: HoverProxy installed on " + cls);
+                }
+                catch (Exception ex) { SettingsModEntry.Log("KBM: HoverProxy install err: " + ex.Message); }
+                finally { _view.Dispose(); }
+            }
+        }
+
+        // =====================================================================
         // GmlProxy — View.OnGenericMotionListener on DecorView.
         // Fires for ALL mouse generic motion events (hover + captured move) at the
         // view level, independently of whether Window.Callback fires.
@@ -3634,14 +3749,57 @@ namespace CNRSettingsMod
                                       .Call<string>("getName");
                     if (_capture)
                     {
+                        // Try on passed view (DecorView)
                         if (_listener != null)
                             _view.Call("setOnCapturedPointerListener", _listener);
                         _view.Call("requestPointerCapture");
                         bool hasCap = _view.Call<bool>("hasPointerCapture");
-                        SettingsModEntry.Log("KBM: UI capture hasCap=" + hasCap
-                            + " view=" + cls);
-                        // Set optimistically — grant is async, hasCap may be false
-                        // immediately even when capture succeeds.
+                        SettingsModEntry.Log("KBM: decor capture hasCap=" + hasCap + " view=" + cls);
+
+                        // requestPointerCapture() requires the calling View to have input
+                        // focus.  On Unity, mUnityPlayer (not DecorView) holds focus.
+                        // Try the currently focused view and mUnityPlayer explicitly.
+                        AndroidJavaClass  pl2 = null;
+                        AndroidJavaObject ac2 = null, wn2 = null, fv = null, mup = null;
+                        try
+                        {
+                            pl2 = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                            ac2 = pl2.GetStatic<AndroidJavaObject>("currentActivity");
+                            wn2 = ac2.Call<AndroidJavaObject>("getWindow");
+                            // Try window's focused view
+                            fv = wn2.Call<AndroidJavaObject>("getCurrentFocus");
+                            if (fv != null)
+                            {
+                                if (_listener != null) fv.Call("setOnCapturedPointerListener", _listener);
+                                fv.Call("requestPointerCapture");
+                                bool hasFv = fv.Call<bool>("hasPointerCapture");
+                                string fvCls = fv.Call<AndroidJavaObject>("getClass").Call<string>("getName");
+                                SettingsModEntry.Log("KBM: focused capture hasCap=" + hasFv + " view=" + fvCls);
+                            }
+                            else
+                            {
+                                SettingsModEntry.Log("KBM: getCurrentFocus() returned null");
+                            }
+                            // Also try mUnityPlayer directly
+                            mup = ac2.Get<AndroidJavaObject>("mUnityPlayer");
+                            if (mup != null)
+                            {
+                                if (_listener != null) mup.Call("setOnCapturedPointerListener", _listener);
+                                mup.Call("requestPointerCapture");
+                                bool hasMup = mup.Call<bool>("hasPointerCapture");
+                                string mupCls = mup.Call<AndroidJavaObject>("getClass").Call<string>("getName");
+                                SettingsModEntry.Log("KBM: mUnityPlayer capture hasCap=" + hasMup + " view=" + mupCls);
+                            }
+                        }
+                        catch (Exception ce) { SettingsModEntry.Log("KBM: focused/mup capture err: " + ce.Message); }
+                        finally
+                        {
+                            if (mup != null) mup.Dispose();
+                            if (fv  != null) fv.Dispose();
+                            if (wn2 != null) wn2.Dispose();
+                            if (ac2 != null) ac2.Dispose();
+                            if (pl2 != null) pl2.Dispose();
+                        }
                         _host._captureActive = true;
                     }
                     else
@@ -3741,33 +3899,49 @@ namespace CNRSettingsMod
             public void onWindowFocusChanged(bool hasFocus)
             {
                 _orig.Call("onWindowFocusChanged", hasFocus);
-                // Android docs: requestPointerCapture() must be called while the window has
-                // input focus.  onWindowFocusChanged(true) is the documented trigger point.
-                // Re-requesting here covers: initial capture AND cases where focus was lost
-                // (dialog, notification shade) and regained.
+                if (hasFocus) _host._winFocusFires++;
                 if (hasFocus && _host._kbmEnabled && _host._cursorLocked)
                 {
                     AndroidJavaClass  pl = null;
-                    AndroidJavaObject ac = null, wn = null, dc = null;
+                    AndroidJavaObject ac = null, wn = null, dc = null, fv = null, mup = null;
                     try
                     {
-                        pl = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-                        ac = pl.GetStatic<AndroidJavaObject>("currentActivity");
-                        wn = ac.Call<AndroidJavaObject>("getWindow");
-                        dc = wn.Call<AndroidJavaObject>("getDecorView");
+                        pl  = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                        ac  = pl.GetStatic<AndroidJavaObject>("currentActivity");
+                        wn  = ac.Call<AndroidJavaObject>("getWindow");
+                        // Try focused view first (mUnityPlayer holds focus in Unity)
+                        fv  = wn.Call<AndroidJavaObject>("getCurrentFocus");
+                        if (fv != null)
+                        {
+                            if (_host._capListener != null)
+                                fv.Call("setOnCapturedPointerListener", _host._capListener);
+                            fv.Call("requestPointerCapture");
+                            SettingsModEntry.Log("KBM: focusChange capture -> focused view");
+                        }
+                        mup = ac.Get<AndroidJavaObject>("mUnityPlayer");
+                        if (mup != null)
+                        {
+                            if (_host._capListener != null)
+                                mup.Call("setOnCapturedPointerListener", _host._capListener);
+                            mup.Call("requestPointerCapture");
+                            SettingsModEntry.Log("KBM: focusChange capture -> mUnityPlayer");
+                        }
+                        dc  = wn.Call<AndroidJavaObject>("getDecorView");
                         if (_host._capListener != null)
                             dc.Call("setOnCapturedPointerListener", _host._capListener);
                         dc.Call("requestPointerCapture");
                         _host._captureActive = true;
-                        SettingsModEntry.Log("KBM: onWindowFocusChanged(true) -> requestPointerCapture");
+                        SettingsModEntry.Log("KBM: focusChange capture -> decor (winFocusFires=" + _host._winFocusFires + ")");
                     }
                     catch (Exception ex) { SettingsModEntry.Log("KBM: focus-capture err: " + ex.Message); }
                     finally
                     {
-                        if (dc != null) dc.Dispose();
-                        if (wn != null) wn.Dispose();
-                        if (ac != null) ac.Dispose();
-                        if (pl != null) pl.Dispose();
+                        if (mup != null) mup.Dispose();
+                        if (fv  != null) fv.Dispose();
+                        if (dc  != null) dc.Dispose();
+                        if (wn  != null) wn.Dispose();
+                        if (ac  != null) ac.Dispose();
+                        if (pl  != null) pl.Dispose();
                     }
                 }
             }
