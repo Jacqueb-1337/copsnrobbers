@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.6";
+        public  const string Version = "3.0.8";
 
         public static void Load()
         {
@@ -2909,23 +2909,34 @@ namespace CNRSettingsMod
         private void SetPointerCapture(bool capture)
         {
             AndroidJavaClass  player   = null;
-            AndroidJavaObject activity = null, window = null, decor = null;
+            AndroidJavaObject activity = null, window = null, decor = null, focused = null;
             try
             {
                 player   = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
                 activity = player.GetStatic<AndroidJavaObject>("currentActivity");
                 window   = activity.Call<AndroidJavaObject>("getWindow");
                 decor    = window.Call<AndroidJavaObject>("getDecorView");
+                // Captured pointer events are delivered to the view that HOLDS the capture.
+                // Unity's inner UnityPlayer view has focus, not the decor root.
+                // findFocus() walks down the hierarchy and returns the focused descendant.
+                focused = decor.Call<AndroidJavaObject>("findFocus");
+                AndroidJavaObject target = (focused != null) ? focused : decor;
                 if (capture)
                 {
-                    decor.Call("requestPointerCapture");
+                    // Register listener on the same view we request capture on —
+                    // both must be the same view or captured events won't reach our callback.
+                    if (_capListener != null)
+                        target.Call("setOnCapturedPointerListener", _capListener);
+                    target.Call("requestPointerCapture");
+                    bool hasCap = target.Call<bool>("hasPointerCapture");
+                    SettingsModEntry.Log("KBM: requestPointerCapture hasCap=" + hasCap
+                        + " usedFocus=" + (focused != null));
                     _captureActive = true;
                     if (_capListener != null) _capListener.Reset();
-                    SettingsModEntry.Log("KBM: pointer capture requested");
                 }
                 else
                 {
-                    decor.Call("releasePointerCapture");
+                    target.Call("releasePointerCapture");
                     _captureActive = false;
                     if (_capListener != null) _capListener.Reset();
                     SettingsModEntry.Log("KBM: pointer capture released");
@@ -2938,6 +2949,7 @@ namespace CNRSettingsMod
             }
             finally
             {
+                if (focused  != null) focused.Dispose();
                 if (decor    != null) decor.Dispose();
                 if (window   != null) window.Dispose();
                 if (activity != null) activity.Dispose();
@@ -2998,10 +3010,10 @@ namespace CNRSettingsMod
                 window   = activity.Call<AndroidJavaObject>("getWindow");
                 decor    = window.Call<AndroidJavaObject>("getDecorView");
 
-                // Register CapturedPointerListener (fires when pointer capture is active)
+                // Create CapturedPointerListener; it gets registered on the focused view
+                // inside SetPointerCapture(true) (must be the same view that holds capture).
                 _capListener = new CapturedPointerListener();
-                decor.Call("setOnCapturedPointerListener", _capListener);
-                SettingsModEntry.Log("KBM: CapturedPointerListener registered");
+                SettingsModEntry.Log("KBM: CapturedPointerListener created");
 
                 // Also install Window.Callback proxy as fallback
                 orig = window.Call<AndroidJavaObject>("getCallback");
@@ -3511,6 +3523,7 @@ namespace CNRSettingsMod
             // Raw accumulated relative mouse delta since last drain.
             private volatile float _dx;
             private volatile float _dy;
+            private volatile bool  _loggedFirst;
             // Mouse button state (set/cleared from Android UI thread, read on game thread).
             public volatile bool lmbHeld;
 
@@ -3526,7 +3539,7 @@ namespace CNRSettingsMod
             public CapturedPointerListener()
                 : base("android.view.View$OnCapturedPointerListener") { }
 
-            public void Reset() { _dx = 0f; _dy = 0f; lmbHeld = false; }
+            public void Reset() { _dx = 0f; _dy = 0f; lmbHeld = false; _loggedFirst = false; }
 
             // Called by Unity game thread each frame to atomically read+clear delta.
             public float DrainDx() { float v = _dx; _dx = 0f; return v; }
@@ -3538,6 +3551,14 @@ namespace CNRSettingsMod
                 try
                 {
                     int action = e.Call<int>("getActionMasked");
+                    if (!_loggedFirst)
+                    {
+                        _loggedFirst = true;
+                        float rx = e.Call<float>("getAxisValue", AXIS_RELATIVE_X);
+                        float ry = e.Call<float>("getAxisValue", AXIS_RELATIVE_Y);
+                        UnityEngine.Debug.Log("KBM: onCapturedPointer FIRST action=" + action
+                            + " rx=" + rx + " ry=" + ry);
+                    }
                     if (action == ACTION_MOVE || action == ACTION_HOVER_MOVE)
                     {
                         _dx += e.Call<float>("getAxisValue", AXIS_RELATIVE_X);
