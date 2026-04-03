@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.21";
+        public  const string Version = "3.0.23";
 
         public static void Load()
         {
@@ -1972,7 +1972,14 @@ namespace CNRSettingsMod
             }
             if (_allSliderotates.Count > 0)
             {
-                _sliderotate = _allSliderotates[0];
+                // Prefer active+enabled; fall back to first found
+                _sliderotate = null;
+                foreach (MonoBehaviour mb in _allSliderotates)
+                {
+                    if (mb.gameObject.activeInHierarchy && ((Behaviour)mb).enabled)
+                    { _sliderotate = mb; break; }
+                }
+                if (_sliderotate == null) _sliderotate = _allSliderotates[0];
                 Type t = _sliderotate.GetType();
                 _fiSensX        = t.GetField("sensitivityX",  BindingFlags.Instance | BindingFlags.NonPublic);
                 _fiSensY        = t.GetField("sensitivityY",  BindingFlags.Instance | BindingFlags.NonPublic);
@@ -3210,6 +3217,12 @@ namespace CNRSettingsMod
         private void KbmInjectMouseLook(float mx, float my)
         {
             if (_sliderotate == null) CacheSliderotate();
+            // Re-cache if we've latched onto an inactive GO (e.g. stale prefab or respawn)
+            if (_sliderotate != null && !((Component)(_sliderotate as Component)).gameObject.activeInHierarchy)
+            {
+                _sliderotate = null;
+                CacheSliderotate();
+            }
             if (_sliderotate == null || _fiRotationX == null) return;
 
             float sens = _isAiming ? (_mouseSensNgl * _mouseAdsMult) : _mouseSensNgl;
