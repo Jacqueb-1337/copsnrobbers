@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.33";
+        public  const string Version = "3.0.34";
 
         public static void Load()
         {
@@ -1068,7 +1068,8 @@ namespace CNRSettingsMod
         // Supplemental screen-space fire-button detection (see TouchFireDetect)
         private float _touchFireCooldown = 0f;
         private bool  _kbmFireWasHeld   = false;
-        private JoyStickController _joyStickCtrl = null;
+        private JoyStickController _joyStickCtrl         = null;
+        private bool               _joyStickCtrlSearched  = false; // true after FindObjectOfType ran once (prevents per-frame search in CNR mode where JoyStickController is absent)
         private System.Reflection.FieldInfo _fiFireHoldCount = null;
         private System.Reflection.FieldInfo _fiJumpIsJumping  = null;
         private System.Reflection.FieldInfo _fiJumpTime       = null;
@@ -1195,7 +1196,8 @@ namespace CNRSettingsMod
             _chatWasFocused   = false;
             for (int i = 0; i < DRAG_COUNT; i++) { _dragGOs[i] = null; _dragOrigPos[i] = Vector3.zero; /* keep _dragOrigScale so captured baseline survives multiple ApplyHUDOnLoad runs */ }
             for (int i = 0; i < _visGOs.Length;  i++) _visGOs[i]  = null;
-            _joyStickCtrl    = null;
+            _joyStickCtrl         = null;
+            _joyStickCtrlSearched = false;
             _fiJumpIsJumping  = null;
             _fiJumpTime       = null;
             _fiJumpCharCtrl   = null;
@@ -1738,8 +1740,13 @@ namespace CNRSettingsMod
                 : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
 
             // Cache JoyStickController and fireStatusHoldTimeCount field (single-player scenes).
-            if ((object)_joyStickCtrl == null)
+            // IMPORTANT: Only search once — in CNR mode JoyStickController is absent so searching
+            // every frame is O(all scene components) → causes periodic GC stutter.
+            if ((object)_joyStickCtrl == null && !_joyStickCtrlSearched)
+            {
+                _joyStickCtrlSearched = true;
                 _joyStickCtrl = (JoyStickController)UnityEngine.Object.FindObjectOfType(typeof(JoyStickController));
+            }
             if (_fiFireHoldCount == null && (object)_joyStickCtrl != null)
                 _fiFireHoldCount = typeof(JoyStickController).GetField(
                     "fireStatusHoldTimeCount",
@@ -1771,14 +1778,14 @@ namespace CNRSettingsMod
                     _fiFireHoldCount.SetValue(_joyStickCtrl, 0.235f);
             }
 
-            // ---- CNR multiplayer path (CRInput / CRWeaponScript scenes) ----
-            // fireFlag must be set every LateUpdate while held because CRJoyStickController
-            // resets it to false at the end of every Update().  Our LateUpdate runs after,
-            // so the true value persists into the next frame's Update().
-            if ((object)CRInput.mInstance != null)
-                CRInput.mInstance.m_bFire = true;
-            if ((object)CRJoyStickController.mInstance != null)
-                CRJoyStickController.mInstance.fireFlag = true;
+            // ---- CNR multiplayer path — call through UIMenuDirector.GenFireEvent() ----
+            // This is exactly what the on-screen Fire button does:
+            //   UIButtonEventKit → UIMenuDirector.mInstance.GenFireEvent()
+            //   → UIMenuDirector.OnFire event → CRUIEventInteract.OnFire()
+            //   → { CRInput.m_bFire = true; CRJoyStickController.fireFlag = true; }
+            //   → CRWeaponScript.LateUpdate() reads m_bFire and fires the active melee weapon.
+            if ((object)UIMenuDirector.mInstance != null)
+                UIMenuDirector.mInstance.GenFireEvent();
         }
 
         // Jump-on-press touch detection.
