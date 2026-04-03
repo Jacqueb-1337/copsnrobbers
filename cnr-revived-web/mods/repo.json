@@ -575,6 +575,11 @@
         {
           "version": "3.1.0",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.0.dll",
+          "changelog": "add Xbox gamepad support "
+        },
+        {
+          "version": "3.1.0",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.0.dll",
           "changelog": "added Xbox gamepad support "
         },
         {
