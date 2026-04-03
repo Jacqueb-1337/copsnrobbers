@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.0";
+        public  const string Version = "3.1.1";
 
         public static void Load()
         {
@@ -294,9 +294,22 @@ namespace CNRSettingsMod
         private bool   _gpAxesProbed  = false;
         private string _gpLAxisX      = null;
         private string _gpLAxisY      = null;
-        private string _gpRAxisX      = null; // user-configured or detected
-        private string _gpRAxisY      = null;
-        private int    _gpRStickDetect = 0;   // 0=idle, 1=detecting X, 2=detecting Y
+        private int    _gpStickDetect = 0;    // 0=idle, 1=LX, 2=LY, 3=RX, 4=RY
+        private int    _gpLStickJAX   = 0;    // JoyProxy axis for left stick X  (default AXIS_X=0)
+        private int    _gpLStickJAY   = 1;    // JoyProxy axis for left stick Y  (default AXIS_Y=1)
+        private int    _gpRStickJAX   = 11;   // JoyProxy axis for right stick X (default AXIS_Z=11)
+        private int    _gpRStickJAY   = 14;   // JoyProxy axis for right stick Y (default AXIS_RZ=14)
+        // Joystick MotionEvent proxy (intercepts Android axes Unity's InputManager doesn't expose)
+        private JoyMotionProxy _joyProxy;
+        private bool           _joyProxySetup;
+        private float[]        _gpJoyBaseline = null; // joyProxy axis snapshot at capture start
+        // Android MotionEvent axis IDs for Xbox-style gamepad
+        private const int JA_RSX  = 11; // AXIS_Z      right stick X
+        private const int JA_RSY  = 14; // AXIS_RZ     right stick Y
+        private const int JA_HATX = 15; // AXIS_HAT_X  dpad X
+        private const int JA_HATY = 16; // AXIS_HAT_Y  dpad Y
+        private const int JA_LT   = 17; // AXIS_LTRIGGER
+        private const int JA_RT   = 18; // AXIS_RTRIGGER
         private static readonly string[] GP_LAXIS_X = { "Horizontal", "Joystick Axis 1", "1st axis" };
         private static readonly string[] GP_LAXIS_Y = { "Vertical",   "Joystick Axis 2", "2nd axis" };
         // All axes to probe for button capture and live test
@@ -1622,7 +1635,7 @@ namespace CNRSettingsMod
                     _fiCannotRotate.SetValue(_sliderotate, true);
             }
             // Gamepad right stick also injects via KbmInjectMouseLook — suppress Sliderotate too.
-            else if (_gamepadEnabled && _gpRAxisX != null && _inGameScene)
+            else if (_gamepadEnabled && _joyProxy != null && _inGameScene)
             {
                 if (_sliderotate == null) CacheSliderotate();
                 if (_sliderotate != null && _fiCannotRotate != null)
@@ -2954,19 +2967,41 @@ namespace CNRSettingsMod
             GUILayout.Space(14f);
 
             // ---- Axis Live Test --------------------------------------------
+            if (!_joyProxySetup) SetupJoyProxy();
             SectionHeader("Axis Live Test");
             GUILayout.Space(4f);
-            GUILayout.Label("  Move sticks / trigger / D-pad to see which axis numbers respond.", HintStyle());
             GUIStyle axStyle = HintStyle(); axStyle.fontSize = 11;
-            for (int axi = 0; axi < GP_ALL_AXES.Length; axi++)
+            if (_joyProxy != null && _joyProxy.HasData)
             {
-                string an = GP_ALL_AXES[axi];
+                GUILayout.Label("  JoyProxy axes (move sticks / triggers / D-pad):", HintStyle());
+                string[][] labeled = {
+                    new string[]{ "0",  "L-stick X" }, new string[]{ "1",  "L-stick Y" },
+                    new string[]{ "11", "R-stick X" }, new string[]{ "14", "R-stick Y" },
+                    new string[]{ "15", "DPad X" },    new string[]{ "16", "DPad Y" },
+                    new string[]{ "17", "L-Trigger" }, new string[]{ "18", "R-Trigger" } };
+                foreach (var pair in labeled)
+                {
+                    int axId; if (!int.TryParse(pair[0], out axId)) continue;
+                    float av = _joyProxy.Get(axId);
+                    string lbl = "    " + pair[1].PadRight(14) + ": " + av.ToString("F2") + (Mathf.Abs(av) > 0.3f ? "  \u25c4" : "");
+                    GUILayout.Label(lbl, axStyle, GUILayout.Height(17f));
+                }
+            }
+            else
+            {
+                GUILayout.Label("  Connect a controller \u2014 values appear here once a stick or button is moved.", HintStyle());
+            }
+            // Unity InputManager axes (Horizontal / Vertical from left stick)
+            GUILayout.Space(3f);
+            GUIStyle axStyle2 = HintStyle(); axStyle2.fontSize = 10;
+            foreach (string an in new string[]{ "Horizontal", "Vertical", "Rotate Camera Horizontal Buttons", "Rotate Camera Vertical Buttons" })
+            {
                 float av = TryGetAxisRaw(an);
-                if (float.IsNaN(av)) continue;  // axis not in InputManager — skip
-                string sn = an.StartsWith("Joystick Axis ") ? "Axis " + an.Substring("Joystick Axis ".Length)
-                          : (an.Length > 16 ? an.Substring(0, 16) : an);
-                string lbl = "  " + sn.PadRight(16) + ": " + av.ToString("F2") + (Mathf.Abs(av) > 0.3f ? "  \u25C4" : "");
-                GUILayout.Label(lbl, axStyle, GUILayout.Height(16f));
+                if (!float.IsNaN(av))
+                {
+                    string sn = an.Length > 22 ? an.Substring(0, 22) : an;
+                    GUILayout.Label("    " + sn.PadRight(22) + ": " + av.ToString("F2") + (Mathf.Abs(av) > 0.1f ? "  \u25c4" : ""), axStyle2, GUILayout.Height(15f));
+                }
             }
             GUILayout.Space(10f);
 
@@ -2989,7 +3024,7 @@ namespace CNRSettingsMod
                     HudCfgSave();
                 }
             }
-            GUILayout.Label("  Left stick = move.  Configure R-stick axes below for camera.", HintStyle());
+            GUILayout.Label("  Left stick = move.  Right stick camera uses Android AXIS_Z/AXIS_RZ.", HintStyle());
             GUILayout.Space(14f);
 
             // ---- Deadzone --------------------------------------------------
@@ -3042,57 +3077,62 @@ namespace CNRSettingsMod
                 HudCfgSetFloat("CNRMod_CtrlAimMult", _controllerAimMult);
             }
             GUILayout.Label("  % of right-stick speed while scoped", HintStyle());
-            GUILayout.Space(10f);
+            GUILayout.Space(14f);
 
-            // ---- R-stick Axis Config (Detect) --------------------------------
-            SectionHeader("Right Stick Axis Config");
+            // ---- Stick Axis Detection ----------------------------------------
+            SectionHeader("Stick Axes (JoyProxy)");
             GUILayout.Space(4f);
-            GUILayout.Label("  Use Axis Live Test above to identify axis numbers, then tap Detect and move the stick.", HintStyle());
+            GUILayout.Label("  Tap Detect then move the stick axis you want to assign.", HintStyle());
             GUILayout.Space(4f);
-            // R-stick X
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("R-stick X:  " + (_gpRAxisX ?? "(not set)"), HintStyle(), GUILayout.ExpandWidth(true));
-            if (_gpRStickDetect == 1)
+            string[] stickLabels = { "L-stick X", "L-stick Y", "R-stick X", "R-stick Y" };
+            int[] stickCurrent   = { _gpLStickJAX, _gpLStickJAY, _gpRStickJAX, _gpRStickJAY };
+            for (int si = 0; si < 4; si++)
             {
-                if (GUILayout.Button("Cancel", BtnStyle(11, new Color(1f, 0.5f, 0.5f)), GUILayout.Width(pw * 0.27f), GUILayout.Height(26f)))
-                    _gpRStickDetect = 0;
-            }
-            else
-            {
-                if (GUILayout.Button("Detect X", BtnStyle(11, new Color(0.5f, 1f, 0.6f)), GUILayout.Width(pw * 0.27f), GUILayout.Height(26f)))
-                    _gpRStickDetect = 1;
-            }
-            GUILayout.EndHorizontal();
-            if (_gpRStickDetect == 1) GUILayout.Label("  >>> Move right stick LEFT or RIGHT now...", HintStyle());
-            GUILayout.Space(4f);
-            // R-stick Y
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("R-stick Y:  " + (_gpRAxisY ?? "(not set)"), HintStyle(), GUILayout.ExpandWidth(true));
-            if (_gpRStickDetect == 2)
-            {
-                if (GUILayout.Button("Cancel", BtnStyle(11, new Color(1f, 0.5f, 0.5f)), GUILayout.Width(pw * 0.27f), GUILayout.Height(26f)))
-                    _gpRStickDetect = 0;
-            }
-            else
-            {
-                if (GUILayout.Button("Detect Y", BtnStyle(11, new Color(0.5f, 1f, 0.6f)), GUILayout.Width(pw * 0.27f), GUILayout.Height(26f)))
-                    _gpRStickDetect = 2;
-            }
-            GUILayout.EndHorizontal();
-            if (_gpRStickDetect == 2) GUILayout.Label("  >>> Move right stick UP or DOWN now...", HintStyle());
-            // Poll axes for stick detection
-            if (_gpRStickDetect > 0)
-            {
-                foreach (string an in GP_ALL_AXES)
+                GUILayout.BeginHorizontal();
+                string curLabel = "JA:" + stickCurrent[si];
+                GUILayout.Label(stickLabels[si] + "  [" + curLabel + "]", HintStyle(), GUILayout.ExpandWidth(true));
+                if (_gpStickDetect == si + 1)
                 {
-                    if (an == _gpLAxisX || an == _gpLAxisY) continue;
-                    float av = TryGetAxisRaw(an);
-                    if (!float.IsNaN(av) && Mathf.Abs(av) > 0.5f)
+                    if (GUILayout.Button("Cancel", BtnStyle(11, new Color(1f, 0.5f, 0.5f)), GUILayout.Width(pw * 0.24f), GUILayout.Height(26f)))
+                        _gpStickDetect = 0;
+                }
+                else
+                {
+                    if (GUILayout.Button("Detect", BtnStyle(11, new Color(0.5f, 1f, 0.6f)), GUILayout.Width(pw * 0.24f), GUILayout.Height(26f)))
+                        _gpStickDetect = si + 1;
+                }
+                GUILayout.EndHorizontal();
+                if (_gpStickDetect == si + 1) GUILayout.Label("  >>> Move the axis now...", HintStyle());
+                GUILayout.Space(2f);
+            }
+            // Poll JoyProxy for detection
+            if (_gpStickDetect > 0 && _joyProxy != null && _joyProxy.HasData)
+            {
+                int[] excludeLX = { _gpLStickJAY, _gpRStickJAX, _gpRStickJAY };
+                int[] excludeLY = { _gpLStickJAX, _gpRStickJAX, _gpRStickJAY };
+                int[] excludeRX = { _gpLStickJAX, _gpLStickJAY, _gpRStickJAY };
+                int[] excludeRY = { _gpLStickJAX, _gpLStickJAY, _gpRStickJAX };
+                int[] excludes  = _gpStickDetect == 1 ? excludeLX
+                                : _gpStickDetect == 2 ? excludeLY
+                                : _gpStickDetect == 3 ? excludeRX
+                                : excludeRY;
+                int[] candidates = { 0, 1, 11, 14, 15, 16, 17, 18 };
+                foreach (int axId in candidates)
+                {
+                    bool skip = false;
+                    foreach (int ex in excludes) if (ex == axId) { skip = true; break; }
+                    if (skip) continue;
+                    if (Mathf.Abs(_joyProxy.Get(axId)) > 0.5f)
                     {
-                        if (_gpRStickDetect == 1) { _gpRAxisX = an; HudCfgSet("CNRMod_RStickX", an); }
-                        else                      { _gpRAxisY = an; HudCfgSet("CNRMod_RStickY", an); }
+                        switch (_gpStickDetect)
+                        {
+                            case 1: _gpLStickJAX = axId; HudCfgSetInt("CNRMod_LStickJAX", axId); break;
+                            case 2: _gpLStickJAY = axId; HudCfgSetInt("CNRMod_LStickJAY", axId); break;
+                            case 3: _gpRStickJAX = axId; HudCfgSetInt("CNRMod_RStickJAX", axId); break;
+                            case 4: _gpRStickJAY = axId; HudCfgSetInt("CNRMod_RStickJAY", axId); break;
+                        }
                         HudCfgSave();
-                        _gpRStickDetect = 0;
+                        _gpStickDetect = 0;
                         break;
                     }
                 }
@@ -3131,10 +3171,12 @@ namespace CNRSettingsMod
                 {
                     _gpCaptureIdx      = i;
                     _gpCaptureCooldown = 4;
-                    // snapshot baseline so axis-threshold detection uses delta, not absolute value
+                    // snapshot Unity InputManager axes baseline
                     _gpAxisBaseline = new float[GP_ALL_AXES.Length];
                     for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
                         _gpAxisBaseline[ai] = TryGetAxisRaw(GP_ALL_AXES[ai]);
+                    // snapshot JoyProxy axes baseline (triggers rest at 0, dpad at 0)
+                    _gpJoyBaseline = _joyProxy != null ? _joyProxy.Snapshot() : null;
                 }
                 GUILayout.EndHorizontal();
                 GUILayout.Space(2f);
@@ -3466,7 +3508,7 @@ namespace CNRSettingsMod
             if (kcInt >= 370 && kcInt <= 509) return "JBtn" + ((kcInt - 350) % 20);
             return kc.ToString();
         }
-        // "Joystick Axis 9|+" → "Axis9+",  "Horizontal|-" → "Horiz-"
+        // "JA:17|+" → "LT",  "JA:15|-" → "DPad-L",  "Horizontal|-" → "H-"
         private static string GpAxisBindLabel(string axisBind)
         {
             if (string.IsNullOrEmpty(axisBind)) return "";
@@ -3474,6 +3516,19 @@ namespace CNRSettingsMod
             if (pipe < 0) return axisBind;
             string axName = axisBind.Substring(0, pipe);
             string dir    = axisBind.Substring(pipe + 1);
+            if (axName.StartsWith("JA:"))
+            {
+                switch (axName)
+                {
+                    case "JA:11": return dir == "+" ? "RS-R" : "RS-L";
+                    case "JA:14": return dir == "+" ? "RS-D" : "RS-U";
+                    case "JA:15": return dir == "+" ? "DPad-R" : "DPad-L";
+                    case "JA:16": return dir == "+" ? "DPad-D" : "DPad-U";
+                    case "JA:17": return "LT";
+                    case "JA:18": return "RT";
+                    default:      return "JA" + axName.Substring(3) + dir;
+                }
+            }
             if (axName.StartsWith("Joystick Axis "))  axName = "Axis" + axName.Substring("Joystick Axis ".Length);
             else if (axName == "Horizontal")          axName = "H";
             else if (axName == "Vertical")            axName = "V";
@@ -3532,26 +3587,52 @@ namespace CNRSettingsMod
 
             // ---- Poll axes for threshold-based bindings (triggers, D-pad, sticks) ----
             // Only check once per Repaint to avoid double-firing
-            if (Event.current.type == EventType.Repaint && _gpAxisBaseline != null)
+            if (Event.current.type == EventType.Repaint)
             {
-                for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
+                // JoyProxy axes (right stick, triggers, dpad) — primary for Android gamepad
+                if (_joyProxy != null && _joyProxy.HasData && _gpJoyBaseline != null)
                 {
-                    string an = GP_ALL_AXES[ai];
-                    float cur = TryGetAxisRaw(an);
-                    if (float.IsNaN(cur)) continue;
-                    float baseline = float.IsNaN(_gpAxisBaseline[ai]) ? 0f : _gpAxisBaseline[ai];
-                    float delta = cur - baseline;
-                    if (Mathf.Abs(delta) > 0.45f)
+                    float[] joyNow = _joyProxy.Snapshot();
+                    int[] joyAxes = { 11, 14, 15, 16, 17, 18 };
+                    foreach (int axId in joyAxes)
                     {
-                        string dir = delta > 0f ? "+" : "-";
-                        _gpAxisBinds[_gpCaptureIdx] = an + "|" + dir;
-                        HudCfgSet(GP_AXIS_PREF_KEYS[_gpCaptureIdx], _gpAxisBinds[_gpCaptureIdx]);
-                        // Clear any previously stored key bind for this slot (axis bind takes priority)
-                        _gpKeys[_gpCaptureIdx] = KeyCode.None;
-                        HudCfgSetInt(GP_PREF_KEYS[_gpCaptureIdx], (int)KeyCode.None);
-                        HudCfgSave();
-                        _gpCaptureIdx = -1;
-                        return;
+                        if (axId >= joyNow.Length) continue;
+                        float bl = axId < _gpJoyBaseline.Length ? _gpJoyBaseline[axId] : 0f;
+                        float delta = joyNow[axId] - bl;
+                        if (Mathf.Abs(delta) > 0.4f)
+                        {
+                            string dir = delta > 0f ? "+" : "-";
+                            _gpAxisBinds[_gpCaptureIdx] = "JA:" + axId + "|" + dir;
+                            HudCfgSet(GP_AXIS_PREF_KEYS[_gpCaptureIdx], _gpAxisBinds[_gpCaptureIdx]);
+                            _gpKeys[_gpCaptureIdx] = KeyCode.None;
+                            HudCfgSetInt(GP_PREF_KEYS[_gpCaptureIdx], (int)KeyCode.None);
+                            HudCfgSave();
+                            _gpCaptureIdx = -1;
+                            return;
+                        }
+                    }
+                }
+                // Unity InputManager axes (Horizontal / Vertical) — fallback
+                if (_gpAxisBaseline != null)
+                {
+                    for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
+                    {
+                        string an = GP_ALL_AXES[ai];
+                        float cur = TryGetAxisRaw(an);
+                        if (float.IsNaN(cur)) continue;
+                        float baseline = float.IsNaN(_gpAxisBaseline[ai]) ? 0f : _gpAxisBaseline[ai];
+                        float delta = cur - baseline;
+                        if (Mathf.Abs(delta) > 0.45f)
+                        {
+                            string dir = delta > 0f ? "+" : "-";
+                            _gpAxisBinds[_gpCaptureIdx] = an + "|" + dir;
+                            HudCfgSet(GP_AXIS_PREF_KEYS[_gpCaptureIdx], _gpAxisBinds[_gpCaptureIdx]);
+                            _gpKeys[_gpCaptureIdx] = KeyCode.None;
+                            HudCfgSetInt(GP_PREF_KEYS[_gpCaptureIdx], (int)KeyCode.None);
+                            HudCfgSave();
+                            _gpCaptureIdx = -1;
+                            return;
+                        }
                     }
                 }
             }
@@ -3930,23 +4011,71 @@ namespace CNRSettingsMod
             if (string.IsNullOrEmpty(_gpAxisBinds[idx])) return false;
             int pipe = _gpAxisBinds[idx].LastIndexOf('|');
             if (pipe < 0) return false;
-            float v = TryGetAxisRaw(_gpAxisBinds[idx].Substring(0, pipe));
-            if (float.IsNaN(v)) return false;
-            return _gpAxisBinds[idx][pipe + 1] == '+' ? (v > 0.5f) : (v < -0.5f);
+            string axName = _gpAxisBinds[idx].Substring(0, pipe);
+            char   dir    = _gpAxisBinds[idx][pipe + 1];
+            float  v;
+            if (axName.StartsWith("JA:"))
+            {
+                int axId;
+                v = (int.TryParse(axName.Substring(3), out axId) && _joyProxy != null)
+                    ? _joyProxy.Get(axId) : 0f;
+            }
+            else
+            {
+                v = TryGetAxisRaw(axName);
+                if (float.IsNaN(v)) return false;
+            }
+            return dir == '+' ? (v > 0.5f) : (v < -0.5f);
         }
 
-        private void ProbeGpAxes()
+        // Null-safe read from JoyMotionProxy axes.
+        private float JoyRaw(int axis) { return _joyProxy != null ? _joyProxy.Get(axis) : 0f; }
+
+        // Register JoyMotionProxy as OnGenericMotionEventListener on the DecorView.
+        // Returns false so Unity still receives all joystick events normally.
+        private void SetupJoyProxy()
         {
+            if (_joyProxySetup) return;
+            _joyProxySetup = true;
+            AndroidJavaClass  player   = null;
+            AndroidJavaObject activity = null, window = null, decor = null;
+            try
+            {
+                player   = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                activity = player.GetStatic<AndroidJavaObject>("currentActivity");
+                window   = activity.Call<AndroidJavaObject>("getWindow");
+                decor    = window.Call<AndroidJavaObject>("getDecorView");
+                _joyProxy = new JoyMotionProxy();
+                var runnable = new JoyProxySetRunnable(decor, _joyProxy);
+                decor = null; // ownership transferred to runnable
+                activity.Call("runOnUiThread", runnable);
+            }
+            catch (Exception ex)
+            {
+                SettingsModEntry.Log("SetupJoyProxy: " + ex.Message);
+                _joyProxy = null;
+            }
+            finally
+            {
+                if (decor    != null) decor.Dispose();
+                if (window   != null) window.Dispose();
+                if (activity != null) activity.Dispose();
+                if (player   != null) player.Dispose();
+            }
+        }
+
+        private void ProbeGpAxes()        {
             _gpAxesProbed = true;
             foreach (string n in GP_LAXIS_X) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisX = n; break; } }
             foreach (string n in GP_LAXIS_Y) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisY = n; break; } }
             // R-stick axes come from user config (Detect buttons in Controllers tab) — not auto-probed.
             SettingsModEntry.Log("GP axes probed: LX=" + (_gpLAxisX ?? "NONE") + " LY=" + (_gpLAxisY ?? "NONE")
-                + "  RX=" + (_gpRAxisX ?? "user-cfg") + " RY=" + (_gpRAxisY ?? "user-cfg"));
+                + "  RX=JA:" + _gpRStickJAX + " RY=JA:" + _gpRStickJAY);
         }
 
         private void GamepadUpdate()
         {
+            if (!_joyProxySetup) SetupJoyProxy();
             if (!_gpAxesProbed) ProbeGpAxes();
 
             // ---- Movement inject (left stick → VCAnalogJoystickBase) --------
@@ -3965,12 +4094,23 @@ namespace CNRSettingsMod
                 if (fiMax != null) _kbmDragMax = (float)fiMax.GetValue(_kbmJoystick);
                 SettingsModEntry.Log("GamepadUpdate: joystick hooked, dragMax=" + _kbmDragMax);
             }
-            if (_kbmFiDeltaPixels != null && _gpLAxisX != null && _gpLAxisY != null)
+            if (_kbmFiDeltaPixels != null)
             {
-                float ax = TryGetAxisRaw(_gpLAxisX);
-                float ay = TryGetAxisRaw(_gpLAxisY);
-                if (float.IsNaN(ax)) ax = 0f;
-                if (float.IsNaN(ay)) ay = 0f;
+                float ax, ay;
+                // Prefer JoyProxy AXIS_X/Y (bypasses Unity InputManager limitations)
+                if (_joyProxy != null && _joyProxy.HasData)
+                {
+                    ax =  _joyProxy.Get(_gpLStickJAX);
+                    ay = -_joyProxy.Get(_gpLStickJAY); // Y is inverted: push up = positive Y in Unity
+                }
+                else if (_gpLAxisX != null && _gpLAxisY != null)
+                {
+                    ax = TryGetAxisRaw(_gpLAxisX);
+                    ay = TryGetAxisRaw(_gpLAxisY);
+                    if (float.IsNaN(ax)) ax = 0f;
+                    if (float.IsNaN(ay)) ay = 0f;
+                }
+                else { ax = 0f; ay = 0f; }
                 float mag = Mathf.Sqrt(ax * ax + ay * ay);
                 if (mag > 0f && mag < _controllerDeadzone) { ax = 0f; ay = 0f; }
                 float injectX = ax * _kbmDragMax * _controllerSens;
@@ -3981,16 +4121,14 @@ namespace CNRSettingsMod
                 _kbmFiDeltaPixels.SetValue(_kbmJoystick, new Vector2(injectX, injectY));
             }
 
-            // ---- Right stick → camera ----------------------------------------
-            if (_gpRAxisX != null && _gpRAxisY != null)
+            // ---- Right stick → camera (reads JoyProxy axes, user-configurable) --------
+            if (_joyProxy != null)
             {
                 if (_sliderotate == null) CacheSliderotate();
                 if (_sliderotate != null)
                 {
-                    float rx =  TryGetAxisRaw(_gpRAxisX);
-                    float ry = -TryGetAxisRaw(_gpRAxisY); // invert: stick up = look up
-                    if (float.IsNaN(rx)) rx = 0f;
-                    if (float.IsNaN(ry)) ry = 0f;
+                    float rx =  JoyRaw(_gpRStickJAX);
+                    float ry = -JoyRaw(_gpRStickJAY); // invert: stick up = look up
                     float rmag = Mathf.Sqrt(rx * rx + ry * ry);
                     if (rmag > _controllerDeadzone)
                     {
@@ -4424,6 +4562,76 @@ namespace CNRSettingsMod
                 if (root == null) continue;
                 SettingsModEntry.Log("=== Deep scan: " + rootName + " ===");
                 LogChildrenRecursive(root.transform, 0, 6); // max depth 6
+            }
+        }
+
+        // =====================================================================
+        // JoyMotionProxy — View.OnGenericMotionEventListener on the DecorView.
+        // Intercepts SOURCE_JOYSTICK MotionEvents to read right stick / trigger /
+        // dpad axes that are NOT mapped in the game's InputManager and therefore
+        // inaccessible via Input.GetAxisRaw().  Returns false so Unity still receives
+        // the event and processes button presses normally.
+        // =====================================================================
+        private class JoyMotionProxy : AndroidJavaProxy
+        {
+            private readonly object _lk = new object();
+            private readonly float[] _ax = new float[20];
+            private bool _hasData;
+
+            internal JoyMotionProxy() : base("android.view.View$OnGenericMotionEventListener") { }
+
+            // Called on Android UI thread by View.dispatchGenericMotionEvent.
+            bool onGenericMotion(AndroidJavaObject v, AndroidJavaObject e)
+            {
+                try
+                {
+                    int src = e.Call<int>("getSource");
+                    if ((src & 0x01000010) != 0) // SOURCE_JOYSTICK
+                    {
+                        lock (_lk)
+                        {
+                            _ax[0]  = e.Call<float>("getAxisValue", 0);  // AXIS_X      left stick X
+                            _ax[1]  = e.Call<float>("getAxisValue", 1);  // AXIS_Y      left stick Y
+                            _ax[11] = e.Call<float>("getAxisValue", 11); // AXIS_Z      right stick X
+                            _ax[14] = e.Call<float>("getAxisValue", 14); // AXIS_RZ     right stick Y
+                            _ax[15] = e.Call<float>("getAxisValue", 15); // AXIS_HAT_X  dpad X
+                            _ax[16] = e.Call<float>("getAxisValue", 16); // AXIS_HAT_Y  dpad Y
+                            _ax[17] = e.Call<float>("getAxisValue", 17); // AXIS_LTRIGGER
+                            _ax[18] = e.Call<float>("getAxisValue", 18); // AXIS_RTRIGGER
+                            _hasData = true;
+                        }
+                    }
+                }
+                catch { }
+                return false; // don't consume: Unity still sees the event
+            }
+
+            internal float Get(int axis)
+            {
+                if (!_hasData || axis < 0 || axis >= _ax.Length) return 0f;
+                lock (_lk) { return _ax[axis]; }
+            }
+            internal bool HasData { get { return _hasData; } }
+            internal float[] Snapshot()
+            {
+                var copy = new float[_ax.Length];
+                lock (_lk) { System.Array.Copy(_ax, copy, _ax.Length); }
+                return copy;
+            }
+        }
+
+        private class JoyProxySetRunnable : AndroidJavaProxy
+        {
+            private readonly AndroidJavaObject _decor;
+            private readonly JoyMotionProxy    _proxy;
+            internal JoyProxySetRunnable(AndroidJavaObject decor, JoyMotionProxy proxy)
+                : base("java.lang.Runnable") { _decor = decor; _proxy = proxy; }
+            public void run()
+            {
+                try   { _decor.Call("setOnGenericMotionListener", _proxy);
+                        SettingsModEntry.Log("JoyProxy: registered on DecorView"); }
+                catch (Exception ex) { SettingsModEntry.Log("JoyProxy reg: " + ex.Message); }
+                finally { _decor.Dispose(); }
             }
         }
 
@@ -4979,10 +5187,10 @@ namespace CNRSettingsMod
                 string axBind    = HudCfgGet(GP_AXIS_PREF_KEYS[gi], "");
                 _gpAxisBinds[gi] = axBind.Length > 0 ? axBind : null;
             }
-            string rsX = HudCfgGet("CNRMod_RStickX", "");
-            string rsY = HudCfgGet("CNRMod_RStickY", "");
-            if (rsX.Length > 0) _gpRAxisX = rsX;
-            if (rsY.Length > 0) _gpRAxisY = rsY;
+            _gpLStickJAX = HudCfgGetInt("CNRMod_LStickJAX", 0);
+            _gpLStickJAY = HudCfgGetInt("CNRMod_LStickJAY", 1);
+            _gpRStickJAX = HudCfgGetInt("CNRMod_RStickJAX", 11);
+            _gpRStickJAY = HudCfgGetInt("CNRMod_RStickJAY", 14);
             for (int i = 0; i < VIS_ITEMS.Length; i++)
                 _visOn[i] = HudCfgGetInt(VIS_ITEMS[i].prefKey, 1) == 1;
             // Pre-populate _savedScales so LateUpdate can enforce them immediately.
