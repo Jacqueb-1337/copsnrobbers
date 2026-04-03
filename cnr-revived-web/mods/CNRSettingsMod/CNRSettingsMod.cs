@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.27";
+        public  const string Version = "3.0.28";
 
         public static void Load()
         {
@@ -1067,6 +1067,7 @@ namespace CNRSettingsMod
 
         // Supplemental screen-space fire-button detection (see TouchFireDetect)
         private float _touchFireCooldown = 0f;
+        private bool  _kbmFireWasHeld   = false;
         private JoyStickController _joyStickCtrl = null;
         private System.Reflection.FieldInfo _fiFireHoldCount = null;
         private System.Reflection.FieldInfo _fiJumpIsJumping  = null;
@@ -1201,6 +1202,7 @@ namespace CNRSettingsMod
             _jumpTouchIds.Clear();
             _ownJumpActive = false;
             _ownJumpVelY   = 0f;
+            _kbmFireWasHeld  = false;
             LoadPrefs();
             if (_inGameScene) StartCoroutine(ApplyHUDOnLoad());
             if (_inGameScene && _kbmEnabled) StartCoroutine(AutoLockAfterLoad());
@@ -1361,8 +1363,6 @@ namespace CNRSettingsMod
             if (_kbKeys[12] != KeyCode.None && Input.GetKeyDown(_kbKeys[12]))
                 KbmHandleChat();
 
-            // Movement
-            KbmInjectJoystick();
         }
 
         private IEnumerator PatchAfterFrame()
@@ -1630,6 +1630,10 @@ namespace CNRSettingsMod
                 _amlDy = 0f;
                 if (_capListener != null) { _capListener.DrainDx(); _capListener.DrainDy(); }
             }
+            // Joystick inject runs at the END of LateUpdate so it cannot interfere with
+            // the mouse-look code above.  Movement uses the previous frame's inject (1-frame
+            // lag is imperceptible for held keys) which is fine since we inject every frame.
+            if (_kbmEnabled && _inGameScene) KbmInjectJoystick();
         }
 
         // Supplemental fire-button touch detection.
@@ -1708,33 +1712,59 @@ namespace CNRSettingsMod
         // resets mStatus to idle every frame when touchCount==0.
         private void KbmFireDetect()
         {
-            if (!_kbmEnabled || !_cursorLocked) return;
+            if (!_kbmEnabled || !_cursorLocked)
+            {
+                _kbmFireWasHeld = false;
+                return;
+            }
             bool fireHeld = (_kbKeys[0] == KeyCode.Mouse0)
                 ? (_capListener != null ? _capListener.lmbHeld : Input.GetMouseButton(0))
                 : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
-            if (!fireHeld) return;
-            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
-            if (NGUI.mInstance != null && NGUI.mInstance.noClips) return;
 
-            WeaponType wt = PlayerLogic.mInstance.mWeaponType;
-            PlayerLogic.mInstance.mStatus =
-                (wt == WeaponType.BallisticKnife || wt == WeaponType.GingerbreadKnife)
-                ? PlayerStatus.knifeFire : PlayerStatus.fire;
-
-            // Cache fireStatusHoldTimeCount so JoyStickController won't reset to idle
-            // next frame's Update() before we get to set it again.
+            // Cache JoyStickController and fireStatusHoldTimeCount field once.
             if ((object)_joyStickCtrl == null)
                 _joyStickCtrl = (JoyStickController)UnityEngine.Object.FindObjectOfType(typeof(JoyStickController));
             if (_fiFireHoldCount == null && (object)_joyStickCtrl != null)
                 _fiFireHoldCount = typeof(JoyStickController).GetField(
                     "fireStatusHoldTimeCount",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+            if (!fireHeld)
+            {
+                // On release: let JoyStickController reset mStatus to idle/walk next frame.
+                if (_kbmFireWasHeld && (object)_joyStickCtrl != null && _fiFireHoldCount != null)
+                    _fiFireHoldCount.SetValue(_joyStickCtrl, 0f);
+                _kbmFireWasHeld = false;
+                return;
+            }
+
+            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied)
+            {
+                _kbmFireWasHeld = false;
+                return;
+            }
+            if (NGUI.mInstance != null && NGUI.mInstance.noClips) return;
+
+            _kbmFireWasHeld = true;
+
+            WeaponType wt = PlayerLogic.mInstance.mWeaponType;
+            PlayerLogic.mInstance.mStatus =
+                (wt == WeaponType.BallisticKnife || wt == WeaponType.GingerbreadKnife)
+                ? PlayerStatus.knifeFire : PlayerStatus.fire;
+
+            // Keep fireStatusHoldTimeCount > 0 so JoyStickController.Update() doesn't
+            // override mStatus to idle (it only overrides when holdCount <= 0).
             if ((object)_joyStickCtrl != null && _fiFireHoldCount != null)
                 _fiFireHoldCount.SetValue(_joyStickCtrl, 0.235f);
 
-            // Trigger actual weapon fire logic (sets CRInput.m_bFire + fireFlag).
-            if ((object)UIMenuDirector.mInstance != null)
-                UIMenuDirector.mInstance.GenFireEvent();
+            // Set fire signals directly — avoids GenFireEvent() which calls
+            // CRJoyStickController.mInstance.fireFlag and throws NullReferenceException
+            // if CRJoyStickController.mInstance is null, aborting LateUpdate and
+            // preventing the mouse-look code from running.
+            if ((object)CRInput.mInstance != null)
+                CRInput.mInstance.m_bFire = true;
+            if ((object)CRJoyStickController.mInstance != null)
+                CRJoyStickController.mInstance.fireFlag = true;
         }
 
         // Jump-on-press touch detection.
