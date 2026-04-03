@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.30";
+        public  const string Version = "3.0.31";
 
         public static void Load()
         {
@@ -1719,8 +1719,13 @@ namespace CNRSettingsMod
             }
         }
 
-        // KBM fire: runs in LateUpdate so it overrides JoyStickController.Update() which
-        // resets mStatus to idle every frame when touchCount==0.
+        // KBM fire: mirrors what the on-screen Fire button does.
+        // Single-player (FreeRun/SingleMode): sets PlayerLogic.mStatus and keeps
+        //   JoyStickController.fireStatusHoldTimeCount alive so Update() won't reset to idle.
+        // CNR multiplayer: sets CRInput.m_bFire + CRJoyStickController.fireFlag, exactly as
+        //   UIButtonEventKit → GenFireEvent → CRUIEventInteract.OnFire() does — but null-safe.
+        //   CRWeaponScript.LateUpdate() reads m_bFire and fires the active melee weapon.
+        // NOTE: In CNR mode PlayerLogic.mInstance is null — DON'T use it as a gate for fire!
         private void KbmFireDetect()
         {
             if (!_kbmEnabled || !_cursorLocked)
@@ -1732,7 +1737,7 @@ namespace CNRSettingsMod
                 ? (_capListener != null ? _capListener.lmbHeld : Input.GetMouseButton(0))
                 : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
 
-            // Cache JoyStickController and fireStatusHoldTimeCount field once.
+            // Cache JoyStickController and fireStatusHoldTimeCount field (single-player scenes).
             if ((object)_joyStickCtrl == null)
                 _joyStickCtrl = (JoyStickController)UnityEngine.Object.FindObjectOfType(typeof(JoyStickController));
             if (_fiFireHoldCount == null && (object)_joyStickCtrl != null)
@@ -1749,29 +1754,27 @@ namespace CNRSettingsMod
                 return;
             }
 
-            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied)
-            {
-                _kbmFireWasHeld = false;
-                return;
-            }
             if (NGUI.mInstance != null && NGUI.mInstance.noClips) return;
 
             _kbmFireWasHeld = true;
 
-            WeaponType wt = PlayerLogic.mInstance.mWeaponType;
-            PlayerLogic.mInstance.mStatus =
-                (wt == WeaponType.BallisticKnife || wt == WeaponType.GingerbreadKnife)
-                ? PlayerStatus.knifeFire : PlayerStatus.fire;
+            // ---- Single-player path (PlayerLogic / JoyStickController scenes) ----
+            if ((object)PlayerLogic.mInstance != null && !PlayerLogic.mInstance.bDied)
+            {
+                WeaponType wt = PlayerLogic.mInstance.mWeaponType;
+                PlayerLogic.mInstance.mStatus =
+                    (wt == WeaponType.BallisticKnife || wt == WeaponType.GingerbreadKnife)
+                    ? PlayerStatus.knifeFire : PlayerStatus.fire;
+                // Keep fireStatusHoldTimeCount > 0 so JoyStickController.Update() doesn't
+                // override mStatus to idle (it only overrides when holdCount <= 0).
+                if ((object)_joyStickCtrl != null && _fiFireHoldCount != null)
+                    _fiFireHoldCount.SetValue(_joyStickCtrl, 0.235f);
+            }
 
-            // Keep fireStatusHoldTimeCount > 0 so JoyStickController.Update() doesn't
-            // override mStatus to idle (it only overrides when holdCount <= 0).
-            if ((object)_joyStickCtrl != null && _fiFireHoldCount != null)
-                _fiFireHoldCount.SetValue(_joyStickCtrl, 0.235f);
-
-            // Set fire signals directly — avoids GenFireEvent() which calls
-            // CRJoyStickController.mInstance.fireFlag and throws NullReferenceException
-            // if CRJoyStickController.mInstance is null, aborting LateUpdate and
-            // preventing the mouse-look code from running.
+            // ---- CNR multiplayer path (CRInput / CRWeaponScript scenes) ----
+            // fireFlag must be set every LateUpdate while held because CRJoyStickController
+            // resets it to false at the end of every Update().  Our LateUpdate runs after,
+            // so the true value persists into the next frame's Update().
             if ((object)CRInput.mInstance != null)
                 CRInput.mInstance.m_bFire = true;
             if ((object)CRJoyStickController.mInstance != null)
