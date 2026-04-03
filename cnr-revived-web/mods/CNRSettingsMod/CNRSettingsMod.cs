@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.31";
+        public  const string Version = "3.0.33";
 
         public static void Load()
         {
@@ -2528,8 +2528,8 @@ namespace CNRSettingsMod
         // =====================================================================
         private void OnGUI()
         {
-            // KBM debug overlay — always visible when KBM enabled and cursor locked
-            if (_kbmEnabled && _cursorLocked && !_showSettings)
+            // KBM debug overlay — disabled
+            if (false && _kbmEnabled && _cursorLocked && !_showSettings)
             {
                 GUIStyle dbgStyle = new GUIStyle(GUI.skin.box);
                 dbgStyle.alignment = TextAnchor.UpperLeft;
