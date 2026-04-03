@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.5";
+        public  const string Version = "3.0.6";
 
         public static void Load()
         {
@@ -1328,7 +1328,7 @@ namespace CNRSettingsMod
 
             // Fire
             bool fireHeld = (_kbKeys[0] == KeyCode.Mouse0)
-                ? Input.GetMouseButton(0)
+                ? (_captureActive ? (_capListener != null && _capListener.lmbHeld) : Input.GetMouseButton(0))
                 : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
             if (fireHeld
                 && (object)PlayerLogic.mInstance != null
@@ -1527,48 +1527,57 @@ namespace CNRSettingsMod
             OwnJumpPhysics();
             ApplySensitivity();
             // KBM mouse look.
-            // Primary source: AXIS_RELATIVE_X/Y accumulated by AndroidMouseListener each frame.
-            // These are hardware mouse velocity values from the MotionEvent — they work at any
-            // screen position with no pointer capture, so Unity clicks are unaffected.
-            // Fallback 1: Input.GetAxis (may return 0 on old Android/Unity builds).
-            // Fallback 2: Input.mousePosition delta (stops at screen edges, last resort).
+            // Primary: pointer capture (API 26+) gives AXIS_RELATIVE on captured events.
+            // Fallback 1: WindowCallbackProxy AXIS_RELATIVE (if proxy fires before Unity).
+            // Fallback 2: Input.GetAxis (may be 0 on old Android builds).
+            // Fallback 3: mousePosition delta (stops at screen edges, last resort).
             if (_kbmEnabled && _cursorLocked && !_showSettings)
             {
-                // Drain the accumulated delta written by WindowCallbackProxy.
-                float dx = _amlDx;  _amlDx = 0f;
-                float dy = _amlDy;  _amlDy = 0f;
-                if (_amlGotData)
+                float dx, dy;
+                if (_captureActive && _capListener != null)
                 {
-                    // Proxy is working — use AXIS_RELATIVE data (works at any screen position).
+                    dx = _capListener.DrainDx();
+                    dy = _capListener.DrainDy();
+                    // dy from MotionEvent: positive = down; Unity camera: positive = up
                     if (dx != 0f || dy != 0f)
                     {
-                        // dy from MotionEvent: positive = down; Unity camera: positive = up — invert.
                         KbmInjectMouseLook(dx * 0.05f, -dy * 0.05f);
                         _lastMousePosValid = false;
                     }
                 }
                 else
                 {
-                    // Fallback 1: Unity axis
-                    float axX = Input.GetAxis("Mouse X");
-                    float axY = Input.GetAxis("Mouse Y");
-                    if (axX != 0f || axY != 0f)
+                    // Drain WindowCallbackProxy accumulator
+                    dx = _amlDx;  _amlDx = 0f;
+                    dy = _amlDy;  _amlDy = 0f;
+                    if (_amlGotData && (dx != 0f || dy != 0f))
                     {
-                        KbmInjectMouseLook(axX * 3f, axY * 3f);
+                        KbmInjectMouseLook(dx * 0.05f, -dy * 0.05f);
                         _lastMousePosValid = false;
                     }
                     else
                     {
-                        // Fallback 2: mousePosition delta
-                        Vector3 curPos = Input.mousePosition;
-                        if (_lastMousePosValid)
+                        // Fallback 2: Unity axis
+                        float axX = Input.GetAxis("Mouse X");
+                        float axY = Input.GetAxis("Mouse Y");
+                        if (axX != 0f || axY != 0f)
                         {
-                            float mx = (curPos.x - _lastMousePos.x) * 0.05f;
-                            float my = (curPos.y - _lastMousePos.y) * 0.05f;
-                            if (mx != 0f || my != 0f) KbmInjectMouseLook(mx, my);
+                            KbmInjectMouseLook(axX * 3f, axY * 3f);
+                            _lastMousePosValid = false;
                         }
-                        _lastMousePos      = curPos;
-                        _lastMousePosValid = true;
+                        else
+                        {
+                            // Fallback 3: mousePosition delta
+                            Vector3 curPos = Input.mousePosition;
+                            if (_lastMousePosValid)
+                            {
+                                float mx = (curPos.x - _lastMousePos.x) * 0.05f;
+                                float my = (curPos.y - _lastMousePos.y) * 0.05f;
+                                if (mx != 0f || my != 0f) KbmInjectMouseLook(mx, my);
+                            }
+                            _lastMousePos      = curPos;
+                            _lastMousePosValid = true;
+                        }
                     }
                 }
             }
@@ -1577,6 +1586,7 @@ namespace CNRSettingsMod
                 _lastMousePosValid = false;
                 _amlDx = 0f;
                 _amlDy = 0f;
+                if (_capListener != null) { _capListener.DrainDx(); _capListener.DrainDy(); }
             }
         }
 
@@ -2890,9 +2900,49 @@ namespace CNRSettingsMod
         {
             _cursorLocked      = locked;
             _lastMousePosValid = false;
-            _amlDx = 0f; _amlDy = 0f;  // discard any queued deltas on lock change
+            _amlDx = 0f; _amlDy = 0f;
             Screen.showCursor  = !locked;
-            SetAndroidPointerIcon(!locked);  // hide/show hardware cursor via Android API
+            SetAndroidPointerIcon(!locked);
+            SetPointerCapture(locked);  // request/release pointer capture tied to lock state
+        }
+
+        private void SetPointerCapture(bool capture)
+        {
+            AndroidJavaClass  player   = null;
+            AndroidJavaObject activity = null, window = null, decor = null;
+            try
+            {
+                player   = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                activity = player.GetStatic<AndroidJavaObject>("currentActivity");
+                window   = activity.Call<AndroidJavaObject>("getWindow");
+                decor    = window.Call<AndroidJavaObject>("getDecorView");
+                if (capture)
+                {
+                    decor.Call("requestPointerCapture");
+                    _captureActive = true;
+                    if (_capListener != null) _capListener.Reset();
+                    SettingsModEntry.Log("KBM: pointer capture requested");
+                }
+                else
+                {
+                    decor.Call("releasePointerCapture");
+                    _captureActive = false;
+                    if (_capListener != null) _capListener.Reset();
+                    SettingsModEntry.Log("KBM: pointer capture released");
+                }
+            }
+            catch (Exception ex)
+            {
+                _captureActive = false;
+                SettingsModEntry.Log("KBM: SetPointerCapture(" + capture + ") err: " + ex.Message);
+            }
+            finally
+            {
+                if (decor    != null) decor.Dispose();
+                if (window   != null) window.Dispose();
+                if (activity != null) activity.Dispose();
+                if (player   != null) player.Dispose();
+            }
         }
 
         // Hide or show the hardware mouse cursor using Android's PointerIcon API (API 24+).
@@ -2935,30 +2985,37 @@ namespace CNRSettingsMod
         }
 
         // Wrap the Activity's Window.Callback so we intercept dispatchGenericMotionEvent
-        // BEFORE it is dispatched to any view (including Unity's own view hierarchy).
-        // All other callback methods are forwarded to the original callback unchanged.
+        // as a fallback when pointer capture is unavailable.
+        // Also registers the CapturedPointerListener for pointer-capture-based input.
         private void KbmRegisterMouseListener()
         {
             AndroidJavaClass  player   = null;
-            AndroidJavaObject activity = null, window = null, orig = null;
+            AndroidJavaObject activity = null, window = null, orig = null, decor = null;
             try
             {
                 player   = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
                 activity = player.GetStatic<AndroidJavaObject>("currentActivity");
                 window   = activity.Call<AndroidJavaObject>("getWindow");
-                orig     = window.Call<AndroidJavaObject>("getCallback");
+                decor    = window.Call<AndroidJavaObject>("getDecorView");
+
+                // Register CapturedPointerListener (fires when pointer capture is active)
+                _capListener = new CapturedPointerListener();
+                decor.Call("setOnCapturedPointerListener", _capListener);
+                SettingsModEntry.Log("KBM: CapturedPointerListener registered");
+
+                // Also install Window.Callback proxy as fallback
+                orig = window.Call<AndroidJavaObject>("getCallback");
                 _winProxy = new WindowCallbackProxy(orig, this);
                 window.Call("setCallback", _winProxy);
                 SettingsModEntry.Log("KBM: WindowCallbackProxy installed");
             }
             catch (Exception ex)
             {
-                SettingsModEntry.Log("KBM: WindowCallbackProxy failed: " + ex.Message);
-                _winProxy = null;
+                SettingsModEntry.Log("KBM: mouse listener reg failed: " + ex.Message);
             }
             finally
             {
-                // Note: do NOT dispose orig — WindowCallbackProxy holds a reference to it.
+                if (decor    != null) decor.Dispose();
                 if (window   != null) window.Dispose();
                 if (activity != null) activity.Dispose();
                 if (player   != null) player.Dispose();
