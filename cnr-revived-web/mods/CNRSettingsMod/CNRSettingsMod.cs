@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.36";
+        public  const string Version = "3.0.37";
 
         public static void Load()
         {
@@ -284,6 +284,17 @@ namespace CNRSettingsMod
         private KeyCode[] _gpKeys           = new KeyCode[GP_BIND_COUNT];
         private int     _gpCaptureIdx       = -1;
         private int     _gpCaptureCooldown  = 0;
+        // -- Gamepad axis probe -----------------------------------------------
+        // Probed on first GamepadUpdate call; null = axis doesn't exist in InputManager.
+        private bool   _gpAxesProbed  = false;
+        private string _gpLAxisX      = null;
+        private string _gpLAxisY      = null;
+        private string _gpRAxisX      = null;
+        private string _gpRAxisY      = null;
+        private static readonly string[] GP_LAXIS_X = { "Horizontal", "Joystick Axis 1", "1st axis" };
+        private static readonly string[] GP_LAXIS_Y = { "Vertical",   "Joystick Axis 2", "2nd axis" };
+        private static readonly string[] GP_RAXIS_X = { "Joystick Axis 4", "4th axis", "Joystick Axis 3", "3rd axis" };
+        private static readonly string[] GP_RAXIS_Y = { "Joystick Axis 5", "5th axis", "Joystick Axis 4", "4th axis" };
         private int     _activeTab  = 0;   // 0 = Settings  1 = KBM  2 = Account
         private string  _pinInput    = "";
         private string  _pinPassword = "";
@@ -1600,7 +1611,7 @@ namespace CNRSettingsMod
                     _fiCannotRotate.SetValue(_sliderotate, true);
             }
             // Gamepad right stick also injects via KbmInjectMouseLook — suppress Sliderotate too.
-            else if (_gamepadEnabled && _gpRightStickOk && _inGameScene)
+            else if (_gamepadEnabled && _gpRAxisX != null && _inGameScene)
             {
                 if (_sliderotate == null) CacheSliderotate();
                 if (_sliderotate != null && _fiCannotRotate != null)
@@ -2931,6 +2942,26 @@ namespace CNRSettingsMod
             }
             GUILayout.Space(14f);
 
+            // ---- Axis Live Test --------------------------------------------
+            SectionHeader("Axis Live Test");
+            GUILayout.Space(4f);
+            if (!_gpAxesProbed)
+                GUILayout.Label("  Enable Gamepad and enter a game — axes will be probed on first update.", HintStyle());
+            else
+            {
+                string lxs = _gpLAxisX != null ? (_gpLAxisX + " = " + TryGetAxisRaw(_gpLAxisX).ToString("F2")) : "NOT FOUND";
+                string lys = _gpLAxisY != null ? (_gpLAxisY + " = " + TryGetAxisRaw(_gpLAxisY).ToString("F2")) : "NOT FOUND";
+                string rxs = _gpRAxisX != null ? (_gpRAxisX + " = " + TryGetAxisRaw(_gpRAxisX).ToString("F2")) : "NOT FOUND";
+                string rys = _gpRAxisY != null ? (_gpRAxisY + " = " + TryGetAxisRaw(_gpRAxisY).ToString("F2")) : "NOT FOUND";
+                GUILayout.Label("  L-stick X:  " + lxs, HintStyle());
+                GUILayout.Label("  L-stick Y:  " + lys, HintStyle());
+                GUILayout.Label("  R-stick X:  " + rxs, HintStyle());
+                GUILayout.Label("  R-stick Y:  " + rys, HintStyle());
+                GUILayout.Label("  Move sticks to verify values change.", HintStyle());
+            }
+            GUILayout.Label("  L2/R2 triggers are analog axes — they cannot be bound as buttons.", HintStyle());
+            GUILayout.Space(14f);
+
             // ---- Gamepad Enabled --------------------------------------------
             SectionHeader("Gamepad Input");
             GUILayout.Space(4f);
@@ -3348,22 +3379,31 @@ namespace CNRSettingsMod
 
         private static string GpBtnName(KeyCode kc)
         {
-            switch (kc)
+            if (kc == KeyCode.None) return "(none)";
+            int kcInt = (int)kc;
+            // Any-joystick range: JoystickButton0-19 = 330-349
+            if (kcInt >= 330 && kcInt <= 349) return GpBtnShort(kcInt - 330);
+            // Joystick1Button0-19 = 350-369  (Unity captures these when physical pad detected)
+            if (kcInt >= 350 && kcInt <= 369) return GpBtnShort(kcInt - 350);
+            // Joystick2-8 (370-509) - unlikely but handle
+            if (kcInt >= 370 && kcInt <= 509) return "JBtn" + ((kcInt - 350) % 20);
+            return kc.ToString();
+        }
+        private static string GpBtnShort(int n)
+        {
+            switch (n)
             {
-                case KeyCode.JoystickButton0:  return "Btn 0  (A/Cross)";
-                case KeyCode.JoystickButton1:  return "Btn 1  (B/Circle)";
-                case KeyCode.JoystickButton2:  return "Btn 2  (X/Square)";
-                case KeyCode.JoystickButton3:  return "Btn 3  (Y/Tri)";
-                case KeyCode.JoystickButton4:  return "Btn 4  (LB/L1)";
-                case KeyCode.JoystickButton5:  return "Btn 5  (RB/R1)";
-                case KeyCode.JoystickButton6:  return "Btn 6  (Back)";
-                case KeyCode.JoystickButton7:  return "Btn 7  (Start)";
-                case KeyCode.JoystickButton8:  return "Btn 8  (L-stick)";
-                case KeyCode.JoystickButton9:  return "Btn 9  (R-stick)";
-                case KeyCode.None:             return "(none)";
-                default:
-                    int n = (int)kc - 330; // JoystickButton0 = KeyCode 330
-                    return (n >= 0 && n <= 19) ? "Btn " + n : kc.ToString();
+                case 0:  return "Btn0 A";
+                case 1:  return "Btn1 B";
+                case 2:  return "Btn2 X";
+                case 3:  return "Btn3 Y";
+                case 4:  return "Btn4 LB";
+                case 5:  return "Btn5 RB";
+                case 6:  return "Btn6 Bk";
+                case 7:  return "Btn7 St";
+                case 8:  return "Btn8 LS";
+                case 9:  return "Btn9 RS";
+                default: return "Btn" + n;
             }
         }
 
@@ -3388,6 +3428,8 @@ namespace CNRSettingsMod
             float cy = h * 0.40f;
             GUI.Label(new Rect(10f, cy,        w - 20f, 40f), "Binding:  " + GP_BIND_NAMES[_gpCaptureIdx], title);
             GUI.Label(new Rect(10f, cy + 48f,  w - 20f, 28f), "Press any button  \u2014  Esc to cancel", sub);
+            GUIStyle note = new GUIStyle(sub); note.fontSize = 12; note.normal.textColor = new Color(0.65f, 0.65f, 0.65f);
+            GUI.Label(new Rect(10f, cy + 82f,  w - 20f, 22f), "Note: L2/R2 triggers cannot be bound (they are axes).", note);
 
             Event e = Event.current;
             if (e.type == EventType.KeyDown && e.keyCode != KeyCode.None)
@@ -3396,8 +3438,14 @@ namespace CNRSettingsMod
                     _gpCaptureIdx = -1;
                 else
                 {
-                    _gpKeys[_gpCaptureIdx] = e.keyCode;
-                    HudCfgSetInt(GP_PREF_KEYS[_gpCaptureIdx], (int)e.keyCode);
+                    // Normalize Joystick1Button0-19 (350-369) to JoystickButton0-19 (330-349)
+                    // so Input.GetKey works for any connected joystick, not just joystick 1.
+                    int kcInt = (int)e.keyCode;
+                    KeyCode toStore = (kcInt >= 350 && kcInt <= 369)
+                        ? (KeyCode)(kcInt - 20)
+                        : e.keyCode;
+                    _gpKeys[_gpCaptureIdx] = toStore;
+                    HudCfgSetInt(GP_PREF_KEYS[_gpCaptureIdx], (int)toStore);
                     HudCfgSave();
                     _gpCaptureIdx = -1;
                 }
@@ -3741,8 +3789,28 @@ namespace CNRSettingsMod
                 _kbmFiDeltaPixels.SetValue(_kbmJoystick, Vector2.zero);
         }
 
+        // Returns NaN if the axis name doesn't exist in the game's InputManager.
+        private static float TryGetAxisRaw(string name)
+        {
+            try { return Input.GetAxisRaw(name); }
+            catch (System.ArgumentException) { return float.NaN; }
+        }
+
+        private void ProbeGpAxes()
+        {
+            _gpAxesProbed = true;
+            foreach (string n in GP_LAXIS_X) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisX = n; break; } }
+            foreach (string n in GP_LAXIS_Y) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisY = n; break; } }
+            foreach (string n in GP_RAXIS_X) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpRAxisX = n; break; } }
+            foreach (string n in GP_RAXIS_Y) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpRAxisY = n; break; } }
+            SettingsModEntry.Log("GP axes: LX=" + (_gpLAxisX ?? "NONE") + " LY=" + (_gpLAxisY ?? "NONE")
+                + " RX=" + (_gpRAxisX ?? "NONE") + " RY=" + (_gpRAxisY ?? "NONE"));
+        }
+
         private void GamepadUpdate()
         {
+            if (!_gpAxesProbed) ProbeGpAxes();
+
             // ---- Movement inject (left stick → VCAnalogJoystickBase) --------
             if (_kbmJoystick == null)
             {
@@ -3759,10 +3827,12 @@ namespace CNRSettingsMod
                 if (fiMax != null) _kbmDragMax = (float)fiMax.GetValue(_kbmJoystick);
                 SettingsModEntry.Log("GamepadUpdate: joystick hooked, dragMax=" + _kbmDragMax);
             }
-            if (_kbmFiDeltaPixels != null)
+            if (_kbmFiDeltaPixels != null && _gpLAxisX != null && _gpLAxisY != null)
             {
-                float ax = Input.GetAxisRaw("Horizontal");
-                float ay = Input.GetAxisRaw("Vertical");
+                float ax = TryGetAxisRaw(_gpLAxisX);
+                float ay = TryGetAxisRaw(_gpLAxisY);
+                if (float.IsNaN(ax)) ax = 0f;
+                if (float.IsNaN(ay)) ay = 0f;
                 float mag = Mathf.Sqrt(ax * ax + ay * ay);
                 if (mag > 0f && mag < _controllerDeadzone) { ax = 0f; ay = 0f; }
                 float injectX = ax * _kbmDragMax * _controllerSens;
@@ -3773,27 +3843,21 @@ namespace CNRSettingsMod
                 _kbmFiDeltaPixels.SetValue(_kbmJoystick, new Vector2(injectX, injectY));
             }
 
-            // ---- Right stick → camera (if axes registered in InputManager) ----
-            if (_gpRightStickOk)
+            // ---- Right stick → camera ----------------------------------------
+            if (_gpRAxisX != null && _gpRAxisY != null)
             {
                 if (_sliderotate == null) CacheSliderotate();
                 if (_sliderotate != null)
                 {
-                    try
+                    float rx =  TryGetAxisRaw(_gpRAxisX);
+                    float ry = -TryGetAxisRaw(_gpRAxisY); // invert: stick up = look up
+                    if (float.IsNaN(rx)) rx = 0f;
+                    if (float.IsNaN(ry)) ry = 0f;
+                    float rmag = Mathf.Sqrt(rx * rx + ry * ry);
+                    if (rmag > _controllerDeadzone)
                     {
-                        float rx =  Input.GetAxisRaw("4th axis");
-                        float ry = -Input.GetAxisRaw("5th axis"); // invert: stick up = look up
-                        float rmag = Mathf.Sqrt(rx * rx + ry * ry);
-                        if (rmag > _controllerDeadzone)
-                        {
-                            float camSens = _isAiming ? (_controllerCamSens * _controllerAimMult) : _controllerCamSens;
-                            KbmInjectMouseLook(rx * camSens, ry * camSens);
-                        }
-                    }
-                    catch (System.ArgumentException)
-                    {
-                        _gpRightStickOk = false;
-                        SettingsModEntry.Log("GamepadUpdate: right-stick axis not in InputManager, camera disabled");
+                        float camSens = _isAiming ? (_controllerCamSens * _controllerAimMult) : _controllerCamSens;
+                        KbmInjectMouseLook(rx * camSens, ry * camSens);
                     }
                 }
             }
