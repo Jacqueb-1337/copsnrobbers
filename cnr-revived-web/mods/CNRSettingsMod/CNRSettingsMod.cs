@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.9";
+        public  const string Version = "3.0.10";
 
         public static void Load()
         {
@@ -2909,37 +2909,35 @@ namespace CNRSettingsMod
         private void SetPointerCapture(bool capture)
         {
             AndroidJavaClass  player   = null;
-            AndroidJavaObject activity = null, window = null, decor = null, focused = null;
+            AndroidJavaObject activity = null, window = null, decor = null;
             try
             {
                 player   = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
                 activity = player.GetStatic<AndroidJavaObject>("currentActivity");
                 window   = activity.Call<AndroidJavaObject>("getWindow");
                 decor    = window.Call<AndroidJavaObject>("getDecorView");
-                // findFocus() returns the deepest focused descendant (Unity's inner view).
                 // requestPointerCapture / setOnCapturedPointerListener MUST be called on the
-                // Android UI thread — calling them from Unity's game thread causes
-                // View.getViewRootImpl() to return null, silently making them no-ops.
-                focused = decor.Call<AndroidJavaObject>("findFocus");
-                AndroidJavaObject target = (focused != null) ? focused : decor;
-
+                // Android UI thread (ViewRootImpl is only available there).
+                // Use the DecorView (FrameLayout) — NOT findFocus() — because SurfaceView
+                // (Unity's render surface) does not support requestPointerCapture().
+                // Captured events are delivered to the view that requested capture —
+                // our OnCapturedPointerListener on the DecorView will receive them.
                 if (capture)
                 {
                     _captureActive = true;
                     if (_capListener != null) _capListener.Reset();
-                    // Post to UI thread; PointerCaptureRunnable owns and disposes target.
-                    var r = new PointerCaptureRunnable(target, true, _capListener);
+                    var r = new PointerCaptureRunnable(decor, true, _capListener);
                     activity.Call("runOnUiThread", r);
-                    focused = null;  // ownership transferred to runnable — don't dispose here
-                    SettingsModEntry.Log("KBM: requestPointerCapture posted to UI thread");
+                    decor = null;  // ownership transferred to runnable
+                    SettingsModEntry.Log("KBM: requestPointerCapture posted to UI thread (decor)");
                 }
                 else
                 {
                     _captureActive = false;
                     if (_capListener != null) _capListener.Reset();
-                    var r = new PointerCaptureRunnable(target, false, null);
+                    var r = new PointerCaptureRunnable(decor, false, null);
                     activity.Call("runOnUiThread", r);
-                    focused = null;
+                    decor = null;
                     SettingsModEntry.Log("KBM: releasePointerCapture posted to UI thread");
                 }
             }
@@ -2950,7 +2948,6 @@ namespace CNRSettingsMod
             }
             finally
             {
-                if (focused  != null) focused.Dispose();
                 if (decor    != null) decor.Dispose();
                 if (window   != null) window.Dispose();
                 if (activity != null) activity.Dispose();
