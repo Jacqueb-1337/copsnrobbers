@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.20";
+        public  const string Version = "3.0.21";
 
         public static void Load()
         {
@@ -288,6 +288,8 @@ namespace CNRSettingsMod
         private float  _dbgAbsX = 0f, _dbgAbsY = 0f;  // last abs XY reported by proxy
         private volatile int _gmlFires = 0;   // total calls to GmlProxy.onGenericMotion
         private float  _gmlAbsX = 0f, _gmlAbsY = 0f;  // last abs XY reported by GmlProxy
+        private int    _injectFires = 0;   // times KbmInjectMouseLook ran past early-return
+        private float  _dbgEulerY = 0f;    // character euler Y after last inject
         private HoverProxy           _hoverProxy = null;
         private volatile int         _hvrFires = 0;    // total calls to HoverProxy.onHover
         private float  _hvrAbsX = 0f, _hvrAbsY = 0f;  // last abs XY reported by HoverProxy
@@ -2357,15 +2359,17 @@ namespace CNRSettingsMod
                 dbgStyle.alignment = TextAnchor.UpperLeft;
                 dbgStyle.fontSize  = 22;
                 dbgStyle.normal.textColor = Color.yellow;
+                string srName = _sliderotate != null ? ((Component)(_sliderotate as Component)).gameObject.name : "NULL";
                 string dbgText =
                     "KBM DEBUG\n" +
                     "cap=" + _captureActive + " lock=" + _cursorLocked + " focusChg=" + _winFocusFires + "\n" +
                     "src=" + _dbgSource + " dx=" + _dbgRawDx.ToString("F2") + " dy=" + _dbgRawDy.ToString("F2") + "\n" +
-                    "hvr.fires=" + _hvrFires + " abs=" + (int)_hvrAbsX + "," + (int)_hvrAbsY + "\n" +
                     "cap.fires=" + (_capListener != null ? _capListener.FireCount.ToString() : "?") + "\n" +
+                    "inject.fires=" + _injectFires + " sr=" + srName + "\n" +
+                    "eulerY=" + _dbgEulerY.ToString("F1") + "\n" +
                     "proxy.fires=" + _proxyFires + " gml.fires=" + _gmlFires + "\n" +
                     "frame=" + _dbgFrame;
-                GUI.Box(new Rect(10, 10, 360, 220), dbgText, dbgStyle);
+                GUI.Box(new Rect(10, 10, 420, 260), dbgText, dbgStyle);
             }
 
             if (!_showSettings && !_hudEditMode) return;
@@ -3220,9 +3224,11 @@ namespace CNRSettingsMod
             float maxY = (_fiMaxY != null) ? (float)_fiMaxY.GetValue(_sliderotate) : 35f;
             rotY = Mathf.Clamp(rotY, minY, maxY);
 
+            _injectFires++;
             _fiRotationX.SetValue(_sliderotate, rotX);
             _fiRotationY.SetValue(_sliderotate, rotY);
             srComp.transform.localEulerAngles = new Vector3(0f, rotX, 0f);
+            _dbgEulerY = srComp.transform.localEulerAngles.y;
             if (_fiCamTransform != null)
             {
                 Transform camT = (Transform)_fiCamTransform.GetValue(_sliderotate);
