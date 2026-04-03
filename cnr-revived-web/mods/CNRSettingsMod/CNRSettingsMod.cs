@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.25";
+        public  const string Version = "3.0.26";
 
         public static void Load()
         {
@@ -1093,6 +1093,11 @@ namespace CNRSettingsMod
         private const float JumpAscendGrav  = -41f;  // d/dt(_ownJumpVelY) while rising
         private const float JumpDescendGrav = -56f;  // d/dt(_ownJumpVelY) while falling
 
+        // -- Touch camera (routes touch look through KbmInjectMouseLook, eliminating deadzone)
+        private int   _touchCamFingerId  = -1;
+        private float _touchCamPrevX     = 0f;
+        private float _touchCamPrevY     = 0f;
+
         // -- Pause panel polling -----------------------------------------------
         private GameObject _pausePanelRef;
         private UIPanel    _pauseUIPanel;
@@ -1549,6 +1554,9 @@ namespace CNRSettingsMod
             if (_hudEditMode) return;
             // Supplemental fire-button touch detection (bypasses Physics.Raycast).
             TouchFireDetect();
+            // Touch camera: route right-side drag through KbmInjectMouseLook so behaviour
+            // matches mouse exactly (no Android touch-slop deadzone, same sensitivity slider).
+            TouchCameraDetect();
             // Jump-on-press: NGUI's OnClick fires on finger-up, so holding the jump
             // button delays the jump until release.  This detects the touch directly
             // and sets OnJump=1 on Began so the jump triggers immediately, and again
@@ -1742,6 +1750,63 @@ namespace CNRSettingsMod
 
             _kbmJumpPending = false;
             TriggerOwnJump();
+        }
+
+        // Routes right-side touch drag through KbmInjectMouseLook so touch and mouse camera
+        // behave identically: same sensitivity slider, no Android touch-slop deadzone.
+        // Suppresses Sliderotate for the tracked finger by toggling cannotRotate for one frame.
+        private void TouchCameraDetect()
+        {
+            if (_kbmEnabled && _cursorLocked) return; // KBM mouse handles camera
+            if (_sliderotate == null && Input.touchCount > 0) CacheSliderotate();
+            if (_sliderotate == null) return;
+            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
+
+            float sw = Screen.width;
+            float sh = Screen.height;
+
+            bool trackedAlive = false;
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch t = Input.GetTouch(i);
+                if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
+                {
+                    if (t.fingerId == _touchCamFingerId) { _touchCamFingerId = -1; }
+                    continue;
+                }
+
+                // Claim a new camera finger: must start in Sliderotate's zone (right 65%, upper 72%)
+                if (_touchCamFingerId == -1 && t.phase == TouchPhase.Began)
+                {
+                    if (t.position.x >= sw * 0.35f && t.position.y <= sh * 0.72f)
+                    {
+                        _touchCamFingerId = t.fingerId;
+                        _touchCamPrevX    = t.position.x;
+                        _touchCamPrevY    = t.position.y;
+                    }
+                }
+
+                if (t.fingerId != _touchCamFingerId) continue;
+                trackedAlive = true;
+
+                float dx = t.position.x - _touchCamPrevX;
+                float dy = t.position.y - _touchCamPrevY;
+                _touchCamPrevX = t.position.x;
+                _touchCamPrevY = t.position.y;
+
+                if (dx == 0f && dy == 0f) continue;
+
+                // Scale matches Sliderotate: raw pixel delta * 0.1, then * sensitivityX via KbmInjectMouseLook.
+                // Invert Y: touch up = positive screen Y = camera up = negative Unity rotY.
+                KbmInjectMouseLook(dx * 0.1f, -dy * 0.1f);
+
+                // Block Sliderotate from double-processing this touch this frame.
+                if (_fiCannotRotate != null) _fiCannotRotate.SetValue(_sliderotate, true);
+            }
+
+            // Re-enable Sliderotate next frame if our finger lifted (or there never was one).
+            if (!trackedAlive && _touchCamFingerId == -1 && _fiCannotRotate != null)
+                _fiCannotRotate.SetValue(_sliderotate, false);
         }
 
         private void TouchJumpDetect()
@@ -4046,10 +4111,12 @@ namespace CNRSettingsMod
             public volatile bool rmbHeld;
 
             // Android MotionEvent constants
-            private const int AXIS_RELATIVE_X   = 27;
-            private const int AXIS_RELATIVE_Y   = 28;
-            private const int ACTION_MOVE        = 2;
-            private const int ACTION_HOVER_MOVE  = 7;
+            private const int AXIS_RELATIVE_X    = 27;
+            private const int AXIS_RELATIVE_Y    = 28;
+            private const int ACTION_DOWN         = 0;   // primary button pressed (LMB)
+            private const int ACTION_UP           = 1;   // primary button released (LMB)
+            private const int ACTION_MOVE         = 2;
+            private const int ACTION_HOVER_MOVE   = 7;
             private const int ACTION_BUTTON_PRESS   = 11;
             private const int ACTION_BUTTON_RELEASE  = 12;
             private const int BUTTON_PRIMARY     = 1;
@@ -4084,17 +4151,24 @@ namespace CNRSettingsMod
                     {
                         _dx += e.Call<float>("getAxisValue", AXIS_RELATIVE_X);
                         _dy += e.Call<float>("getAxisValue", AXIS_RELATIVE_Y);
+                        // Sync button state from live button mask — catches presses that
+                        // arrived as ACTION_DOWN rather than ACTION_BUTTON_PRESS.
+                        int bs = e.Call<int>("getButtonState");
+                        lmbHeld = (bs & BUTTON_PRIMARY)   != 0;
+                        rmbHeld = (bs & BUTTON_SECONDARY) != 0;
                     }
+                    else if (action == ACTION_DOWN)  { lmbHeld = true; }
+                    else if (action == ACTION_UP)    { lmbHeld = false; }
                     else if (action == ACTION_BUTTON_PRESS)
                     {
                         int btn = e.Call<int>("getActionButton");
-                        if (btn == BUTTON_PRIMARY)   lmbHeld = true;
+                        if (btn == BUTTON_PRIMARY)    lmbHeld = true;
                         if (btn == BUTTON_SECONDARY)  rmbHeld = true;
                     }
                     else if (action == ACTION_BUTTON_RELEASE)
                     {
                         int btn = e.Call<int>("getActionButton");
-                        if (btn == BUTTON_PRIMARY)   lmbHeld = false;
+                        if (btn == BUTTON_PRIMARY)    lmbHeld = false;
                         if (btn == BUTTON_SECONDARY)  rmbHeld = false;
                     }
                 }
