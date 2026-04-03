@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.12";
+        public  const string Version = "3.0.14";
 
         public static void Load()
         {
@@ -277,6 +277,13 @@ namespace CNRSettingsMod
         // -- KBM pointer capture (Android 8+ / API 26+) ----------------------
         private CapturedPointerListener _capListener   = null;
         private bool                    _captureActive = false;
+
+        // -- KBM debug overlay snapshot (populated each LateUpdate) ----------
+        private string _dbgSource = "";
+        private float  _dbgRawDx = 0f, _dbgRawDy = 0f;
+        private float  _dbgAxX = 0f, _dbgAxY = 0f;
+        private Vector3 _dbgMousePos = Vector3.zero;
+        private int    _dbgFrame = 0;
 
         // -- KBM Window.Callback intercept (AXIS_RELATIVE_X/Y velocity) -----
         private WindowCallbackProxy  _winProxy = null;
@@ -1545,6 +1552,7 @@ namespace CNRSettingsMod
                         KbmInjectMouseLook(dx * 0.05f, -dy * 0.05f);
                         _lastMousePosValid = false;
                         captureHandled = true;
+                        _dbgSource = "capListener"; _dbgRawDx = dx; _dbgRawDy = dy;
                     }
                 }
                 if (!captureHandled)
@@ -1556,32 +1564,42 @@ namespace CNRSettingsMod
                     {
                         KbmInjectMouseLook(dx * 0.05f, -dy * 0.05f);
                         _lastMousePosValid = false;
+                        _dbgSource = "aml"; _dbgRawDx = dx; _dbgRawDy = dy;
                     }
                     else
                     {
                         // Fallback 2: Unity axis
                         float axX = Input.GetAxis("Mouse X");
                         float axY = Input.GetAxis("Mouse Y");
+                        _dbgAxX = axX; _dbgAxY = axY;
                         if (axX != 0f || axY != 0f)
                         {
                             KbmInjectMouseLook(axX * 3f, axY * 3f);
                             _lastMousePosValid = false;
+                            _dbgSource = "GetAxis"; _dbgRawDx = axX; _dbgRawDy = axY;
                         }
                         else
                         {
                             // Fallback 3: mousePosition delta
                             Vector3 curPos = Input.mousePosition;
+                            _dbgMousePos = curPos;
                             if (_lastMousePosValid)
                             {
                                 float mx = (curPos.x - _lastMousePos.x) * 0.05f;
                                 float my = (curPos.y - _lastMousePos.y) * 0.05f;
-                                if (mx != 0f || my != 0f) KbmInjectMouseLook(mx, my);
+                                if (mx != 0f || my != 0f)
+                                {
+                                    KbmInjectMouseLook(mx, my);
+                                    _dbgSource = "mousePos"; _dbgRawDx = mx; _dbgRawDy = my;
+                                }
+                                else { _dbgSource = "NONE"; _dbgRawDx = 0f; _dbgRawDy = 0f; }
                             }
                             _lastMousePos      = curPos;
                             _lastMousePosValid = true;
                         }
                     }
                 }
+                _dbgFrame = Time.frameCount;
             }
             else
             {
@@ -2321,6 +2339,24 @@ namespace CNRSettingsMod
         // =====================================================================
         private void OnGUI()
         {
+            // KBM debug overlay — always visible when KBM enabled and cursor locked
+            if (_kbmEnabled && _cursorLocked && !_showSettings)
+            {
+                GUIStyle dbgStyle = new GUIStyle(GUI.skin.box);
+                dbgStyle.alignment = TextAnchor.UpperLeft;
+                dbgStyle.fontSize  = 22;
+                dbgStyle.normal.textColor = Color.yellow;
+                string dbgText =
+                    "KBM DEBUG\n" +
+                    "capActive=" + _captureActive + "  locked=" + _cursorLocked + "\n" +
+                    "source=" + _dbgSource + "\n" +
+                    "rawDx=" + _dbgRawDx.ToString("F3") + "  rawDy=" + _dbgRawDy.ToString("F3") + "\n" +
+                    "GetAxis=" + _dbgAxX.ToString("F3") + "," + _dbgAxY.ToString("F3") + "\n" +
+                    "mousePos=" + (int)_dbgMousePos.x + "," + (int)_dbgMousePos.y + "\n" +
+                    "frame=" + _dbgFrame;
+                GUI.Box(new Rect(10, 10, 340, 200), dbgText, dbgStyle);
+            }
+
             if (!_showSettings && !_hudEditMode) return;
 
             float scale = Screen.width / REF_W;
@@ -2903,6 +2939,7 @@ namespace CNRSettingsMod
             _cursorLocked      = locked;
             _lastMousePosValid = false;
             _amlDx = 0f; _amlDy = 0f;
+            if (!locked && _winProxy != null) _winProxy.ResetAbsPos();
             Screen.showCursor  = !locked;
             SetAndroidPointerIcon(!locked);
             SetPointerCapture(locked);  // request/release pointer capture tied to lock state
@@ -3526,6 +3563,8 @@ namespace CNRSettingsMod
 
             private readonly AndroidJavaObject _orig;
             private readonly SettingsModHook   _host;
+            private float _lastAbsX = float.MinValue;
+            private float _lastAbsY = float.MinValue;
 
             public WindowCallbackProxy(AndroidJavaObject orig, SettingsModHook host)
                 : base("android.view.Window$Callback") { _orig = orig; _host = host; }
@@ -3538,6 +3577,7 @@ namespace CNRSettingsMod
                     int action = ev.Call<int>("getActionMasked");
                     if (action == ACTION_HOVER_MOVE || action == ACTION_MOVE)
                     {
+                        // Primary: AXIS_RELATIVE (only available when pointer capture is active)
                         float rdx = ev.Call<float>("getAxisValue", AXIS_RELATIVE_X);
                         float rdy = ev.Call<float>("getAxisValue", AXIS_RELATIVE_Y);
                         if (rdx != 0f || rdy != 0f)
@@ -3546,11 +3586,35 @@ namespace CNRSettingsMod
                             _host._amlDy += rdy;
                             _host._amlGotData = true;
                         }
+                        else
+                        {
+                            // Fallback: absolute position delta.
+                            // Works even without pointer capture; cursor is hidden (TYPE_NULL)
+                            // but Android still updates getX/getY as the physical mouse moves.
+                            float ax = ev.Call<float>("getX");
+                            float ay = ev.Call<float>("getY");
+                            if (_lastAbsX != float.MinValue)
+                            {
+                                float ddx = ax - _lastAbsX;
+                                float ddy = ay - _lastAbsY;
+                                if (ddx != 0f || ddy != 0f)
+                                {
+                                    _host._amlDx += ddx;
+                                    _host._amlDy += ddy;
+                                    _host._amlGotData = true;
+                                }
+                            }
+                            _lastAbsX = ax;
+                            _lastAbsY = ay;
+                        }
                     }
                 }
                 catch { }
                 return _orig.Call<bool>("dispatchGenericMotionEvent", ev);
             }
+
+            // Called when cursor is unlocked so the next lock doesn't produce a delta jump.
+            public void ResetAbsPos() { _lastAbsX = float.MinValue; _lastAbsY = float.MinValue; }
 
             // Forward all other Window.Callback methods to the original.
             public bool dispatchKeyEvent(AndroidJavaObject ev)
