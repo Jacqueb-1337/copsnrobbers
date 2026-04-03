@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.19";
+        public  const string Version = "3.0.20";
 
         public static void Load()
         {
@@ -3202,28 +3202,46 @@ namespace CNRSettingsMod
             _kbmFiDeltaPixels.SetValue(_kbmJoystick, new Vector2(ax * _kbmDragMax, ay * _kbmDragMax));
         }
 
+        private float _kbmInjectLogTimer = 0f;
         private void KbmInjectMouseLook(float mx, float my)
         {
             if (_sliderotate == null) CacheSliderotate();
             if (_sliderotate == null || _fiRotationX == null) return;
 
             float sens = _isAiming ? (_mouseSensNgl * _mouseAdsMult) : _mouseSensNgl;
-            float rotX = (float)_fiRotationX.GetValue(_sliderotate);
-            float rotY = (float)_fiRotationY.GetValue(_sliderotate);
+
+            // Mirror what Sliderotate.Update() does: base horizontal from transform, NOT the
+            // private rotationX field.  The field is only updated when a touch is active;
+            // reading it when no touch has occurred gives 0 (stale), causing a snap to 0°.
+            Component srComp = _sliderotate as Component;
+            float rotX = srComp.transform.localEulerAngles.y + mx * sens;
+            float rotY = (float)_fiRotationY.GetValue(_sliderotate) + my * sens;
             float minY = (_fiMinY != null) ? (float)_fiMinY.GetValue(_sliderotate) : -35f;
             float maxY = (_fiMaxY != null) ? (float)_fiMaxY.GetValue(_sliderotate) : 35f;
-
-            rotX += mx * sens;
-            rotY += my * sens;
-            rotY  = Mathf.Clamp(rotY, minY, maxY);
+            rotY = Mathf.Clamp(rotY, minY, maxY);
 
             _fiRotationX.SetValue(_sliderotate, rotX);
             _fiRotationY.SetValue(_sliderotate, rotY);
-            (_sliderotate as Component).transform.localEulerAngles = new Vector3(0f, rotX, 0f);
+            srComp.transform.localEulerAngles = new Vector3(0f, rotX, 0f);
             if (_fiCamTransform != null)
             {
                 Transform camT = (Transform)_fiCamTransform.GetValue(_sliderotate);
                 if (camT != null) camT.localEulerAngles = new Vector3(-rotY, 0f, 0f);
+            }
+
+            // Diagnostic: log once per second so we can confirm injection is reaching here
+            _kbmInjectLogTimer -= Time.deltaTime;
+            if (_kbmInjectLogTimer <= 0f)
+            {
+                _kbmInjectLogTimer = 1f;
+                Transform camT2 = _fiCamTransform != null ? (Transform)_fiCamTransform.GetValue(_sliderotate) : null;
+                SettingsModEntry.Log("KBM inject: mx=" + mx.ToString("F2") + " my=" + my.ToString("F2")
+                    + " sens=" + sens.ToString("F2")
+                    + " rotX=" + rotX.ToString("F1") + " eulerY=" + srComp.transform.localEulerAngles.y.ToString("F1")
+                    + " rotY=" + rotY.ToString("F1")
+                    + " GO=" + srComp.gameObject.name
+                    + " active=" + srComp.gameObject.activeInHierarchy
+                    + " cam=" + (camT2 != null ? camT2.gameObject.name : "NULL"));
             }
         }
 
