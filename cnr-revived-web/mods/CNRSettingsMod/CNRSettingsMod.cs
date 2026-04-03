@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.4";
+        public  const string Version = "3.0.5";
 
         public static void Load()
         {
@@ -278,11 +278,11 @@ namespace CNRSettingsMod
         private CapturedPointerListener _capListener   = null;
         private bool                    _captureActive = false;
 
-        // -- KBM Android GenericMotionListener (AXIS_RELATIVE_X/Y velocity, API 22+) --
-        private AndroidMouseListener _amlProxy = null;
+        // -- KBM Window.Callback intercept (AXIS_RELATIVE_X/Y velocity) -----
+        private WindowCallbackProxy  _winProxy = null;
         private volatile float       _amlDx    = 0f;  // accumulated relative X since last drain
         private volatile float       _amlDy    = 0f;  // accumulated relative Y since last drain
-        private volatile int         _amlSeq   = 0;   // incremented each time new data arrives
+        private bool                 _amlGotData = false;  // have we received any AML data yet?
 
         // -- KBM reflection (joystick) ----------------------------------------
         private MonoBehaviour _kbmJoystick      = null;
@@ -1534,14 +1534,18 @@ namespace CNRSettingsMod
             // Fallback 2: Input.mousePosition delta (stops at screen edges, last resort).
             if (_kbmEnabled && _cursorLocked && !_showSettings)
             {
-                // Atomically drain the accumulated delta written by AndroidMouseListener.
+                // Drain the accumulated delta written by WindowCallbackProxy.
                 float dx = _amlDx;  _amlDx = 0f;
                 float dy = _amlDy;  _amlDy = 0f;
-                if (dx != 0f || dy != 0f)
+                if (_amlGotData)
                 {
-                    // dy from MotionEvent: positive = down; Unity camera: positive = up — invert.
-                    KbmInjectMouseLook(dx * 0.05f, -dy * 0.05f);
-                    _lastMousePosValid = false;
+                    // Proxy is working — use AXIS_RELATIVE data (works at any screen position).
+                    if (dx != 0f || dy != 0f)
+                    {
+                        // dy from MotionEvent: positive = down; Unity camera: positive = up — invert.
+                        KbmInjectMouseLook(dx * 0.05f, -dy * 0.05f);
+                        _lastMousePosValid = false;
+                    }
                 }
                 else
                 {
@@ -2930,31 +2934,31 @@ namespace CNRSettingsMod
             }
         }
 
-        // Register an Android View.OnGenericMotionListener on the Unity decor view.
-        // This gives us raw MotionEvent x/y for mouse-movement without pointer capture
-        // (which would break Unity's click handling).
+        // Wrap the Activity's Window.Callback so we intercept dispatchGenericMotionEvent
+        // BEFORE it is dispatched to any view (including Unity's own view hierarchy).
+        // All other callback methods are forwarded to the original callback unchanged.
         private void KbmRegisterMouseListener()
         {
             AndroidJavaClass  player   = null;
-            AndroidJavaObject activity = null, window = null, decor = null;
+            AndroidJavaObject activity = null, window = null, orig = null;
             try
             {
-                _amlProxy = new AndroidMouseListener(this);
-                player    = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-                activity  = player.GetStatic<AndroidJavaObject>("currentActivity");
-                window    = activity.Call<AndroidJavaObject>("getWindow");
-                decor     = window.Call<AndroidJavaObject>("getDecorView");
-                decor.Call("setOnGenericMotionListener", _amlProxy);
-                SettingsModEntry.Log("KBM: AndroidMouseListener registered");
+                player   = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                activity = player.GetStatic<AndroidJavaObject>("currentActivity");
+                window   = activity.Call<AndroidJavaObject>("getWindow");
+                orig     = window.Call<AndroidJavaObject>("getCallback");
+                _winProxy = new WindowCallbackProxy(orig, this);
+                window.Call("setCallback", _winProxy);
+                SettingsModEntry.Log("KBM: WindowCallbackProxy installed");
             }
             catch (Exception ex)
             {
-                SettingsModEntry.Log("KBM: AndroidMouseListener reg failed: " + ex.Message);
-                _amlProxy = null;
+                SettingsModEntry.Log("KBM: WindowCallbackProxy failed: " + ex.Message);
+                _winProxy = null;
             }
             finally
             {
-                if (decor    != null) decor.Dispose();
+                // Note: do NOT dispose orig — WindowCallbackProxy holds a reference to it.
                 if (window   != null) window.Dispose();
                 if (activity != null) activity.Dispose();
                 if (player   != null) player.Dispose();
@@ -3380,39 +3384,63 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
-        // Android GenericMotionListener — AXIS_RELATIVE_X/Y mouse velocity (API 22+)
-        // Implements android.view.View$OnGenericMotionListener.
-        // Returns false so Unity still receives every event (clicks work normally).
-        // AXIS_RELATIVE_X (27) / AXIS_RELATIVE_Y (28) are hardware mouse deltas available
-        // on ACTION_HOVER_MOVE without pointer capture.  We accumulate them here and the
-        // game thread drains them each LateUpdate frame.
+        // WindowCallbackProxy — wraps Activity Window.Callback to intercept
+        // dispatchGenericMotionEvent before any view sees it.  All other methods
+        // are forwarded to the original callback so game input is unaffected.
+        // AXIS_RELATIVE_X (27) / AXIS_RELATIVE_Y (28) give hardware mouse velocity
+        // on ACTION_HOVER_MOVE (7) / ACTION_MOVE (2) without pointer capture.
         // =====================================================================
-        private class AndroidMouseListener : AndroidJavaProxy
+        private class WindowCallbackProxy : AndroidJavaProxy
         {
-            private const int ACTION_HOVER_MOVE  = 7;
-            private const int ACTION_MOVE        = 2;
-            private const int AXIS_RELATIVE_X    = 27;
-            private const int AXIS_RELATIVE_Y    = 28;
+            private const int ACTION_HOVER_MOVE = 7;
+            private const int ACTION_MOVE       = 2;
+            private const int AXIS_RELATIVE_X   = 27;
+            private const int AXIS_RELATIVE_Y   = 28;
 
-            private readonly SettingsModHook _host;
-            public AndroidMouseListener(SettingsModHook host)
-                : base("android.view.View$OnGenericMotionListener") { _host = host; }
+            private readonly AndroidJavaObject _orig;
+            private readonly SettingsModHook   _host;
 
-            public bool onGenericMotion(AndroidJavaObject view, AndroidJavaObject ev)
+            public WindowCallbackProxy(AndroidJavaObject orig, SettingsModHook host)
+                : base("android.view.Window$Callback") { _orig = orig; _host = host; }
+
+            // Intercept mouse movement; forward event to original for view dispatch.
+            public bool dispatchGenericMotionEvent(AndroidJavaObject ev)
             {
                 try
                 {
                     int action = ev.Call<int>("getActionMasked");
                     if (action == ACTION_HOVER_MOVE || action == ACTION_MOVE)
                     {
-                        // Accumulate — multiple events may arrive between Unity frames.
-                        _host._amlDx += ev.Call<float>("getAxisValue", AXIS_RELATIVE_X);
-                        _host._amlDy += ev.Call<float>("getAxisValue", AXIS_RELATIVE_Y);
+                        float rdx = ev.Call<float>("getAxisValue", AXIS_RELATIVE_X);
+                        float rdy = ev.Call<float>("getAxisValue", AXIS_RELATIVE_Y);
+                        if (rdx != 0f || rdy != 0f)
+                        {
+                            _host._amlDx += rdx;
+                            _host._amlDy += rdy;
+                            _host._amlGotData = true;
+                        }
                     }
                 }
                 catch { }
-                return false;  // don't consume — Unity also receives the event
+                return _orig.Call<bool>("dispatchGenericMotionEvent", ev);
             }
+
+            // Forward all other Window.Callback methods to the original.
+            public bool dispatchKeyEvent(AndroidJavaObject ev)
+            { return _orig.Call<bool>("dispatchKeyEvent", ev); }
+            public bool dispatchKeyShortcutEvent(AndroidJavaObject ev)
+            { return _orig.Call<bool>("dispatchKeyShortcutEvent", ev); }
+            public bool dispatchTouchEvent(AndroidJavaObject ev)
+            { return _orig.Call<bool>("dispatchTouchEvent", ev); }
+            public bool dispatchTrackballEvent(AndroidJavaObject ev)
+            { return _orig.Call<bool>("dispatchTrackballEvent", ev); }
+            public bool dispatchPopulateAccessibilityEvent(AndroidJavaObject ev)
+            { return _orig.Call<bool>("dispatchPopulateAccessibilityEvent", ev); }
+            public void onWindowFocusChanged(bool f)         { _orig.Call("onWindowFocusChanged", f); }
+            public void onAttachedToWindow()                 { _orig.Call("onAttachedToWindow"); }
+            public void onDetachedFromWindow()               { _orig.Call("onDetachedFromWindow"); }
+            public void onContentChanged()                   { _orig.Call("onContentChanged"); }
+            public void onWindowAttributesChanged(AndroidJavaObject p) { _orig.Call("onWindowAttributesChanged", p); }
         }
 
         // =====================================================================
