@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.18";
+        public  const string Version = "3.0.19";
 
         public static void Load()
         {
@@ -1551,13 +1551,15 @@ namespace CNRSettingsMod
             {
                 float dx, dy;
                 bool captureHandled = false;
-                if (_captureActive && _capListener != null)
+                // Always drain capListener — _captureActive may lag behind the actual grant
+                if (_capListener != null)
                 {
                     dx = _capListener.DrainDx();
                     dy = _capListener.DrainDy();
                     // dy from MotionEvent: positive = down; Unity camera: positive = up
                     if (dx != 0f || dy != 0f)
                     {
+                        _captureActive = true;  // self-correct the flag once we see real data
                         KbmInjectMouseLook(dx * 0.05f, -dy * 0.05f);
                         _lastMousePosValid = false;
                         captureHandled = true;
