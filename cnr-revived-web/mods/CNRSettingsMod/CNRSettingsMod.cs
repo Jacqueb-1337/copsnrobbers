@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.34";
+        public  const string Version = "3.0.35";
 
         public static void Load()
         {
@@ -251,6 +251,9 @@ namespace CNRSettingsMod
         private Vector2 _scroll;
         private Vector2 _scrollKbm     = Vector2.zero;
         private Vector2 _scrollAccount = Vector2.zero;
+        private Vector2 _scrollCtrl    = Vector2.zero;
+        private float   _kbmDeadzone   = 0.05f; // keyboard/mouse inject: axis magnitude below this is zeroed
+        private float   _touchDeadzone = 0.1f;  // touch joystick: normalised magnitude below this is zeroed
         private int     _activeTab  = 0;   // 0 = Settings  1 = KBM  2 = Account
         private string  _pinInput    = "";
         private string  _pinPassword = "";
@@ -1647,6 +1650,10 @@ namespace CNRSettingsMod
             // the mouse-look code above.  Movement uses the previous frame's inject (1-frame
             // lag is imperceptible for held keys) which is fine since we inject every frame.
             if (_kbmEnabled && _inGameScene) KbmInjectJoystick();
+            // Touch-joystick deadzone: when NOT in KBM mode, post-process _deltaPixels to kill drift.
+            // KBM mode handles its own deadzone inside KbmInjectJoystick.
+            else if (!_kbmEnabled && _inGameScene && _touchDeadzone > 0f)
+                ApplyTouchJoystickDeadzone();
         }
 
         // Supplemental fire-button touch detection.
@@ -2601,7 +2608,7 @@ namespace CNRSettingsMod
 
             // ---- Tab bar ----
             GUILayout.Space(2f);
-            float tbW = (pw - 12f) / 3f;
+            float tbW = (pw - 18f) / 4f;
             GUILayout.BeginHorizontal();
             GUILayout.Space(2f);
             if (GUILayout.Button("Settings", TabBtnStyle(_activeTab == 0), GUILayout.Width(tbW), GUILayout.Height(34f)))
@@ -2610,6 +2617,9 @@ namespace CNRSettingsMod
             if (GUILayout.Button("KB+Mouse", TabBtnStyle(_activeTab == 1), GUILayout.Width(tbW), GUILayout.Height(34f)))
             { if (_activeTab != 1) { _activeTab = 1; _scrollKbm = Vector2.zero; } }
             GUILayout.Space(4f);
+            if (GUILayout.Button("Controllers", TabBtnStyle(_activeTab == 3), GUILayout.Width(tbW), GUILayout.Height(34f)))
+            { if (_activeTab != 3) { _activeTab = 3; _scrollCtrl = Vector2.zero; } }
+            GUILayout.Space(4f);
             if (GUILayout.Button("Account", TabBtnStyle(_activeTab == 2), GUILayout.Width(tbW), GUILayout.Height(34f)))
             { if (_activeTab != 2) { _activeTab = 2; _scrollAccount = Vector2.zero; } }
             GUILayout.Space(2f);
@@ -2617,11 +2627,17 @@ namespace CNRSettingsMod
             GUILayout.Space(4f);
 
             GUIStyle vScroll = new GUIStyle(GUI.skin.verticalScrollbar); vScroll.fixedWidth = 30f;
-            Vector2 sv = (_activeTab == 0) ? _scroll : (_activeTab == 1) ? _scrollKbm : _scrollAccount;
+            Vector2 sv = (_activeTab == 0) ? _scroll
+                       : (_activeTab == 1) ? _scrollKbm
+                       : (_activeTab == 3) ? _scrollCtrl
+                       : _scrollAccount;
             sv = GUILayout.BeginScrollView(sv, false, true, GUIStyle.none, vScroll,
                 GUILayout.Width(_winRect.width - 4f),
                 GUILayout.Height(_winRect.height - 104f));
-            if (_activeTab == 0) _scroll = sv; else if (_activeTab == 1) _scrollKbm = sv; else _scrollAccount = sv;
+            if (_activeTab == 0) _scroll = sv;
+            else if (_activeTab == 1) _scrollKbm = sv;
+            else if (_activeTab == 3) _scrollCtrl = sv;
+            else _scrollAccount = sv;
             GUILayout.Space(6f);
 
             if (_activeTab == 0)
@@ -2768,6 +2784,7 @@ namespace CNRSettingsMod
 
             } // end Settings tab
             else if (_activeTab == 1) { DrawKbmTabContent(pw); }
+            else if (_activeTab == 3) { DrawControllersTabContent(pw); }
             else { DrawAccountTabContent(pw); }
 
             GUILayout.Space(6f);
@@ -2830,6 +2847,96 @@ namespace CNRSettingsMod
             Type t = EcoType(); if (t == null) return;
             System.Reflection.MethodInfo mi = t.GetMethod(method, BindingFlags.Public | BindingFlags.Static);
             if (mi != null) mi.Invoke(null, args);
+        }
+        // =====================================================================
+        // Controllers tab UI
+        // =====================================================================
+        private void DrawControllersTabContent(float pw)
+        {
+            // ---- Camera Sensitivity ----------------------------------------
+            SectionHeader("Camera Sensitivity");
+            GUILayout.Space(4f);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Normal  [" + _sensNormal.ToString("F1") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newSens = DrawSlider(_sensNormal, 1f, 7f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newSens - _sensNormal) > 0.05f)
+            {
+                _sensNormal = Mathf.Round(newSens * 10f) / 10f;
+                PlayerPrefs.SetFloat("Sensitivity", _sensNormal);
+                if (_sliderotate != null && _fiSensX != null)
+                    WriteAllSens(_sensNormal);
+            }
+            GUILayout.Space(6f);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Aimed   [" + Mathf.RoundToInt(_adsMultiplier * 100f) + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newAimed = DrawSlider(_adsMultiplier, 0.1f, 1.0f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newAimed - _adsMultiplier) > 0.005f)
+            {
+                _adsMultiplier = Mathf.Round(newAimed * 20f) / 20f;
+                PlayerPrefs.SetFloat("CNRMod_AimedMult", _adsMultiplier);
+            }
+            GUILayout.Label("  % of normal sens while scoped", HintStyle());
+            GUILayout.Space(14f);
+
+            // ---- Joystick --------------------------------------------------
+            SectionHeader("Joystick");
+            GUILayout.Space(4f);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("KB/Mouse deadzone  [" + (_kbmDeadzone * 100f).ToString("F0") + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newKbmDz = DrawSlider(_kbmDeadzone, 0f, 0.4f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newKbmDz - _kbmDeadzone) > 0.005f)
+            {
+                _kbmDeadzone = Mathf.Round(newKbmDz * 20f) / 20f;
+                HudCfgSetFloat("CNRMod_KbmDeadzone", _kbmDeadzone);
+            }
+            GUILayout.Label("  Keyboard inject: axis below this magnitude is zeroed", HintStyle());
+            GUILayout.Space(6f);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Touch deadzone  [" + (_touchDeadzone * 100f).ToString("F0") + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newTouchDz = DrawSlider(_touchDeadzone, 0f, 0.4f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newTouchDz - _touchDeadzone) > 0.005f)
+            {
+                _touchDeadzone = Mathf.Round(newTouchDz * 20f) / 20f;
+                HudCfgSetFloat("CNRMod_TouchDeadzone", _touchDeadzone);
+            }
+            GUILayout.Label("  Touch joystick: inputs below this magnitude are ignored (avoids drift)", HintStyle());
+            GUILayout.Space(14f);
+
+            // ---- Keybinds --------------------------------------------------
+            SectionHeader("Keybinds");
+            GUILayout.Space(4f);
+            float colName = pw * 0.35f;
+            float colKey  = pw * 0.34f;
+            float colBtn  = pw * 0.27f;
+            GUIStyle keyStyle = new GUIStyle(GUI.skin.box);
+            keyStyle.fontSize  = 14;
+            keyStyle.alignment = TextAnchor.MiddleCenter;
+            keyStyle.normal.textColor = new Color(1f, 0.9f, 0.4f);
+            if (_gameFont != null) keyStyle.font = _gameFont;
+            for (int i = 0; i < KBM_BIND_COUNT; i++)
+            {
+                GUILayout.BeginHorizontal(GUILayout.Height(32f));
+                GUILayout.Label(KBM_BIND_NAMES[i], LabelStyle(), GUILayout.Width(colName));
+                GUILayout.Label(KbKeyName(_kbKeys[i]), keyStyle,
+                    GUILayout.Width(colKey), GUILayout.Height(30f));
+                if (GUILayout.Button("Rebind", BtnStyle(13, new Color(0.6f, 0.9f, 1f)),
+                    GUILayout.Width(colBtn), GUILayout.Height(30f)))
+                {
+                    _captureIdx      = i;
+                    _captureCooldown = 4;
+                }
+                GUILayout.EndHorizontal();
+                GUILayout.Space(2f);
+            }
+            GUILayout.Space(6f);
         }
         // =====================================================================
         // Account tab UI
@@ -3421,6 +3528,14 @@ namespace CNRSettingsMod
             if (_kbmFiDeltaPixels == null) return;
             float injectX = ax * _kbmDragMax;
             float injectY = ay * _kbmDragMax;
+
+            // Apply deadzone: if keyboard magnitude (0-1) is below threshold, zero it.
+            float mag = Mathf.Sqrt(ax * ax + ay * ay);
+            if (mag > 0f && mag < _kbmDeadzone)
+            {
+                injectX = 0f;
+                injectY = 0f;
+            }
             // JoyStickController.Update() has three branches: |AxisY| > |AxisX| (forward-dominant),
             // |AxisY| < |AxisX| (strafe-dominant), and both < 0.05 (idle).  The equal-axis
             // diagonal case (e.g. W+A with both = ±1) hits none of them and skips the moveSpeed
@@ -3430,6 +3545,31 @@ namespace CNRSettingsMod
             if (ax != 0f && ay != 0f)
                 injectX *= 0.999f;
             _kbmFiDeltaPixels.SetValue(_kbmJoystick, new Vector2(injectX, injectY));
+        }
+
+        private void ApplyTouchJoystickDeadzone()
+        {
+            // Cache joystick + _deltaPixels field the same way KbmInjectJoystick does.
+            if (_kbmJoystick == null)
+            {
+                VCAnalogJoystickBase inst = VCAnalogJoystickBase.GetInstance("stick");
+                if (inst == null) return;
+                _kbmJoystick = (MonoBehaviour)(object)inst;
+                Type t = _kbmJoystick.GetType();
+                while (t != null && t.Name != "VCAnalogJoystickBase") t = t.BaseType;
+                if (t == null) t = _kbmJoystick.GetType();
+                _kbmFiDeltaPixels = t.GetField("_deltaPixels",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                FieldInfo fiMax = t.GetField("dragDeltaMagnitudeMaxPixels",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (fiMax != null) _kbmDragMax = (float)fiMax.GetValue(_kbmJoystick);
+            }
+            if (_kbmFiDeltaPixels == null || _kbmDragMax <= 0f) return;
+            Vector2 dp = (Vector2)_kbmFiDeltaPixels.GetValue(_kbmJoystick);
+            // Compare normalised magnitude against deadzone threshold
+            float normalised = dp.magnitude / _kbmDragMax;
+            if (normalised > 0f && normalised < _touchDeadzone)
+                _kbmFiDeltaPixels.SetValue(_kbmJoystick, Vector2.zero);
         }
 
         private float _kbmInjectLogTimer = 0f;
@@ -4333,6 +4473,8 @@ namespace CNRSettingsMod
             _kbmEnabled     = HudCfgGetInt("CNRMod_KbmEnabled", 0) == 1;
             _mouseSensNgl   = HudCfgGetFloat("CNRMod_MouseSens", 3.2f);
             _mouseAdsMult   = HudCfgGetFloat("CNRMod_MouseAdsMult", 0.5f);
+            _kbmDeadzone   = HudCfgGetFloat("CNRMod_KbmDeadzone",   0.05f);
+            _touchDeadzone = HudCfgGetFloat("CNRMod_TouchDeadzone", 0.1f);
             for (int ki = 0; ki < KBM_BIND_COUNT; ki++)
                 _kbKeys[ki] = (KeyCode)HudCfgGetInt(KBM_PREF_KEYS[ki], (int)KBM_DEFAULTS[ki]);
             for (int i = 0; i < VIS_ITEMS.Length; i++)
