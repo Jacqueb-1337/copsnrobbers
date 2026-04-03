@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.8";
+        public  const string Version = "3.0.9";
 
         public static void Load()
         {
@@ -2916,30 +2916,31 @@ namespace CNRSettingsMod
                 activity = player.GetStatic<AndroidJavaObject>("currentActivity");
                 window   = activity.Call<AndroidJavaObject>("getWindow");
                 decor    = window.Call<AndroidJavaObject>("getDecorView");
-                // Captured pointer events are delivered to the view that HOLDS the capture.
-                // Unity's inner UnityPlayer view has focus, not the decor root.
-                // findFocus() walks down the hierarchy and returns the focused descendant.
+                // findFocus() returns the deepest focused descendant (Unity's inner view).
+                // requestPointerCapture / setOnCapturedPointerListener MUST be called on the
+                // Android UI thread — calling them from Unity's game thread causes
+                // View.getViewRootImpl() to return null, silently making them no-ops.
                 focused = decor.Call<AndroidJavaObject>("findFocus");
                 AndroidJavaObject target = (focused != null) ? focused : decor;
+
                 if (capture)
                 {
-                    // Register listener on the same view we request capture on —
-                    // both must be the same view or captured events won't reach our callback.
-                    if (_capListener != null)
-                        target.Call("setOnCapturedPointerListener", _capListener);
-                    target.Call("requestPointerCapture");
-                    bool hasCap = target.Call<bool>("hasPointerCapture");
-                    SettingsModEntry.Log("KBM: requestPointerCapture hasCap=" + hasCap
-                        + " usedFocus=" + (focused != null));
                     _captureActive = true;
                     if (_capListener != null) _capListener.Reset();
+                    // Post to UI thread; PointerCaptureRunnable owns and disposes target.
+                    var r = new PointerCaptureRunnable(target, true, _capListener);
+                    activity.Call("runOnUiThread", r);
+                    focused = null;  // ownership transferred to runnable — don't dispose here
+                    SettingsModEntry.Log("KBM: requestPointerCapture posted to UI thread");
                 }
                 else
                 {
-                    target.Call("releasePointerCapture");
                     _captureActive = false;
                     if (_capListener != null) _capListener.Reset();
-                    SettingsModEntry.Log("KBM: pointer capture released");
+                    var r = new PointerCaptureRunnable(target, false, null);
+                    activity.Call("runOnUiThread", r);
+                    focused = null;
+                    SettingsModEntry.Log("KBM: releasePointerCapture posted to UI thread");
                 }
             }
             catch (Exception ex)
@@ -3459,6 +3460,55 @@ namespace CNRSettingsMod
         // AXIS_RELATIVE_X (27) / AXIS_RELATIVE_Y (28) give hardware mouse velocity
         // on ACTION_HOVER_MOVE (7) / ACTION_MOVE (2) without pointer capture.
         // =====================================================================
+        // Runnable posted to Android's UI thread to call requestPointerCapture /
+        // setOnCapturedPointerListener on the correct thread.  Owns and disposes 'view'.
+        private class PointerCaptureRunnable : AndroidJavaProxy
+        {
+            private readonly AndroidJavaObject          _view;
+            private readonly bool                       _capture;
+            private readonly CapturedPointerListener    _listener;
+
+            public PointerCaptureRunnable(AndroidJavaObject view, bool capture,
+                                          CapturedPointerListener listener)
+                : base("java.lang.Runnable")
+            {
+                _view     = view;
+                _capture  = capture;
+                _listener = listener;
+            }
+
+            public void run()
+            {
+                try
+                {
+                    string cls = _view.Call<AndroidJavaObject>("getClass")
+                                      .Call<string>("getName");
+                    if (_capture)
+                    {
+                        if (_listener != null)
+                            _view.Call("setOnCapturedPointerListener", _listener);
+                        _view.Call("requestPointerCapture");
+                        bool hasCap = _view.Call<bool>("hasPointerCapture");
+                        SettingsModEntry.Log("KBM: UI capture hasCap=" + hasCap
+                            + " view=" + cls);
+                    }
+                    else
+                    {
+                        _view.Call("releasePointerCapture");
+                        SettingsModEntry.Log("KBM: UI release done view=" + cls);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SettingsModEntry.Log("KBM: PointerCaptureRunnable err: " + ex.Message);
+                }
+                finally
+                {
+                    _view.Dispose();
+                }
+            }
+        }
+
         private class WindowCallbackProxy : AndroidJavaProxy
         {
             private const int ACTION_HOVER_MOVE = 7;
