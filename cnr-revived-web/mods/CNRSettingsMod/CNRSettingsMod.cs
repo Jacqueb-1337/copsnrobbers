@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.10";
+        public  const string Version = "3.0.11";
 
         public static void Load()
         {
@@ -1534,6 +1534,7 @@ namespace CNRSettingsMod
             if (_kbmEnabled && _cursorLocked && !_showSettings)
             {
                 float dx, dy;
+                bool captureHandled = false;
                 if (_captureActive && _capListener != null)
                 {
                     dx = _capListener.DrainDx();
@@ -1543,9 +1544,10 @@ namespace CNRSettingsMod
                     {
                         KbmInjectMouseLook(dx * 0.05f, -dy * 0.05f);
                         _lastMousePosValid = false;
+                        captureHandled = true;
                     }
                 }
-                else
+                if (!captureHandled)
                 {
                     // Drain WindowCallbackProxy accumulator
                     dx = _amlDx;  _amlDx = 0f;
@@ -2924,9 +2926,12 @@ namespace CNRSettingsMod
                 // our OnCapturedPointerListener on the DecorView will receive them.
                 if (capture)
                 {
-                    _captureActive = true;
+                    // Do NOT set _captureActive=true here — the runnable checks hasCap
+                    // asynchronously and sets it only if capture is actually granted.
+                    // Until then, Input.GetAxis("Mouse X/Y") runs as the primary path.
+                    _captureActive = false;
                     if (_capListener != null) _capListener.Reset();
-                    var r = new PointerCaptureRunnable(decor, true, _capListener);
+                    var r = new PointerCaptureRunnable(decor, true, _capListener, this);
                     activity.Call("runOnUiThread", r);
                     decor = null;  // ownership transferred to runnable
                     SettingsModEntry.Log("KBM: requestPointerCapture posted to UI thread (decor)");
@@ -2935,7 +2940,7 @@ namespace CNRSettingsMod
                 {
                     _captureActive = false;
                     if (_capListener != null) _capListener.Reset();
-                    var r = new PointerCaptureRunnable(decor, false, null);
+                    var r = new PointerCaptureRunnable(decor, false, null, this);
                     activity.Call("runOnUiThread", r);
                     decor = null;
                     SettingsModEntry.Log("KBM: releasePointerCapture posted to UI thread");
@@ -3464,14 +3469,16 @@ namespace CNRSettingsMod
             private readonly AndroidJavaObject          _view;
             private readonly bool                       _capture;
             private readonly CapturedPointerListener    _listener;
+            private readonly SettingsModHook            _host;
 
             public PointerCaptureRunnable(AndroidJavaObject view, bool capture,
-                                          CapturedPointerListener listener)
+                                          CapturedPointerListener listener, SettingsModHook host)
                 : base("java.lang.Runnable")
             {
                 _view     = view;
                 _capture  = capture;
                 _listener = listener;
+                _host     = host;
             }
 
             public void run()
@@ -3484,14 +3491,19 @@ namespace CNRSettingsMod
                     {
                         if (_listener != null)
                             _view.Call("setOnCapturedPointerListener", _listener);
+                        _view.Call("requestFocus");
                         _view.Call("requestPointerCapture");
                         bool hasCap = _view.Call<bool>("hasPointerCapture");
                         SettingsModEntry.Log("KBM: UI capture hasCap=" + hasCap
                             + " view=" + cls);
+                        // Set optimistically — grant is async, hasCap may be false
+                        // immediately even when capture succeeds.
+                        _host._captureActive = true;
                     }
                     else
                     {
                         _view.Call("releasePointerCapture");
+                        _host._captureActive = false;
                         SettingsModEntry.Log("KBM: UI release done view=" + cls);
                     }
                 }
