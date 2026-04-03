@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.2";
+        public  const string Version = "3.1.3";
 
         public static void Load()
         {
@@ -4070,7 +4070,7 @@ namespace CNRSettingsMod
             }
         }
 
-        // Register JoyMotionProxy as OnGenericMotionEventListener on the DecorView.
+        // Register JoyMotionProxy as OnGenericMotionListener on Unity's render surface.
         // Also ensures WindowCallbackProxy is installed as a reliable feed-through path.
         // Returns false so Unity still receives all joystick events normally.
         private void SetupJoyProxy()
@@ -4078,18 +4078,38 @@ namespace CNRSettingsMod
             if (_joyProxySetup) return;
             _joyProxySetup = true;
             _joyProxy = new JoyMotionProxy(); // create before EnsureWindowCallback so Feed() works
-            EnsureWindowCallback(); // primary reliable path for joystick data
+            EnsureWindowCallback(); // feed path via Window.Callback
             AndroidJavaClass  player   = null;
-            AndroidJavaObject activity = null, window = null, decor = null;
+            AndroidJavaObject activity = null, window = null;
             try
             {
                 player   = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
                 activity = player.GetStatic<AndroidJavaObject>("currentActivity");
                 window   = activity.Call<AndroidJavaObject>("getWindow");
-                decor    = window.Call<AndroidJavaObject>("getDecorView");
-                var runnable = new JoyProxySetRunnable(decor, _joyProxy);
-                decor = null; // ownership transferred to runnable
-                activity.Call("runOnUiThread", runnable); // secondary path (may not fire if overwritten)
+                // Joystick events are dispatched to the focused view (mUnityPlayer / SurfaceView),
+                // NOT to DecorView. Register on the same target as HoverProxy.
+                AndroidJavaObject regTarget = null;
+                try
+                {
+                    AndroidJavaObject mup = activity.Get<AndroidJavaObject>("mUnityPlayer");
+                    try
+                    {
+                        int cc = mup.Call<int>("getChildCount");
+                        if (cc > 0)
+                        {
+                            regTarget = mup.Call<AndroidJavaObject>("getChildAt", 0);
+                            mup.Dispose();
+                        }
+                        else regTarget = mup; // use mUnityPlayer itself
+                    }
+                    catch { regTarget = mup; }
+                }
+                catch
+                {
+                    regTarget = window.Call<AndroidJavaObject>("getDecorView"); // last resort
+                }
+                activity.Call("runOnUiThread", new JoyProxySetRunnable(regTarget, _joyProxy));
+                // regTarget ownership transferred to runnable
             }
             catch (Exception ex)
             {
@@ -4097,7 +4117,6 @@ namespace CNRSettingsMod
             }
             finally
             {
-                if (decor    != null) decor.Dispose();
                 if (window   != null) window.Dispose();
                 if (activity != null) activity.Dispose();
                 if (player   != null) player.Dispose();
@@ -4618,7 +4637,7 @@ namespace CNRSettingsMod
             private readonly float[] _ax = new float[20];
             private bool _hasData;
 
-            internal JoyMotionProxy() : base("android.view.View$OnGenericMotionEventListener") { }
+            internal JoyMotionProxy() : base("android.view.View$OnGenericMotionListener") { }
 
             // Called on Android UI thread by View.dispatchGenericMotionEvent.
             bool onGenericMotion(AndroidJavaObject v, AndroidJavaObject e)
@@ -4686,16 +4705,16 @@ namespace CNRSettingsMod
 
         private class JoyProxySetRunnable : AndroidJavaProxy
         {
-            private readonly AndroidJavaObject _decor;
+            private readonly AndroidJavaObject _view;
             private readonly JoyMotionProxy    _proxy;
-            internal JoyProxySetRunnable(AndroidJavaObject decor, JoyMotionProxy proxy)
-                : base("java.lang.Runnable") { _decor = decor; _proxy = proxy; }
+            internal JoyProxySetRunnable(AndroidJavaObject view, JoyMotionProxy proxy)
+                : base("java.lang.Runnable") { _view = view; _proxy = proxy; }
             public void run()
             {
-                try   { _decor.Call("setOnGenericMotionListener", _proxy);
-                        SettingsModEntry.Log("JoyProxy: registered on DecorView"); }
+                try   { _view.Call("setOnGenericMotionListener", _proxy);
+                        SettingsModEntry.Log("JoyProxy: registered on " + _view.Call<AndroidJavaObject>("getClass").Call<string>("getSimpleName")); }
                 catch (Exception ex) { SettingsModEntry.Log("JoyProxy reg: " + ex.Message); }
-                finally { _decor.Dispose(); }
+                finally { _view.Dispose(); }
             }
         }
 
