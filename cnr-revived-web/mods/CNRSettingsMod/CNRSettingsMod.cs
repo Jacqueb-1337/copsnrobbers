@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.16";
+        public  const string Version = "3.0.17";
 
         public static void Load()
         {
@@ -286,9 +286,12 @@ namespace CNRSettingsMod
         private int    _dbgFrame = 0;
         private int    _proxyFires = 0;         // total calls to WindowCallbackProxy.dispatchGenericMotionEvent
         private float  _dbgAbsX = 0f, _dbgAbsY = 0f;  // last abs XY reported by proxy
+        private volatile int _gmlFires = 0;   // total calls to GmlProxy.onGenericMotion
+        private float  _gmlAbsX = 0f, _gmlAbsY = 0f;  // last abs XY reported by GmlProxy
 
         // -- KBM Window.Callback intercept (AXIS_RELATIVE_X/Y velocity) -----
         private WindowCallbackProxy  _winProxy = null;
+        private GmlProxy             _gmlProxy = null;
         private volatile float       _amlDx    = 0f;  // accumulated relative X since last drain
         private volatile float       _amlDy    = 0f;  // accumulated relative Y since last drain
         private bool                 _amlGotData = false;  // have we received any AML data yet?
@@ -2350,13 +2353,14 @@ namespace CNRSettingsMod
                 dbgStyle.normal.textColor = Color.yellow;
                 string dbgText =
                     "KBM DEBUG\n" +
-                    "capActive=" + _captureActive + "  locked=" + _cursorLocked + "\n" +
-                    "source=" + _dbgSource + "\n" +
-                    "rawDx=" + _dbgRawDx.ToString("F3") + "  rawDy=" + _dbgRawDy.ToString("F3") + "\n" +
-                    "pfires=" + _proxyFires + "  cfires=" + (_capListener != null ? _capListener.FireCount.ToString() : "?") + "\n" +
-                    "absX=" + _dbgAbsX.ToString("F1") + "  absY=" + _dbgAbsY.ToString("F1") + "\n" +
+                    "cap=" + _captureActive + " lock=" + _cursorLocked + "\n" +
+                    "src=" + _dbgSource + " dx=" + _dbgRawDx.ToString("F2") + " dy=" + _dbgRawDy.ToString("F2") + "\n" +
+                    "proxy.fires=" + _proxyFires + " | cap.fires=" + (_capListener != null ? _capListener.FireCount.ToString() : "?") + "\n" +
+                    "gml.fires=" + _gmlFires + "\n" +
+                    "proxy.abs=" + (int)_dbgAbsX + "," + (int)_dbgAbsY + "\n" +
+                    "gml.abs=" + (int)_gmlAbsX + "," + (int)_gmlAbsY + "\n" +
                     "frame=" + _dbgFrame;
-                GUI.Box(new Rect(10, 10, 340, 210), dbgText, dbgStyle);
+                GUI.Box(new Rect(10, 10, 360, 240), dbgText, dbgStyle);
             }
 
             if (!_showSettings && !_hudEditMode) return;
@@ -2942,6 +2946,7 @@ namespace CNRSettingsMod
             _lastMousePosValid = false;
             _amlDx = 0f; _amlDy = 0f;
             if (!locked && _winProxy != null) _winProxy.ResetAbsPos();
+            if (!locked && _gmlProxy != null) _gmlProxy.ResetAbsPos();
             Screen.showCursor  = !locked;
             SetAndroidPointerIcon(!locked);
             SetPointerCapture(locked);  // request/release pointer capture tied to lock state
@@ -3062,6 +3067,16 @@ namespace CNRSettingsMod
                 _winProxy = new WindowCallbackProxy(orig, this);
                 window.Call("setCallback", _winProxy);
                 SettingsModEntry.Log("KBM: WindowCallbackProxy installed");
+
+                // View.OnGenericMotionListener on DecorView.
+                // Window.Callback.dispatchGenericMotionEvent is NOT called for mouse hover
+                // events on Android — they go directly through the view hierarchy.
+                // A GenericMotionListener on DecorView fires for ALL generic motion events.
+                _gmlProxy = new GmlProxy(this);
+                AndroidJavaObject gmlDecorRef = window.Call<AndroidJavaObject>("getDecorView");
+                activity.Call("runOnUiThread", new GmlSetRunnable(gmlDecorRef, _gmlProxy, this));
+                // gmlDecorRef ownership transferred to GmlSetRunnable
+                SettingsModEntry.Log("KBM: GmlProxy registration posted to UI thread");
             }
             catch (Exception ex)
             {
@@ -3491,6 +3506,97 @@ namespace CNRSettingsMod
                 if (root == null) continue;
                 SettingsModEntry.Log("=== Deep scan: " + rootName + " ===");
                 LogChildrenRecursive(root.transform, 0, 6); // max depth 6
+            }
+        }
+
+        // =====================================================================
+        // GmlProxy — View.OnGenericMotionListener on DecorView.
+        // Fires for ALL mouse generic motion events (hover + captured move) at the
+        // view level, independently of whether Window.Callback fires.
+        // Returns false so Unity still receives every event.
+        // =====================================================================
+        private class GmlProxy : AndroidJavaProxy
+        {
+            private const int AXIS_RELATIVE_X = 27;
+            private const int AXIS_RELATIVE_Y = 28;
+            private const int ACTION_HOVER_MOVE = 7;
+            private const int ACTION_MOVE       = 2;
+
+            private readonly SettingsModHook _host;
+            private float _lastAbsX = float.MinValue;
+            private float _lastAbsY = float.MinValue;
+
+            public GmlProxy(SettingsModHook host)
+                : base("android.view.View$OnGenericMotionListener") { _host = host; }
+
+            public void ResetAbsPos() { _lastAbsX = float.MinValue; _lastAbsY = float.MinValue; }
+
+            bool onGenericMotion(AndroidJavaObject view, AndroidJavaObject ev)
+            {
+                _host._gmlFires++;
+                try
+                {
+                    int action = ev.Call<int>("getActionMasked");
+                    if (action == ACTION_HOVER_MOVE || action == ACTION_MOVE)
+                    {
+                        // Primary: AXIS_RELATIVE (only non-zero when pointer capture is active)
+                        float rdx = ev.Call<float>("getAxisValue", AXIS_RELATIVE_X);
+                        float rdy = ev.Call<float>("getAxisValue", AXIS_RELATIVE_Y);
+                        if (rdx != 0f || rdy != 0f)
+                        {
+                            _host._amlDx += rdx;
+                            _host._amlDy += rdy;
+                            _host._amlGotData = true;
+                        }
+                        else
+                        {
+                            // Fallback: absolute position delta (bounded by screen edge)
+                            float ax = ev.Call<float>("getX");
+                            float ay = ev.Call<float>("getY");
+                            _host._gmlAbsX = ax;
+                            _host._gmlAbsY = ay;
+                            if (_lastAbsX != float.MinValue)
+                            {
+                                float ddx = ax - _lastAbsX;
+                                float ddy = ay - _lastAbsY;
+                                if (ddx != 0f || ddy != 0f)
+                                {
+                                    _host._amlDx += ddx;
+                                    _host._amlDy += ddy;
+                                    _host._amlGotData = true;
+                                }
+                            }
+                            _lastAbsX = ax;
+                            _lastAbsY = ay;
+                        }
+                    }
+                }
+                catch { }
+                return false; // do not consume — Unity must still receive the event
+            }
+        }
+
+        // Runnable that installs GmlProxy on DecorView from the UI thread.
+        // Owns and disposes 'view'.
+        private class GmlSetRunnable : AndroidJavaProxy
+        {
+            private readonly AndroidJavaObject _view;
+            private readonly GmlProxy          _proxy;
+            private readonly SettingsModHook   _host;
+
+            public GmlSetRunnable(AndroidJavaObject view, GmlProxy proxy, SettingsModHook host)
+                : base("java.lang.Runnable") { _view = view; _proxy = proxy; _host = host; }
+
+            public void run()
+            {
+                try
+                {
+                    _view.Call("setOnGenericMotionListener", _proxy);
+                    string cls = _view.Call<AndroidJavaObject>("getClass").Call<string>("getName");
+                    SettingsModEntry.Log("KBM: GmlProxy installed on " + cls);
+                }
+                catch (Exception ex) { SettingsModEntry.Log("KBM: GmlProxy install err: " + ex.Message); }
+                finally { _view.Dispose(); }
             }
         }
 
