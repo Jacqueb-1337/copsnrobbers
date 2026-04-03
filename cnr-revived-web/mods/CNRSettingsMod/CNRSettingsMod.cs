@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.24";
+        public  const string Version = "3.0.25";
 
         public static void Load()
         {
@@ -1224,14 +1224,9 @@ namespace CNRSettingsMod
 
         private void Update()
         {
-            if (!_inGameScene) return;
-
-            // Set UICamera.useMouse.
-            // In KBM mode: always true so hardware mouse clicks reach NGUI in all states
-            // (menus, pause, HUD buttons). The previous logic toggled this off when the
-            // cursor was 'locked', which silently broke all mouse clicking.
-            // In pure touch mode: leave at Android default (false) so ProcessMouse()
-            // doesn't interfere with ProcessTouches() via simulateMouseWithTouches.
+            // Set UICamera.useMouse — must run in ALL scenes (including main menu).
+            // In KBM mode: always true so hardware mouse clicks reach NGUI everywhere.
+            // In pure touch mode: leave at Android default (false).
             _uiCamCacheAge -= Time.deltaTime;
             if (_uiCamCache.Length == 0 || _uiCamCacheAge <= 0f)
             {
@@ -1241,6 +1236,8 @@ namespace CNRSettingsMod
             bool wantMouse = _kbmEnabled;
             foreach (UICamera cam in _uiCamCache)
                 if (cam != null) cam.useMouse = wantMouse;
+
+            if (!_inGameScene) return;
 
             if (_pausePanelRef == null)
             {
