@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.15";
+        public  const string Version = "3.0.16";
 
         public static void Load()
         {
@@ -284,6 +284,8 @@ namespace CNRSettingsMod
         private float  _dbgAxX = 0f, _dbgAxY = 0f;
         private Vector3 _dbgMousePos = Vector3.zero;
         private int    _dbgFrame = 0;
+        private int    _proxyFires = 0;         // total calls to WindowCallbackProxy.dispatchGenericMotionEvent
+        private float  _dbgAbsX = 0f, _dbgAbsY = 0f;  // last abs XY reported by proxy
 
         // -- KBM Window.Callback intercept (AXIS_RELATIVE_X/Y velocity) -----
         private WindowCallbackProxy  _winProxy = null;
@@ -1560,7 +1562,7 @@ namespace CNRSettingsMod
                     // Drain WindowCallbackProxy accumulator
                     dx = _amlDx;  _amlDx = 0f;
                     dy = _amlDy;  _amlDy = 0f;
-                    if (_amlGotData && (dx != 0f || dy != 0f))
+                    if (dx != 0f || dy != 0f)  // no _amlGotData gate: any non-zero accumulator fires
                     {
                         KbmInjectMouseLook(dx * 0.05f, -dy * 0.05f);
                         _lastMousePosValid = false;
@@ -2351,10 +2353,10 @@ namespace CNRSettingsMod
                     "capActive=" + _captureActive + "  locked=" + _cursorLocked + "\n" +
                     "source=" + _dbgSource + "\n" +
                     "rawDx=" + _dbgRawDx.ToString("F3") + "  rawDy=" + _dbgRawDy.ToString("F3") + "\n" +
-                    "GetAxis=" + _dbgAxX.ToString("F3") + "," + _dbgAxY.ToString("F3") + "\n" +
-                    "mousePos=" + (int)_dbgMousePos.x + "," + (int)_dbgMousePos.y + "\n" +
+                    "pfires=" + _proxyFires + "  cfires=" + (_capListener != null ? _capListener.FireCount.ToString() : "?") + "\n" +
+                    "absX=" + _dbgAbsX.ToString("F1") + "  absY=" + _dbgAbsY.ToString("F1") + "\n" +
                     "frame=" + _dbgFrame;
-                GUI.Box(new Rect(10, 10, 340, 200), dbgText, dbgStyle);
+                GUI.Box(new Rect(10, 10, 340, 210), dbgText, dbgStyle);
             }
 
             if (!_showSettings && !_hudEditMode) return;
@@ -3572,6 +3574,7 @@ namespace CNRSettingsMod
             // Intercept mouse movement; forward event to original for view dispatch.
             public bool dispatchGenericMotionEvent(AndroidJavaObject ev)
             {
+                _host._proxyFires++;  // diagnostic: counts whether this JNI proxy is invoked at all
                 try
                 {
                     int action = ev.Call<int>("getActionMasked");
@@ -3593,6 +3596,8 @@ namespace CNRSettingsMod
                             // but Android still updates getX/getY as the physical mouse moves.
                             float ax = ev.Call<float>("getX");
                             float ay = ev.Call<float>("getY");
+                            _host._dbgAbsX = ax;  // diagnostic: track last reported cursor position
+                            _host._dbgAbsY = ay;
                             if (_lastAbsX != float.MinValue)
                             {
                                 float ddx = ax - _lastAbsX;
@@ -3627,7 +3632,39 @@ namespace CNRSettingsMod
             { return _orig.Call<bool>("dispatchTrackballEvent", ev); }
             public bool dispatchPopulateAccessibilityEvent(AndroidJavaObject ev)
             { return _orig.Call<bool>("dispatchPopulateAccessibilityEvent", ev); }
-            public void onWindowFocusChanged(bool f)         { _orig.Call("onWindowFocusChanged", f); }
+            public void onWindowFocusChanged(bool hasFocus)
+            {
+                _orig.Call("onWindowFocusChanged", hasFocus);
+                // Android docs: requestPointerCapture() must be called while the window has
+                // input focus.  onWindowFocusChanged(true) is the documented trigger point.
+                // Re-requesting here covers: initial capture AND cases where focus was lost
+                // (dialog, notification shade) and regained.
+                if (hasFocus && _host._kbmEnabled && _host._cursorLocked)
+                {
+                    AndroidJavaClass  pl = null;
+                    AndroidJavaObject ac = null, wn = null, dc = null;
+                    try
+                    {
+                        pl = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                        ac = pl.GetStatic<AndroidJavaObject>("currentActivity");
+                        wn = ac.Call<AndroidJavaObject>("getWindow");
+                        dc = wn.Call<AndroidJavaObject>("getDecorView");
+                        if (_host._capListener != null)
+                            dc.Call("setOnCapturedPointerListener", _host._capListener);
+                        dc.Call("requestPointerCapture");
+                        _host._captureActive = true;
+                        SettingsModEntry.Log("KBM: onWindowFocusChanged(true) -> requestPointerCapture");
+                    }
+                    catch (Exception ex) { SettingsModEntry.Log("KBM: focus-capture err: " + ex.Message); }
+                    finally
+                    {
+                        if (dc != null) dc.Dispose();
+                        if (wn != null) wn.Dispose();
+                        if (ac != null) ac.Dispose();
+                        if (pl != null) pl.Dispose();
+                    }
+                }
+            }
             public void onAttachedToWindow()                 { _orig.Call("onAttachedToWindow"); }
             public void onDetachedFromWindow()               { _orig.Call("onDetachedFromWindow"); }
             public void onContentChanged()                   { _orig.Call("onContentChanged"); }
@@ -3661,7 +3698,8 @@ namespace CNRSettingsMod
             public CapturedPointerListener()
                 : base("android.view.View$OnCapturedPointerListener") { }
 
-            public void Reset() { _dx = 0f; _dy = 0f; lmbHeld = false; _loggedFirst = false; }
+            public int  FireCount;
+            public void Reset() { _dx = 0f; _dy = 0f; lmbHeld = false; _loggedFirst = false; FireCount = 0; }
 
             // Called by Unity game thread each frame to atomically read+clear delta.
             public float DrainDx() { float v = _dx; _dx = 0f; return v; }
@@ -3670,6 +3708,7 @@ namespace CNRSettingsMod
             // Java callback: View.OnCapturedPointerListener.onCapturedPointer(View, MotionEvent)
             bool onCapturedPointer(AndroidJavaObject view, AndroidJavaObject e)
             {
+                FireCount++;
                 try
                 {
                     int action = e.Call<int>("getActionMasked");
