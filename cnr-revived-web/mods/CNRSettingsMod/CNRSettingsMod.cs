@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.35";
+        public  const string Version = "3.0.36";
 
         public static void Load()
         {
@@ -204,6 +204,26 @@ namespace CNRSettingsMod
             KeyCode.A, KeyCode.D, KeyCode.E, KeyCode.Q,
             KeyCode.Mouse1, KeyCode.P, KeyCode.R, KeyCode.Tab, KeyCode.T };
         private const int KBM_BIND_COUNT = 13;
+
+        // -- Gamepad / controller keybinds -----------------------------------
+        private static readonly string[] GP_BIND_NAMES = {
+            "Fire", "Jump", "Next gun", "Prev gun", "Aim", "Pause", "Reload", "Player list", "Chat" };
+        private static readonly string[] GP_PREF_KEYS = {
+            "CNRMod_GP_Fire", "CNRMod_GP_Jump", "CNRMod_GP_NextWpn", "CNRMod_GP_PrevWpn",
+            "CNRMod_GP_Aim", "CNRMod_GP_Pause", "CNRMod_GP_Reload", "CNRMod_GP_PList", "CNRMod_GP_Chat" };
+        private static readonly KeyCode[] GP_DEFAULTS = {
+            KeyCode.JoystickButton0,  // A / Cross      = Fire
+            KeyCode.JoystickButton1,  // B / Circle     = Jump
+            KeyCode.JoystickButton5,  // RB / R1        = Next gun
+            KeyCode.JoystickButton4,  // LB / L1        = Prev gun
+            KeyCode.JoystickButton9,  // R-stick click  = Aim
+            KeyCode.JoystickButton7,  // Start/Options  = Pause
+            KeyCode.JoystickButton2,  // X / Square     = Reload
+            KeyCode.JoystickButton6,  // Back/Share     = Player list
+            KeyCode.JoystickButton8,  // L-stick click  = Chat
+        };
+        private const int GP_BIND_COUNT = 9;
+
         private System.Collections.Generic.Dictionary<string,string> _hudCfg =
             new System.Collections.Generic.Dictionary<string,string>();
         private GameObject[] _dragGOs      = new GameObject[DRAG_COUNT];
@@ -254,6 +274,16 @@ namespace CNRSettingsMod
         private Vector2 _scrollCtrl    = Vector2.zero;
         private float   _kbmDeadzone   = 0.05f; // keyboard/mouse inject: axis magnitude below this is zeroed
         private float   _touchDeadzone = 0.1f;  // touch joystick: normalised magnitude below this is zeroed
+        // -- Gamepad / controller state ----------------------------------------
+        private bool    _gamepadEnabled     = false;
+        private float   _controllerDeadzone = 0.1f;
+        private float   _controllerSens     = 1.5f;  // left-stick magnitude multiplier
+        private float   _controllerCamSens  = 0.04f; // right-stick camera scale per frame
+        private float   _controllerAimMult  = 0.5f;
+        private bool    _gpRightStickOk     = true;  // false after axis-not-found exception
+        private KeyCode[] _gpKeys           = new KeyCode[GP_BIND_COUNT];
+        private int     _gpCaptureIdx       = -1;
+        private int     _gpCaptureCooldown  = 0;
         private int     _activeTab  = 0;   // 0 = Settings  1 = KBM  2 = Account
         private string  _pinInput    = "";
         private string  _pinPassword = "";
@@ -1569,6 +1599,13 @@ namespace CNRSettingsMod
                 if (_sliderotate != null && _fiCannotRotate != null)
                     _fiCannotRotate.SetValue(_sliderotate, true);
             }
+            // Gamepad right stick also injects via KbmInjectMouseLook — suppress Sliderotate too.
+            else if (_gamepadEnabled && _gpRightStickOk && _inGameScene)
+            {
+                if (_sliderotate == null) CacheSliderotate();
+                if (_sliderotate != null && _fiCannotRotate != null)
+                    _fiCannotRotate.SetValue(_sliderotate, true);
+            }
             // KBM mouse look.
             // Primary: pointer capture (API 26+) gives AXIS_RELATIVE on captured events.
             // Fallback 1: WindowCallbackProxy AXIS_RELATIVE (if proxy fires before Unity).
@@ -1652,7 +1689,8 @@ namespace CNRSettingsMod
             if (_kbmEnabled && _inGameScene) KbmInjectJoystick();
             // Touch-joystick deadzone: when NOT in KBM mode, post-process _deltaPixels to kill drift.
             // KBM mode handles its own deadzone inside KbmInjectJoystick.
-            else if (!_kbmEnabled && _inGameScene && _touchDeadzone > 0f)
+            else if (_gamepadEnabled && _inGameScene) GamepadUpdate();
+            else if (_inGameScene && _touchDeadzone > 0f)
                 ApplyTouchJoystickDeadzone();
         }
 
@@ -2669,7 +2707,22 @@ namespace CNRSettingsMod
                 PlayerPrefs.SetFloat("CNRMod_AimedMult", _adsMultiplier);
             }
             GUILayout.Label("  % of normal sens while scoped (e.g. 50% = half speed)", HintStyle());
-            GUILayout.Space(10f);
+            GUILayout.Space(14f);
+
+            // ---- Touch Joystick Deadzone -----------------------------------
+            SectionHeader("Touch Joystick");
+            GUILayout.Space(4f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Deadzone  [" + (_touchDeadzone * 100f).ToString("F0") + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newTouchDz = DrawSlider(_touchDeadzone, 0f, 0.4f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newTouchDz - _touchDeadzone) > 0.005f)
+            {
+                _touchDeadzone = Mathf.Round(newTouchDz * 20f) / 20f;
+                HudCfgSetFloat("CNRMod_TouchDeadzone", _touchDeadzone);
+            }
+            GUILayout.Label("  Inputs below this magnitude are ignored (avoids drift)", HintStyle());
+            GUILayout.Space(14f);
 
             // ---- AWP / ADS --------------------------------------------------
             SectionHeader("AWP / ADS");
@@ -2803,6 +2856,7 @@ namespace CNRSettingsMod
 
             // Keybind capture overlay — drawn on top of everything else
             if (_captureIdx >= 0) DrawCaptureOverlay();
+            if (_gpCaptureIdx >= 0) DrawGpCaptureOverlay();
         }
 
         // =====================================================================
@@ -2853,65 +2907,106 @@ namespace CNRSettingsMod
         // =====================================================================
         private void DrawControllersTabContent(float pw)
         {
-            // ---- Camera Sensitivity ----------------------------------------
-            SectionHeader("Camera Sensitivity");
+            // ---- Connected Controllers ----------------------------------------
+            SectionHeader("Connected Controllers");
             GUILayout.Space(4f);
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Normal  [" + _sensNormal.ToString("F1") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newSens = DrawSlider(_sensNormal, 1f, 7f);
-            GUILayout.EndHorizontal();
-            if (Mathf.Abs(newSens - _sensNormal) > 0.05f)
+            string[] joyNames = Input.GetJoystickNames();
+            bool anyConnected = false;
+            if (joyNames != null)
             {
-                _sensNormal = Mathf.Round(newSens * 10f) / 10f;
-                PlayerPrefs.SetFloat("Sensitivity", _sensNormal);
-                if (_sliderotate != null && _fiSensX != null)
-                    WriteAllSens(_sensNormal);
+                for (int ji = 0; ji < joyNames.Length; ji++)
+                {
+                    if (!string.IsNullOrEmpty(joyNames[ji]))
+                    {
+                        GUILayout.Label("  \u2022  " + joyNames[ji], LabelStyle());
+                        anyConnected = true;
+                    }
+                }
             }
-            GUILayout.Space(6f);
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Aimed   [" + Mathf.RoundToInt(_adsMultiplier * 100f) + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newAimed = DrawSlider(_adsMultiplier, 0.1f, 1.0f);
-            GUILayout.EndHorizontal();
-            if (Mathf.Abs(newAimed - _adsMultiplier) > 0.005f)
+            if (!anyConnected)
             {
-                _adsMultiplier = Mathf.Round(newAimed * 20f) / 20f;
-                PlayerPrefs.SetFloat("CNRMod_AimedMult", _adsMultiplier);
+                GUIStyle noCtrl = HintStyle();
+                noCtrl.normal.textColor = new Color(1f, 0.55f, 0.55f);
+                GUILayout.Label("  No controller detected.  Pair via Bluetooth or USB.", noCtrl);
             }
-            GUILayout.Label("  % of normal sens while scoped", HintStyle());
             GUILayout.Space(14f);
 
-            // ---- Joystick --------------------------------------------------
-            SectionHeader("Joystick");
+            // ---- Gamepad Enabled --------------------------------------------
+            SectionHeader("Gamepad Input");
             GUILayout.Space(4f);
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("KB/Mouse deadzone  [" + (_kbmDeadzone * 100f).ToString("F0") + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newKbmDz = DrawSlider(_kbmDeadzone, 0f, 0.4f);
-            GUILayout.EndHorizontal();
-            if (Mathf.Abs(newKbmDz - _kbmDeadzone) > 0.005f)
             {
-                _kbmDeadzone = Mathf.Round(newKbmDz * 20f) / 20f;
-                HudCfgSetFloat("CNRMod_KbmDeadzone", _kbmDeadzone);
+                GUILayout.Space(2f);
+                bool clicked = GUILayout.Button(GUIContent.none, GhostBtnStyle(), GUILayout.Height(34f));
+                Rect rk = GUILayoutUtility.GetLastRect();
+                Texture2D chkTex = _gamepadEnabled
+                    ? (_spSelectKuang ?? MakeTex(2, 2, Color.white))
+                    : (_spPropKuang   ?? MakeTex(2, 2, new Color(0.35f, 0.35f, 0.35f)));
+                GUI.DrawTexture(new Rect(rk.x + 3f, rk.y + 2f, 30f, 30f), chkTex, ScaleMode.ScaleToFit);
+                GUI.Label(new Rect(rk.x + 39f, rk.y, rk.width - 42f, rk.height), "Gamepad controls enabled", LabelStyle());
+                if (clicked)
+                {
+                    _gamepadEnabled = !_gamepadEnabled;
+                    HudCfgSetInt("CNRMod_GamepadEnabled", _gamepadEnabled ? 1 : 0);
+                    HudCfgSave();
+                }
             }
-            GUILayout.Label("  Keyboard inject: axis below this magnitude is zeroed", HintStyle());
-            GUILayout.Space(6f);
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Touch deadzone  [" + (_touchDeadzone * 100f).ToString("F0") + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newTouchDz = DrawSlider(_touchDeadzone, 0f, 0.4f);
-            GUILayout.EndHorizontal();
-            if (Mathf.Abs(newTouchDz - _touchDeadzone) > 0.005f)
-            {
-                _touchDeadzone = Mathf.Round(newTouchDz * 20f) / 20f;
-                HudCfgSetFloat("CNRMod_TouchDeadzone", _touchDeadzone);
-            }
-            GUILayout.Label("  Touch joystick: inputs below this magnitude are ignored (avoids drift)", HintStyle());
+            GUILayout.Label("  Left stick = move.  Right stick camera not yet supported.", HintStyle());
             GUILayout.Space(14f);
 
-            // ---- Keybinds --------------------------------------------------
-            SectionHeader("Keybinds");
+            // ---- Deadzone --------------------------------------------------
+            SectionHeader("Deadzone");
+            GUILayout.Space(4f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Left stick  [" + (_controllerDeadzone * 100f).ToString("F0") + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newCDz = DrawSlider(_controllerDeadzone, 0f, 0.4f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newCDz - _controllerDeadzone) > 0.005f)
+            {
+                _controllerDeadzone = Mathf.Round(newCDz * 20f) / 20f;
+                HudCfgSetFloat("CNRMod_CtrlDeadzone", _controllerDeadzone);
+            }
+            GUILayout.Label("  Inputs below this magnitude are ignored (avoids stick drift)", HintStyle());
+            GUILayout.Space(14f);
+
+            // ---- Sensitivity -----------------------------------------------
+            SectionHeader("Sensitivity");
+            GUILayout.Space(4f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Left stick  [" + _controllerSens.ToString("F1") + "x]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newCS = DrawSlider(_controllerSens, 0.5f, 3f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newCS - _controllerSens) > 0.05f)
+            {
+                _controllerSens = Mathf.Round(newCS * 10f) / 10f;
+                HudCfgSetFloat("CNRMod_CtrlSens", _controllerSens);
+            }
+            GUILayout.Label("  Movement scale (1.0 = normal speed)", HintStyle());
+            GUILayout.Space(6f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Right stick  [" + _controllerCamSens.ToString("F3") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newRCS = DrawSlider(_controllerCamSens, 0.005f, 0.15f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newRCS - _controllerCamSens) > 0.001f)
+            {
+                _controllerCamSens = Mathf.Round(newRCS * 200f) / 200f;
+                HudCfgSetFloat("CNRMod_CtrlCamSens", _controllerCamSens);
+            }
+            GUILayout.Label("  Right stick camera speed", HintStyle());
+            GUILayout.Space(6f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Aimed   [" + Mathf.RoundToInt(_controllerAimMult * 100f) + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newCA = DrawSlider(_controllerAimMult, 0.1f, 1.0f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newCA - _controllerAimMult) > 0.005f)
+            {
+                _controllerAimMult = Mathf.Round(newCA * 20f) / 20f;
+                HudCfgSetFloat("CNRMod_CtrlAimMult", _controllerAimMult);
+            }
+            GUILayout.Label("  % of right-stick speed while scoped", HintStyle());
+            GUILayout.Space(14f);
+
+            // ---- Button Bindings ------------------------------------------
+            SectionHeader("Button Bindings");
             GUILayout.Space(4f);
             float colName = pw * 0.35f;
             float colKey  = pw * 0.34f;
@@ -2921,17 +3016,17 @@ namespace CNRSettingsMod
             keyStyle.alignment = TextAnchor.MiddleCenter;
             keyStyle.normal.textColor = new Color(1f, 0.9f, 0.4f);
             if (_gameFont != null) keyStyle.font = _gameFont;
-            for (int i = 0; i < KBM_BIND_COUNT; i++)
+            for (int i = 0; i < GP_BIND_COUNT; i++)
             {
                 GUILayout.BeginHorizontal(GUILayout.Height(32f));
-                GUILayout.Label(KBM_BIND_NAMES[i], LabelStyle(), GUILayout.Width(colName));
-                GUILayout.Label(KbKeyName(_kbKeys[i]), keyStyle,
+                GUILayout.Label(GP_BIND_NAMES[i], LabelStyle(), GUILayout.Width(colName));
+                GUILayout.Label(GpBtnName(_gpKeys[i]), keyStyle,
                     GUILayout.Width(colKey), GUILayout.Height(30f));
                 if (GUILayout.Button("Rebind", BtnStyle(13, new Color(0.6f, 0.9f, 1f)),
                     GUILayout.Width(colBtn), GUILayout.Height(30f)))
                 {
-                    _captureIdx      = i;
-                    _captureCooldown = 4;
+                    _gpCaptureIdx      = i;
+                    _gpCaptureCooldown = 4;
                 }
                 GUILayout.EndHorizontal();
                 GUILayout.Space(2f);
@@ -3129,6 +3224,21 @@ namespace CNRSettingsMod
             GUILayout.Label("  % of normal mouse sens while scoped", HintStyle());
             GUILayout.Space(14f);
 
+            // ---- Keyboard Deadzone -----------------------------------------
+            SectionHeader("Keyboard Deadzone");
+            GUILayout.Space(4f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Deadzone  [" + (_kbmDeadzone * 100f).ToString("F0") + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newKbmDz = DrawSlider(_kbmDeadzone, 0f, 0.4f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newKbmDz - _kbmDeadzone) > 0.005f)
+            {
+                _kbmDeadzone = Mathf.Round(newKbmDz * 20f) / 20f;
+                HudCfgSetFloat("CNRMod_KbmDeadzone", _kbmDeadzone);
+            }
+            GUILayout.Label("  Keyboard joystick inject: axis below this magnitude is zeroed", HintStyle());
+            GUILayout.Space(14f);
+
             // ---- Keybinds ---------------------------------------------------
             SectionHeader("Keybinds");
             GUILayout.Space(4f);
@@ -3233,6 +3343,65 @@ namespace CNRSettingsMod
                 case KeyCode.Mouse2:  return "MMB";
                 case KeyCode.None:    return "---";
                 default:              return kc.ToString();
+            }
+        }
+
+        private static string GpBtnName(KeyCode kc)
+        {
+            switch (kc)
+            {
+                case KeyCode.JoystickButton0:  return "Btn 0  (A/Cross)";
+                case KeyCode.JoystickButton1:  return "Btn 1  (B/Circle)";
+                case KeyCode.JoystickButton2:  return "Btn 2  (X/Square)";
+                case KeyCode.JoystickButton3:  return "Btn 3  (Y/Tri)";
+                case KeyCode.JoystickButton4:  return "Btn 4  (LB/L1)";
+                case KeyCode.JoystickButton5:  return "Btn 5  (RB/R1)";
+                case KeyCode.JoystickButton6:  return "Btn 6  (Back)";
+                case KeyCode.JoystickButton7:  return "Btn 7  (Start)";
+                case KeyCode.JoystickButton8:  return "Btn 8  (L-stick)";
+                case KeyCode.JoystickButton9:  return "Btn 9  (R-stick)";
+                case KeyCode.None:             return "(none)";
+                default:
+                    int n = (int)kc - 330; // JoystickButton0 = KeyCode 330
+                    return (n >= 0 && n <= 19) ? "Btn " + n : kc.ToString();
+            }
+        }
+
+        private void DrawGpCaptureOverlay()
+        {
+            if (_gpCaptureCooldown > 0) { _gpCaptureCooldown--; return; }
+
+            float w = _winRect.width;
+            float h = _winRect.height;
+            GUI.color = new Color(0f, 0f, 0f, 0.84f);
+            GUI.DrawTexture(new Rect(0f, 18f, w, h - 18f), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            GUIStyle title = new GUIStyle(GUI.skin.label);
+            title.fontSize  = 18; title.fontStyle = FontStyle.Bold;
+            title.alignment = TextAnchor.MiddleCenter;
+            title.normal.textColor = new Color(1f, 0.9f, 0.3f);
+            if (_gameFont != null) title.font = _gameFont;
+            GUIStyle sub = new GUIStyle(title);
+            sub.fontSize = 14; sub.normal.textColor = new Color(0.8f, 0.8f, 0.8f);
+
+            float cy = h * 0.40f;
+            GUI.Label(new Rect(10f, cy,        w - 20f, 40f), "Binding:  " + GP_BIND_NAMES[_gpCaptureIdx], title);
+            GUI.Label(new Rect(10f, cy + 48f,  w - 20f, 28f), "Press any button  \u2014  Esc to cancel", sub);
+
+            Event e = Event.current;
+            if (e.type == EventType.KeyDown && e.keyCode != KeyCode.None)
+            {
+                if (e.keyCode == KeyCode.Escape)
+                    _gpCaptureIdx = -1;
+                else
+                {
+                    _gpKeys[_gpCaptureIdx] = e.keyCode;
+                    HudCfgSetInt(GP_PREF_KEYS[_gpCaptureIdx], (int)e.keyCode);
+                    HudCfgSave();
+                    _gpCaptureIdx = -1;
+                }
+                e.Use();
             }
         }
 
@@ -3570,6 +3739,116 @@ namespace CNRSettingsMod
             float normalised = dp.magnitude / _kbmDragMax;
             if (normalised > 0f && normalised < _touchDeadzone)
                 _kbmFiDeltaPixels.SetValue(_kbmJoystick, Vector2.zero);
+        }
+
+        private void GamepadUpdate()
+        {
+            // ---- Movement inject (left stick → VCAnalogJoystickBase) --------
+            if (_kbmJoystick == null)
+            {
+                VCAnalogJoystickBase inst = VCAnalogJoystickBase.GetInstance("stick");
+                if (inst == null) return;
+                _kbmJoystick = (MonoBehaviour)(object)inst;
+                Type t = _kbmJoystick.GetType();
+                while (t != null && t.Name != "VCAnalogJoystickBase") t = t.BaseType;
+                if (t == null) t = _kbmJoystick.GetType();
+                _kbmFiDeltaPixels = t.GetField("_deltaPixels",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                FieldInfo fiMax = t.GetField("dragDeltaMagnitudeMaxPixels",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                if (fiMax != null) _kbmDragMax = (float)fiMax.GetValue(_kbmJoystick);
+                SettingsModEntry.Log("GamepadUpdate: joystick hooked, dragMax=" + _kbmDragMax);
+            }
+            if (_kbmFiDeltaPixels != null)
+            {
+                float ax = Input.GetAxisRaw("Horizontal");
+                float ay = Input.GetAxisRaw("Vertical");
+                float mag = Mathf.Sqrt(ax * ax + ay * ay);
+                if (mag > 0f && mag < _controllerDeadzone) { ax = 0f; ay = 0f; }
+                float injectX = ax * _kbmDragMax * _controllerSens;
+                float injectY = ay * _kbmDragMax * _controllerSens;
+                if (Mathf.Abs(injectX) > _kbmDragMax) injectX = Mathf.Sign(injectX) * _kbmDragMax;
+                if (Mathf.Abs(injectY) > _kbmDragMax) injectY = Mathf.Sign(injectY) * _kbmDragMax;
+                if (ax != 0f && ay != 0f) injectX *= 0.999f; // diagonal fix
+                _kbmFiDeltaPixels.SetValue(_kbmJoystick, new Vector2(injectX, injectY));
+            }
+
+            // ---- Right stick → camera (if axes registered in InputManager) ----
+            if (_gpRightStickOk)
+            {
+                if (_sliderotate == null) CacheSliderotate();
+                if (_sliderotate != null)
+                {
+                    try
+                    {
+                        float rx =  Input.GetAxisRaw("4th axis");
+                        float ry = -Input.GetAxisRaw("5th axis"); // invert: stick up = look up
+                        float rmag = Mathf.Sqrt(rx * rx + ry * ry);
+                        if (rmag > _controllerDeadzone)
+                        {
+                            float camSens = _isAiming ? (_controllerCamSens * _controllerAimMult) : _controllerCamSens;
+                            KbmInjectMouseLook(rx * camSens, ry * camSens);
+                        }
+                    }
+                    catch (System.ArgumentException)
+                    {
+                        _gpRightStickOk = false;
+                        SettingsModEntry.Log("GamepadUpdate: right-stick axis not in InputManager, camera disabled");
+                    }
+                }
+            }
+
+            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
+
+            // ---- Fire (index 0, held) ----------------------------------------
+            if (_gpKeys[0] != KeyCode.None && Input.GetKey(_gpKeys[0]))
+            {
+                if ((object)UIMenuDirector.mInstance != null)
+                    UIMenuDirector.mInstance.GenFireEvent();
+                else
+                    PlayerPrefs.SetInt("FpsOnFire", 1 - PlayerPrefs.GetInt("FpsOnFire", 0));
+            }
+
+            // ---- Jump (index 1, down) ----------------------------------------
+            if (_gpKeys[1] != KeyCode.None && Input.GetKeyDown(_gpKeys[1]))
+            {
+                if ((object)_joyStickCtrl == null)
+                    _joyStickCtrl = (JoyStickController)UnityEngine.Object.FindObjectOfType(typeof(JoyStickController));
+                if ((object)_joyStickCtrl != null)
+                {
+                    if (_fiJumpIsJumping == null)
+                        _fiJumpIsJumping = typeof(JoyStickController).GetField("isJumping",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    if (_fiJumpCharCtrl == null)
+                        _fiJumpCharCtrl = typeof(JoyStickController).GetField("charactercontroller",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                }
+                TriggerOwnJump();
+            }
+
+            // ---- Weapon switch (index 2 = next, 3 = prev, down) -------------
+            if (_gpKeys[2] != KeyCode.None && Input.GetKeyDown(_gpKeys[2])) KbmSwitchWeapon(+1);
+            if (_gpKeys[3] != KeyCode.None && Input.GetKeyDown(_gpKeys[3])) KbmSwitchWeapon(-1);
+
+            // ---- Aim (index 4, down) -----------------------------------------
+            if (_gpKeys[4] != KeyCode.None && Input.GetKeyDown(_gpKeys[4]))
+                PlayerPrefs.SetInt("OnAim", 1);
+
+            // ---- Pause (index 5, down) ---------------------------------------
+            if (_gpKeys[5] != KeyCode.None && Input.GetKeyDown(_gpKeys[5]))
+                KbmPressPause();
+
+            // ---- Reload (index 6, down) --------------------------------------
+            if (_gpKeys[6] != KeyCode.None && Input.GetKeyDown(_gpKeys[6]))
+                PlayerPrefs.SetInt("FpsReload", 1);
+
+            // ---- Player list (index 7, down) ---------------------------------
+            if (_gpKeys[7] != KeyCode.None && Input.GetKeyDown(_gpKeys[7]))
+                KbmToggleLeaderboard();
+
+            // ---- Chat (index 8, down) ----------------------------------------
+            if (_gpKeys[8] != KeyCode.None && Input.GetKeyDown(_gpKeys[8]))
+                KbmHandleChat();
         }
 
         private float _kbmInjectLogTimer = 0f;
@@ -4475,8 +4754,15 @@ namespace CNRSettingsMod
             _mouseAdsMult   = HudCfgGetFloat("CNRMod_MouseAdsMult", 0.5f);
             _kbmDeadzone   = HudCfgGetFloat("CNRMod_KbmDeadzone",   0.05f);
             _touchDeadzone = HudCfgGetFloat("CNRMod_TouchDeadzone", 0.1f);
+            _gamepadEnabled      = HudCfgGetInt("CNRMod_GamepadEnabled", 0) == 1;
+            _controllerDeadzone  = HudCfgGetFloat("CNRMod_CtrlDeadzone",  0.1f);
+            _controllerSens      = HudCfgGetFloat("CNRMod_CtrlSens",      1.5f);
+            _controllerCamSens   = HudCfgGetFloat("CNRMod_CtrlCamSens",   0.04f);
+            _controllerAimMult   = HudCfgGetFloat("CNRMod_CtrlAimMult",   0.5f);
             for (int ki = 0; ki < KBM_BIND_COUNT; ki++)
                 _kbKeys[ki] = (KeyCode)HudCfgGetInt(KBM_PREF_KEYS[ki], (int)KBM_DEFAULTS[ki]);
+            for (int gi = 0; gi < GP_BIND_COUNT; gi++)
+                _gpKeys[gi] = (KeyCode)HudCfgGetInt(GP_PREF_KEYS[gi], (int)GP_DEFAULTS[gi]);
             for (int i = 0; i < VIS_ITEMS.Length; i++)
                 _visOn[i] = HudCfgGetInt(VIS_ITEMS[i].prefKey, 1) == 1;
             // Pre-populate _savedScales so LateUpdate can enforce them immediately.
