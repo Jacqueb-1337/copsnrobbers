@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.29";
+        public  const string Version = "3.0.30";
 
         public static void Load()
         {
@@ -1553,6 +1553,17 @@ namespace CNRSettingsMod
             KbmJumpDetect();
             OwnJumpPhysics();
             ApplySensitivity();
+            // In KBM mode with cursor locked: prevent Sliderotate.Update() from running.
+            // Sliderotate has an "else" (MouseY-only) branch that reads Input.GetAxis("Mouse Y")
+            // and writes to transform.localEulerAngles every Update frame, even without touches.
+            // This causes double-application of mouse input — our KbmInjectMouseLook also applies
+            // the same delta in LateUpdate.  Blocking it via cannotRotate eliminates the conflict.
+            if (_kbmEnabled && _cursorLocked)
+            {
+                if (_sliderotate == null) CacheSliderotate();
+                if (_sliderotate != null && _fiCannotRotate != null)
+                    _fiCannotRotate.SetValue(_sliderotate, true);
+            }
             // KBM mouse look.
             // Primary: pointer capture (API 26+) gives AXIS_RELATIVE on captured events.
             // Fallback 1: WindowCallbackProxy AXIS_RELATIVE (if proxy fires before Unity).
@@ -3119,6 +3130,9 @@ namespace CNRSettingsMod
             if (!locked && _winProxy   != null) _winProxy.ResetAbsPos();
             if (!locked && _gmlProxy   != null) _gmlProxy.ResetAbsPos();
             if (!locked && _hoverProxy != null) _hoverProxy.ResetAbsPos();
+            // Release Sliderotate when cursor is unlocked so touch camera works normally
+            if (!locked && _sliderotate != null && _fiCannotRotate != null)
+                _fiCannotRotate.SetValue(_sliderotate, false);
             Screen.showCursor  = !locked;
             SetAndroidPointerIcon(!locked);
             SetPointerCapture(locked);  // request/release pointer capture tied to lock state
@@ -3338,9 +3352,14 @@ namespace CNRSettingsMod
             KbmSetCursorLocked(false);
         }
 
-        // Trigger a weapon switch through the same path as the on-screen button:
-        // CRWeaponManager.Update() reads CRInput.m_bSwitch + m_PropIconName each frame
-        // and calls SwitchWeapons() → selectWeapon → NGUI.receiveGunName() to update the HUD.
+        // Trigger a weapon switch:
+        // 1. Tell CRWeaponManager to physically swap the active weapon GO by setting
+        //    CRInput.m_bSwitch + m_PropIconName (read by CRWeaponManager.Update()).
+        // 2. Directly update the NGUI HUD sprite via SendMessage("receiveGunName").
+        //    CRWeaponManager.SwitchWeapons() only sends "selectWeapon" to the weapon GO
+        //    which sets canFire=true but does NOT call receiveGunName.  The HUD sprite
+        //    (goGunName.spriteName) is only updated by receiveGunName, so we must call it
+        //    ourselves.
         private void KbmSwitchWeapon(int dir)
         {
             if ((object)CRInput.mInstance == null) return;
@@ -3352,8 +3371,13 @@ namespace CNRSettingsMod
             int next = (((_weaponManager.index + dir) % weapons.Count) + weapons.Count) % weapons.Count;
             string name = weapons[next].weaponName;
             if (string.IsNullOrEmpty(name)) return;
+            // Physically swap the weapon GO
             CRInput.mInstance.m_bSwitch = true;
             CRInput.mInstance.m_PropIconName = name;
+            // Update HUD sprite immediately (receiveGunName is private; SendMessage reaches it)
+            if ((object)NGUI.mInstance != null)
+                ((Component)NGUI.mInstance).gameObject.SendMessage(
+                    "receiveGunName", name, SendMessageOptions.DontRequireReceiver);
         }
 
         private void KbmInjectJoystick()
