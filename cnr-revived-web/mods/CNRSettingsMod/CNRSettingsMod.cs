@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.3";
+        public  const string Version = "3.0.4";
 
         public static void Load()
         {
@@ -278,13 +278,11 @@ namespace CNRSettingsMod
         private CapturedPointerListener _capListener   = null;
         private bool                    _captureActive = false;
 
-        // -- KBM Android GenericMotionListener (raw mouse position, API 24+) --
-        private AndroidMouseListener _amlProxy     = null;
-        private volatile float       _amlRawX      = -1f;  // latest X from MotionEvent; -1 = none
-        private volatile float       _amlRawY      = -1f;
-        private float                _amlLastX     = 0f;
-        private float                _amlLastY     = 0f;
-        private bool                 _amlLastValid = false;
+        // -- KBM Android GenericMotionListener (AXIS_RELATIVE_X/Y velocity, API 22+) --
+        private AndroidMouseListener _amlProxy = null;
+        private volatile float       _amlDx    = 0f;  // accumulated relative X since last drain
+        private volatile float       _amlDy    = 0f;  // accumulated relative Y since last drain
+        private volatile int         _amlSeq   = 0;   // incremented each time new data arrives
 
         // -- KBM reflection (joystick) ----------------------------------------
         private MonoBehaviour _kbmJoystick      = null;
@@ -1529,35 +1527,25 @@ namespace CNRSettingsMod
             OwnJumpPhysics();
             ApplySensitivity();
             // KBM mouse look.
-            // Primary source: AndroidMouseListener (raw MotionEvent x/y from Android view).
-            // The listener fires on mousemove without pointer capture, so Unity clicks still
-            // work normally.  We compute the position delta ourselves each frame.
-            // Fallback 1: Input.GetAxis (may be 0 on old Android Unity builds).
-            // Fallback 2: Input.mousePosition delta (stops working at screen edges).
+            // Primary source: AXIS_RELATIVE_X/Y accumulated by AndroidMouseListener each frame.
+            // These are hardware mouse velocity values from the MotionEvent — they work at any
+            // screen position with no pointer capture, so Unity clicks are unaffected.
+            // Fallback 1: Input.GetAxis (may return 0 on old Android/Unity builds).
+            // Fallback 2: Input.mousePosition delta (stops at screen edges, last resort).
             if (_kbmEnabled && _cursorLocked && !_showSettings)
             {
-                float rawX = _amlRawX;
-                float rawY = _amlRawY;
-                bool  gotAml = (rawX >= 0f);
-                if (gotAml)
+                // Atomically drain the accumulated delta written by AndroidMouseListener.
+                float dx = _amlDx;  _amlDx = 0f;
+                float dy = _amlDy;  _amlDy = 0f;
+                if (dx != 0f || dy != 0f)
                 {
-                    _amlRawX = -1f;  // mark consumed
-                    if (_amlLastValid)
-                    {
-                        float dx =  (rawX - _amlLastX) * 0.05f;
-                        float dy = -(rawY - _amlLastY) * 0.05f;  // Android Y top-down; invert
-                        // ignore jumps > 40 units (e.g. first frame after cursor warp / lock)
-                        if (Mathf.Abs(dx) < 2f && Mathf.Abs(dy) < 2f)
-                            if (dx != 0f || dy != 0f) KbmInjectMouseLook(dx, dy);
-                    }
-                    _amlLastX     = rawX;
-                    _amlLastY     = rawY;
-                    _amlLastValid = true;
+                    // dy from MotionEvent: positive = down; Unity camera: positive = up — invert.
+                    KbmInjectMouseLook(dx * 0.05f, -dy * 0.05f);
                     _lastMousePosValid = false;
                 }
                 else
                 {
-                    // Fallback 1: Unity axis (raw hardware delta; may work even at screen edges)
+                    // Fallback 1: Unity axis
                     float axX = Input.GetAxis("Mouse X");
                     float axY = Input.GetAxis("Mouse Y");
                     if (axX != 0f || axY != 0f)
@@ -1567,7 +1555,7 @@ namespace CNRSettingsMod
                     }
                     else
                     {
-                        // Fallback 2: mousePosition delta (stops at screen edges)
+                        // Fallback 2: mousePosition delta
                         Vector3 curPos = Input.mousePosition;
                         if (_lastMousePosValid)
                         {
@@ -1583,7 +1571,8 @@ namespace CNRSettingsMod
             else
             {
                 _lastMousePosValid = false;
-                _amlLastValid      = false;
+                _amlDx = 0f;
+                _amlDy = 0f;
             }
         }
 
@@ -2897,7 +2886,7 @@ namespace CNRSettingsMod
         {
             _cursorLocked      = locked;
             _lastMousePosValid = false;
-            _amlLastValid      = false;  // reset delta baseline on lock state change
+            _amlDx = 0f; _amlDy = 0f;  // discard any queued deltas on lock change
             Screen.showCursor  = !locked;
             SetAndroidPointerIcon(!locked);  // hide/show hardware cursor via Android API
         }
@@ -3391,27 +3380,34 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
-        // Android GenericMotionListener — raw mouse position (API 24+)
+        // Android GenericMotionListener — AXIS_RELATIVE_X/Y mouse velocity (API 22+)
         // Implements android.view.View$OnGenericMotionListener.
-        // Returns false so Unity's own input handling still receives the event.
-        // Written from the Android UI thread; _host._amlRawX/Y are volatile floats.
+        // Returns false so Unity still receives every event (clicks work normally).
+        // AXIS_RELATIVE_X (27) / AXIS_RELATIVE_Y (28) are hardware mouse deltas available
+        // on ACTION_HOVER_MOVE without pointer capture.  We accumulate them here and the
+        // game thread drains them each LateUpdate frame.
         // =====================================================================
         private class AndroidMouseListener : AndroidJavaProxy
         {
+            private const int ACTION_HOVER_MOVE  = 7;
+            private const int ACTION_MOVE        = 2;
+            private const int AXIS_RELATIVE_X    = 27;
+            private const int AXIS_RELATIVE_Y    = 28;
+
             private readonly SettingsModHook _host;
             public AndroidMouseListener(SettingsModHook host)
                 : base("android.view.View$OnGenericMotionListener") { _host = host; }
-            // ACTION_HOVER_MOVE = 7 (mouse moving, no button held)
-            // ACTION_MOVE       = 2 (mouse moving with button held, e.g. drag)
+
             public bool onGenericMotion(AndroidJavaObject view, AndroidJavaObject ev)
             {
                 try
                 {
                     int action = ev.Call<int>("getActionMasked");
-                    if (action == 7 || action == 2)
+                    if (action == ACTION_HOVER_MOVE || action == ACTION_MOVE)
                     {
-                        _host._amlRawX = ev.Call<float>("getX");
-                        _host._amlRawY = ev.Call<float>("getY");
+                        // Accumulate — multiple events may arrive between Unity frames.
+                        _host._amlDx += ev.Call<float>("getAxisValue", AXIS_RELATIVE_X);
+                        _host._amlDy += ev.Call<float>("getAxisValue", AXIS_RELATIVE_Y);
                     }
                 }
                 catch { }
