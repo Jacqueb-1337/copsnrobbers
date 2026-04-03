@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.26";
+        public  const string Version = "3.0.27";
 
         public static void Load()
         {
@@ -307,6 +307,7 @@ namespace CNRSettingsMod
         private MonoBehaviour _kbmJoystick      = null;
         private FieldInfo     _kbmFiDeltaPixels = null;
         private float         _kbmDragMax       = 60f;
+        private CRWeaponManager _weaponManager  = null;
 
         // -- KBM reflection (Sliderotate rotation) ----------------------------
         private FieldInfo _fiRotationX    = null;
@@ -1176,6 +1177,7 @@ namespace CNRSettingsMod
             _sliderotate      = null;
             _allSliderotates.Clear();
             _kbmJoystick      = null;
+            _weaponManager    = null;
             KbmSetCursorLocked(false);
             _mainCam          = null;
             _scopedFov        = -1f;
@@ -1317,15 +1319,13 @@ namespace CNRSettingsMod
                 || (_kbKeys[6] != KeyCode.None && Input.GetKeyDown(_kbKeys[6])))
             {
                 _kbmScrollAccum = 0f;
-                int c = PlayerPrefs.GetInt("WeaponIndex", 0);
-                PlayerPrefs.SetInt("WeaponIndex", (c + 1) % 2);
+                KbmSwitchWeapon(+1);
             }
             else if (_kbmScrollAccum <= -0.1f
                 || (_kbKeys[7] != KeyCode.None && Input.GetKeyDown(_kbKeys[7])))
             {
                 _kbmScrollAccum = 0f;
-                int c = PlayerPrefs.GetInt("WeaponIndex", 0);
-                PlayerPrefs.SetInt("WeaponIndex", ((c - 1) % 2 + 2) % 2);
+                KbmSwitchWeapon(-1);
             }
 
             // Aim toggle (index 8)
@@ -1360,21 +1360,6 @@ namespace CNRSettingsMod
             // Chat (index 12)
             if (_kbKeys[12] != KeyCode.None && Input.GetKeyDown(_kbKeys[12]))
                 KbmHandleChat();
-
-            // Fire
-            bool fireHeld = (_kbKeys[0] == KeyCode.Mouse0)
-                ? (_capListener != null ? _capListener.lmbHeld : Input.GetMouseButton(0))
-                : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
-            if (fireHeld
-                && (object)PlayerLogic.mInstance != null
-                && !PlayerLogic.mInstance.bDied)
-            {
-                WeaponType wt = PlayerLogic.mInstance.mWeaponType;
-                if (wt == WeaponType.BallisticKnife || wt == WeaponType.GingerbreadKnife)
-                    PlayerLogic.mInstance.mStatus = PlayerStatus.knifeFire;
-                else
-                    PlayerLogic.mInstance.mStatus = PlayerStatus.fire;
-            }
 
             // Movement
             KbmInjectJoystick();
@@ -1554,6 +1539,9 @@ namespace CNRSettingsMod
             if (_hudEditMode) return;
             // Supplemental fire-button touch detection (bypasses Physics.Raycast).
             TouchFireDetect();
+            // KBM fire: must run in LateUpdate so it overrides JoyStickController.Update()
+            // which resets mStatus to idle every frame when Input.touchCount == 0.
+            KbmFireDetect();
             // Touch camera: route right-side drag through KbmInjectMouseLook so behaviour
             // matches mouse exactly (no Android touch-slop deadzone, same sensitivity slider).
             TouchCameraDetect();
@@ -1660,6 +1648,7 @@ namespace CNRSettingsMod
             if (_touchFireCooldown > 0f) return;
 
             if (_dragGOs[0] == null || _nguiCam == null) return;
+
             if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
             if (NGUI.mInstance != null && NGUI.mInstance.noClips) return;
             if (Input.touchCount == 0) return;
@@ -1713,6 +1702,39 @@ namespace CNRSettingsMod
                 _touchFireCooldown = 0.2f;  // slightly less than 0.235f — expires first
                 break;
             }
+        }
+
+        // KBM fire: runs in LateUpdate so it overrides JoyStickController.Update() which
+        // resets mStatus to idle every frame when touchCount==0.
+        private void KbmFireDetect()
+        {
+            if (!_kbmEnabled || !_cursorLocked) return;
+            bool fireHeld = (_kbKeys[0] == KeyCode.Mouse0)
+                ? (_capListener != null ? _capListener.lmbHeld : Input.GetMouseButton(0))
+                : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
+            if (!fireHeld) return;
+            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
+            if (NGUI.mInstance != null && NGUI.mInstance.noClips) return;
+
+            WeaponType wt = PlayerLogic.mInstance.mWeaponType;
+            PlayerLogic.mInstance.mStatus =
+                (wt == WeaponType.BallisticKnife || wt == WeaponType.GingerbreadKnife)
+                ? PlayerStatus.knifeFire : PlayerStatus.fire;
+
+            // Cache fireStatusHoldTimeCount so JoyStickController won't reset to idle
+            // next frame's Update() before we get to set it again.
+            if ((object)_joyStickCtrl == null)
+                _joyStickCtrl = (JoyStickController)UnityEngine.Object.FindObjectOfType(typeof(JoyStickController));
+            if (_fiFireHoldCount == null && (object)_joyStickCtrl != null)
+                _fiFireHoldCount = typeof(JoyStickController).GetField(
+                    "fireStatusHoldTimeCount",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if ((object)_joyStickCtrl != null && _fiFireHoldCount != null)
+                _fiFireHoldCount.SetValue(_joyStickCtrl, 0.235f);
+
+            // Trigger actual weapon fire logic (sets CRInput.m_bFire + fireFlag).
+            if ((object)UIMenuDirector.mInstance != null)
+                UIMenuDirector.mInstance.GenFireEvent();
         }
 
         // Jump-on-press touch detection.
@@ -1797,8 +1819,9 @@ namespace CNRSettingsMod
                 if (dx == 0f && dy == 0f) continue;
 
                 // Scale matches Sliderotate: raw pixel delta * 0.1, then * sensitivityX via KbmInjectMouseLook.
-                // Invert Y: touch up = positive screen Y = camera up = negative Unity rotY.
-                KbmInjectMouseLook(dx * 0.1f, -dy * 0.1f);
+                // Touch.position.y is bottom-left origin: positive Y = finger moves UP = camera looks UP.
+                // KbmInjectMouseLook: positive my → rotY increases → cam pitches up. Same sign, no inversion.
+                KbmInjectMouseLook(dx * 0.1f, dy * 0.1f);
 
                 // Block Sliderotate from double-processing this touch this frame.
                 if (_fiCannotRotate != null) _fiCannotRotate.SetValue(_sliderotate, true);
@@ -3285,6 +3308,24 @@ namespace CNRSettingsMod
             KbmSetCursorLocked(false);
         }
 
+        // Trigger a weapon switch through the same path as the on-screen button:
+        // CRWeaponManager.Update() reads CRInput.m_bSwitch + m_PropIconName each frame
+        // and calls SwitchWeapons() → selectWeapon → NGUI.receiveGunName() to update the HUD.
+        private void KbmSwitchWeapon(int dir)
+        {
+            if ((object)CRInput.mInstance == null) return;
+            if ((object)_weaponManager == null)
+                _weaponManager = (CRWeaponManager)UnityEngine.Object.FindObjectOfType(typeof(CRWeaponManager));
+            if ((object)_weaponManager == null) return;
+            var weapons = _weaponManager.allWeapons;
+            if (weapons == null || weapons.Count < 2) return;
+            int next = (((_weaponManager.index + dir) % weapons.Count) + weapons.Count) % weapons.Count;
+            string name = weapons[next].weaponName;
+            if (string.IsNullOrEmpty(name)) return;
+            CRInput.mInstance.m_bSwitch = true;
+            CRInput.mInstance.m_PropIconName = name;
+        }
+
         private void KbmInjectJoystick()
         {
             float ax = 0f, ay = 0f;
@@ -3314,7 +3355,17 @@ namespace CNRSettingsMod
             }
 
             if (_kbmFiDeltaPixels == null) return;
-            _kbmFiDeltaPixels.SetValue(_kbmJoystick, new Vector2(ax * _kbmDragMax, ay * _kbmDragMax));
+            float injectX = ax * _kbmDragMax;
+            float injectY = ay * _kbmDragMax;
+            // JoyStickController.Update() has three branches: |AxisY| > |AxisX| (forward-dominant),
+            // |AxisY| < |AxisX| (strafe-dominant), and both < 0.05 (idle).  The equal-axis
+            // diagonal case (e.g. W+A with both = ±1) hits none of them and skips the moveSpeed
+            // multiplication entirely, making diagonal movement almost stationary.
+            // Fix: when strafing diagonally, nudge |AxisX| just below |AxisY| so the
+            // forward-dominant branch fires and full moveSpeed is applied.
+            if (ax != 0f && ay != 0f)
+                injectX *= 0.999f;
+            _kbmFiDeltaPixels.SetValue(_kbmJoystick, new Vector2(injectX, injectY));
         }
 
         private float _kbmInjectLogTimer = 0f;
