@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.11";
+        public  const string Version = "3.0.12";
 
         public static void Load()
         {
@@ -3491,7 +3491,6 @@ namespace CNRSettingsMod
                     {
                         if (_listener != null)
                             _view.Call("setOnCapturedPointerListener", _listener);
-                        _view.Call("requestFocus");
                         _view.Call("requestPointerCapture");
                         bool hasCap = _view.Call<bool>("hasPointerCapture");
                         SettingsModEntry.Log("KBM: UI capture hasCap=" + hasCap
