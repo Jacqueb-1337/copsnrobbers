@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.1";
+        public  const string Version = "3.1.2";
 
         public static void Load()
         {
@@ -3791,11 +3791,19 @@ namespace CNRSettingsMod
                 _capListener = new CapturedPointerListener();
                 SettingsModEntry.Log("KBM: CapturedPointerListener created");
 
-                // Also install Window.Callback proxy as fallback
-                orig = window.Call<AndroidJavaObject>("getCallback");
-                _winProxy = new WindowCallbackProxy(orig, this);
-                window.Call("setCallback", _winProxy);
-                SettingsModEntry.Log("KBM: WindowCallbackProxy installed");
+                // Also install Window.Callback proxy as fallback (skip if already installed by JoyProxy path)
+                if (_winProxy == null)
+                {
+                    orig = window.Call<AndroidJavaObject>("getCallback");
+                    _winProxy = new WindowCallbackProxy(orig, this);
+                    orig = null; // ownership transferred to _winProxy
+                    window.Call("setCallback", _winProxy);
+                    SettingsModEntry.Log("KBM: WindowCallbackProxy installed");
+                }
+                else
+                {
+                    SettingsModEntry.Log("KBM: WindowCallbackProxy already installed (by JoyProxy)");
+                }
 
                 // View.OnGenericMotionListener on DecorView (catches ACTION_SCROLL etc.).
                 _gmlProxy = new GmlProxy(this);
@@ -4031,12 +4039,46 @@ namespace CNRSettingsMod
         // Null-safe read from JoyMotionProxy axes.
         private float JoyRaw(int axis) { return _joyProxy != null ? _joyProxy.Get(axis) : 0f; }
 
+        // Ensure Window.Callback proxy is installed (needed even when KBM is off,
+        // so WindowCallbackProxy.dispatchGenericMotionEvent can feed _joyProxy).
+        private void EnsureWindowCallback()
+        {
+            if (_winProxy != null) return;
+            AndroidJavaClass  player   = null;
+            AndroidJavaObject activity = null, window = null, orig = null;
+            try
+            {
+                player   = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                activity = player.GetStatic<AndroidJavaObject>("currentActivity");
+                window   = activity.Call<AndroidJavaObject>("getWindow");
+                orig     = window.Call<AndroidJavaObject>("getCallback");
+                _winProxy = new WindowCallbackProxy(orig, this);
+                orig = null; // ownership transferred to _winProxy
+                window.Call("setCallback", _winProxy);
+                SettingsModEntry.Log("JoyProxy: EnsureWindowCallback installed");
+            }
+            catch (Exception ex)
+            {
+                SettingsModEntry.Log("EnsureWindowCallback: " + ex.Message);
+            }
+            finally
+            {
+                if (orig     != null) orig.Dispose();
+                if (window   != null) window.Dispose();
+                if (activity != null) activity.Dispose();
+                if (player   != null) player.Dispose();
+            }
+        }
+
         // Register JoyMotionProxy as OnGenericMotionEventListener on the DecorView.
+        // Also ensures WindowCallbackProxy is installed as a reliable feed-through path.
         // Returns false so Unity still receives all joystick events normally.
         private void SetupJoyProxy()
         {
             if (_joyProxySetup) return;
             _joyProxySetup = true;
+            _joyProxy = new JoyMotionProxy(); // create before EnsureWindowCallback so Feed() works
+            EnsureWindowCallback(); // primary reliable path for joystick data
             AndroidJavaClass  player   = null;
             AndroidJavaObject activity = null, window = null, decor = null;
             try
@@ -4045,15 +4087,13 @@ namespace CNRSettingsMod
                 activity = player.GetStatic<AndroidJavaObject>("currentActivity");
                 window   = activity.Call<AndroidJavaObject>("getWindow");
                 decor    = window.Call<AndroidJavaObject>("getDecorView");
-                _joyProxy = new JoyMotionProxy();
                 var runnable = new JoyProxySetRunnable(decor, _joyProxy);
                 decor = null; // ownership transferred to runnable
-                activity.Call("runOnUiThread", runnable);
+                activity.Call("runOnUiThread", runnable); // secondary path (may not fire if overwritten)
             }
             catch (Exception ex)
             {
                 SettingsModEntry.Log("SetupJoyProxy: " + ex.Message);
-                _joyProxy = null;
             }
             finally
             {
@@ -4618,6 +4658,30 @@ namespace CNRSettingsMod
                 lock (_lk) { System.Array.Copy(_ax, copy, _ax.Length); }
                 return copy;
             }
+
+            // Secondary feed path: called from WindowCallbackProxy.dispatchGenericMotionEvent
+            // so we get joystick data even if setOnGenericMotionListener was overwritten.
+            internal void Feed(AndroidJavaObject ev)
+            {
+                try
+                {
+                    int src = ev.Call<int>("getSource");
+                    if ((src & 0x01000010) == 0) return; // not SOURCE_JOYSTICK
+                    lock (_lk)
+                    {
+                        _ax[0]  = ev.Call<float>("getAxisValue", 0);
+                        _ax[1]  = ev.Call<float>("getAxisValue", 1);
+                        _ax[11] = ev.Call<float>("getAxisValue", 11);
+                        _ax[14] = ev.Call<float>("getAxisValue", 14);
+                        _ax[15] = ev.Call<float>("getAxisValue", 15);
+                        _ax[16] = ev.Call<float>("getAxisValue", 16);
+                        _ax[17] = ev.Call<float>("getAxisValue", 17);
+                        _ax[18] = ev.Call<float>("getAxisValue", 18);
+                        _hasData = true;
+                    }
+                }
+                catch { }
+            }
         }
 
         private class JoyProxySetRunnable : AndroidJavaProxy
@@ -4936,6 +5000,8 @@ namespace CNRSettingsMod
             public bool dispatchGenericMotionEvent(AndroidJavaObject ev)
             {
                 _host._proxyFires++;  // diagnostic: counts whether this JNI proxy is invoked at all
+                // Feed joystick axes to JoyProxy regardless of action type
+                if (_host._joyProxy != null) _host._joyProxy.Feed(ev);
                 try
                 {
                     int action = ev.Call<int>("getActionMasked");
