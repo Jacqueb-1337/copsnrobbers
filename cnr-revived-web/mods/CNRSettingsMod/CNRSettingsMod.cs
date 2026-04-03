@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.23";
+        public  const string Version = "3.0.24";
 
         public static void Load()
         {
@@ -277,6 +277,7 @@ namespace CNRSettingsMod
         // -- KBM pointer capture (Android 8+ / API 26+) ----------------------
         private CapturedPointerListener _capListener   = null;
         private bool                    _captureActive = false;
+        private bool                    _rmbWasHeld    = false;  // for RMB aim rising-edge detection
 
         // -- KBM debug overlay snapshot (populated each LateUpdate) ----------
         private string _dbgSource = "";
@@ -1085,7 +1086,8 @@ namespace CNRSettingsMod
         // Compare: original arc was ~0.9 m peak, 1.0 s total, uniform/flat.
         // Peak formula: h = (JumpInitialVel - 9.81)² / (2 * |JumpAscendGrav|)
         //   JumpInitialVel=24 → ~2.5 m,  =22 → ~1.8 m,  =20 → ~1.3 m,  =19 → ~1.0 m,  =18 → ~0.8 m
-        private bool  _ownJumpActive = false;
+        private bool  _ownJumpActive  = false;
+        private bool  _kbmJumpPending  = false;  // set on spacebar down, consumed in LateUpdate
         private float _ownJumpVelY   = 0f;
         private const float JumpInitialVel  = 19f;   // slightly above vanilla
         private const float JumpAscendGrav  = -41f;  // d/dt(_ownJumpVelY) while rising
@@ -1304,8 +1306,8 @@ namespace CNRSettingsMod
             if (Input.GetMouseButtonDown(0) && !_cursorLocked && !_showSettings && !_wasPauseVisible) { KbmSetCursorLocked(true); return; }
             if (!_cursorLocked || _showSettings) return;
 
-            // Jump
-            if (Input.GetKeyDown(_kbKeys[1])) PlayerPrefs.SetInt("OnJump", 1);
+            // Jump — set pending flag; TriggerOwnJump fires in LateUpdate once _joyStickCtrl is ready.
+            if (Input.GetKeyDown(_kbKeys[1])) _kbmJumpPending = true;
 
             // Weapon scroll + keybinds
             _kbmScrollAccum += Input.GetAxis("Mouse ScrollWheel");
@@ -1325,8 +1327,21 @@ namespace CNRSettingsMod
             }
 
             // Aim toggle (index 8)
-            if (_kbKeys[8] != KeyCode.None && Input.GetKeyDown(_kbKeys[8]))
-                PlayerPrefs.SetInt("OnAim", 1);
+            // When capture active, RMB arrives via rmbHeld — detect rising edge.
+            // When not captured, fall back to Input.GetKeyDown.
+            bool aimKeyDown;
+            if (_capListener != null && _kbKeys[8] == KeyCode.Mouse1)
+            {
+                bool rmbNow = _capListener.rmbHeld;
+                aimKeyDown = rmbNow && !_rmbWasHeld;
+                _rmbWasHeld = rmbNow;
+            }
+            else
+            {
+                aimKeyDown = _kbKeys[8] != KeyCode.None && Input.GetKeyDown(_kbKeys[8]);
+                _rmbWasHeld = false;
+            }
+            if (aimKeyDown) PlayerPrefs.SetInt("OnAim", 1);
 
             // Pause (index 9)
             if (_kbKeys[9] != KeyCode.None && Input.GetKeyDown(_kbKeys[9]))
@@ -1346,7 +1361,7 @@ namespace CNRSettingsMod
 
             // Fire
             bool fireHeld = (_kbKeys[0] == KeyCode.Mouse0)
-                ? (_captureActive ? (_capListener != null && _capListener.lmbHeld) : Input.GetMouseButton(0))
+                ? (_capListener != null ? _capListener.lmbHeld : Input.GetMouseButton(0))
                 : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
             if (fireHeld
                 && (object)PlayerLogic.mInstance != null
@@ -1542,6 +1557,7 @@ namespace CNRSettingsMod
             // and sets OnJump=1 on Began so the jump triggers immediately, and again
             // each frame while held so the player auto-re-jumps on landing.
             TouchJumpDetect();
+            KbmJumpDetect();
             OwnJumpPhysics();
             ApplySensitivity();
             // KBM mouse look.
@@ -1707,6 +1723,30 @@ namespace CNRSettingsMod
         // Hit-testing uses Physics.Raycast from the NGUI camera — exactly what UICamera
         // does internally — so the detection correctly respects the button's actual
         // collider size regardless of any HUD-editor rescaling.
+        // Handles keyboard jump in KBM mode — mirrors TouchJumpDetect but for keyboard.
+        // Runs in LateUpdate so _joyStickCtrl can be cached here before TriggerOwnJump.
+        private void KbmJumpDetect()
+        {
+            if (!_kbmEnabled || !_cursorLocked || !_kbmJumpPending) return;
+            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
+
+            // Cache JoyStickController and its reflection fields (same as TouchJumpDetect).
+            if ((object)_joyStickCtrl == null)
+                _joyStickCtrl = (JoyStickController)UnityEngine.Object.FindObjectOfType(typeof(JoyStickController));
+            if ((object)_joyStickCtrl != null)
+            {
+                if (_fiJumpIsJumping == null)
+                    _fiJumpIsJumping = typeof(JoyStickController).GetField(
+                        "isJumping", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (_fiJumpCharCtrl == null)
+                    _fiJumpCharCtrl = typeof(JoyStickController).GetField(
+                        "charactercontroller", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            }
+
+            _kbmJumpPending = false;
+            TriggerOwnJump();
+        }
+
         private void TouchJumpDetect()
         {
             if (_dragGOs[1] == null || _nguiCam == null) return;
@@ -3191,7 +3231,9 @@ namespace CNRSettingsMod
             if (Input.GetKey(_kbKeys[2]) || Input.GetKey(KeyCode.UpArrow))    ay += 1f;
             if (Input.GetKey(_kbKeys[3]) || Input.GetKey(KeyCode.DownArrow))  ay -= 1f;
 
-            if (ax != 0f && ay != 0f) { ax *= 0.7071f; ay *= 0.7071f; }
+            // No diagonal normalization: inject each axis at full magnitude.
+            // The game's joystick reads components independently, so normalizing
+            // would reduce forward speed to 70% when also strafing.
 
             if (_kbmJoystick == null)
             {
@@ -4004,6 +4046,7 @@ namespace CNRSettingsMod
             private volatile bool  _loggedFirst;
             // Mouse button state (set/cleared from Android UI thread, read on game thread).
             public volatile bool lmbHeld;
+            public volatile bool rmbHeld;
 
             // Android MotionEvent constants
             private const int AXIS_RELATIVE_X   = 27;
@@ -4013,12 +4056,13 @@ namespace CNRSettingsMod
             private const int ACTION_BUTTON_PRESS   = 11;
             private const int ACTION_BUTTON_RELEASE  = 12;
             private const int BUTTON_PRIMARY     = 1;
+            private const int BUTTON_SECONDARY   = 2;
 
             public CapturedPointerListener()
                 : base("android.view.View$OnCapturedPointerListener") { }
 
             public int  FireCount;
-            public void Reset() { _dx = 0f; _dy = 0f; lmbHeld = false; _loggedFirst = false; FireCount = 0; }
+            public void Reset() { _dx = 0f; _dy = 0f; lmbHeld = false; rmbHeld = false; _loggedFirst = false; FireCount = 0; }
 
             // Called by Unity game thread each frame to atomically read+clear delta.
             public float DrainDx() { float v = _dx; _dx = 0f; return v; }
@@ -4046,13 +4090,15 @@ namespace CNRSettingsMod
                     }
                     else if (action == ACTION_BUTTON_PRESS)
                     {
-                        if (e.Call<int>("getActionButton") == BUTTON_PRIMARY)
-                            lmbHeld = true;
+                        int btn = e.Call<int>("getActionButton");
+                        if (btn == BUTTON_PRIMARY)   lmbHeld = true;
+                        if (btn == BUTTON_SECONDARY)  rmbHeld = true;
                     }
                     else if (action == ACTION_BUTTON_RELEASE)
                     {
-                        if (e.Call<int>("getActionButton") == BUTTON_PRIMARY)
-                            lmbHeld = false;
+                        int btn = e.Call<int>("getActionButton");
+                        if (btn == BUTTON_PRIMARY)   lmbHeld = false;
+                        if (btn == BUTTON_SECONDARY)  rmbHeld = false;
                     }
                 }
                 catch (Exception) { }
