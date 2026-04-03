@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.2";
+        public  const string Version = "3.0.3";
 
         public static void Load()
         {
@@ -277,6 +277,14 @@ namespace CNRSettingsMod
         // -- KBM pointer capture (Android 8+ / API 26+) ----------------------
         private CapturedPointerListener _capListener   = null;
         private bool                    _captureActive = false;
+
+        // -- KBM Android GenericMotionListener (raw mouse position, API 24+) --
+        private AndroidMouseListener _amlProxy     = null;
+        private volatile float       _amlRawX      = -1f;  // latest X from MotionEvent; -1 = none
+        private volatile float       _amlRawY      = -1f;
+        private float                _amlLastX     = 0f;
+        private float                _amlLastY     = 0f;
+        private bool                 _amlLastValid = false;
 
         // -- KBM reflection (joystick) ----------------------------------------
         private MonoBehaviour _kbmJoystick      = null;
@@ -1082,6 +1090,7 @@ namespace CNRSettingsMod
         {
             UpdateScene(Application.loadedLevelName);
             RegisterWithEconomyHook();
+            KbmRegisterMouseListener();
         }
 
         private void RegisterWithEconomyHook()
@@ -1520,35 +1529,61 @@ namespace CNRSettingsMod
             OwnJumpPhysics();
             ApplySensitivity();
             // KBM mouse look.
-            // Use Input.GetAxis("Mouse X/Y") which returns raw hardware mouse delta
-            // regardless of where the cursor is on screen — no screen-edge clamping.
-            // Fallback to mousePosition delta if GetAxis returns zero (shouldn't happen
-            // with a real external mouse but covers edge cases with older Unity builds).
+            // Primary source: AndroidMouseListener (raw MotionEvent x/y from Android view).
+            // The listener fires on mousemove without pointer capture, so Unity clicks still
+            // work normally.  We compute the position delta ourselves each frame.
+            // Fallback 1: Input.GetAxis (may be 0 on old Android Unity builds).
+            // Fallback 2: Input.mousePosition delta (stops working at screen edges).
             if (_kbmEnabled && _cursorLocked && !_showSettings)
             {
-                float axX = Input.GetAxis("Mouse X");
-                float axY = Input.GetAxis("Mouse Y");
-                if (axX != 0f || axY != 0f)
+                float rawX = _amlRawX;
+                float rawY = _amlRawY;
+                bool  gotAml = (rawX >= 0f);
+                if (gotAml)
                 {
-                    KbmInjectMouseLook(axX * 3f, axY * 3f);
+                    _amlRawX = -1f;  // mark consumed
+                    if (_amlLastValid)
+                    {
+                        float dx =  (rawX - _amlLastX) * 0.05f;
+                        float dy = -(rawY - _amlLastY) * 0.05f;  // Android Y top-down; invert
+                        // ignore jumps > 40 units (e.g. first frame after cursor warp / lock)
+                        if (Mathf.Abs(dx) < 2f && Mathf.Abs(dy) < 2f)
+                            if (dx != 0f || dy != 0f) KbmInjectMouseLook(dx, dy);
+                    }
+                    _amlLastX     = rawX;
+                    _amlLastY     = rawY;
+                    _amlLastValid = true;
                     _lastMousePosValid = false;
                 }
                 else
                 {
-                    Vector3 curPos = Input.mousePosition;
-                    if (_lastMousePosValid)
+                    // Fallback 1: Unity axis (raw hardware delta; may work even at screen edges)
+                    float axX = Input.GetAxis("Mouse X");
+                    float axY = Input.GetAxis("Mouse Y");
+                    if (axX != 0f || axY != 0f)
                     {
-                        float mx = (curPos.x - _lastMousePos.x) * 0.05f;
-                        float my = (curPos.y - _lastMousePos.y) * 0.05f;
-                        if (mx != 0f || my != 0f) KbmInjectMouseLook(mx, my);
+                        KbmInjectMouseLook(axX * 3f, axY * 3f);
+                        _lastMousePosValid = false;
                     }
-                    _lastMousePos      = curPos;
-                    _lastMousePosValid = true;
+                    else
+                    {
+                        // Fallback 2: mousePosition delta (stops at screen edges)
+                        Vector3 curPos = Input.mousePosition;
+                        if (_lastMousePosValid)
+                        {
+                            float mx = (curPos.x - _lastMousePos.x) * 0.05f;
+                            float my = (curPos.y - _lastMousePos.y) * 0.05f;
+                            if (mx != 0f || my != 0f) KbmInjectMouseLook(mx, my);
+                        }
+                        _lastMousePos      = curPos;
+                        _lastMousePosValid = true;
+                    }
                 }
             }
             else
             {
                 _lastMousePosValid = false;
+                _amlLastValid      = false;
             }
         }
 
@@ -2862,10 +2897,79 @@ namespace CNRSettingsMod
         {
             _cursorLocked      = locked;
             _lastMousePosValid = false;
-            // Screen.lockCursor is a no-op on Android; skip it to avoid side effects.
-            // Cursor visibility: hide when locked (gameplay) so it's less distracting,
-            // but useMouse stays true so clicks always work regardless.
-            Screen.showCursor = !locked;
+            _amlLastValid      = false;  // reset delta baseline on lock state change
+            Screen.showCursor  = !locked;
+            SetAndroidPointerIcon(!locked);  // hide/show hardware cursor via Android API
+        }
+
+        // Hide or show the hardware mouse cursor using Android's PointerIcon API (API 24+).
+        // Safe to call from Unity's main thread; falls back silently on older API levels.
+        private void SetAndroidPointerIcon(bool visible)
+        {
+            AndroidJavaClass  player   = null;
+            AndroidJavaObject activity = null, window = null, decor = null;
+            try
+            {
+                player   = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                activity = player.GetStatic<AndroidJavaObject>("currentActivity");
+                window   = activity.Call<AndroidJavaObject>("getWindow");
+                decor    = window.Call<AndroidJavaObject>("getDecorView");
+                if (!visible)
+                {
+                    // PointerIcon.TYPE_NULL (0) = hidden cursor — available API 24+
+                    AndroidJavaClass  piClass  = new AndroidJavaClass("android.view.PointerIcon");
+                    AndroidJavaObject nullIcon = piClass.CallStatic<AndroidJavaObject>("getSystemIcon", activity, 0);
+                    decor.Call("setPointerIcon", nullIcon);
+                    nullIcon.Dispose();
+                    piClass.Dispose();
+                }
+                else
+                {
+                    decor.Call("setPointerIcon", (AndroidJavaObject)null);
+                }
+            }
+            catch (Exception ex)
+            {
+                SettingsModEntry.Log("SetAndroidPointerIcon(" + visible + ") err: " + ex.Message);
+            }
+            finally
+            {
+                if (decor    != null) decor.Dispose();
+                if (window   != null) window.Dispose();
+                if (activity != null) activity.Dispose();
+                if (player   != null) player.Dispose();
+            }
+        }
+
+        // Register an Android View.OnGenericMotionListener on the Unity decor view.
+        // This gives us raw MotionEvent x/y for mouse-movement without pointer capture
+        // (which would break Unity's click handling).
+        private void KbmRegisterMouseListener()
+        {
+            AndroidJavaClass  player   = null;
+            AndroidJavaObject activity = null, window = null, decor = null;
+            try
+            {
+                _amlProxy = new AndroidMouseListener(this);
+                player    = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                activity  = player.GetStatic<AndroidJavaObject>("currentActivity");
+                window    = activity.Call<AndroidJavaObject>("getWindow");
+                decor     = window.Call<AndroidJavaObject>("getDecorView");
+                decor.Call("setOnGenericMotionListener", _amlProxy);
+                SettingsModEntry.Log("KBM: AndroidMouseListener registered");
+            }
+            catch (Exception ex)
+            {
+                SettingsModEntry.Log("KBM: AndroidMouseListener reg failed: " + ex.Message);
+                _amlProxy = null;
+            }
+            finally
+            {
+                if (decor    != null) decor.Dispose();
+                if (window   != null) window.Dispose();
+                if (activity != null) activity.Dispose();
+                if (player   != null) player.Dispose();
+            }
         }
 
         private IEnumerator AutoLockAfterLoad()
@@ -3283,6 +3387,35 @@ namespace CNRSettingsMod
                 if (root == null) continue;
                 SettingsModEntry.Log("=== Deep scan: " + rootName + " ===");
                 LogChildrenRecursive(root.transform, 0, 6); // max depth 6
+            }
+        }
+
+        // =====================================================================
+        // Android GenericMotionListener — raw mouse position (API 24+)
+        // Implements android.view.View$OnGenericMotionListener.
+        // Returns false so Unity's own input handling still receives the event.
+        // Written from the Android UI thread; _host._amlRawX/Y are volatile floats.
+        // =====================================================================
+        private class AndroidMouseListener : AndroidJavaProxy
+        {
+            private readonly SettingsModHook _host;
+            public AndroidMouseListener(SettingsModHook host)
+                : base("android.view.View$OnGenericMotionListener") { _host = host; }
+            // ACTION_HOVER_MOVE = 7 (mouse moving, no button held)
+            // ACTION_MOVE       = 2 (mouse moving with button held, e.g. drag)
+            public bool onGenericMotion(AndroidJavaObject view, AndroidJavaObject ev)
+            {
+                try
+                {
+                    int action = ev.Call<int>("getActionMasked");
+                    if (action == 7 || action == 2)
+                    {
+                        _host._amlRawX = ev.Call<float>("getX");
+                        _host._amlRawY = ev.Call<float>("getY");
+                    }
+                }
+                catch { }
+                return false;  // don't consume — Unity also receives the event
             }
         }
 
