@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.0.37";
+        public  const string Version = "3.1.0";
 
         public static void Load()
         {
@@ -280,21 +280,32 @@ namespace CNRSettingsMod
         private float   _controllerSens     = 1.5f;  // left-stick magnitude multiplier
         private float   _controllerCamSens  = 0.04f; // right-stick camera scale per frame
         private float   _controllerAimMult  = 0.5f;
-        private bool    _gpRightStickOk     = true;  // false after axis-not-found exception
+        private bool    _gpRightStickOk     = true;  // legacy, unused
         private KeyCode[] _gpKeys           = new KeyCode[GP_BIND_COUNT];
+        private string[]  _gpAxisBinds      = new string[GP_BIND_COUNT]; // "axisName|+" or "axisName|-", else null
+        private bool[]    _gpAxisPrevHeld   = new bool[GP_BIND_COUNT];   // for rising-edge detection
+        private static readonly string[] GP_AXIS_PREF_KEYS = {
+            "CNRMod_GPA_Fire", "CNRMod_GPA_Jump", "CNRMod_GPA_NextWpn", "CNRMod_GPA_PrevWpn",
+            "CNRMod_GPA_Aim",  "CNRMod_GPA_Pause", "CNRMod_GPA_Reload", "CNRMod_GPA_PList", "CNRMod_GPA_Chat" };
         private int     _gpCaptureIdx       = -1;
         private int     _gpCaptureCooldown  = 0;
+        private float[] _gpAxisBaseline     = null; // axis values at capture start (for delta detection)
         // -- Gamepad axis probe -----------------------------------------------
-        // Probed on first GamepadUpdate call; null = axis doesn't exist in InputManager.
         private bool   _gpAxesProbed  = false;
         private string _gpLAxisX      = null;
         private string _gpLAxisY      = null;
-        private string _gpRAxisX      = null;
+        private string _gpRAxisX      = null; // user-configured or detected
         private string _gpRAxisY      = null;
+        private int    _gpRStickDetect = 0;   // 0=idle, 1=detecting X, 2=detecting Y
         private static readonly string[] GP_LAXIS_X = { "Horizontal", "Joystick Axis 1", "1st axis" };
         private static readonly string[] GP_LAXIS_Y = { "Vertical",   "Joystick Axis 2", "2nd axis" };
-        private static readonly string[] GP_RAXIS_X = { "Joystick Axis 4", "4th axis", "Joystick Axis 3", "3rd axis" };
-        private static readonly string[] GP_RAXIS_Y = { "Joystick Axis 5", "5th axis", "Joystick Axis 4", "4th axis" };
+        // All axes to probe for button capture and live test
+        private static readonly string[] GP_ALL_AXES = {
+            "Horizontal", "Vertical",
+            "Joystick Axis 1",  "Joystick Axis 2",  "Joystick Axis 3",  "Joystick Axis 4",
+            "Joystick Axis 5",  "Joystick Axis 6",  "Joystick Axis 7",  "Joystick Axis 8",
+            "Joystick Axis 9",  "Joystick Axis 10",
+            "Rotate Camera Horizontal Buttons", "Rotate Camera Vertical Buttons" };
         private int     _activeTab  = 0;   // 0 = Settings  1 = KBM  2 = Account
         private string  _pinInput    = "";
         private string  _pinPassword = "";
@@ -2945,22 +2956,19 @@ namespace CNRSettingsMod
             // ---- Axis Live Test --------------------------------------------
             SectionHeader("Axis Live Test");
             GUILayout.Space(4f);
-            if (!_gpAxesProbed)
-                GUILayout.Label("  Enable Gamepad and enter a game — axes will be probed on first update.", HintStyle());
-            else
+            GUILayout.Label("  Move sticks / trigger / D-pad to see which axis numbers respond.", HintStyle());
+            GUIStyle axStyle = HintStyle(); axStyle.fontSize = 11;
+            for (int axi = 0; axi < GP_ALL_AXES.Length; axi++)
             {
-                string lxs = _gpLAxisX != null ? (_gpLAxisX + " = " + TryGetAxisRaw(_gpLAxisX).ToString("F2")) : "NOT FOUND";
-                string lys = _gpLAxisY != null ? (_gpLAxisY + " = " + TryGetAxisRaw(_gpLAxisY).ToString("F2")) : "NOT FOUND";
-                string rxs = _gpRAxisX != null ? (_gpRAxisX + " = " + TryGetAxisRaw(_gpRAxisX).ToString("F2")) : "NOT FOUND";
-                string rys = _gpRAxisY != null ? (_gpRAxisY + " = " + TryGetAxisRaw(_gpRAxisY).ToString("F2")) : "NOT FOUND";
-                GUILayout.Label("  L-stick X:  " + lxs, HintStyle());
-                GUILayout.Label("  L-stick Y:  " + lys, HintStyle());
-                GUILayout.Label("  R-stick X:  " + rxs, HintStyle());
-                GUILayout.Label("  R-stick Y:  " + rys, HintStyle());
-                GUILayout.Label("  Move sticks to verify values change.", HintStyle());
+                string an = GP_ALL_AXES[axi];
+                float av = TryGetAxisRaw(an);
+                if (float.IsNaN(av)) continue;  // axis not in InputManager — skip
+                string sn = an.StartsWith("Joystick Axis ") ? "Axis " + an.Substring("Joystick Axis ".Length)
+                          : (an.Length > 16 ? an.Substring(0, 16) : an);
+                string lbl = "  " + sn.PadRight(16) + ": " + av.ToString("F2") + (Mathf.Abs(av) > 0.3f ? "  \u25C4" : "");
+                GUILayout.Label(lbl, axStyle, GUILayout.Height(16f));
             }
-            GUILayout.Label("  L2/R2 triggers are analog axes — they cannot be bound as buttons.", HintStyle());
-            GUILayout.Space(14f);
+            GUILayout.Space(10f);
 
             // ---- Gamepad Enabled --------------------------------------------
             SectionHeader("Gamepad Input");
@@ -2981,7 +2989,7 @@ namespace CNRSettingsMod
                     HudCfgSave();
                 }
             }
-            GUILayout.Label("  Left stick = move.  Right stick camera not yet supported.", HintStyle());
+            GUILayout.Label("  Left stick = move.  Configure R-stick axes below for camera.", HintStyle());
             GUILayout.Space(14f);
 
             // ---- Deadzone --------------------------------------------------
@@ -3034,16 +3042,71 @@ namespace CNRSettingsMod
                 HudCfgSetFloat("CNRMod_CtrlAimMult", _controllerAimMult);
             }
             GUILayout.Label("  % of right-stick speed while scoped", HintStyle());
+            GUILayout.Space(10f);
+
+            // ---- R-stick Axis Config (Detect) --------------------------------
+            SectionHeader("Right Stick Axis Config");
+            GUILayout.Space(4f);
+            GUILayout.Label("  Use Axis Live Test above to identify axis numbers, then tap Detect and move the stick.", HintStyle());
+            GUILayout.Space(4f);
+            // R-stick X
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("R-stick X:  " + (_gpRAxisX ?? "(not set)"), HintStyle(), GUILayout.ExpandWidth(true));
+            if (_gpRStickDetect == 1)
+            {
+                if (GUILayout.Button("Cancel", BtnStyle(11, new Color(1f, 0.5f, 0.5f)), GUILayout.Width(pw * 0.27f), GUILayout.Height(26f)))
+                    _gpRStickDetect = 0;
+            }
+            else
+            {
+                if (GUILayout.Button("Detect X", BtnStyle(11, new Color(0.5f, 1f, 0.6f)), GUILayout.Width(pw * 0.27f), GUILayout.Height(26f)))
+                    _gpRStickDetect = 1;
+            }
+            GUILayout.EndHorizontal();
+            if (_gpRStickDetect == 1) GUILayout.Label("  >>> Move right stick LEFT or RIGHT now...", HintStyle());
+            GUILayout.Space(4f);
+            // R-stick Y
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("R-stick Y:  " + (_gpRAxisY ?? "(not set)"), HintStyle(), GUILayout.ExpandWidth(true));
+            if (_gpRStickDetect == 2)
+            {
+                if (GUILayout.Button("Cancel", BtnStyle(11, new Color(1f, 0.5f, 0.5f)), GUILayout.Width(pw * 0.27f), GUILayout.Height(26f)))
+                    _gpRStickDetect = 0;
+            }
+            else
+            {
+                if (GUILayout.Button("Detect Y", BtnStyle(11, new Color(0.5f, 1f, 0.6f)), GUILayout.Width(pw * 0.27f), GUILayout.Height(26f)))
+                    _gpRStickDetect = 2;
+            }
+            GUILayout.EndHorizontal();
+            if (_gpRStickDetect == 2) GUILayout.Label("  >>> Move right stick UP or DOWN now...", HintStyle());
+            // Poll axes for stick detection
+            if (_gpRStickDetect > 0)
+            {
+                foreach (string an in GP_ALL_AXES)
+                {
+                    if (an == _gpLAxisX || an == _gpLAxisY) continue;
+                    float av = TryGetAxisRaw(an);
+                    if (!float.IsNaN(av) && Mathf.Abs(av) > 0.5f)
+                    {
+                        if (_gpRStickDetect == 1) { _gpRAxisX = an; HudCfgSet("CNRMod_RStickX", an); }
+                        else                      { _gpRAxisY = an; HudCfgSet("CNRMod_RStickY", an); }
+                        HudCfgSave();
+                        _gpRStickDetect = 0;
+                        break;
+                    }
+                }
+            }
             GUILayout.Space(14f);
 
             // ---- Button Bindings ------------------------------------------
             SectionHeader("Button Bindings");
+            GUILayout.Label("  Tip: triggers and D-pad are axes — move them during Rebind to assign.", HintStyle());
             GUILayout.Space(4f);
-            float colName = pw * 0.35f;
-            float colKey  = pw * 0.34f;
-            float colBtn  = pw * 0.27f;
+            float colName = pw * 0.33f;
+            float colKey  = pw * 0.30f;
             GUIStyle keyStyle = new GUIStyle(GUI.skin.box);
-            keyStyle.fontSize  = 14;
+            keyStyle.fontSize  = 13;
             keyStyle.alignment = TextAnchor.MiddleCenter;
             keyStyle.normal.textColor = new Color(1f, 0.9f, 0.4f);
             if (_gameFont != null) keyStyle.font = _gameFont;
@@ -3051,13 +3114,27 @@ namespace CNRSettingsMod
             {
                 GUILayout.BeginHorizontal(GUILayout.Height(32f));
                 GUILayout.Label(GP_BIND_NAMES[i], LabelStyle(), GUILayout.Width(colName));
-                GUILayout.Label(GpBtnName(_gpKeys[i]), keyStyle,
-                    GUILayout.Width(colKey), GUILayout.Height(30f));
-                if (GUILayout.Button("Rebind", BtnStyle(13, new Color(0.6f, 0.9f, 1f)),
-                    GUILayout.Width(colBtn), GUILayout.Height(30f)))
+                bool hasAxis = !string.IsNullOrEmpty(_gpAxisBinds[i]);
+                string dispLabel = hasAxis ? GpAxisBindLabel(_gpAxisBinds[i]) : GpBtnName(_gpKeys[i]);
+                GUILayout.Label(dispLabel, keyStyle, GUILayout.Width(colKey), GUILayout.Height(30f));
+                // [X] clears axis bind when set
+                if (hasAxis)
+                {
+                    if (GUILayout.Button("X", BtnStyle(12, new Color(1f, 0.5f, 0.5f)), GUILayout.Width(26f), GUILayout.Height(28f)))
+                    {
+                        _gpAxisBinds[i] = null;
+                        HudCfgSet(GP_AXIS_PREF_KEYS[i], "");
+                        HudCfgSave();
+                    }
+                }
+                if (GUILayout.Button("Rebind", BtnStyle(12, new Color(0.6f, 0.9f, 1f)), GUILayout.Height(28f)))
                 {
                     _gpCaptureIdx      = i;
                     _gpCaptureCooldown = 4;
+                    // snapshot baseline so axis-threshold detection uses delta, not absolute value
+                    _gpAxisBaseline = new float[GP_ALL_AXES.Length];
+                    for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
+                        _gpAxisBaseline[ai] = TryGetAxisRaw(GP_ALL_AXES[ai]);
                 }
                 GUILayout.EndHorizontal();
                 GUILayout.Space(2f);
@@ -3389,6 +3466,20 @@ namespace CNRSettingsMod
             if (kcInt >= 370 && kcInt <= 509) return "JBtn" + ((kcInt - 350) % 20);
             return kc.ToString();
         }
+        // "Joystick Axis 9|+" → "Axis9+",  "Horizontal|-" → "Horiz-"
+        private static string GpAxisBindLabel(string axisBind)
+        {
+            if (string.IsNullOrEmpty(axisBind)) return "";
+            int pipe = axisBind.LastIndexOf('|');
+            if (pipe < 0) return axisBind;
+            string axName = axisBind.Substring(0, pipe);
+            string dir    = axisBind.Substring(pipe + 1);
+            if (axName.StartsWith("Joystick Axis "))  axName = "Axis" + axName.Substring("Joystick Axis ".Length);
+            else if (axName == "Horizontal")          axName = "H";
+            else if (axName == "Vertical")            axName = "V";
+            else if (axName.StartsWith("Rotate Camera ")) axName = "RotCam";
+            return axName + (dir == "+" ? "+" : "-");
+        }
         private static string GpBtnShort(int n)
         {
             switch (n)
@@ -3424,27 +3515,64 @@ namespace CNRSettingsMod
             if (_gameFont != null) title.font = _gameFont;
             GUIStyle sub = new GUIStyle(title);
             sub.fontSize = 14; sub.normal.textColor = new Color(0.8f, 0.8f, 0.8f);
+            GUIStyle note = new GUIStyle(sub);
+            note.fontSize = 12; note.normal.textColor = new Color(0.65f, 0.65f, 0.65f);
 
-            float cy = h * 0.40f;
+            float cy = h * 0.30f;
             GUI.Label(new Rect(10f, cy,        w - 20f, 40f), "Binding:  " + GP_BIND_NAMES[_gpCaptureIdx], title);
-            GUI.Label(new Rect(10f, cy + 48f,  w - 20f, 28f), "Press any button  \u2014  Esc to cancel", sub);
-            GUIStyle note = new GUIStyle(sub); note.fontSize = 12; note.normal.textColor = new Color(0.65f, 0.65f, 0.65f);
-            GUI.Label(new Rect(10f, cy + 82f,  w - 20f, 22f), "Note: L2/R2 triggers cannot be bound (they are axes).", note);
+            GUI.Label(new Rect(10f, cy + 48f,  w - 20f, 28f), "Press a button  OR  move an axis (trigger / D-pad)", sub);
+            GUI.Label(new Rect(10f, cy + 80f,  w - 20f, 22f), "Tap Cancel below  \u2014  or Esc on keyboard", note);
 
+            // On-screen Cancel button (tap-friendly for gamepad users without keyboard)
+            if (GUI.Button(new Rect(w * 0.5f - 64f, cy + 112f, 128f, 40f), "Cancel", BtnStyle(15, new Color(1f, 0.4f, 0.4f))))
+            {
+                _gpCaptureIdx = -1;
+                return;
+            }
+
+            // ---- Poll axes for threshold-based bindings (triggers, D-pad, sticks) ----
+            // Only check once per Repaint to avoid double-firing
+            if (Event.current.type == EventType.Repaint && _gpAxisBaseline != null)
+            {
+                for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
+                {
+                    string an = GP_ALL_AXES[ai];
+                    float cur = TryGetAxisRaw(an);
+                    if (float.IsNaN(cur)) continue;
+                    float baseline = float.IsNaN(_gpAxisBaseline[ai]) ? 0f : _gpAxisBaseline[ai];
+                    float delta = cur - baseline;
+                    if (Mathf.Abs(delta) > 0.45f)
+                    {
+                        string dir = delta > 0f ? "+" : "-";
+                        _gpAxisBinds[_gpCaptureIdx] = an + "|" + dir;
+                        HudCfgSet(GP_AXIS_PREF_KEYS[_gpCaptureIdx], _gpAxisBinds[_gpCaptureIdx]);
+                        // Clear any previously stored key bind for this slot (axis bind takes priority)
+                        _gpKeys[_gpCaptureIdx] = KeyCode.None;
+                        HudCfgSetInt(GP_PREF_KEYS[_gpCaptureIdx], (int)KeyCode.None);
+                        HudCfgSave();
+                        _gpCaptureIdx = -1;
+                        return;
+                    }
+                }
+            }
+
+            // ---- Key / button press ----------------------------------------
             Event e = Event.current;
             if (e.type == EventType.KeyDown && e.keyCode != KeyCode.None)
             {
+                int kcInt = (int)e.keyCode;
                 if (e.keyCode == KeyCode.Escape)
+                {
                     _gpCaptureIdx = -1;
+                }
                 else
                 {
-                    // Normalize Joystick1Button0-19 (350-369) to JoystickButton0-19 (330-349)
-                    // so Input.GetKey works for any connected joystick, not just joystick 1.
-                    int kcInt = (int)e.keyCode;
-                    KeyCode toStore = (kcInt >= 350 && kcInt <= 369)
-                        ? (KeyCode)(kcInt - 20)
-                        : e.keyCode;
+                    // Normalize Joystick1Button0-19 (350-369) → JoystickButton0-19 (330-349)
+                    KeyCode toStore = (kcInt >= 350 && kcInt <= 369) ? (KeyCode)(kcInt - 20) : e.keyCode;
                     _gpKeys[_gpCaptureIdx] = toStore;
+                    // Clear axis bind for this slot (key bind takes priority)
+                    _gpAxisBinds[_gpCaptureIdx] = null;
+                    HudCfgSet(GP_AXIS_PREF_KEYS[_gpCaptureIdx], "");
                     HudCfgSetInt(GP_PREF_KEYS[_gpCaptureIdx], (int)toStore);
                     HudCfgSave();
                     _gpCaptureIdx = -1;
@@ -3796,15 +3924,25 @@ namespace CNRSettingsMod
             catch (System.ArgumentException) { return float.NaN; }
         }
 
+        // True if the axis binding for slot idx is currently beyond threshold.
+        private bool GpAxisHeld(int idx)
+        {
+            if (string.IsNullOrEmpty(_gpAxisBinds[idx])) return false;
+            int pipe = _gpAxisBinds[idx].LastIndexOf('|');
+            if (pipe < 0) return false;
+            float v = TryGetAxisRaw(_gpAxisBinds[idx].Substring(0, pipe));
+            if (float.IsNaN(v)) return false;
+            return _gpAxisBinds[idx][pipe + 1] == '+' ? (v > 0.5f) : (v < -0.5f);
+        }
+
         private void ProbeGpAxes()
         {
             _gpAxesProbed = true;
             foreach (string n in GP_LAXIS_X) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisX = n; break; } }
             foreach (string n in GP_LAXIS_Y) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisY = n; break; } }
-            foreach (string n in GP_RAXIS_X) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpRAxisX = n; break; } }
-            foreach (string n in GP_RAXIS_Y) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpRAxisY = n; break; } }
-            SettingsModEntry.Log("GP axes: LX=" + (_gpLAxisX ?? "NONE") + " LY=" + (_gpLAxisY ?? "NONE")
-                + " RX=" + (_gpRAxisX ?? "NONE") + " RY=" + (_gpRAxisY ?? "NONE"));
+            // R-stick axes come from user config (Detect buttons in Controllers tab) — not auto-probed.
+            SettingsModEntry.Log("GP axes probed: LX=" + (_gpLAxisX ?? "NONE") + " LY=" + (_gpLAxisY ?? "NONE")
+                + "  RX=" + (_gpRAxisX ?? "user-cfg") + " RY=" + (_gpRAxisY ?? "user-cfg"));
         }
 
         private void GamepadUpdate()
@@ -3864,8 +4002,13 @@ namespace CNRSettingsMod
 
             if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
 
+            // Snapshot current axis-held state before running actions (for rising-edge detection)
+            bool[] axisNow = new bool[GP_BIND_COUNT];
+            for (int bi = 0; bi < GP_BIND_COUNT; bi++) axisNow[bi] = GpAxisHeld(bi);
+
             // ---- Fire (index 0, held) ----------------------------------------
-            if (_gpKeys[0] != KeyCode.None && Input.GetKey(_gpKeys[0]))
+            bool fireHeld = (_gpKeys[0] != KeyCode.None && Input.GetKey(_gpKeys[0])) || axisNow[0];
+            if (fireHeld)
             {
                 if ((object)UIMenuDirector.mInstance != null)
                     UIMenuDirector.mInstance.GenFireEvent();
@@ -3874,7 +4017,9 @@ namespace CNRSettingsMod
             }
 
             // ---- Jump (index 1, down) ----------------------------------------
-            if (_gpKeys[1] != KeyCode.None && Input.GetKeyDown(_gpKeys[1]))
+            bool jumpDown = (_gpKeys[1] != KeyCode.None && Input.GetKeyDown(_gpKeys[1]))
+                         || (axisNow[1] && !_gpAxisPrevHeld[1]);
+            if (jumpDown)
             {
                 if ((object)_joyStickCtrl == null)
                     _joyStickCtrl = (JoyStickController)UnityEngine.Object.FindObjectOfType(typeof(JoyStickController));
@@ -3891,28 +4036,31 @@ namespace CNRSettingsMod
             }
 
             // ---- Weapon switch (index 2 = next, 3 = prev, down) -------------
-            if (_gpKeys[2] != KeyCode.None && Input.GetKeyDown(_gpKeys[2])) KbmSwitchWeapon(+1);
-            if (_gpKeys[3] != KeyCode.None && Input.GetKeyDown(_gpKeys[3])) KbmSwitchWeapon(-1);
+            if ((_gpKeys[2] != KeyCode.None && Input.GetKeyDown(_gpKeys[2])) || (axisNow[2] && !_gpAxisPrevHeld[2])) KbmSwitchWeapon(+1);
+            if ((_gpKeys[3] != KeyCode.None && Input.GetKeyDown(_gpKeys[3])) || (axisNow[3] && !_gpAxisPrevHeld[3])) KbmSwitchWeapon(-1);
 
             // ---- Aim (index 4, down) -----------------------------------------
-            if (_gpKeys[4] != KeyCode.None && Input.GetKeyDown(_gpKeys[4]))
+            if ((_gpKeys[4] != KeyCode.None && Input.GetKeyDown(_gpKeys[4])) || (axisNow[4] && !_gpAxisPrevHeld[4]))
                 PlayerPrefs.SetInt("OnAim", 1);
 
             // ---- Pause (index 5, down) ---------------------------------------
-            if (_gpKeys[5] != KeyCode.None && Input.GetKeyDown(_gpKeys[5]))
+            if ((_gpKeys[5] != KeyCode.None && Input.GetKeyDown(_gpKeys[5])) || (axisNow[5] && !_gpAxisPrevHeld[5]))
                 KbmPressPause();
 
             // ---- Reload (index 6, down) --------------------------------------
-            if (_gpKeys[6] != KeyCode.None && Input.GetKeyDown(_gpKeys[6]))
+            if ((_gpKeys[6] != KeyCode.None && Input.GetKeyDown(_gpKeys[6])) || (axisNow[6] && !_gpAxisPrevHeld[6]))
                 PlayerPrefs.SetInt("FpsReload", 1);
 
             // ---- Player list (index 7, down) ---------------------------------
-            if (_gpKeys[7] != KeyCode.None && Input.GetKeyDown(_gpKeys[7]))
+            if ((_gpKeys[7] != KeyCode.None && Input.GetKeyDown(_gpKeys[7])) || (axisNow[7] && !_gpAxisPrevHeld[7]))
                 KbmToggleLeaderboard();
 
             // ---- Chat (index 8, down) ----------------------------------------
-            if (_gpKeys[8] != KeyCode.None && Input.GetKeyDown(_gpKeys[8]))
+            if ((_gpKeys[8] != KeyCode.None && Input.GetKeyDown(_gpKeys[8])) || (axisNow[8] && !_gpAxisPrevHeld[8]))
                 KbmHandleChat();
+
+            // Update prev-held state for next frame's rising-edge detection
+            for (int bi = 0; bi < GP_BIND_COUNT; bi++) _gpAxisPrevHeld[bi] = axisNow[bi];
         }
 
         private float _kbmInjectLogTimer = 0f;
@@ -4826,7 +4974,15 @@ namespace CNRSettingsMod
             for (int ki = 0; ki < KBM_BIND_COUNT; ki++)
                 _kbKeys[ki] = (KeyCode)HudCfgGetInt(KBM_PREF_KEYS[ki], (int)KBM_DEFAULTS[ki]);
             for (int gi = 0; gi < GP_BIND_COUNT; gi++)
-                _gpKeys[gi] = (KeyCode)HudCfgGetInt(GP_PREF_KEYS[gi], (int)GP_DEFAULTS[gi]);
+            {
+                _gpKeys[gi]      = (KeyCode)HudCfgGetInt(GP_PREF_KEYS[gi], (int)GP_DEFAULTS[gi]);
+                string axBind    = HudCfgGet(GP_AXIS_PREF_KEYS[gi], "");
+                _gpAxisBinds[gi] = axBind.Length > 0 ? axBind : null;
+            }
+            string rsX = HudCfgGet("CNRMod_RStickX", "");
+            string rsY = HudCfgGet("CNRMod_RStickY", "");
+            if (rsX.Length > 0) _gpRAxisX = rsX;
+            if (rsY.Length > 0) _gpRAxisY = rsY;
             for (int i = 0; i < VIS_ITEMS.Length; i++)
                 _visOn[i] = HudCfgGetInt(VIS_ITEMS[i].prefKey, 1) == 1;
             // Pre-populate _savedScales so LateUpdate can enforce them immediately.
@@ -4908,6 +5064,8 @@ namespace CNRSettingsMod
             return (_hudCfg.TryGetValue(key, out v) && int.TryParse(v, out r)) ? r : def;
         }
         private void HudCfgSetInt(string key, int val) { _hudCfg[key] = val.ToString(); }
+        private string HudCfgGet(string key, string def = "") { string v; return _hudCfg.TryGetValue(key, out v) ? v : def; }
+        private void   HudCfgSet(string key, string val)       { _hudCfg[key] = val; }
 
         // =====================================================================
         // Misc helpers
