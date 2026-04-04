@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.10";
+        public  const string Version = "3.1.12";
 
         public static void Load()
         {
@@ -299,8 +299,8 @@ namespace CNRSettingsMod
         private int    _gpStickDetect = 0;    // 0=idle, 1=LX, 2=LY, 3=RX, 4=RY
         private float[] _gpStickDetAxBase  = null; // Unity InputManager baseline at Detect press
         // -- APK version check ------------------------------------------------
-        private string _apkVersionName    = null;  // read from PackageManager on Start()
-        private bool   _apkNeedsUpdate    = false; // true if versionName doesn't contain "-cnr"
+        private string _apkVersionName    = null;  // null = not yet checked
+        private bool   _apkNeedsUpdate    = true;  // assume needs update until CheckApkVersion confirms otherwise
         private bool   _apkUpdateDismissed = false; // user dismissed banner for this session
         private float[] _gpStickDetJoyBase = null; // JoyProxy snapshot at Detect press
         private int    _gpLStickJAX   = 0;    // JoyProxy axis for left stick X  (default AXIS_X=0)
@@ -1329,6 +1329,7 @@ namespace CNRSettingsMod
             _ownJumpVelY   = 0f;
             _kbmFireWasHeld  = false;
             LoadPrefs();
+            CheckApkVersion(); // re-run on every scene load so new instances (after in-app DLL reload) always have the result
             if (_inGameScene) StartCoroutine(ApplyHUDOnLoad());
             if (_inGameScene && _kbmEnabled) StartCoroutine(AutoLockAfterLoad());
             if (_sceneName == "MainMenu") StartCoroutine(PatchMainMenuAfterLoad());
