@@ -1,4 +1,4 @@
-// CNRSettingsMod.cs -- In-game settings/HUD mod for Cops N Robbers
+﻿// CNRSettingsMod.cs -- In-game settings/HUD mod for Cops N Robbers
 // Entry point: CNRSettingsMod.SettingsModEntry.Load() -- called by CNRMod DLL scanner
 
 using System;
@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.37";
+        public  const string Version = "3.1.38";
 
         public static void Load()
         {
@@ -44,10 +44,10 @@ namespace CNRSettingsMod
                 // MainMenuDirector.Awake(), which fires on every scene transition back
                 // to the main menu.  Without this check each round trip adds another
                 // SettingsModHook MonoBehaviour, and OwnJumpPhysics() gets called N
-                // times per frame after N matches — multiplying jump height by N.
+                // times per frame after N matches â€” multiplying jump height by N.
                 if (GameObject.Find("CNRSettingsMod") != null)
                 {
-                    Log("CNRSettingsMod already running — skipping duplicate Load()");
+                    Log("CNRSettingsMod already running â€” skipping duplicate Load()");
                     return;
                 }
                 GameObject go = new GameObject("CNRSettingsMod");
@@ -303,34 +303,6 @@ namespace CNRSettingsMod
         private string _apkVersionName    = null;  // null = not yet checked
         private bool   _apkNeedsUpdate    = true;  // assume needs update until CheckApkVersion confirms otherwise
         private bool   _apkUpdateDismissed = false; // user dismissed banner for this session
-        // -- Networked ammo packs ---------------------------------------------
-        private bool   _ammoPacksEnabled = true;
-        private const  float PACK_INTERVAL = 20f;   // seconds between pack spawns (hardcoded)
-        private int    _ammoPackMax      = 2;      // max simultaneous active packs (FIFO)
-
-        // Ammo packs
-        private const  string AP_PRE     = "cnr_pk_";
-        private System.Collections.Generic.Dictionary<int, GameObject> _apDict =
-            new System.Collections.Generic.Dictionary<int, GameObject>();
-        private System.Collections.Generic.List<int> _apSpawnOrder =
-            new System.Collections.Generic.List<int>();
-        private int    _apNextId    = 1;
-        private float  _apSpawnTimer = 0f;
-        private float  _apPollTimer  = 0f;
-        private string _apHudMsg    = "";
-        private float  _apHudTimer  = 0f;
-
-        // Health packs
-        private const  string HP_PRE     = "cnr_hp_";
-        private System.Collections.Generic.Dictionary<int, GameObject> _hpDict =
-            new System.Collections.Generic.Dictionary<int, GameObject>();
-        private System.Collections.Generic.List<int> _hpSpawnOrder =
-            new System.Collections.Generic.List<int>();
-        private int    _hpNextId    = 1;
-        private float  _hpSpawnTimer = 0f;
-        private float  _hpPollTimer  = 0f;
-        private string _hpHudMsg    = "";
-        private float  _hpHudTimer  = 0f;
         private float[] _gpStickDetJoyBase = null; // JoyProxy snapshot at Detect press
         private int    _gpLStickJAX   = 0;    // JoyProxy axis for left stick X  (default AXIS_X=0)
         private int    _gpLStickJAY   = 1;    // JoyProxy axis for left stick Y  (default AXIS_Y=1)
@@ -1207,7 +1179,7 @@ namespace CNRSettingsMod
         private System.Collections.Generic.HashSet<int> _jumpTouchIds =
             new System.Collections.Generic.HashSet<int>();
 
-        // Our own jump arc — replaces JoyStickController's clunky 5-segment arc.
+        // Our own jump arc â€” replaces JoyStickController's clunky 5-segment arc.
         // The game permanently applies Physics.gravity (-9.81 m/s Y) to the
         // CharacterController via cc.Move in its own Update().  We add our Y on top
         // in LateUpdate.  Net Y per frame = (_ownJumpVelY + (-9.81)) * dt.
@@ -1217,8 +1189,8 @@ namespace CNRSettingsMod
         //
         // Tuned for ~1.3 m peak height, ~0.25 s rise, ~0.25 s fall (0.50 s total).
         // Compare: original arc was ~0.9 m peak, 1.0 s total, uniform/flat.
-        // Peak formula: h = (JumpInitialVel - 9.81)² / (2 * |JumpAscendGrav|)
-        //   JumpInitialVel=24 → ~2.5 m,  =22 → ~1.8 m,  =20 → ~1.3 m,  =19 → ~1.0 m,  =18 → ~0.8 m
+        // Peak formula: h = (JumpInitialVel - 9.81)Â² / (2 * |JumpAscendGrav|)
+        //   JumpInitialVel=24 â†’ ~2.5 m,  =22 â†’ ~1.8 m,  =20 â†’ ~1.3 m,  =19 â†’ ~1.0 m,  =18 â†’ ~0.8 m
         private bool  _ownJumpActive  = false;
         private bool  _kbmJumpPending  = false;  // set on spacebar down, consumed in LateUpdate
         private float _ownJumpVelY   = 0f;
@@ -1313,7 +1285,6 @@ namespace CNRSettingsMod
 
         private void UpdateScene(string scene)
         {
-            AmmoPackClear();
             _sceneName        = scene ?? "";
             _inGameScene      = IsGameScene(scene);
             _btnPatched       = false;
@@ -1389,7 +1360,7 @@ namespace CNRSettingsMod
 
         private void Update()
         {
-            // Gamepad axis capture polling — runs every frame, in all scenes.
+            // Gamepad axis capture polling â€” runs every frame, in all scenes.
             if (_gpCaptureIdx >= 0 && _gpCaptureCooldown <= 0)
                 GpCaptureAxisPoll();
             else if (_gpCaptureCooldown > 0)
@@ -1398,7 +1369,7 @@ namespace CNRSettingsMod
             // Stick Axes detection polling (Detect button in Controllers tab).
             if (_gpStickDetect > 0) GpStickDetectPoll();
 
-            // Set UICamera.useMouse — must run in ALL scenes (including main menu).
+            // Set UICamera.useMouse â€” must run in ALL scenes (including main menu).
             // In KBM mode: always true so hardware mouse clicks reach NGUI everywhere.
             // In pure touch mode: leave at Android default (false).
             _uiCamCacheAge -= Time.deltaTime;
@@ -1450,23 +1421,19 @@ namespace CNRSettingsMod
             // the same frame and the jump fires immediately on the first press.
             if (!_hudEditMode) TouchJumpDetect();
 
-            // Networked ammo packs — runs regardless of KBM/gamepad mode
-            if (!_hudEditMode) AmmoPackUpdate();
-            if (!_hudEditMode) HealthPackUpdate();
-
-            // ── KBM input ────────────────────────────────────────────────────
+            // â”€â”€ KBM input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             if (!_kbmEnabled) return;
 
             // Chat input: block all gameplay input while chat is focused
             bool chatFocused = UIInputForChat.current != null;
             if (!_chatWasFocused && chatFocused)
             {
-                // Chat just opened — make sure cursor is released
+                // Chat just opened â€” make sure cursor is released
                 if (_cursorLocked) KbmSetCursorLocked(false);
             }
             if (_chatWasFocused && !chatFocused)
             {
-                // Chat just closed — re-lock for gameplay
+                // Chat just closed â€” re-lock for gameplay
                 if (!_showSettings) KbmSetCursorLocked(true);
             }
             _chatWasFocused = chatFocused;
@@ -1481,7 +1448,7 @@ namespace CNRSettingsMod
             if (Input.GetMouseButtonDown(0) && !_cursorLocked && !_showSettings && !_wasPauseVisible) { KbmSetCursorLocked(true); return; }
             if (!_cursorLocked || _showSettings) return;
 
-            // Jump — set pending flag; TriggerOwnJump fires in LateUpdate once _joyStickCtrl is ready.
+            // Jump â€” set pending flag; TriggerOwnJump fires in LateUpdate once _joyStickCtrl is ready.
             if (Input.GetKeyDown(_kbKeys[1])) _kbmJumpPending = true;
 
             // Weapon scroll + keybinds
@@ -1500,7 +1467,7 @@ namespace CNRSettingsMod
             }
 
             // Aim toggle (index 8)
-            // When capture active, RMB arrives via rmbHeld — detect rising edge.
+            // When capture active, RMB arrives via rmbHeld â€” detect rising edge.
             // When not captured, fall back to Input.GetKeyDown.
             bool aimKeyDown;
             if (_capListener != null && _kbKeys[8] == KeyCode.Mouse1)
@@ -1725,7 +1692,7 @@ namespace CNRSettingsMod
             // In KBM mode with cursor locked: prevent Sliderotate.Update() from running.
             // Sliderotate has an "else" (MouseY-only) branch that reads Input.GetAxis("Mouse Y")
             // and writes to transform.localEulerAngles every Update frame, even without touches.
-            // This causes double-application of mouse input — our KbmInjectMouseLook also applies
+            // This causes double-application of mouse input â€” our KbmInjectMouseLook also applies
             // the same delta in LateUpdate.  Blocking it via cannotRotate eliminates the conflict.
             if (_kbmEnabled && _cursorLocked)
             {
@@ -1733,7 +1700,7 @@ namespace CNRSettingsMod
                 if (_sliderotate != null && _fiCannotRotate != null)
                     _fiCannotRotate.SetValue(_sliderotate, true);
             }
-            // Gamepad right stick also injects via KbmInjectMouseLook — suppress Sliderotate too.
+            // Gamepad right stick also injects via KbmInjectMouseLook â€” suppress Sliderotate too.
             else if (_gamepadEnabled && _joyProxy != null && _inGameScene)
             {
                 if (_sliderotate == null) CacheSliderotate();
@@ -1749,7 +1716,7 @@ namespace CNRSettingsMod
             {
                 float dx, dy;
                 bool captureHandled = false;
-                // Always drain capListener — _captureActive may lag behind the actual grant
+                // Always drain capListener â€” _captureActive may lag behind the actual grant
                 if (_capListener != null)
                 {
                     dx = _capListener.DrainDx();
@@ -1895,7 +1862,7 @@ namespace CNRSettingsMod
                 if ((object)UIMenuDirector.mInstance != null)
                     UIMenuDirector.mInstance.GenFireEvent();
 
-                _touchFireCooldown = 0.2f;  // slightly less than 0.235f — expires first
+                _touchFireCooldown = 0.2f;  // slightly less than 0.235f â€” expires first
                 break;
             }
         }
@@ -1904,9 +1871,9 @@ namespace CNRSettingsMod
         // Single-player (FreeRun/SingleMode): sets PlayerLogic.mStatus and keeps
         //   JoyStickController.fireStatusHoldTimeCount alive so Update() won't reset to idle.
         // CNR multiplayer: sets CRInput.m_bFire + CRJoyStickController.fireFlag, exactly as
-        //   UIButtonEventKit → GenFireEvent → CRUIEventInteract.OnFire() does — but null-safe.
+        //   UIButtonEventKit â†’ GenFireEvent â†’ CRUIEventInteract.OnFire() does â€” but null-safe.
         //   CRWeaponScript.LateUpdate() reads m_bFire and fires the active melee weapon.
-        // NOTE: In CNR mode PlayerLogic.mInstance is null — DON'T use it as a gate for fire!
+        // NOTE: In CNR mode PlayerLogic.mInstance is null â€” DON'T use it as a gate for fire!
         private void KbmFireDetect()
         {
             if (!_kbmEnabled || !_cursorLocked)
@@ -1919,8 +1886,8 @@ namespace CNRSettingsMod
                 : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
 
             // Cache JoyStickController and fireStatusHoldTimeCount field (single-player scenes).
-            // IMPORTANT: Only search once — in CNR mode JoyStickController is absent so searching
-            // every frame is O(all scene components) → causes periodic GC stutter.
+            // IMPORTANT: Only search once â€” in CNR mode JoyStickController is absent so searching
+            // every frame is O(all scene components) â†’ causes periodic GC stutter.
             if ((object)_joyStickCtrl == null && !_joyStickCtrlSearched)
             {
                 _joyStickCtrlSearched = true;
@@ -1990,10 +1957,10 @@ namespace CNRSettingsMod
         // While the player is in the air (isJumping=true), we keep OnJump=1 in prefs
         // so JoyStickController re-jumps the instant it detects landing.
         //
-        // Hit-testing uses Physics.Raycast from the NGUI camera — exactly what UICamera
-        // does internally — so the detection correctly respects the button's actual
+        // Hit-testing uses Physics.Raycast from the NGUI camera â€” exactly what UICamera
+        // does internally â€” so the detection correctly respects the button's actual
         // collider size regardless of any HUD-editor rescaling.
-        // Handles keyboard jump in KBM mode — mirrors TouchJumpDetect but for keyboard.
+        // Handles keyboard jump in KBM mode â€” mirrors TouchJumpDetect but for keyboard.
         // Runs in LateUpdate so _joyStickCtrl can be cached here before TriggerOwnJump.
         private void KbmJumpDetect()
         {
@@ -2063,7 +2030,7 @@ namespace CNRSettingsMod
 
                 // Scale matches Sliderotate: raw pixel delta * 0.1, then * sensitivityX via KbmInjectMouseLook.
                 // Touch.position.y is bottom-left origin: positive Y = finger moves UP = camera looks UP.
-                // KbmInjectMouseLook: positive my → rotY increases → cam pitches up. Same sign, no inversion.
+                // KbmInjectMouseLook: positive my â†’ rotY increases â†’ cam pitches up. Same sign, no inversion.
                 KbmInjectMouseLook(dx * 0.1f, dy * 0.1f);
 
                 // Block Sliderotate from double-processing this touch this frame.
@@ -2167,8 +2134,8 @@ namespace CNRSettingsMod
         // net Y displacement = (-9.81 + _ownJumpVelY) * dt.
         //
         // Arc: _ownJumpVelY starts at JumpInitialVel (24), decelerates at JumpAscendGrav
-        // (-41 m/s²) until net Y crosses zero (peak ≈ 2.5 m), then accelerates down via
-        // JumpDescendGrav (-56 m/s²) for a snap-fast landing (~0.3 s fall).
+        // (-41 m/sÂ²) until net Y crosses zero (peak â‰ˆ 2.5 m), then accelerates down via
+        // JumpDescendGrav (-56 m/sÂ²) for a snap-fast landing (~0.3 s fall).
         private void OwnJumpPhysics()
         {
             if (!_ownJumpActive) return;
@@ -2215,7 +2182,7 @@ namespace CNRSettingsMod
             if (_aimBtn == null) CacheAimBtn();
             if (_mainCam == null) CacheMainCam();
 
-            // Detect fire button press: FpsOnFire pref is toggled (0↔1) on every press.
+            // Detect fire button press: FpsOnFire pref is toggled (0â†”1) on every press.
             // Any value change means the fire button was just tapped.
             int curFpsOnFire = PlayerPrefs.GetInt("FpsOnFire", 0);
             if (_prevFpsOnFire != -1 && curFpsOnFire != _prevFpsOnFire)
@@ -2308,7 +2275,7 @@ namespace CNRSettingsMod
 
         public void ToggleAiming() { _isAiming = !_isAiming; }
 
-        // All Sliderotate instances — patch every one of them
+        // All Sliderotate instances â€” patch every one of them
         private System.Collections.Generic.List<MonoBehaviour> _allSliderotates
             = new System.Collections.Generic.List<MonoBehaviour>();
 
@@ -2423,7 +2390,7 @@ namespace CNRSettingsMod
         // [0,1].  If the HUD camera's rect is constrained to the original button region
         // (e.g. right ~65% of screen, with the left reserved for the virtual joystick),
         // buttons dragged into the other region never fire.  Expanding the rect to the full
-        // screen costs nothing — the joystick uses VCTouchController, not NGUI, so it is
+        // screen costs nothing â€” the joystick uses VCTouchController, not NGUI, so it is
         // completely unaffected.
         private void ExpandNguiCamToFullScreen()
         {
@@ -2508,7 +2475,7 @@ namespace CNRSettingsMod
             yield return null;
             yield return null;
             yield return null;
-            // Enter edit mode — this calls ReCacheHUD and populates _dragGOs
+            // Enter edit mode â€” this calls ReCacheHUD and populates _dragGOs
             EnterHudEditMode();
             yield return null;
             // Apply factory reset to all live items
@@ -2727,7 +2694,7 @@ namespace CNRSettingsMod
         // =====================================================================
         private void OnGUI()
         {
-            // KBM debug overlay — disabled
+            // KBM debug overlay â€” disabled
             if (false && _kbmEnabled && _cursorLocked && !_showSettings)
             {
                 GUIStyle dbgStyle = new GUIStyle(GUI.skin.box);
@@ -2779,35 +2746,6 @@ namespace CNRSettingsMod
 
             if (!_showSettings && !_hudEditMode)
             {
-                // Pack pickup HUD messages (shown in-game while not in settings/edit)
-                if (_ammoPacksEnabled && _inGameScene)
-                {
-                    GUIStyle apStyle = new GUIStyle(GUI.skin.label);
-                    apStyle.fontSize  = Mathf.RoundToInt(Screen.width / 18f);
-                    apStyle.fontStyle = FontStyle.Bold;
-                    apStyle.alignment = TextAnchor.MiddleCenter;
-                    float mw = Screen.width * 0.5f;
-                    float mh = 56f * (Screen.width / REF_W);
-
-                    if (_apHudTimer > 0f && _apHudMsg.Length > 0)
-                    {
-                        float alpha = Mathf.Clamp01(_apHudTimer);
-                        Color prev = GUI.color;
-                        GUI.color = new Color(1f, 0.85f, 0f, alpha);
-                        GUI.Label(new Rect((Screen.width - mw) * 0.5f, Screen.height * 0.2f, mw, mh), _apHudMsg, apStyle);
-                        GUI.color = prev;
-                    }
-
-                    if (_hpHudTimer > 0f && _hpHudMsg.Length > 0)
-                    {
-                        float alpha = Mathf.Clamp01(_hpHudTimer);
-                        Color prev = GUI.color;
-                        GUI.color = new Color(0.85f, 0.15f, 0.15f, alpha);
-                        float yOff = (_apHudTimer > 0f) ? Screen.height * 0.27f : Screen.height * 0.2f;
-                        GUI.Label(new Rect((Screen.width - mw) * 0.5f, yOff, mw, mh), _hpHudMsg, apStyle);
-                        GUI.color = prev;
-                    }
-                }
                 return;
             }
 
@@ -2871,7 +2809,7 @@ namespace CNRSettingsMod
                     _gsApkBanner.normal.background = _texApkBannerBg ?? (_texApkBannerBg = MakeTex(2, 2, new Color(0.5f, 0.1f, 0f, 0.92f)));
                 }
                 string apkVer = string.IsNullOrEmpty(_apkVersionName) ? "unknown" : _apkVersionName;
-                GUILayout.Box("⚠  APK update required (current: " + apkVer + ")\n   Gamepad axes (R-stick, D-pad, triggers) need the patched APK.", _gsApkBanner, GUILayout.ExpandWidth(true));
+                GUILayout.Box("âš   APK update required (current: " + apkVer + ")\n   Gamepad axes (R-stick, D-pad, triggers) need the patched APK.", _gsApkBanner, GUILayout.ExpandWidth(true));
                 GUILayout.Space(2f);
                 GUILayout.BeginHorizontal();
                 if (GUILayout.Button("Download APK", GUILayout.Height(30f)))
@@ -3060,7 +2998,7 @@ namespace CNRSettingsMod
                     StartCoroutine(ResetHUDViaEditMode());
                 else
                 {
-                    // Not in game scene yet — just wipe prefs; defaults load on next scene entry
+                    // Not in game scene yet â€” just wipe prefs; defaults load on next scene entry
                     for (int i = 0; i < DRAG_COUNT; i++)
                     {
                         HudCfgDelete(DRAG_ITEMS[i].prefPX);
@@ -3074,27 +3012,6 @@ namespace CNRSettingsMod
             }
             GUILayout.Space(6f);
 
-            // ---- Ammo Packs (Online) --------------------------------------
-            SectionHeader("Ammo Packs (Online)");
-            GUILayout.Space(4f);
-            {
-                bool clicked = GUILayout.Button(GUIContent.none, GhostBtnStyle(), GUILayout.Height(34f));
-                Rect ra = GUILayoutUtility.GetLastRect();
-                Texture2D chkTex = _ammoPacksEnabled
-                    ? (_spSelectKuang ?? MakeTex(2, 2, Color.white))
-                    : (_spPropKuang   ?? MakeTex(2, 2, new Color(0.35f, 0.35f, 0.35f)));
-                GUI.DrawTexture(new Rect(ra.x + 3f, ra.y + 2f, 30f, 30f), chkTex, ScaleMode.ScaleToFit);
-                GUI.Label(new Rect(ra.x + 39f, ra.y, ra.width - 42f, ra.height), "Enable ammo packs", LabelStyle());
-                if (clicked)
-                {
-                    _ammoPacksEnabled = !_ammoPacksEnabled;
-                    HudCfgSetInt("CNRMod_AmmoPacksOn", _ammoPacksEnabled ? 1 : 0);
-                    HudCfgSave();
-                }
-            }
-            GUILayout.Label("  Host spawns gold cubes (ammo) and red cubes (health) every 20 s.\n  Walk over them to pick up.", HintStyle());
-            GUILayout.Space(14f);
-
             } // end Settings tab
             else if (_activeTab == 1) { DrawKbmTabContent(pw); }
             else if (_activeTab == 3) { DrawControllersTabContent(pw); }
@@ -3103,7 +3020,7 @@ namespace CNRSettingsMod
             GUILayout.Space(6f);
             GUILayout.EndScrollView();
 
-            // ---- Close & Save — pinned to bottom via FlexibleSpace ----------
+            // ---- Close & Save â€” pinned to bottom via FlexibleSpace ----------
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("  Close & Save  ", BtnStyle(22, Color.white), GUILayout.Height(38f)))
             {
@@ -3114,7 +3031,7 @@ namespace CNRSettingsMod
             }
             GUILayout.Space(6f);
 
-            // Keybind capture overlay — drawn on top of everything else
+            // Keybind capture overlay â€” drawn on top of everything else
             if (_captureIdx >= 0) DrawCaptureOverlay();
             if (_gpCaptureIdx >= 0) DrawGpCaptureOverlay();
         }
@@ -3368,7 +3285,7 @@ namespace CNRSettingsMod
 
             // ---- Button Bindings ------------------------------------------
             SectionHeader("Button Bindings");
-            GUILayout.Label("  Tip: triggers and D-pad are axes — move them during Rebind to assign.", HintStyle());
+            GUILayout.Label("  Tip: triggers and D-pad are axes â€” move them during Rebind to assign.", HintStyle());
             GUILayout.Space(4f);
             float colName = pw * 0.33f;
             float colKey  = pw * 0.30f;
@@ -3557,7 +3474,7 @@ namespace CNRSettingsMod
                 _gsWipBanner.alignment = TextAnchor.MiddleCenter;
                 _gsWipBanner.normal.background = _texWipBg ?? (_texWipBg = MakeTex(2, 2, new Color(0.35f, 0.2f, 0f, 0.85f)));
             }
-            GUILayout.Box("⚠  Camera mouse-look is not working yet on Android.\n   Other KBM features (keyboard, buttons) are functional.", _gsWipBanner, GUILayout.ExpandWidth(true));
+            GUILayout.Box("âš   Camera mouse-look is not working yet on Android.\n   Other KBM features (keyboard, buttons) are functional.", _gsWipBanner, GUILayout.ExpandWidth(true));
             GUILayout.Space(8f);
 
             // ---- KBM Enabled ------------------------------------------------
@@ -3748,7 +3665,7 @@ namespace CNRSettingsMod
             if (kcInt >= 370 && kcInt <= 509) return "JBtn" + ((kcInt - 350) % 20);
             return kc.ToString();
         }
-        // "JA:17|+" → "LT",  "JA:15|-" → "DPad-L",  "Horizontal|-" → "H-"
+        // "JA:17|+" â†’ "LT",  "JA:15|-" â†’ "DPad-L",  "Horizontal|-" â†’ "H-"
         private static string GpAxisBindLabel(string axisBind)
         {
             if (string.IsNullOrEmpty(axisBind)) return "";
@@ -3839,7 +3756,7 @@ namespace CNRSettingsMod
                 }
                 else
                 {
-                    // Normalize Joystick1Button0-19 (350-369) → JoystickButton0-19 (330-349)
+                    // Normalize Joystick1Button0-19 (350-369) â†’ JoystickButton0-19 (330-349)
                     KeyCode toStore = (kcInt >= 350 && kcInt <= 369) ? (KeyCode)(kcInt - 20) : e.keyCode;
                     _gpKeys[_gpCaptureIdx] = toStore;
                     // Clear axis bind for this slot (key bind takes priority)
@@ -3884,13 +3801,13 @@ namespace CNRSettingsMod
                 decor    = window.Call<AndroidJavaObject>("getDecorView");
                 // requestPointerCapture / setOnCapturedPointerListener MUST be called on the
                 // Android UI thread (ViewRootImpl is only available there).
-                // Use the DecorView (FrameLayout) — NOT findFocus() — because SurfaceView
+                // Use the DecorView (FrameLayout) â€” NOT findFocus() â€” because SurfaceView
                 // (Unity's render surface) does not support requestPointerCapture().
-                // Captured events are delivered to the view that requested capture —
+                // Captured events are delivered to the view that requested capture â€”
                 // our OnCapturedPointerListener on the DecorView will receive them.
                 if (capture)
                 {
-                    // Do NOT set _captureActive=true here — the runnable checks hasCap
+                    // Do NOT set _captureActive=true here â€” the runnable checks hasCap
                     // asynchronously and sets it only if capture is actually granted.
                     // Until then, Input.GetAxis("Mouse X/Y") runs as the primary path.
                     _captureActive = false;
@@ -3938,7 +3855,7 @@ namespace CNRSettingsMod
                 decor    = window.Call<AndroidJavaObject>("getDecorView");
                 if (!visible)
                 {
-                    // PointerIcon.TYPE_NULL (0) = hidden cursor — available API 24+
+                    // PointerIcon.TYPE_NULL (0) = hidden cursor â€” available API 24+
                     AndroidJavaClass  piClass  = new AndroidJavaClass("android.view.PointerIcon");
                     AndroidJavaObject nullIcon = piClass.CallStatic<AndroidJavaObject>("getSystemIcon", activity, 0);
                     decor.Call("setPointerIcon", nullIcon);
@@ -4087,7 +4004,7 @@ namespace CNRSettingsMod
         }
 
         // Simulate a full NGUI finger tap on a weapon switch button.
-        // A real tap fires: OnPress(true) → OnPress(false) → OnClick.
+        // A real tap fires: OnPress(true) â†’ OnPress(false) â†’ OnClick.
         // OnClick is what UIButtonEventKit handles to actually perform the switch.
         private void TapGO(GameObject go)
         {
@@ -4095,7 +4012,7 @@ namespace CNRSettingsMod
             go.SendMessage("OnPress", true,  SendMessageOptions.DontRequireReceiver);
             go.SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
             go.SendMessage("OnClick",        SendMessageOptions.DontRequireReceiver);
-            // Clear NGUI focus so the button doesn't stay "hot" — prevents the next
+            // Clear NGUI focus so the button doesn't stay "hot" â€” prevents the next
             // unrelated input (jump, fire, etc.) from replaying on this button.
             UICamera.hoveredObject  = null;
             UICamera.selectedObject = null;
@@ -4108,508 +4025,6 @@ namespace CNRSettingsMod
             TapGO(dir > 0 ? _dragGOs[15] : _dragGOs[14]);
         }
 
-        // =====================================================================
-        // Networked ammo packs — ground pickups synced via Photon room props
-        // =====================================================================
-        private void AmmoPackUpdate()
-        {
-            if (!_ammoPacksEnabled) return;
-            if (!_inGameScene)      return;
-            if (PhotonNetwork.room == null) return;
-
-            // Master client drives the spawn timer
-            if (PhotonNetwork.isMasterClient)
-            {
-                _apSpawnTimer += Time.deltaTime;
-                if (_apSpawnTimer >= PACK_INTERVAL)
-                {
-                    _apSpawnTimer = 0f;
-                    SpawnPackMaster(); // handles FIFO eviction internally
-                }
-            }
-
-            // All clients: poll room custom props every 0.5 s for pack changes
-            // (PUN 1.17 has no OnPhotonCustomRoomPropertiesChanged callback)
-            _apPollTimer += Time.deltaTime;
-            if (_apPollTimer >= 0.5f)
-            {
-                _apPollTimer = 0f;
-                AmmoPackSync();
-            }
-
-            // Proximity pickup — CharacterController doesn't reliably fire OnTriggerEnter
-            GameObject player = GameObject.FindWithTag("Player");
-            if (player != null && _apDict.Count > 0)
-            {
-                Vector3 pp   = player.transform.position;
-                int     pick = -1;
-                float   best = 2.0f;
-                foreach (var kv in _apDict)
-                {
-                    if (kv.Value == null) continue;
-                    float d = Vector3.Distance(pp, kv.Value.transform.position);
-                    if (d < best) { best = d; pick = kv.Key; }
-                }
-                if (pick >= 0) AmmoPackPickup(pick);
-            }
-
-            // Spin active pack cubes
-            foreach (var kv in _apDict)
-                if (kv.Value != null)
-                    kv.Value.transform.Rotate(0f, 90f * Time.deltaTime, 0f, Space.World);
-
-            // Tick down HUD msg timer
-            if (_apHudTimer > 0f) _apHudTimer -= Time.deltaTime;
-        }
-
-        private void HealthPackUpdate()
-        {
-            if (!_ammoPacksEnabled) return;
-            if (!_inGameScene)      return;
-            if (PhotonNetwork.room == null) return;
-
-            if (PhotonNetwork.isMasterClient)
-            {
-                _hpSpawnTimer += Time.deltaTime;
-                if (_hpSpawnTimer >= PACK_INTERVAL)
-                {
-                    _hpSpawnTimer = 0f;
-                    SpawnHealthPackMaster();
-                }
-            }
-
-            _hpPollTimer += Time.deltaTime;
-            if (_hpPollTimer >= 0.5f)
-            {
-                _hpPollTimer = 0f;
-                HealthPackSync();
-            }
-
-            GameObject player = GameObject.FindWithTag("Player");
-            if (player != null && _hpDict.Count > 0)
-            {
-                Vector3 pp   = player.transform.position;
-                int     pick = -1;
-                float   best = 2.0f;
-                foreach (var kv in _hpDict)
-                {
-                    if (kv.Value == null) continue;
-                    float d = Vector3.Distance(pp, kv.Value.transform.position);
-                    if (d < best) { best = d; pick = kv.Key; }
-                }
-                if (pick >= 0) HealthPackPickup(pick);
-            }
-
-            foreach (var kv in _hpDict)
-                if (kv.Value != null)
-                    kv.Value.transform.Rotate(0f, 90f * Time.deltaTime, 0f, Space.World);
-
-            if (_hpHudTimer > 0f) _hpHudTimer -= Time.deltaTime;
-        }
-
-        private void HealthPackSync()
-        {
-            Hashtable props = PhotonNetwork.room.customProperties;
-            if (props == null) return;
-
-            var keys = new System.Collections.Generic.List<string>();
-            foreach (object key in props.Keys)
-            {
-                string k = key as string;
-                if (k != null && k.StartsWith(HP_PRE)) keys.Add(k);
-            }
-
-            foreach (string k in keys)
-            {
-                int id;
-                if (!int.TryParse(k.Substring(HP_PRE.Length), out id)) continue;
-                string val = props[k] as string;
-
-                if (string.IsNullOrEmpty(val))
-                {
-                    DespawnHealthPackLocal(id);
-                }
-                else if (!_hpDict.ContainsKey(id))
-                {
-                    string[] p = val.Split(',');
-                    if (p.Length >= 3)
-                    {
-                        float x = 0f, y = 0f, z = 0f;
-                        bool ok = float.TryParse(p[0], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out x)
-                               && float.TryParse(p[1], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out y)
-                               && float.TryParse(p[2], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out z);
-                        if (ok) SpawnHealthPackLocal(id, new Vector3(x, y, z));
-                    }
-                }
-            }
-        }
-
-        private void SpawnHealthPackMaster()
-        {
-            if (PhotonNetwork.room == null) return;
-
-            if (_hpDict.Count >= _ammoPackMax && _hpSpawnOrder.Count > 0)
-            {
-                int oldest = _hpSpawnOrder[0];
-                _hpSpawnOrder.RemoveAt(0);
-                DespawnHealthPackLocal(oldest);
-                var htEvict = new Hashtable();
-                htEvict[HP_PRE + oldest] = "";
-                PhotonNetwork.room.SetCustomProperties(htEvict);
-            }
-
-            Vector3 origin = PickRandomPlayerOrigin();
-
-            // Offset 45 degrees from ammo packs so they don't overlap
-            int   slot  = (_hpNextId - 1) % 4;
-            float angle = (slot * 90f + 45f) * Mathf.Deg2Rad;
-            float cx    = origin.x + Mathf.Cos(angle) * 12f;
-            float cz    = origin.z + Mathf.Sin(angle) * 12f;
-
-            float groundY = origin.y;
-            RaycastHit hit;
-            if (Physics.Raycast(origin + Vector3.up * 0.5f, Vector3.down, out hit, 5f))
-                groundY = hit.point.y;
-            if (Physics.Raycast(new Vector3(cx, groundY + 2f, cz), Vector3.down, out hit, 4f))
-                groundY = hit.point.y;
-
-            Vector3 pos = new Vector3(cx, groundY, cz);
-
-            int    id  = _hpNextId++;
-            string val = pos.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
-                       + "," + pos.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
-                       + "," + pos.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
-
-            var ht = new Hashtable();
-            ht[HP_PRE + id] = val;
-            PhotonNetwork.room.SetCustomProperties(ht);
-            SettingsModEntry.Log("HealthPackMaster spawned id=" + id + " pos=" + pos);
-        }
-
-        private void SpawnHealthPackLocal(int id, Vector3 pos)
-        {
-            if (_hpDict.ContainsKey(id)) return;
-
-            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            go.name = "CNRHealthPack_" + id;
-            go.transform.position   = pos + new Vector3(0f, 0.3f, 0f);
-            go.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
-            go.transform.rotation   = Quaternion.Euler(30f, 45f, 0f);
-
-            Renderer rend = go.GetComponent<Renderer>();
-            if (rend != null)
-                rend.material.color = new Color(0.85f, 0.15f, 0.15f); // Red
-
-            Collider col = go.GetComponent<Collider>();
-            if (col != null) UnityEngine.Object.Destroy(col);
-
-            _hpDict[id] = go;
-            _hpSpawnOrder.Add(id);
-            SettingsModEntry.Log("HealthPackLocal spawn id=" + id + " pos=" + pos);
-        }
-
-        private void DespawnHealthPackLocal(int id)
-        {
-            GameObject go;
-            if (_hpDict.TryGetValue(id, out go))
-            {
-                if (go != null) UnityEngine.Object.Destroy(go);
-                _hpDict.Remove(id);
-            }
-            _hpSpawnOrder.Remove(id);
-        }
-
-        private void HealthPackPickup(int id)
-        {
-            DespawnHealthPackLocal(id);
-
-            if (PhotonNetwork.room != null)
-            {
-                var ht = new Hashtable();
-                ht[HP_PRE + id] = "";
-                PhotonNetwork.room.SetCustomProperties(ht);
-            }
-
-            if (PlayerLogic.mInstance != null && !PlayerLogic.mInstance.bDied)
-                PlayerLogic.mInstance.blood = 100;
-
-            _hpHudMsg   = "+ Health";
-            _hpHudTimer = 2.5f;
-            SettingsModEntry.Log("HealthPackPickup id=" + id);
-        }
-
-        private void AmmoPackSync()
-        {
-            Hashtable props = PhotonNetwork.room.customProperties;
-            if (props == null) return;
-
-            var keys = new System.Collections.Generic.List<string>();
-            foreach (object key in props.Keys)
-            {
-                string k = key as string;
-                if (k != null && k.StartsWith(AP_PRE)) keys.Add(k);
-            }
-
-            foreach (string k in keys)
-            {
-                int id;
-                if (!int.TryParse(k.Substring(AP_PRE.Length), out id)) continue;
-                string val = props[k] as string;
-
-                if (string.IsNullOrEmpty(val))
-                {
-                    DespawnPackLocal(id);
-                }
-                else if (!_apDict.ContainsKey(id))
-                {
-                    string[] p = val.Split(',');
-                    if (p.Length >= 3)
-                    {
-                        float x = 0f, y = 0f, z = 0f;
-                        bool ok = float.TryParse(p[0], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out x)
-                               && float.TryParse(p[1], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out y)
-                               && float.TryParse(p[2], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out z);
-                        if (ok) SpawnPackLocal(id, new Vector3(x, y, z));
-                    }
-                }
-            }
-        }
-
-        // Returns position of a randomly chosen player (local + all remotes).
-        // Falls back to Vector3.zero if no player objects are found.
-        private Vector3 PickRandomPlayerOrigin()
-        {
-            var positions = new System.Collections.Generic.List<Vector3>();
-
-            GameObject local = GameObject.FindWithTag("Player");
-            if (local != null) positions.Add(local.transform.position);
-
-            // Remote players' WeaponManager sibling objects are tagged "WeaponManagerOnline"
-            GameObject[] remotes = GameObject.FindGameObjectsWithTag("WeaponManagerOnline");
-            foreach (GameObject r in remotes)
-                positions.Add(r.transform.position);
-
-            if (positions.Count == 0) return Vector3.zero;
-            return positions[UnityEngine.Random.Range(0, positions.Count)];
-        }
-
-        private void SpawnPackMaster()
-        {
-            if (PhotonNetwork.room == null) return;
-
-            // FIFO eviction: if already at max, despawn oldest before spawning new
-            if (_apDict.Count >= _ammoPackMax && _apSpawnOrder.Count > 0)
-            {
-                int oldest = _apSpawnOrder[0];
-                _apSpawnOrder.RemoveAt(0);
-                DespawnPackLocal(oldest);
-                var htEvict = new Hashtable();
-                htEvict[AP_PRE + oldest] = "";
-                PhotonNetwork.room.SetCustomProperties(htEvict);
-            }
-
-            Vector3 origin = PickRandomPlayerOrigin();
-
-            // Place packs at NE / NW / SE / SW quadrants, 12 m out
-            int   slot  = (_apNextId - 1) % 4;
-            float angle = slot * 90f * Mathf.Deg2Rad;
-            float cx    = origin.x + Mathf.Cos(angle) * 12f;
-            float cz    = origin.z + Mathf.Sin(angle) * 12f;
-
-            // Two-step ground detection so packs spawn on the same floor level as
-            // the host player, even on multi-level maps:
-            //   1. Short downcast from player position → finds the player's actual floor Y.
-            //   2. Narrow downcast at the pack XZ starting 2 m above that floor Y,
-            //      searching only 4 m down → lands on the same-level surface without
-            //      falling through to a lower floor or hitting a ceiling above.
-            //   Fallback: player's Y if nothing is hit.
-            float groundY = origin.y;
-            RaycastHit hit;
-            if (Physics.Raycast(origin + Vector3.up * 0.5f, Vector3.down, out hit, 5f))
-                groundY = hit.point.y;
-            if (Physics.Raycast(new Vector3(cx, groundY + 2f, cz), Vector3.down, out hit, 4f))
-                groundY = hit.point.y;
-
-            Vector3 pos = new Vector3(cx, groundY, cz);
-
-            int    id  = _apNextId++;
-            string val = pos.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
-                       + "," + pos.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
-                       + "," + pos.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
-
-            var ht = new Hashtable();
-            ht[AP_PRE + id] = val;
-            PhotonNetwork.room.SetCustomProperties(ht);
-            SettingsModEntry.Log("AmmoPackMaster spawned id=" + id + " pos=" + pos);
-        }
-
-        private void SpawnPackLocal(int id, Vector3 pos)
-        {
-            if (_apDict.ContainsKey(id)) return;
-
-            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            go.name = "CNRAmmoPack_" + id;
-            go.transform.position   = pos + new Vector3(0f, 0.3f, 0f);
-            go.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
-            go.transform.rotation   = Quaternion.Euler(30f, 45f, 0f);
-
-            // Gold colour
-            Renderer rend = go.GetComponent<Renderer>();
-            if (rend != null)
-                rend.material.color = new Color(1f, 0.75f, 0f);
-
-            // Remove box collider — we use proximity check instead
-            Collider col = go.GetComponent<Collider>();
-            if (col != null) UnityEngine.Object.Destroy(col);
-
-            _apDict[id] = go;
-            _apSpawnOrder.Add(id);
-            SettingsModEntry.Log("AmmoPackLocal spawn id=" + id + " pos=" + pos);
-        }
-
-        private void DespawnPackLocal(int id)
-        {
-            GameObject go;
-            if (_apDict.TryGetValue(id, out go))
-            {
-                if (go != null) UnityEngine.Object.Destroy(go);
-                _apDict.Remove(id);
-            }
-            _apSpawnOrder.Remove(id);
-        }
-
-        private void AmmoPackPickup(int id)
-        {
-            DespawnPackLocal(id);
-
-            // Broadcast despawn to all clients via room props
-            if (PhotonNetwork.room != null)
-            {
-                var ht = new Hashtable();
-                ht[AP_PRE + id] = "";
-                PhotonNetwork.room.SetCustomProperties(ht);
-            }
-
-            // Add ammo directly to the weapon's internal reserve count via reflection.
-            // The local player's WeaponManager is tagged "WeaponManager" (online players use
-            // "WeaponManagerOnline"). WeaponManager.SelectedWeapon is the active WeaponScript.
-            // WeaponScript.machineGun.clips = reserve ammo for machine guns (same as PorcCollider).
-            bool ammoAdded = false;
-            try
-            {
-                var wmGo = UnityEngine.GameObject.FindWithTag("WeaponManager");
-                if (wmGo != null)
-                {
-                    var wm = wmGo.GetComponent("WeaponManager");
-                    if (wm != null)
-                    {
-                        var swField = wm.GetType().GetField("SelectedWeapon");
-                        var selectedWeapon = swField != null ? swField.GetValue(wm) : null;
-                        if (selectedWeapon != null)
-                        {
-                            var wsType = selectedWeapon.GetType();
-                            var wnField = wsType.GetField("weaponName");
-                            var wName   = wnField != null ? (wnField.GetValue(selectedWeapon) as string ?? "") : "";
-
-                            // Per-weapon ammo amounts matching PorcCollider (the in-game ammo box)
-                            bool isGrenade = false, isShotgun = false;
-                            int addAmount = 30;
-                            switch (wName)
-                            {
-                                case "Deagle":           addAmount = 10;  break;
-                                case "G36K":             addAmount = 40;  break;
-                                case "GLOCK21":          addAmount = 20;  break;
-                                case "M67":              addAmount =  5;  isGrenade = true; break;
-                                case "M87T":             addAmount = 10;  isShotgun = true; break;
-                                case "MP5KA4":           addAmount = 40;  break;
-                                case "MP5KA5":           addAmount = 50;  break;
-                                case "RPG":              addAmount =  5;  isGrenade = true; break;
-                                case "Blaser R93":       addAmount =  5;  break;
-                                case "STW-25":           addAmount = 50;  break;
-                                case "UZI":              addAmount = 60;  break;
-                                case "M249":             addAmount = 100; break;
-                                case "MilkBomb":         addAmount =  5;  isGrenade = true; break;
-                                case "CandyRifle":       addAmount = 50;  break;
-                                case "ChristmasSniper":  addAmount = 50;  break;
-                                case "SantaGun":         addAmount = 50;  break;
-                                case "GingerbreadBomb":  addAmount =  5;  isGrenade = true; break;
-                                case "AUG":              addAmount = 40;  break;
-                                case "M3":               addAmount =  7;  isShotgun = true; break;
-                            }
-
-                            string containerField = isGrenade ? "grenadeLauncher"
-                                                 : isShotgun  ? "ShotGun"
-                                                 : "machineGun";
-                            string countField = isGrenade ? "ammoCount" : "clips";
-
-                            var containerFldInfo = wsType.GetField(containerField);
-                            var container = containerFldInfo != null ? containerFldInfo.GetValue(selectedWeapon) : null;
-                            if (container != null)
-                            {
-                                var cType = container.GetType();
-                                var fld   = cType.GetField(countField);
-                                if (fld != null)
-                                {
-                                    int cur = (int)fld.GetValue(container);
-                                    fld.SetValue(container, cur + addAmount);
-                                    containerFldInfo.SetValue(selectedWeapon, container); // write back for value types (structs)
-                                    var irField = wsType.GetField("isReload");
-                                    if (irField != null) irField.SetValue(selectedWeapon, false);
-                                    ammoAdded = true;
-                                    SettingsModEntry.Log("AmmoPickup: +" + addAmount + " to " + wName
-                                        + " (" + containerField + "." + countField + " was " + cur + ")");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            catch (System.Exception ex)
-            {
-                SettingsModEntry.Log("AmmoPickup reflection error: " + ex.Message);
-            }
-
-            if (!ammoAdded)
-                SettingsModEntry.Log("AmmoPickup: could not add ammo via reflection");
-
-            _apHudMsg   = "+ Ammo";
-            _apHudTimer = 2.5f;
-            SettingsModEntry.Log("AmmoPackPickup id=" + id);
-        }
-
-        private void AmmoPackClear()
-        {
-            foreach (var kv in _apDict)
-                if (kv.Value != null) UnityEngine.Object.Destroy(kv.Value);
-            _apDict.Clear();
-            _apSpawnOrder.Clear();
-            _apSpawnTimer = 0f;
-            _apPollTimer  = 0f;
-            _apHudTimer   = 0f;
-            _apHudMsg     = "";
-
-            foreach (var kv in _hpDict)
-                if (kv.Value != null) UnityEngine.Object.Destroy(kv.Value);
-            _hpDict.Clear();
-            _hpSpawnOrder.Clear();
-            _hpSpawnTimer = 0f;
-            _hpPollTimer  = 0f;
-            _hpHudTimer   = 0f;
-            _hpHudMsg     = "";
-        }
-
-        // Called when Photon master client changes (PUN1 SendMonoMessage)
-        private void OnMasterClientSwitched(PhotonPlayer newMaster)
-        {
-            _apSpawnTimer = 0f;
-            _hpSpawnTimer = 0f;
-        }
 
         private void KbmInjectJoystick()
         {
@@ -4652,7 +4067,7 @@ namespace CNRSettingsMod
             }
             // JoyStickController.Update() has three branches: |AxisY| > |AxisX| (forward-dominant),
             // |AxisY| < |AxisX| (strafe-dominant), and both < 0.05 (idle).  The equal-axis
-            // diagonal case (e.g. W+A with both = ±1) hits none of them and skips the moveSpeed
+            // diagonal case (e.g. W+A with both = Â±1) hits none of them and skips the moveSpeed
             // multiplication entirely, making diagonal movement almost stationary.
             // Fix: when strafing diagonally, nudge |AxisX| just below |AxisY| so the
             // forward-dominant branch fires and full moveSpeed is applied.
@@ -4947,7 +4362,7 @@ namespace CNRSettingsMod
             _gpAxesProbed = true;
             foreach (string n in GP_LAXIS_X) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisX = n; break; } }
             foreach (string n in GP_LAXIS_Y) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisY = n; break; } }
-            // R-stick axes come from user config (Detect buttons in Controllers tab) — loaded from prefs.
+            // R-stick axes come from user config (Detect buttons in Controllers tab) â€” loaded from prefs.
             SettingsModEntry.Log("GP axes probed: LX=" + (_gpLAxisX ?? "?") + " LY=" + (_gpLAxisY ?? "?")
                 + "  RX=" + (_gpRAxisX ?? "?") + " RY=" + (_gpRAxisY ?? "?"));
         }
@@ -4957,7 +4372,7 @@ namespace CNRSettingsMod
             if (!_joyProxySetup) SetupJoyProxy();
             if (!_gpAxesProbed) ProbeGpAxes();
 
-            // ---- Movement inject (left stick → VCAnalogJoystickBase) --------
+            // ---- Movement inject (left stick â†’ VCAnalogJoystickBase) --------
             if (_kbmJoystick == null)
             {
                 VCAnalogJoystickBase inst = VCAnalogJoystickBase.GetInstance("stick");
@@ -5000,7 +4415,7 @@ namespace CNRSettingsMod
                 _kbmFiDeltaPixels.SetValue(_kbmJoystick, new Vector2(injectX, injectY));
             }
 
-            // ---- Right stick → camera (Unity axis names set by Detect) --------
+            // ---- Right stick â†’ camera (Unity axis names set by Detect) --------
             if (_gpRAxisX != null || _joyProxy != null)
             {
                 if (_sliderotate == null) CacheSliderotate();
@@ -5034,7 +4449,7 @@ namespace CNRSettingsMod
 
             // When no finger is on the screen, clear NGUI's hover target every frame.
             // A real touchscreen tap sets UICamera.hoveredObject to the tapped button and NGUI
-            // never clears it on lift — so the next controller input (jump, fire, etc.) blindly
+            // never clears it on lift â€” so the next controller input (jump, fire, etc.) blindly
             // re-fires on that button.  Clearing here when touchCount==0 breaks that stale link.
             if (Input.touchCount == 0)
             {
@@ -5043,12 +4458,12 @@ namespace CNRSettingsMod
             }
 
             // Snapshot current axis-held state before running actions (for rising-edge detection).
-            // Done here — before the PlayerLogic guard — so CNR-mode actions can read it too.
+            // Done here â€” before the PlayerLogic guard â€” so CNR-mode actions can read it too.
             bool[] axisNow = new bool[GP_BIND_COUNT];
             for (int bi = 0; bi < GP_BIND_COUNT; bi++) axisNow[bi] = GpAxisHeld(bi);
 
-            // ---- Fire (index 0, held) — works in both single-player AND CNR mode ----
-            // OnPress(true) only on rising edge, OnPress(false) on falling edge — prevents
+            // ---- Fire (index 0, held) â€” works in both single-player AND CNR mode ----
+            // OnPress(true) only on rising edge, OnPress(false) on falling edge â€” prevents
             // the NGUI button from getting stuck in a permanently-pressed state.
             // m_bFire/fireFlag are set every frame while held so auto-fire weapons keep firing.
             bool fireDown = (_gpKeys[0] != KeyCode.None && Input.GetKeyDown(_gpKeys[0])) || (axisNow[0] && !_gpAxisPrevHeld[0]);
@@ -5068,7 +4483,7 @@ namespace CNRSettingsMod
                     CRJoyStickController.mInstance.fireFlag = true;
             }
 
-            // ---- Weapon switch (index 2 = next, 3 = prev, down) — works in CNR mode ----
+            // ---- Weapon switch (index 2 = next, 3 = prev, down) â€” works in CNR mode ----
             // Click the on-screen button + call KbmSwitchWeapon directly (same belt-and-suspenders
             // pattern as fire: SendMessage hits any handlers on the GO; KbmSwitchWeapon sets
             // CRInput.m_bSwitch + m_PropIconName which is the real CNR weapon-swap mechanism).
@@ -5157,7 +4572,7 @@ namespace CNRSettingsMod
 
             // Mirror what Sliderotate.Update() does: base horizontal from transform, NOT the
             // private rotationX field.  The field is only updated when a touch is active;
-            // reading it when no touch has occurred gives 0 (stale), causing a snap to 0°.
+            // reading it when no touch has occurred gives 0 (stale), causing a snap to 0Â°.
             Component srComp = _sliderotate as Component;
             float rotX = srComp.transform.localEulerAngles.y + mx * sens;
             float rotY = (float)_fiRotationY.GetValue(_sliderotate) + my * sens;
@@ -5495,7 +4910,7 @@ namespace CNRSettingsMod
             // Expanding the NGUI camera rect (e.g. to full screen) changes the camera's
             // projection matrix, which causes Camera.ScreenPointToRay() to produce a
             // different ray for the same screen position.  JoyStickController uses that
-            // ray with Physics.Raycast to detect the FireButton collider — when the rect
+            // ray with Physics.Raycast to detect the FireButton collider â€” when the rect
             // is expanded the ray misses and one-finger fire stops working entirely.
             // Consequence: NGUI buttons dragged to the left side of the screen (outside
             // the original camera viewport) will not respond to touches.  Acceptable
@@ -5517,7 +4932,7 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
-        // JoyMotionProxy — View.OnGenericMotionEventListener on the DecorView.
+        // JoyMotionProxy â€” View.OnGenericMotionEventListener on the DecorView.
         // Intercepts SOURCE_JOYSTICK MotionEvents to read right stick / trigger /
         // dpad axes that are NOT mapped in the game's InputManager and therefore
         // inaccessible via Input.GetAxisRaw().  Returns false so Unity still receives
@@ -5613,9 +5028,9 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
-        // HoverProxy — View.OnHoverListener on Unity's render surface.
+        // HoverProxy â€” View.OnHoverListener on Unity's render surface.
         // ACTION_HOVER_MOVE goes through ViewRootImpl.dispatchHoverEvent(), NOT
-        // dispatchGenericMotionEvent — so Window.Callback and OnGenericMotionListener
+        // dispatchGenericMotionEvent â€” so Window.Callback and OnGenericMotionListener
         // are both dead for mouse hover.  OnHoverListener on the actual hovered view
         // (mUnityPlayer or its SurfaceView child) intercepts before Unity sees it.
         // Returns false so Unity still processes hover (needed for NGUI + cursor pos).
@@ -5699,7 +5114,7 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
-        // GmlProxy — View.OnGenericMotionListener on DecorView.
+        // GmlProxy â€” View.OnGenericMotionListener on DecorView.
         // Fires for ALL mouse generic motion events (hover + captured move) at the
         // view level, independently of whether Window.Callback fires.
         // Returns false so Unity still receives every event.
@@ -5761,7 +5176,7 @@ namespace CNRSettingsMod
                     }
                 }
                 catch { }
-                return false; // do not consume — Unity must still receive the event
+                return false; // do not consume â€” Unity must still receive the event
             }
         }
 
@@ -5790,7 +5205,7 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
-        // WindowCallbackProxy — wraps Activity Window.Callback to intercept
+        // WindowCallbackProxy â€” wraps Activity Window.Callback to intercept
         // dispatchGenericMotionEvent before any view sees it.  All other methods
         // are forwarded to the original callback so game input is unaffected.
         // AXIS_RELATIVE_X (27) / AXIS_RELATIVE_Y (28) give hardware mouse velocity
@@ -6084,7 +5499,7 @@ namespace CNRSettingsMod
                     {
                         _dx += e.Call<float>("getAxisValue", AXIS_RELATIVE_X);
                         _dy += e.Call<float>("getAxisValue", AXIS_RELATIVE_Y);
-                        // Sync button state from live button mask — catches presses that
+                        // Sync button state from live button mask â€” catches presses that
                         // arrived as ACTION_DOWN rather than ACTION_BUTTON_PRESS.
                         int bs = e.Call<int>("getButtonState");
                         lmbHeld = (bs & BUTTON_PRIMARY)   != 0;
@@ -6171,8 +5586,6 @@ namespace CNRSettingsMod
             _gpLStickJAY = HudCfgGetInt("CNRMod_LStickJAY", 1);
             _gpRStickJAX = HudCfgGetInt("CNRMod_RStickJAX", 11);
             _gpRStickJAY = HudCfgGetInt("CNRMod_RStickJAY", 14);
-            _ammoPacksEnabled = HudCfgGetInt("CNRMod_AmmoPacksOn", 1) == 1;
-            // (nothing to load for pack interval — now hardcoded to 20 s)
             string rax = HudCfgGet("CNRMod_RAxisX", ""); if (rax.Length > 0) _gpRAxisX = rax;
             string ray = HudCfgGet("CNRMod_RAxisY", ""); if (ray.Length > 0) _gpRAxisY = ray;
             string lax = HudCfgGet("CNRMod_LAxisX", ""); if (lax.Length > 0) _gpLAxisX = lax;
