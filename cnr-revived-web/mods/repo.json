@@ -567,15 +567,20 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.17",
+      "latestVersion": "3.1.18",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
         {
+          "version": "3.1.18",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.18.dll",
+          "changelog": "fixed weapon switch on kbm and controller, as well as a big that caused fire to be held on kbm or controller "
+        },
+        {
           "version": "3.1.17",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.17.dll",
-          "changelog": "fix weapon switch for kbm and controller "
+          "changelog": "Fixed fire button and weapon switch getting stuck in held/pressed state (NGUI buttons now receive OnPress(false) on release/after tap)"
         },
         {
           "version": "3.1.16",
