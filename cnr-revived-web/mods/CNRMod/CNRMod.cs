@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.5";
+        public const  string Version = "3.1.6";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9991,10 +9991,10 @@ namespace CNRMods
             if (_uiMod == null) _uiMod = UnityEngine.Object.FindObjectOfType<UIModDirector>();
             if (_uiMod != null)
             {
-                int copCaptures = CtfMode.RobberScore;  // times robbers captured cop flag
-                int robCaptures = CtfMode.CopScore;     // times cops captured robber flag
-                float copFill   = (CtfMode.WinScore - copCaptures) / (float)CtfMode.WinScore;
-                float robFill   = (CtfMode.WinScore - robCaptures) / (float)CtfMode.WinScore;
+                int copCaptures = CtfMode.CopScore;     // captures made by cops (goes up)
+                int robCaptures = CtfMode.RobberScore;  // captures made by robbers (goes up)
+                float copFill   = copCaptures / (float)CtfMode.WinScore;
+                float robFill   = robCaptures / (float)CtfMode.WinScore;
                 if (_uiMod.copResSprite    != null) _uiMod.copResSprite.GetComponent<UISprite>().fillAmount    = copFill;
                 if (_uiMod.robberResSprite != null) _uiMod.robberResSprite.GetComponent<UISprite>().fillAmount = robFill;
                 if (_uiMod.copResourceLabel    != null) _uiMod.copResourceLabel.GetComponent<UILabel>().text    = copCaptures.ToString();
