@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.6";
+        public const  string Version = "3.1.7";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -171,6 +171,7 @@ namespace CNRMods
                 go.AddComponent<MapLoader>();
                 go.AddComponent<ContentManager>();
                 go.AddComponent<EconomyHook>();
+                go.AddComponent<PackHook>();
                 GameObject.DontDestroyOnLoad(go);
 
                 Log("Mod root created.  IP=" + (ServerIp != "" ? ServerIp : "(none)") +
@@ -10092,5 +10093,571 @@ namespace CNRMods
         public int     FlagId;   // 1 = cop base,  2 = robber base
         public CtfHook Hook;
         void OnTriggerEnter(Collider other) { if (Hook != null) Hook.OnZoneEnter(FlagId, other); }
+    }
+
+    // --------------------------------------------------------------------------
+    //  PACK HOOK — ammo and health packs synced via Photon room props
+    // --------------------------------------------------------------------------
+    public class PackHook : MonoBehaviour
+    {
+        private static readonly string[] GameScenes =
+            { "FreeRun3_1", "FreeRun4_1", "FreeRun5_1", "FreeRun6_1", "FreeRun7_1",
+              "FreeRun8_1", "FreeRun9_1", "FreeRun10_1", "FreeRun11_1", "FreeRun12_1",
+              "FreeRun13_1", "FreeRun14_1", "FreeRun15_1", "CRScene1" };
+
+        private bool  _packsEnabled  = true;
+        private const float PACK_INTERVAL = 20f;
+        private int   _packMax       = 2;
+
+        // Ammo packs
+        private const string AP_PRE  = "cnr_pk_";
+        private System.Collections.Generic.Dictionary<int, GameObject> _apDict =
+            new System.Collections.Generic.Dictionary<int, GameObject>();
+        private System.Collections.Generic.List<int> _apSpawnOrder =
+            new System.Collections.Generic.List<int>();
+        private int   _apNextId     = 1;
+        private float _apSpawnTimer = 0f;
+        private float _apPollTimer  = 0f;
+        private string _apHudMsg    = "";
+        private float _apHudTimer   = 0f;
+
+        // Health packs
+        private const string HP_PRE  = "cnr_hp_";
+        private System.Collections.Generic.Dictionary<int, GameObject> _hpDict =
+            new System.Collections.Generic.Dictionary<int, GameObject>();
+        private System.Collections.Generic.List<int> _hpSpawnOrder =
+            new System.Collections.Generic.List<int>();
+        private int   _hpNextId     = 1;
+        private float _hpSpawnTimer = 0f;
+        private float _hpPollTimer  = 0f;
+        private string _hpHudMsg    = "";
+        private float _hpHudTimer   = 0f;
+
+        private bool InGameScene { get { return Array.IndexOf(GameScenes, Application.loadedLevelName) >= 0; } }
+
+        void Awake()
+        {
+            _packsEnabled = PlayerPrefs.GetInt("CNRMod_AmmoPacksOn", 1) == 1;
+        }
+
+        void OnLevelWasLoaded(int level)
+        {
+            _packsEnabled = PlayerPrefs.GetInt("CNRMod_AmmoPacksOn", 1) == 1;
+            ClearAll();
+        }
+
+        void OnLeftRoom()
+        {
+            ClearAll();
+        }
+
+        void OnMasterClientSwitched(PhotonPlayer newMaster)
+        {
+            _apSpawnTimer = 0f;
+            _hpSpawnTimer = 0f;
+        }
+
+        void Update()
+        {
+            AmmoPackUpdate();
+            HealthPackUpdate();
+        }
+
+        void OnGUI()
+        {
+            if (!InGameScene) return;
+            if (!_packsEnabled) return;
+            if (_apHudTimer <= 0f && _hpHudTimer <= 0f) return;
+
+            GUIStyle apStyle = new GUIStyle(GUI.skin.label);
+            apStyle.fontSize  = Mathf.RoundToInt(Screen.width / 18f);
+            apStyle.fontStyle = FontStyle.Bold;
+            apStyle.alignment = TextAnchor.MiddleCenter;
+            float mw = Screen.width * 0.5f;
+            float mh = 56f;
+
+            if (_apHudTimer > 0f && _apHudMsg.Length > 0)
+            {
+                float alpha = Mathf.Clamp01(_apHudTimer);
+                Color prev = GUI.color;
+                GUI.color = new Color(1f, 0.85f, 0f, alpha);
+                GUI.Label(new Rect((Screen.width - mw) * 0.5f, Screen.height * 0.2f, mw, mh), _apHudMsg, apStyle);
+                GUI.color = prev;
+            }
+
+            if (_hpHudTimer > 0f && _hpHudMsg.Length > 0)
+            {
+                float alpha = Mathf.Clamp01(_hpHudTimer);
+                Color prev = GUI.color;
+                GUI.color = new Color(0.85f, 0.15f, 0.15f, alpha);
+                float yOff = (_apHudTimer > 0f) ? Screen.height * 0.27f : Screen.height * 0.2f;
+                GUI.Label(new Rect((Screen.width - mw) * 0.5f, yOff, mw, mh), _hpHudMsg, apStyle);
+                GUI.color = prev;
+            }
+        }
+
+        private void AmmoPackUpdate()
+        {
+            if (!_packsEnabled) return;
+            if (!InGameScene)   return;
+            if (PhotonNetwork.room == null) return;
+
+            if (PhotonNetwork.isMasterClient)
+            {
+                _apSpawnTimer += Time.deltaTime;
+                if (_apSpawnTimer >= PACK_INTERVAL)
+                {
+                    _apSpawnTimer = 0f;
+                    SpawnPackMaster();
+                }
+            }
+
+            _apPollTimer += Time.deltaTime;
+            if (_apPollTimer >= 0.5f)
+            {
+                _apPollTimer = 0f;
+                AmmoPackSync();
+            }
+
+            GameObject player = GameObject.FindWithTag("Player");
+            if (player != null && _apDict.Count > 0)
+            {
+                Vector3 pp   = player.transform.position;
+                int     pick = -1;
+                float   best = 2.0f;
+                foreach (var kv in _apDict)
+                {
+                    if (kv.Value == null) continue;
+                    float d = Vector3.Distance(pp, kv.Value.transform.position);
+                    if (d < best) { best = d; pick = kv.Key; }
+                }
+                if (pick >= 0) AmmoPackPickup(pick);
+            }
+
+            foreach (var kv in _apDict)
+                if (kv.Value != null)
+                    kv.Value.transform.Rotate(0f, 90f * Time.deltaTime, 0f, Space.World);
+
+            if (_apHudTimer > 0f) _apHudTimer -= Time.deltaTime;
+        }
+
+        private void HealthPackUpdate()
+        {
+            if (!_packsEnabled) return;
+            if (!InGameScene)   return;
+            if (PhotonNetwork.room == null) return;
+
+            if (PhotonNetwork.isMasterClient)
+            {
+                _hpSpawnTimer += Time.deltaTime;
+                if (_hpSpawnTimer >= PACK_INTERVAL)
+                {
+                    _hpSpawnTimer = 0f;
+                    SpawnHealthPackMaster();
+                }
+            }
+
+            _hpPollTimer += Time.deltaTime;
+            if (_hpPollTimer >= 0.5f)
+            {
+                _hpPollTimer = 0f;
+                HealthPackSync();
+            }
+
+            GameObject player = GameObject.FindWithTag("Player");
+            if (player != null && _hpDict.Count > 0)
+            {
+                Vector3 pp   = player.transform.position;
+                int     pick = -1;
+                float   best = 2.0f;
+                foreach (var kv in _hpDict)
+                {
+                    if (kv.Value == null) continue;
+                    float d = Vector3.Distance(pp, kv.Value.transform.position);
+                    if (d < best) { best = d; pick = kv.Key; }
+                }
+                if (pick >= 0) HealthPackPickup(pick);
+            }
+
+            foreach (var kv in _hpDict)
+                if (kv.Value != null)
+                    kv.Value.transform.Rotate(0f, 90f * Time.deltaTime, 0f, Space.World);
+
+            if (_hpHudTimer > 0f) _hpHudTimer -= Time.deltaTime;
+        }
+
+        private void HealthPackSync()
+        {
+            Hashtable props = PhotonNetwork.room.customProperties;
+            if (props == null) return;
+
+            var keys = new System.Collections.Generic.List<string>();
+            foreach (object key in props.Keys)
+            {
+                string k = key as string;
+                if (k != null && k.StartsWith(HP_PRE)) keys.Add(k);
+            }
+
+            foreach (string k in keys)
+            {
+                int id;
+                if (!int.TryParse(k.Substring(HP_PRE.Length), out id)) continue;
+                string val = props[k] as string;
+
+                if (string.IsNullOrEmpty(val))
+                {
+                    DespawnHealthPackLocal(id);
+                }
+                else if (!_hpDict.ContainsKey(id))
+                {
+                    string[] p = val.Split(',');
+                    if (p.Length >= 3)
+                    {
+                        float x = 0f, y = 0f, z = 0f;
+                        bool ok = float.TryParse(p[0], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out x)
+                               && float.TryParse(p[1], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out y)
+                               && float.TryParse(p[2], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out z);
+                        if (ok) SpawnHealthPackLocal(id, new Vector3(x, y, z));
+                    }
+                }
+            }
+        }
+
+        private void SpawnHealthPackMaster()
+        {
+            if (PhotonNetwork.room == null) return;
+
+            if (_hpDict.Count >= _packMax && _hpSpawnOrder.Count > 0)
+            {
+                int oldest = _hpSpawnOrder[0];
+                _hpSpawnOrder.RemoveAt(0);
+                DespawnHealthPackLocal(oldest);
+                var htEvict = new Hashtable();
+                htEvict[HP_PRE + oldest] = "";
+                PhotonNetwork.room.SetCustomProperties(htEvict);
+            }
+
+            Vector3 origin = PickRandomPlayerOrigin();
+
+            int   slot  = (_hpNextId - 1) % 4;
+            float angle = (slot * 90f + 45f) * Mathf.Deg2Rad;
+            float cx    = origin.x + Mathf.Cos(angle) * 12f;
+            float cz    = origin.z + Mathf.Sin(angle) * 12f;
+
+            float groundY = origin.y;
+            RaycastHit hit;
+            if (Physics.Raycast(origin + Vector3.up * 0.5f, Vector3.down, out hit, 5f))
+                groundY = hit.point.y;
+            if (Physics.Raycast(new Vector3(cx, groundY + 2f, cz), Vector3.down, out hit, 4f))
+                groundY = hit.point.y;
+
+            Vector3 pos = new Vector3(cx, groundY, cz);
+            int    id  = _hpNextId++;
+            string val = pos.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+                       + "," + pos.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+                       + "," + pos.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+
+            var ht = new Hashtable();
+            ht[HP_PRE + id] = val;
+            PhotonNetwork.room.SetCustomProperties(ht);
+            ModEntry.Log("HealthPackMaster spawned id=" + id + " pos=" + pos);
+        }
+
+        private void SpawnHealthPackLocal(int id, Vector3 pos)
+        {
+            if (_hpDict.ContainsKey(id)) return;
+
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "CNRHealthPack_" + id;
+            go.transform.position   = pos + new Vector3(0f, 0.3f, 0f);
+            go.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
+            go.transform.rotation   = Quaternion.Euler(30f, 45f, 0f);
+
+            Renderer rend = go.GetComponent<Renderer>();
+            if (rend != null)
+                rend.material.color = new Color(0.85f, 0.15f, 0.15f);
+
+            Collider col = go.GetComponent<Collider>();
+            if (col != null) UnityEngine.Object.Destroy(col);
+
+            _hpDict[id] = go;
+            _hpSpawnOrder.Add(id);
+            ModEntry.Log("HealthPackLocal spawn id=" + id + " pos=" + pos);
+        }
+
+        private void DespawnHealthPackLocal(int id)
+        {
+            GameObject go;
+            if (_hpDict.TryGetValue(id, out go))
+            {
+                if (go != null) UnityEngine.Object.Destroy(go);
+                _hpDict.Remove(id);
+            }
+            _hpSpawnOrder.Remove(id);
+        }
+
+        private void HealthPackPickup(int id)
+        {
+            DespawnHealthPackLocal(id);
+
+            if (PhotonNetwork.room != null)
+            {
+                var ht = new Hashtable();
+                ht[HP_PRE + id] = "";
+                PhotonNetwork.room.SetCustomProperties(ht);
+            }
+
+            if (PlayerLogic.mInstance != null && !PlayerLogic.mInstance.bDied)
+                PlayerLogic.mInstance.blood = 100;
+
+            _hpHudMsg   = "+ Health";
+            _hpHudTimer = 2.5f;
+            ModEntry.Log("HealthPackPickup id=" + id);
+        }
+
+        private void AmmoPackSync()
+        {
+            Hashtable props = PhotonNetwork.room.customProperties;
+            if (props == null) return;
+
+            var keys = new System.Collections.Generic.List<string>();
+            foreach (object key in props.Keys)
+            {
+                string k = key as string;
+                if (k != null && k.StartsWith(AP_PRE)) keys.Add(k);
+            }
+
+            foreach (string k in keys)
+            {
+                int id;
+                if (!int.TryParse(k.Substring(AP_PRE.Length), out id)) continue;
+                string val = props[k] as string;
+
+                if (string.IsNullOrEmpty(val))
+                {
+                    DespawnPackLocal(id);
+                }
+                else if (!_apDict.ContainsKey(id))
+                {
+                    string[] p = val.Split(',');
+                    if (p.Length >= 3)
+                    {
+                        float x = 0f, y = 0f, z = 0f;
+                        bool ok = float.TryParse(p[0], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out x)
+                               && float.TryParse(p[1], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out y)
+                               && float.TryParse(p[2], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out z);
+                        if (ok) SpawnPackLocal(id, new Vector3(x, y, z));
+                    }
+                }
+            }
+        }
+
+        private Vector3 PickRandomPlayerOrigin()
+        {
+            var positions = new System.Collections.Generic.List<Vector3>();
+
+            GameObject local = GameObject.FindWithTag("Player");
+            if (local != null) positions.Add(local.transform.position);
+
+            GameObject[] remotes = GameObject.FindGameObjectsWithTag("WeaponManagerOnline");
+            foreach (GameObject r in remotes)
+                positions.Add(r.transform.position);
+
+            if (positions.Count == 0) return Vector3.zero;
+            return positions[UnityEngine.Random.Range(0, positions.Count)];
+        }
+
+        private void SpawnPackMaster()
+        {
+            if (PhotonNetwork.room == null) return;
+
+            if (_apDict.Count >= _packMax && _apSpawnOrder.Count > 0)
+            {
+                int oldest = _apSpawnOrder[0];
+                _apSpawnOrder.RemoveAt(0);
+                DespawnPackLocal(oldest);
+                var htEvict = new Hashtable();
+                htEvict[AP_PRE + oldest] = "";
+                PhotonNetwork.room.SetCustomProperties(htEvict);
+            }
+
+            Vector3 origin = PickRandomPlayerOrigin();
+
+            int   slot  = (_apNextId - 1) % 4;
+            float angle = slot * 90f * Mathf.Deg2Rad;
+            float cx    = origin.x + Mathf.Cos(angle) * 12f;
+            float cz    = origin.z + Mathf.Sin(angle) * 12f;
+
+            float groundY = origin.y;
+            RaycastHit hit;
+            if (Physics.Raycast(origin + Vector3.up * 0.5f, Vector3.down, out hit, 5f))
+                groundY = hit.point.y;
+            if (Physics.Raycast(new Vector3(cx, groundY + 2f, cz), Vector3.down, out hit, 4f))
+                groundY = hit.point.y;
+
+            Vector3 pos = new Vector3(cx, groundY, cz);
+            int    id  = _apNextId++;
+            string val = pos.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+                       + "," + pos.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+                       + "," + pos.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+
+            var ht = new Hashtable();
+            ht[AP_PRE + id] = val;
+            PhotonNetwork.room.SetCustomProperties(ht);
+            ModEntry.Log("AmmoPackMaster spawned id=" + id + " pos=" + pos);
+        }
+
+        private void SpawnPackLocal(int id, Vector3 pos)
+        {
+            if (_apDict.ContainsKey(id)) return;
+
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "CNRAmmoPack_" + id;
+            go.transform.position   = pos + new Vector3(0f, 0.3f, 0f);
+            go.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
+            go.transform.rotation   = Quaternion.Euler(30f, 45f, 0f);
+
+            Renderer rend = go.GetComponent<Renderer>();
+            if (rend != null)
+                rend.material.color = new Color(1f, 0.75f, 0f);
+
+            Collider col = go.GetComponent<Collider>();
+            if (col != null) UnityEngine.Object.Destroy(col);
+
+            _apDict[id] = go;
+            _apSpawnOrder.Add(id);
+            ModEntry.Log("AmmoPackLocal spawn id=" + id + " pos=" + pos);
+        }
+
+        private void DespawnPackLocal(int id)
+        {
+            GameObject go;
+            if (_apDict.TryGetValue(id, out go))
+            {
+                if (go != null) UnityEngine.Object.Destroy(go);
+                _apDict.Remove(id);
+            }
+            _apSpawnOrder.Remove(id);
+        }
+
+        private void AmmoPackPickup(int id)
+        {
+            DespawnPackLocal(id);
+
+            if (PhotonNetwork.room != null)
+            {
+                var ht = new Hashtable();
+                ht[AP_PRE + id] = "";
+                PhotonNetwork.room.SetCustomProperties(ht);
+            }
+
+            bool ammoAdded = false;
+            try
+            {
+                var wmGo = UnityEngine.GameObject.FindWithTag("WeaponManager");
+                if (wmGo != null)
+                {
+                    var wm = wmGo.GetComponent("WeaponManager");
+                    if (wm != null)
+                    {
+                        var swField = wm.GetType().GetField("SelectedWeapon");
+                        var selectedWeapon = swField != null ? swField.GetValue(wm) : null;
+                        if (selectedWeapon != null)
+                        {
+                            var wsType = selectedWeapon.GetType();
+                            var wnField = wsType.GetField("weaponName");
+                            var wName   = wnField != null ? (wnField.GetValue(selectedWeapon) as string ?? "") : "";
+
+                            bool isGrenade = false, isShotgun = false;
+                            int addAmount = 30;
+                            switch (wName)
+                            {
+                                case "Deagle":           addAmount = 10;  break;
+                                case "G36K":             addAmount = 40;  break;
+                                case "GLOCK21":          addAmount = 20;  break;
+                                case "M67":              addAmount =  5;  isGrenade = true; break;
+                                case "M87T":             addAmount = 10;  isShotgun = true; break;
+                                case "MP5KA4":           addAmount = 40;  break;
+                                case "MP5KA5":           addAmount = 50;  break;
+                                case "RPG":              addAmount =  5;  isGrenade = true; break;
+                                case "Blaser R93":       addAmount =  5;  break;
+                                case "STW-25":           addAmount = 50;  break;
+                                case "UZI":              addAmount = 60;  break;
+                                case "M249":             addAmount = 100; break;
+                                case "MilkBomb":         addAmount =  5;  isGrenade = true; break;
+                                case "CandyRifle":       addAmount = 50;  break;
+                                case "ChristmasSniper":  addAmount = 50;  break;
+                                case "SantaGun":         addAmount = 50;  break;
+                                case "GingerbreadBomb":  addAmount =  5;  isGrenade = true; break;
+                                case "AUG":              addAmount = 40;  break;
+                                case "M3":               addAmount =  7;  isShotgun = true; break;
+                            }
+
+                            string containerField = isGrenade ? "grenadeLauncher"
+                                                 : isShotgun  ? "ShotGun"
+                                                 : "machineGun";
+                            string countField = isGrenade ? "ammoCount" : "clips";
+
+                            var containerFldInfo = wsType.GetField(containerField);
+                            var container = containerFldInfo != null ? containerFldInfo.GetValue(selectedWeapon) : null;
+                            if (container != null)
+                            {
+                                var cType = container.GetType();
+                                var fld   = cType.GetField(countField);
+                                if (fld != null)
+                                {
+                                    int cur = (int)fld.GetValue(container);
+                                    fld.SetValue(container, cur + addAmount);
+                                    containerFldInfo.SetValue(selectedWeapon, container);
+                                    var irField = wsType.GetField("isReload");
+                                    if (irField != null) irField.SetValue(selectedWeapon, false);
+                                    ammoAdded = true;
+                                    ModEntry.Log("AmmoPickup: +" + addAmount + " to " + wName
+                                        + " (" + containerField + "." + countField + " was " + cur + ")");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                ModEntry.Log("AmmoPickup reflection error: " + ex.Message);
+            }
+
+            if (!ammoAdded)
+                ModEntry.Log("AmmoPickup: could not add ammo via reflection");
+
+            _apHudMsg   = "+ Ammo";
+            _apHudTimer = 2.5f;
+            ModEntry.Log("AmmoPackPickup id=" + id);
+        }
+
+        private void ClearAll()
+        {
+            foreach (var kv in _apDict)
+                if (kv.Value != null) UnityEngine.Object.Destroy(kv.Value);
+            _apDict.Clear();
+            _apSpawnOrder.Clear();
+            _apSpawnTimer = 0f;
+            _apPollTimer  = 0f;
+            _apHudTimer   = 0f;
+            _apHudMsg     = "";
+
+            foreach (var kv in _hpDict)
+                if (kv.Value != null) UnityEngine.Object.Destroy(kv.Value);
+            _hpDict.Clear();
+            _hpSpawnOrder.Clear();
+            _hpSpawnTimer = 0f;
+            _hpPollTimer  = 0f;
+            _hpHudTimer   = 0f;
+            _hpHudMsg     = "";
+        }
     }
 }

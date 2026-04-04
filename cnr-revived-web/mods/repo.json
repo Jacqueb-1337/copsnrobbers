@@ -221,11 +221,21 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.1.5",
+      "latestVersion": "3.1.7",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.7",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.1.7.dll",
+          "changelog": "Moved ammo/health pack spawning from CNRSettingsMod into CNRMod (PackHook). Packs are always part of core gameplay, not a settings concern."
+        },
+        {
+          "version": "3.1.6",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.1.6.dll",
+          "changelog": "CTF: fixed score labels (each team now shows their own captures, going up). Fill bars also track own captures."
+        },
         {
           "version": "3.1.5",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.1.5.dll",
@@ -577,11 +587,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.37",
+      "latestVersion": "3.1.38",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.38",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.38.dll",
+          "changelog": "Removed pack spawning (moved to CNRMod). Settings panel no longer has ammo packs toggle."
+        },
         {
           "version": "3.1.37",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.37.dll",
