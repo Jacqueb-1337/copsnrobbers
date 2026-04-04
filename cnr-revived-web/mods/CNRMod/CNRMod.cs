@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.3";
+        public const  string Version = "3.1.5";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -1757,7 +1757,7 @@ namespace CNRMods
             if (cc != null) cc.enabled = false;
             player.transform.position = pos;
             // NOTE: Do NOT re-enable CC here.  Calling cc.enabled = true at Y=4800
-            // (outside scene physics bounds) deadlocks PhysX � all UnityWorker threads
+            // (outside scene physics bounds) deadlocks PhysX: all UnityWorker threads
             // block on the same physics job and UnityMain never processes the next frame.
             // TeleportToSpawn (and RespawnWatcher.DoTeleport) re-enable CC at the normal
             // in-scene spawn position once the map is built.
@@ -9476,7 +9476,7 @@ namespace CNRMods
         public static Vector3 RobberCarrierPos;
         public static int     CopScore         = 0;
         public static int     RobberScore      = 0;
-        public const  int     WinScore         = 3;
+        public const  int     WinScore         = 30;
 
         // Pack full state into a single string for event 199 {ctf_s:"..."}.
         // Format: copScore|robberScore|copStatus|robberStatus|cdrop|rdrop|ccarrier|rcarrier
@@ -9754,6 +9754,7 @@ namespace CNRMods
         private float _bcastTimer = 0f;
 
         private PlayerStatus _prevStatus = PlayerStatus.idle;
+        private UIModDirector _uiMod;
 
         void Start() { StartCoroutine(Init()); }
 
@@ -9811,6 +9812,11 @@ namespace CNRMods
             CtfZone z1 = _zone1Go.AddComponent<CtfZone>(); z1.FlagId = 1; z1.Hook = this;
             CtfZone z2 = _zone2Go.AddComponent<CtfZone>(); z2.FlagId = 2; z2.Hook = this;
 
+            // Init vanilla stronghold resources for CTF scoring (captures reduce opponent resource).
+            var ctfSi = CNRMultiplayerManager.mInstance.myModeInfo.mStrongholdInfo;
+            ctfSi.copResource    = CtfMode.WinScore;
+            ctfSi.robberResource = CtfMode.WinScore;
+
             _inited = true;
             ModEntry.Log("CtfHook: init done. zone1=" + _zone1Base + " zone2=" + _zone2Base);
         }
@@ -9818,6 +9824,17 @@ namespace CNRMods
         void Update()
         {
             if (!_inited || CNRMultiplayerManager.mInstance == null) return;
+
+            // Suppress vanilla stronghold resource drain (keeps shTimeCount far below 1s threshold).
+            CNRMultiplayerManager.mInstance.shTimeCount = -999f;
+            // Sync vanilla resources from CTF scores so vanilla RoundOverChk fires correctly.
+            {
+                var si = CNRMultiplayerManager.mInstance.myModeInfo.mStrongholdInfo;
+                si.copResource    = CtfMode.WinScore - CtfMode.RobberScore;
+                si.robberResource = CtfMode.WinScore - CtfMode.CopScore;
+            }
+            // Freeze the visible round timer.
+            CNRMultiplayerManager.mInstance.mGameRoundTimeRest = 9999f;
 
             bool isAuthority = (CNRMultiplayerManager.mInstance.serverId == _myId);
 
@@ -9959,26 +9976,41 @@ namespace CNRMods
             ModEntry.RaiseCnrEvent(ht);
         }
 
+        void LateUpdate()
+        {
+            if (!_inited || CNRMultiplayerManager.mInstance == null) return;
+
+            // Belt-and-suspenders: re-apply drain suppression and resource sync after all Updates.
+            CNRMultiplayerManager.mInstance.shTimeCount = -999f;
+            var si = CNRMultiplayerManager.mInstance.myModeInfo.mStrongholdInfo;
+            si.copResource    = CtfMode.WinScore - CtfMode.RobberScore;
+            si.robberResource = CtfMode.WinScore - CtfMode.CopScore;
+            CNRMultiplayerManager.mInstance.mGameRoundTimeRest = 9999f;
+
+            // Override UIModDirector HUD to show captures scored (not remaining resources).
+            if (_uiMod == null) _uiMod = UnityEngine.Object.FindObjectOfType<UIModDirector>();
+            if (_uiMod != null)
+            {
+                int copCaptures = CtfMode.RobberScore;  // times robbers captured cop flag
+                int robCaptures = CtfMode.CopScore;     // times cops captured robber flag
+                float copFill   = (CtfMode.WinScore - copCaptures) / (float)CtfMode.WinScore;
+                float robFill   = (CtfMode.WinScore - robCaptures) / (float)CtfMode.WinScore;
+                if (_uiMod.copResSprite    != null) _uiMod.copResSprite.GetComponent<UISprite>().fillAmount    = copFill;
+                if (_uiMod.robberResSprite != null) _uiMod.robberResSprite.GetComponent<UISprite>().fillAmount = robFill;
+                if (_uiMod.copResourceLabel    != null) _uiMod.copResourceLabel.GetComponent<UILabel>().text    = copCaptures.ToString();
+                if (_uiMod.robberResourceLabel != null) _uiMod.robberResourceLabel.GetComponent<UILabel>().text = robCaptures.ToString();
+            }
+        }
+
         void OnGUI()
         {
             if (!_inited) return;
-            float bw = 230f, bh = 95f;
+            float bw = 230f, bh = 56f;
             float bx = (Screen.width - bw) * 0.5f, by = 10f;
             GUI.Box(new Rect(bx, by, bw, bh), "");
-
-            GUI.color = new Color(0.5f, 0.75f, 1f);
-            GUI.Label(new Rect(bx + 8,   by + 6,  105, 24), "Cops  "    + CtfMode.CopScore);
-            GUI.color = new Color(1f, 0.45f, 0.45f);
-            GUI.Label(new Rect(bx + 118, by + 6,  105, 24), "Robbers  " + CtfMode.RobberScore);
             GUI.color = Color.white;
-            GUI.Label(new Rect(bx + 8,   by + 34, bw - 16, 22), "Cop Flag: "    + FlagText(CtfMode.CopFlagStatus));
-            GUI.Label(new Rect(bx + 8,   by + 56, bw - 16, 22), "Robber Flag: " + FlagText(CtfMode.RobberFlagStatus));
-            if (_gameOver)
-            {
-                GUI.color = Color.yellow;
-                GUI.Label(new Rect(bx + 8, by + 74, bw - 16, 24),
-                    CtfMode.CopScore >= CtfMode.WinScore ? "COPS WIN!" : "ROBBERS WIN!");
-            }
+            GUI.Label(new Rect(bx + 8, by + 8,  bw - 16, 22), "Cop Flag:    " + FlagText(CtfMode.CopFlagStatus));
+            GUI.Label(new Rect(bx + 8, by + 30, bw - 16, 22), "Robber Flag: " + FlagText(CtfMode.RobberFlagStatus));
         }
 
         static string FlagText(string s)
