@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.13";
+        public  const string Version = "3.1.16";
 
         public static void Load()
         {
@@ -278,7 +278,7 @@ namespace CNRSettingsMod
         private bool    _gamepadEnabled     = false;
         private float   _controllerDeadzone = 0.1f;
         private float   _controllerSens     = 1.5f;  // left-stick magnitude multiplier
-        private float   _controllerCamSens  = 0.04f; // right-stick camera scale per frame
+        private float   _controllerCamSens  = 0.5f; // right-stick camera scale per frame
         private float   _controllerAimMult  = 0.5f;
         private bool    _gpRightStickOk     = true;  // legacy, unused
         private KeyCode[] _gpKeys           = new KeyCode[GP_BIND_COUNT];
@@ -1923,14 +1923,19 @@ namespace CNRSettingsMod
                     _fiFireHoldCount.SetValue(_joyStickCtrl, 0.235f);
             }
 
-            // ---- CNR multiplayer path — call through UIMenuDirector.GenFireEvent() ----
-            // This is exactly what the on-screen Fire button does:
-            //   UIButtonEventKit → UIMenuDirector.mInstance.GenFireEvent()
-            //   → UIMenuDirector.OnFire event → CRUIEventInteract.OnFire()
-            //   → { CRInput.m_bFire = true; CRJoyStickController.fireFlag = true; }
-            //   → CRWeaponScript.LateUpdate() reads m_bFire and fires the active melee weapon.
+            // ---- CNR multiplayer path: "click" the on-screen fire button ----
+            // SendMessage("OnPress", true) replicates a real finger press — any UIButtonMessage
+            // on the button with trigger=OnPress will send "FireBtnPressed" to UIMenuDirectorExt,
+            // which calls GenFireEvent().  Also set m_bFire directly as a belt-and-suspenders
+            // fallback in case CRUIEventInteract isn't subscribed.
+            if (_dragGOs[0] != null)
+                _dragGOs[0].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
             if ((object)UIMenuDirector.mInstance != null)
                 UIMenuDirector.mInstance.GenFireEvent();
+            if ((object)CRInput.mInstance != null)
+                CRInput.mInstance.m_bFire = true;
+            if ((object)CRJoyStickController.mInstance != null)
+                CRJoyStickController.mInstance.fireFlag = true;
         }
 
         // Jump-on-press touch detection.
@@ -3183,7 +3188,7 @@ namespace CNRSettingsMod
             GUILayout.Space(6f);
             GUILayout.BeginHorizontal();
             GUILayout.Label("Right stick  [" + _controllerCamSens.ToString("F3") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newRCS = DrawSlider(_controllerCamSens, 0.005f, 0.15f);
+            float newRCS = DrawSlider(_controllerCamSens, 0.05f, 3.0f);
             GUILayout.EndHorizontal();
             if (Mathf.Abs(newRCS - _controllerCamSens) > 0.001f)
             {
@@ -4428,20 +4433,37 @@ namespace CNRSettingsMod
                 }
             }
 
-            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
-
-            // Snapshot current axis-held state before running actions (for rising-edge detection)
+            // Snapshot current axis-held state before running actions (for rising-edge detection).
+            // Done here — before the PlayerLogic guard — so CNR-mode actions can read it too.
             bool[] axisNow = new bool[GP_BIND_COUNT];
             for (int bi = 0; bi < GP_BIND_COUNT; bi++) axisNow[bi] = GpAxisHeld(bi);
 
-            // ---- Fire (index 0, held) ----------------------------------------
+            // ---- Fire (index 0, held) — works in both single-player AND CNR mode ----
+            // "Click" the fire button: SendMessage replicates a real touch press so any
+            // UIButtonMessage on the GO sends FireBtnPressed → GenFireEvent.  Also set
+            // m_bFire / fireFlag directly as fallback, same as CRUIEventInteract.OnFire().
             bool fireHeld = (_gpKeys[0] != KeyCode.None && Input.GetKey(_gpKeys[0])) || axisNow[0];
             if (fireHeld)
             {
+                if (_dragGOs[0] != null)
+                    _dragGOs[0].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
                 if ((object)UIMenuDirector.mInstance != null)
                     UIMenuDirector.mInstance.GenFireEvent();
-                else
-                    PlayerPrefs.SetInt("FpsOnFire", 1 - PlayerPrefs.GetInt("FpsOnFire", 0));
+                if ((object)CRInput.mInstance != null)
+                    CRInput.mInstance.m_bFire = true;
+                if ((object)CRJoyStickController.mInstance != null)
+                    CRJoyStickController.mInstance.fireFlag = true;
+            }
+
+            // ---- Weapon switch (index 2 = next, 3 = prev, down) — works in CNR mode ----
+            if ((_gpKeys[2] != KeyCode.None && Input.GetKeyDown(_gpKeys[2])) || (axisNow[2] && !_gpAxisPrevHeld[2])) KbmSwitchWeapon(+1);
+            if ((_gpKeys[3] != KeyCode.None && Input.GetKeyDown(_gpKeys[3])) || (axisNow[3] && !_gpAxisPrevHeld[3])) KbmSwitchWeapon(-1);
+
+            // Actions below require single-player (PlayerLogic) to be active.
+            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied)
+            {
+                for (int bi = 0; bi < GP_BIND_COUNT; bi++) _gpAxisPrevHeld[bi] = axisNow[bi];
+                return;
             }
 
             // ---- Jump (index 1, down) ----------------------------------------
@@ -4462,10 +4484,6 @@ namespace CNRSettingsMod
                 }
                 TriggerOwnJump();
             }
-
-            // ---- Weapon switch (index 2 = next, 3 = prev, down) -------------
-            if ((_gpKeys[2] != KeyCode.None && Input.GetKeyDown(_gpKeys[2])) || (axisNow[2] && !_gpAxisPrevHeld[2])) KbmSwitchWeapon(+1);
-            if ((_gpKeys[3] != KeyCode.None && Input.GetKeyDown(_gpKeys[3])) || (axisNow[3] && !_gpAxisPrevHeld[3])) KbmSwitchWeapon(-1);
 
             // ---- Aim (index 4, down) -----------------------------------------
             if ((_gpKeys[4] != KeyCode.None && Input.GetKeyDown(_gpKeys[4])) || (axisNow[4] && !_gpAxisPrevHeld[4]))
@@ -5506,7 +5524,7 @@ namespace CNRSettingsMod
             _gamepadEnabled      = HudCfgGetInt("CNRMod_GamepadEnabled", 0) == 1;
             _controllerDeadzone  = HudCfgGetFloat("CNRMod_CtrlDeadzone",  0.1f);
             _controllerSens      = HudCfgGetFloat("CNRMod_CtrlSens",      1.5f);
-            _controllerCamSens   = HudCfgGetFloat("CNRMod_CtrlCamSens",   0.04f);
+            _controllerCamSens   = HudCfgGetFloat("CNRMod_CtrlCamSens",   0.5f);
             _controllerAimMult   = HudCfgGetFloat("CNRMod_CtrlAimMult",   0.5f);
             for (int ki = 0; ki < KBM_BIND_COUNT; ki++)
                 _kbKeys[ki] = (KeyCode)HudCfgGetInt(KBM_PREF_KEYS[ki], (int)KBM_DEFAULTS[ki]);
