@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.6";
+        public  const string Version = "3.1.7";
 
         public static void Load()
         {
@@ -294,6 +294,8 @@ namespace CNRSettingsMod
         private bool   _gpAxesProbed  = false;
         private string _gpLAxisX      = null;
         private string _gpLAxisY      = null;
+        private string _gpRAxisX      = null;  // Unity axis name for right stick X (set by Detect)
+        private string _gpRAxisY      = null;  // Unity axis name for right stick Y (set by Detect)
         private int    _gpStickDetect = 0;    // 0=idle, 1=LX, 2=LY, 3=RX, 4=RY
         private float[] _gpStickDetAxBase  = null; // Unity InputManager baseline at Detect press
         private float[] _gpStickDetJoyBase = null; // JoyProxy snapshot at Detect press
@@ -1115,6 +1117,29 @@ namespace CNRSettingsMod
         private static Texture2D _spSliderThumb = null;
         private static bool      _menuSpsCached = false;
         private static Font      _gameFont      = null;
+
+        // Cached plain-color fallback textures (each created once on demand)
+        private static Texture2D _texTabActiveBg  = null; // active tab highlight
+        private static Texture2D _texGhostHover   = null; // ghost-button hover
+        private static Texture2D _texGhostActive  = null; // ghost-button press
+        private static Texture2D _texWipBg        = null; // WIP warning banner bg
+
+        // Cached GUIStyles (nullified when sprites/font are first loaded)
+        private static GUIStyle  _gsWinBg         = null;
+        private static GUIStyle  _gsVScroll        = null;
+        private static GUIStyle  _gsLabel          = null;
+        private static GUIStyle  _gsHint           = null;
+        private static GUIStyle  _gsSectionHdr     = null;
+        private static GUIStyle  _gsTabActive      = null;
+        private static GUIStyle  _gsTabIdle        = null;
+        private static GUIStyle  _gsGhostBtn       = null;
+        private static GUIStyle  _gsInvisBg        = null;
+        private static GUIStyle  _gsInvisThumb     = null;
+        private static GUIStyle  _gsWipBanner      = null;
+        private static GUIStyle  _gsKeyLabelCtrl   = null;  // key/axis badge in Controllers tab
+        private static GUIStyle  _gsKeyLabelKbm    = null;  // key badge in KB+Mouse tab
+        private static System.Collections.Generic.Dictionary<long, GUIStyle> _gsBtnCache
+            = new System.Collections.Generic.Dictionary<long, GUIStyle>();
 
         // -- HUD drag editor ---------------------------------------------------
         private bool    _hudEditMode    = false;
@@ -2672,13 +2697,17 @@ namespace CNRSettingsMod
                 float h = Mathf.Min(vh * 0.92f, 525f);
                 _winRect = new Rect((vw - w) * 0.5f, (vh - h) * 0.5f, w, h);
 
-                GUIStyle winBg = new GUIStyle(GUI.skin.window);
-                winBg.normal.background   = (_spPanelBack != null)
-                    ? _spPanelBack
-                    : MakeTex(2, 2, new Color(0.10f, 0.10f, 0.12f, 0.97f));
-                winBg.onNormal.background = winBg.normal.background;
-                winBg.fontSize            = 15;
-                _winRect = GUI.Window(9902, _winRect, DrawSettingsWindow, "  [CNR Mod]  Settings", winBg);
+                if (_gsWinBg == null)
+                {
+                    _gsWinBg = new GUIStyle(GUI.skin.window);
+                    _gsWinBg.normal.background   = _spPanelBack != null
+                        ? _spPanelBack
+                        : MakeTex(2, 2, new Color(0.10f, 0.10f, 0.12f, 0.97f));
+                    _gsWinBg.onNormal.background = _gsWinBg.normal.background;
+                    _gsWinBg.fontSize            = 15;
+                    if (_gameFont != null) _gsWinBg.font = _gameFont;
+                }
+                _winRect = GUI.Window(9902, _winRect, DrawSettingsWindow, "  [CNR Mod]  Settings", _gsWinBg);
             }
 
             // Consume all input events so nothing passes through to NGUI
@@ -2710,12 +2739,12 @@ namespace CNRSettingsMod
             GUILayout.EndHorizontal();
             GUILayout.Space(4f);
 
-            GUIStyle vScroll = new GUIStyle(GUI.skin.verticalScrollbar); vScroll.fixedWidth = 30f;
+            if (_gsVScroll == null) { _gsVScroll = new GUIStyle(GUI.skin.verticalScrollbar); _gsVScroll.fixedWidth = 30f; }
             Vector2 sv = (_activeTab == 0) ? _scroll
                        : (_activeTab == 1) ? _scrollKbm
                        : (_activeTab == 3) ? _scrollCtrl
                        : _scrollAccount;
-            sv = GUILayout.BeginScrollView(sv, false, true, GUIStyle.none, vScroll,
+            sv = GUILayout.BeginScrollView(sv, false, true, GUIStyle.none, _gsVScroll,
                 GUILayout.Width(_winRect.width - 4f),
                 GUILayout.Height(_winRect.height - 104f));
             if (_activeTab == 0) _scroll = sv;
@@ -3035,7 +3064,7 @@ namespace CNRSettingsMod
                     HudCfgSave();
                 }
             }
-            GUILayout.Label("  Left stick = move.  Right stick camera uses Android AXIS_Z/AXIS_RZ.", HintStyle());
+            GUILayout.Label("  Left stick = move.  Right stick = camera look (assign axes in Stick Axes below).", HintStyle());
             GUILayout.Space(14f);
 
             // ---- Deadzone --------------------------------------------------
@@ -3091,17 +3120,21 @@ namespace CNRSettingsMod
             GUILayout.Space(14f);
 
             // ---- Stick Axis Detection ----------------------------------------
-            SectionHeader("Stick Axes (JoyProxy)");
+            SectionHeader("Stick Axes");
             GUILayout.Space(4f);
-            GUILayout.Label("  Tap Detect then move the stick axis you want to assign.", HintStyle());
+            GUILayout.Label("  Tap Detect then slowly push the stick or axis you want to assign.", HintStyle());
             GUILayout.Space(4f);
-            string[] stickLabels = { "L-stick X", "L-stick Y", "R-stick X", "R-stick Y" };
-            int[] stickCurrent   = { _gpLStickJAX, _gpLStickJAY, _gpRStickJAX, _gpRStickJAY };
+            string[] stickLabels  = { "L-stick X", "L-stick Y", "R-stick X", "R-stick Y" };
+            string[] stickAxisNames = {
+                _gpLAxisX ?? ("JA:" + _gpLStickJAX),
+                _gpLAxisY ?? ("JA:" + _gpLStickJAY),
+                _gpRAxisX ?? ("JA:" + _gpRStickJAX),
+                _gpRAxisY ?? ("JA:" + _gpRStickJAY)
+            };
             for (int si = 0; si < 4; si++)
             {
                 GUILayout.BeginHorizontal();
-                string curLabel = "JA:" + stickCurrent[si];
-                GUILayout.Label(stickLabels[si] + "  [" + curLabel + "]", HintStyle(), GUILayout.ExpandWidth(true));
+                GUILayout.Label(stickLabels[si] + "  [" + stickAxisNames[si] + "]", HintStyle(), GUILayout.ExpandWidth(true));
                 if (_gpStickDetect == si + 1)
                 {
                     if (GUILayout.Button("Cancel", BtnStyle(11, new Color(1f, 0.5f, 0.5f)), GUILayout.Width(pw * 0.24f), GUILayout.Height(26f)))
@@ -3111,28 +3144,26 @@ namespace CNRSettingsMod
                 {
                     if (GUILayout.Button("Detect", BtnStyle(11, new Color(0.5f, 1f, 0.6f)), GUILayout.Width(pw * 0.24f), GUILayout.Height(26f)))
                     {
-                        if (!_joyProxySetup) SetupJoyProxy();
                         _gpStickDetect = si + 1;
                         // snapshot baselines so we can detect delta accurately
                         _gpStickDetAxBase = new float[GP_ALL_AXES.Length];
                         for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
                             _gpStickDetAxBase[ai] = TryGetAxisRaw(GP_ALL_AXES[ai]);
-                        _gpStickDetJoyBase = _joyProxy != null ? _joyProxy.Snapshot() : new float[20];
+                        _gpStickDetJoyBase = new float[20];
                     }
                 }
                 GUILayout.EndHorizontal();
                 if (_gpStickDetect == si + 1)
                 {
-                    bool joyOk = _joyProxy != null && _joyProxy.HasData;
-                    string dbg = "proxy.fires=" + _proxyFires + " joy.HasData=" + (joyOk ? "Y" : "N");
-                    if (joyOk)
+                    // Show live values of all Unity axes so user can see what's moving
+                    var sbAxes = new System.Text.StringBuilder("  >>> Move axis now:  ");
+                    for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
                     {
-                        dbg += "  JA0=" + _joyProxy.Get(0).ToString("F2")
-                             + " JA1=" + _joyProxy.Get(1).ToString("F2")
-                             + " JA11=" + _joyProxy.Get(11).ToString("F2")
-                             + " JA14=" + _joyProxy.Get(14).ToString("F2");
+                        float v = TryGetAxisRaw(GP_ALL_AXES[ai]);
+                        if (!float.IsNaN(v) && Mathf.Abs(v) > 0.05f)
+                            sbAxes.Append(GP_ALL_AXES[ai]).Append('=').Append(v.ToString("F2")).Append(' ');
                     }
-                    GUILayout.Label("  >>> Move the axis now...  (" + dbg + ")", HintStyle());
+                    GUILayout.Label(sbAxes.ToString(), HintStyle());
                 }
                 GUILayout.Space(2f);
             }
@@ -3145,18 +3176,21 @@ namespace CNRSettingsMod
             GUILayout.Space(4f);
             float colName = pw * 0.33f;
             float colKey  = pw * 0.30f;
-            GUIStyle keyStyle = new GUIStyle(GUI.skin.box);
-            keyStyle.fontSize  = 13;
-            keyStyle.alignment = TextAnchor.MiddleCenter;
-            keyStyle.normal.textColor = new Color(1f, 0.9f, 0.4f);
-            if (_gameFont != null) keyStyle.font = _gameFont;
+            if (_gsKeyLabelCtrl == null)
+            {
+                _gsKeyLabelCtrl = new GUIStyle(GUI.skin.box);
+                _gsKeyLabelCtrl.fontSize  = 13;
+                _gsKeyLabelCtrl.alignment = TextAnchor.MiddleCenter;
+                _gsKeyLabelCtrl.normal.textColor = new Color(1f, 0.9f, 0.4f);
+                if (_gameFont != null) _gsKeyLabelCtrl.font = _gameFont;
+            }
             for (int i = 0; i < GP_BIND_COUNT; i++)
             {
                 GUILayout.BeginHorizontal(GUILayout.Height(32f));
                 GUILayout.Label(GP_BIND_NAMES[i], LabelStyle(), GUILayout.Width(colName));
                 bool hasAxis = !string.IsNullOrEmpty(_gpAxisBinds[i]);
                 string dispLabel = hasAxis ? GpAxisBindLabel(_gpAxisBinds[i]) : GpBtnName(_gpKeys[i]);
-                GUILayout.Label(dispLabel, keyStyle, GUILayout.Width(colKey), GUILayout.Height(30f));
+                GUILayout.Label(dispLabel, _gsKeyLabelCtrl, GUILayout.Width(colKey), GUILayout.Height(30f));
                 // [X] clears axis bind when set
                 if (hasAxis)
                 {
@@ -3304,7 +3338,7 @@ namespace CNRSettingsMod
             // Status message
             if (_accountMsg.Length > 0)
             {
-                GUIStyle msg = LabelStyle();
+                GUIStyle msg = new GUIStyle(LabelStyle());
                 msg.normal.textColor = new Color(1f, 0.9f, 0.4f);
                 msg.wordWrap = true;
                 GUILayout.Label(_accountMsg, msg);
@@ -3317,14 +3351,17 @@ namespace CNRSettingsMod
         private void DrawKbmTabContent(float pw)
         {
             // ---- WIP banner -------------------------------------------------
-            GUIStyle wip = new GUIStyle(GUI.skin.box);
-            wip.fontSize = 13;
-            wip.fontStyle = FontStyle.Bold;
-            wip.normal.textColor = new Color(1f, 0.85f, 0.2f);
-            wip.wordWrap = true;
-            wip.alignment = TextAnchor.MiddleCenter;
-            wip.normal.background = MakeTex(2, 2, new Color(0.35f, 0.2f, 0f, 0.85f));
-            GUILayout.Box("⚠  Camera mouse-look is not working yet on Android.\n   Other KBM features (keyboard, buttons) are functional.", wip, GUILayout.ExpandWidth(true));
+            if (_gsWipBanner == null)
+            {
+                _gsWipBanner = new GUIStyle(GUI.skin.box);
+                _gsWipBanner.fontSize = 13;
+                _gsWipBanner.fontStyle = FontStyle.Bold;
+                _gsWipBanner.normal.textColor = new Color(1f, 0.85f, 0.2f);
+                _gsWipBanner.wordWrap = true;
+                _gsWipBanner.alignment = TextAnchor.MiddleCenter;
+                _gsWipBanner.normal.background = _texWipBg ?? (_texWipBg = MakeTex(2, 2, new Color(0.35f, 0.2f, 0f, 0.85f)));
+            }
+            GUILayout.Box("⚠  Camera mouse-look is not working yet on Android.\n   Other KBM features (keyboard, buttons) are functional.", _gsWipBanner, GUILayout.ExpandWidth(true));
             GUILayout.Space(8f);
 
             // ---- KBM Enabled ------------------------------------------------
@@ -3396,16 +3433,19 @@ namespace CNRSettingsMod
             float colName = pw * 0.35f;
             float colKey  = pw * 0.34f;
             float colBtn  = pw * 0.27f;
-            GUIStyle keyStyle = new GUIStyle(GUI.skin.box);
-            keyStyle.fontSize  = 14;
-            keyStyle.alignment = TextAnchor.MiddleCenter;
-            keyStyle.normal.textColor = new Color(1f, 0.9f, 0.4f);
-            if (_gameFont != null) keyStyle.font = _gameFont;
+            if (_gsKeyLabelKbm == null)
+            {
+                _gsKeyLabelKbm = new GUIStyle(GUI.skin.box);
+                _gsKeyLabelKbm.fontSize  = 14;
+                _gsKeyLabelKbm.alignment = TextAnchor.MiddleCenter;
+                _gsKeyLabelKbm.normal.textColor = new Color(1f, 0.9f, 0.4f);
+                if (_gameFont != null) _gsKeyLabelKbm.font = _gameFont;
+            }
             for (int i = 0; i < KBM_BIND_COUNT; i++)
             {
                 GUILayout.BeginHorizontal(GUILayout.Height(32f));
                 GUILayout.Label(KBM_BIND_NAMES[i], LabelStyle(), GUILayout.Width(colName));
-                GUILayout.Label(KbKeyName(_kbKeys[i]), keyStyle,
+                GUILayout.Label(KbKeyName(_kbKeys[i]), _gsKeyLabelKbm,
                     GUILayout.Width(colKey), GUILayout.Height(30f));
                 if (GUILayout.Button("Rebind", BtnStyle(13, new Color(0.6f, 0.9f, 1f)),
                     GUILayout.Width(colBtn), GUILayout.Height(30f)))
@@ -3470,6 +3510,8 @@ namespace CNRSettingsMod
 
         private static GUIStyle TabBtnStyle(bool active)
         {
+            if (active  && _gsTabActive != null) return _gsTabActive;
+            if (!active && _gsTabIdle   != null) return _gsTabIdle;
             GUIStyle s = new GUIStyle(GUI.skin.button);
             s.fontSize  = 16;
             s.fontStyle = active ? FontStyle.Bold : FontStyle.Normal;
@@ -3477,11 +3519,12 @@ namespace CNRSettingsMod
             s.hover.textColor  = active ? new Color(0.25f, 0.85f, 1f)  : Color.white;
             if (active)
             {
-                Texture2D t = MakeTex(2, 2, new Color(0.07f, 0.20f, 0.30f, 1f));
+                Texture2D t = _texTabActiveBg ?? (_texTabActiveBg = MakeTex(2, 2, new Color(0.07f, 0.20f, 0.30f, 1f)));
                 s.normal.background = t;
                 s.hover.background  = t;
             }
             if (_gameFont != null) s.font = _gameFont;
+            if (active) _gsTabActive = s; else _gsTabIdle = s;
             return s;
         }
 
@@ -4023,9 +4066,8 @@ namespace CNRSettingsMod
         }
 
         // Called from Update() every frame while the Stick Axes "Detect" mode is active.
-        // Checks JoyProxy (delta-from-baseline) first, then Unity InputManager as fallback.
-        // Unity fallback can only identify L-stick axes via "Horizontal"/"Vertical", but it
-        // at least makes L-stick X/Y detectable even when JoyProxy has no data yet.
+        // Polls all GP_ALL_AXES via Unity InputManager (delta-from-baseline) and saves the
+        // axis name string directly. JoyProxy path is kept as dead code for now.
         private void GpStickDetectPoll()
         {
             int slot = _gpStickDetect; // 1=LX, 2=LY, 3=RX, 4=RY
@@ -4083,26 +4125,23 @@ namespace CNRSettingsMod
                 }
                 if (bestAi >= 0)
                 {
-                    // Map Unity axis name to Android MotionEvent axis constant
-                    int jaId = UnityAxisNameToJoystickAxis(GP_ALL_AXES[bestAi]);
-                    if (jaId >= 0)
+                    string axName = GP_ALL_AXES[bestAi];
+                    switch (slot)
                     {
-                        switch (slot)
-                        {
-                            case 1: _gpLStickJAX = jaId; HudCfgSetInt("CNRMod_LStickJAX", jaId); break;
-                            case 2: _gpLStickJAY = jaId; HudCfgSetInt("CNRMod_LStickJAY", jaId); break;
-                            case 3: _gpRStickJAX = jaId; HudCfgSetInt("CNRMod_RStickJAX", jaId); break;
-                            case 4: _gpRStickJAY = jaId; HudCfgSetInt("CNRMod_RStickJAY", jaId); break;
-                        }
-                        HudCfgSave();
-                        _gpStickDetect = 0;
+                        case 1: _gpLAxisX = axName; HudCfgSet("CNRMod_LAxisX", axName); break;
+                        case 2: _gpLAxisY = axName; HudCfgSet("CNRMod_LAxisY", axName); break;
+                        case 3: _gpRAxisX = axName; HudCfgSet("CNRMod_RAxisX", axName); break;
+                        case 4: _gpRAxisY = axName; HudCfgSet("CNRMod_RAxisY", axName); break;
                     }
+                    HudCfgSave();
+                    _gpStickDetect = 0;
                 }
             }
         }
 
         // Maps known Unity InputManager axis names to Android MotionEvent axis constants.
-        // Returns -1 if the mapping is unknown.
+        // No longer used by detection (detection now saves axis names directly); kept for
+        // legacy JoyProxy runtime path only.
         private static int UnityAxisNameToJoystickAxis(string name)
         {
             if (name == "Horizontal") return 0;  // AXIS_X  = left stick X
@@ -4223,9 +4262,9 @@ namespace CNRSettingsMod
             _gpAxesProbed = true;
             foreach (string n in GP_LAXIS_X) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisX = n; break; } }
             foreach (string n in GP_LAXIS_Y) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisY = n; break; } }
-            // R-stick axes come from user config (Detect buttons in Controllers tab) — not auto-probed.
-            SettingsModEntry.Log("GP axes probed: LX=" + (_gpLAxisX ?? "NONE") + " LY=" + (_gpLAxisY ?? "NONE")
-                + "  RX=JA:" + _gpRStickJAX + " RY=JA:" + _gpRStickJAY);
+            // R-stick axes come from user config (Detect buttons in Controllers tab) — loaded from prefs.
+            SettingsModEntry.Log("GP axes probed: LX=" + (_gpLAxisX ?? "?") + " LY=" + (_gpLAxisY ?? "?")
+                + "  RX=" + (_gpRAxisX ?? "?") + " RY=" + (_gpRAxisY ?? "?"));
         }
 
         private void GamepadUpdate()
@@ -4276,14 +4315,25 @@ namespace CNRSettingsMod
                 _kbmFiDeltaPixels.SetValue(_kbmJoystick, new Vector2(injectX, injectY));
             }
 
-            // ---- Right stick → camera (reads JoyProxy axes, user-configurable) --------
-            if (_joyProxy != null)
+            // ---- Right stick → camera (Unity axis names set by Detect) --------
+            if (_gpRAxisX != null || _joyProxy != null)
             {
                 if (_sliderotate == null) CacheSliderotate();
                 if (_sliderotate != null)
                 {
-                    float rx =  JoyRaw(_gpRStickJAX);
-                    float ry = -JoyRaw(_gpRStickJAY); // invert: stick up = look up
+                    float rx, ry;
+                    if (_gpRAxisX != null)
+                    {
+                        rx =  TryGetAxisRaw(_gpRAxisX); if (float.IsNaN(rx)) rx = 0f;
+                        string ryName = _gpRAxisY ?? _gpRAxisX;
+                        ry = -(TryGetAxisRaw(ryName)); if (float.IsNaN(ry)) ry = 0f;
+                    }
+                    else
+                    {
+                        rx =  JoyRaw(_gpRStickJAX);
+                        ry = -JoyRaw(_gpRStickJAY);
+                    }
+                    // invert: stick up = look up
                     float rmag = Mathf.Sqrt(rx * rx + ry * ry);
                     if (rmag > _controllerDeadzone)
                     {
@@ -4547,30 +4597,40 @@ namespace CNRSettingsMod
         // =====================================================================
         private static GUIStyle LabelStyle()
         {
+            if (_gsLabel != null) return _gsLabel;
             GUIStyle s = new GUIStyle(GUI.skin.label);
             s.fontSize = 15; s.normal.textColor = Color.white;
             if (_gameFont != null) s.font = _gameFont;
-            return s;
+            return _gsLabel = s;
         }
         private static GUIStyle HintStyle()
         {
+            if (_gsHint != null) return _gsHint;
             GUIStyle s = new GUIStyle(GUI.skin.label);
             s.fontSize = 11; s.wordWrap = true;
             s.normal.textColor = new Color(0.72f, 0.72f, 0.72f);
             if (_gameFont != null) s.font = _gameFont;
-            return s;
+            return _gsHint = s;
         }
         private static GUIStyle GhostBtnStyle()
         {
+            if (_gsGhostBtn != null) return _gsGhostBtn;
             GUIStyle s = new GUIStyle();
             s.normal.background = null;
-            s.hover.background  = MakeTex(2, 2, new Color(1f, 1f, 1f, 0.08f));
-            s.active.background = MakeTex(2, 2, new Color(1f, 1f, 1f, 0.16f));
-            return s;
+            s.hover.background  = _texGhostHover  ?? (_texGhostHover  = MakeTex(2, 2, new Color(1f, 1f, 1f, 0.08f)));
+            s.active.background = _texGhostActive ?? (_texGhostActive = MakeTex(2, 2, new Color(1f, 1f, 1f, 0.16f)));
+            return _gsGhostBtn = s;
         }
         private static GUIStyle BtnStyle(int fontSize = 20, Color textColor = default(Color))
         {
             if (textColor == default(Color)) textColor = Color.white;
+            // 20-bit packed key: upper 8=fontSize, lower 12=quantised RGB
+            long key = ((long)fontSize << 24)
+                     | ((long)(textColor.r * 15f + 0.5f) << 16)
+                     | ((long)(textColor.g * 15f + 0.5f) << 8)
+                     |  (long)(textColor.b * 15f + 0.5f);
+            GUIStyle cached;
+            if (_gsBtnCache.TryGetValue(key, out cached)) return cached;
             GUIStyle s = new GUIStyle(GUI.skin.button);
             s.fontSize    = fontSize;
             s.fixedHeight = fontSize < 15 ? 33f : 39f;
@@ -4584,6 +4644,7 @@ namespace CNRSettingsMod
                 s.hover.background   = _spButtonNull;
                 s.active.background  = _spButtonNull;
             }
+            _gsBtnCache[key] = s;
             return s;
         }
         // Draw a slider using invisible IMGUI input + manual texture paint
@@ -4591,13 +4652,10 @@ namespace CNRSettingsMod
         {
             const float thumbW = 30f;
             const float height = 33f;
-            // Invisible styles -- input only, no drawing
-            GUIStyle invisBg    = new GUIStyle();
-            GUIStyle invisThumb = new GUIStyle();
-            invisBg.fixedHeight    = height;
-            invisThumb.fixedWidth  = thumbW;
-            invisThumb.fixedHeight = height;
-            float newVal = GUILayout.HorizontalSlider(val, min, max, invisBg, invisThumb, GUILayout.Height(height));
+            // Invisible styles -- input only, no drawing (cached to avoid per-frame allocation)
+            if (_gsInvisBg == null)    { _gsInvisBg    = new GUIStyle(); _gsInvisBg.fixedHeight    = height; }
+            if (_gsInvisThumb == null) { _gsInvisThumb = new GUIStyle(); _gsInvisThumb.fixedWidth  = thumbW; _gsInvisThumb.fixedHeight = height; }
+            float newVal = GUILayout.HorizontalSlider(val, min, max, _gsInvisBg, _gsInvisThumb, GUILayout.Height(height));
             if (Event.current.type == EventType.Repaint)
             {
                 Rect r = GUILayoutUtility.GetLastRect();
@@ -4618,11 +4676,14 @@ namespace CNRSettingsMod
         }
         private static void SectionHeader(string title)
         {
-            GUIStyle s = new GUIStyle(GUI.skin.label);
-            s.fontStyle = FontStyle.Bold; s.fontSize = 16;
-            s.normal.textColor = new Color(1f, 0.85f, 0.3f);
-            if (_gameFont != null) s.font = _gameFont;
-            GUILayout.Label("--  " + title + "  --", s);
+            if (_gsSectionHdr == null)
+            {
+                _gsSectionHdr = new GUIStyle(GUI.skin.label);
+                _gsSectionHdr.fontStyle = FontStyle.Bold; _gsSectionHdr.fontSize = 16;
+                _gsSectionHdr.normal.textColor = new Color(1f, 0.85f, 0.3f);
+                if (_gameFont != null) _gsSectionHdr.font = _gameFont;
+            }
+            GUILayout.Label("--  " + title + "  --", _gsSectionHdr);
         }
         private static Texture2D MakeTex(int w, int h, Color col)
         {
@@ -5374,6 +5435,10 @@ namespace CNRSettingsMod
             _gpLStickJAY = HudCfgGetInt("CNRMod_LStickJAY", 1);
             _gpRStickJAX = HudCfgGetInt("CNRMod_RStickJAX", 11);
             _gpRStickJAY = HudCfgGetInt("CNRMod_RStickJAY", 14);
+            string rax = HudCfgGet("CNRMod_RAxisX", ""); if (rax.Length > 0) _gpRAxisX = rax;
+            string ray = HudCfgGet("CNRMod_RAxisY", ""); if (ray.Length > 0) _gpRAxisY = ray;
+            string lax = HudCfgGet("CNRMod_LAxisX", ""); if (lax.Length > 0) _gpLAxisX = lax;
+            string lay = HudCfgGet("CNRMod_LAxisY", ""); if (lay.Length > 0) _gpLAxisY = lay;
             for (int i = 0; i < VIS_ITEMS.Length; i++)
                 _visOn[i] = HudCfgGetInt(VIS_ITEMS[i].prefKey, 1) == 1;
             // Pre-populate _savedScales so LateUpdate can enforce them immediately.
@@ -5503,6 +5568,12 @@ namespace CNRSettingsMod
             _spSliderThumb.LoadImage(System.Convert.FromBase64String(_SliderThumbB64));
             _spSliderThumb.Apply();
             _menuSpsCached = true;
+
+            // Nullify cached styles so they rebuild next frame with correct font + textures
+            _gsWinBg = _gsVScroll = _gsLabel = _gsHint = _gsSectionHdr = null;
+            _gsTabActive = _gsTabIdle = _gsGhostBtn = _gsInvisBg = _gsInvisThumb = _gsWipBanner = null;
+            _gsKeyLabelCtrl = _gsKeyLabelKbm = null;
+            _gsBtnCache.Clear();
 
             // Find game font from any live UILabel
             if (_gameFont == null)
