@@ -567,11 +567,26 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.13",
+      "latestVersion": "3.1.16",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.16",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.16.dll",
+          "changelog": "fixed controller support!"
+        },
+        {
+          "version": "3.1.15",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.15.dll",
+          "changelog": "Fixed fire and weapon switch not working on controller or KBM in CNR mode (was blocked by PlayerLogic==null guard); fire now clicks the on-screen button + sets m_bFire directly"
+        },
+        {
+          "version": "3.1.14",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.14.dll",
+          "changelog": "Controller right stick: increased cam sensitivity slider range (0.05-3.0, default 0.5) — was too slow even at max"
+        },
         {
           "version": "3.1.13",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.13.dll",
