@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.18";
+        public  const string Version = "3.1.19";
 
         public static void Load()
         {
@@ -4006,29 +4006,41 @@ namespace CNRSettingsMod
             KbmSetCursorLocked(false);
         }
 
-        // Trigger a weapon switch:
-        // 1. Tell CRWeaponManager to physically swap the active weapon GO by setting
-        //    CRInput.m_bSwitch + m_PropIconName (read by CRWeaponManager.Update()).
-        // 2. Directly update the NGUI HUD sprite via SendMessage("receiveGunName").
-        //    CRWeaponManager.SwitchWeapons() only sends "selectWeapon" to the weapon GO
-        //    which sets canFire=true but does NOT call receiveGunName.  The HUD sprite
-        //    (goGunName.spriteName) is only updated by receiveGunName, so we must call it
-        //    ourselves.
+        // Trigger a weapon switch.
+        // In CNR multiplayer there is one CRWeaponManager per player in the scene.
+        // FindObjectOfType returns an arbitrary one — if it's an enemy's, the weapon name
+        // we calculate comes from their list, and the local player's weapon manager will
+        // fail to find a match →no actual switch.  Fix: prefer the weapon manager that is
+        // a child of CRPlayer.mInstance (always the local player).
+        // We also call SwitchWeapons() directly rather than going through CRInput.m_bSwitch,
+        // because all weapon managers share the same CRInput singleton and the first one to
+        // run Update() consumes m_bSwitch — that may not be the local player's.
         private void KbmSwitchWeapon(int dir)
         {
-            if ((object)CRInput.mInstance == null) return;
             if ((object)_weaponManager == null)
-                _weaponManager = (CRWeaponManager)UnityEngine.Object.FindObjectOfType(typeof(CRWeaponManager));
-            if ((object)_weaponManager == null) return;
+            {
+                // Prefer local player's weapon manager; fall back to FindObjectOfType
+                // (single-player has only one CRWeaponManager so either path works there).
+                if ((object)CRPlayer.mInstance != null)
+                    _weaponManager = ((Component)CRPlayer.mInstance).GetComponentInChildren<CRWeaponManager>();
+                if ((object)_weaponManager == null)
+                    _weaponManager = (CRWeaponManager)UnityEngine.Object.FindObjectOfType(typeof(CRWeaponManager));
+                if ((object)_weaponManager == null) return;
+            }
             var weapons = _weaponManager.allWeapons;
             if (weapons == null || weapons.Count < 2) return;
-            int next = (((_weaponManager.index + dir) % weapons.Count) + weapons.Count) % weapons.Count;
+            int cur  = _weaponManager.index;
+            int next = (((cur + dir) % weapons.Count) + weapons.Count) % weapons.Count;
             string name = weapons[next].weaponName;
             if (string.IsNullOrEmpty(name)) return;
-            // Physically swap the weapon GO
-            CRInput.mInstance.m_bSwitch = true;
-            CRInput.mInstance.m_PropIconName = name;
-            // Update HUD sprite immediately (receiveGunName is private; SendMessage reaches it)
+            // Directly call SwitchWeapons — deselects current GO, enables next GO, plays audio.
+            // Update index so subsequent calls advance from the correct position.
+            _weaponManager.SwitchWeapons(
+                ((Component)weapons[cur]).gameObject,
+                ((Component)weapons[next]).gameObject);
+            _weaponManager.index = next;
+            // Update the NGUI HUD weapon icon (SwitchWeapons only sends "selectWeapon" to the
+            // weapon GO; it does NOT call receiveGunName, so the HUD sprite must be updated here).
             if ((object)NGUI.mInstance != null)
                 ((Component)NGUI.mInstance).gameObject.SendMessage(
                     "receiveGunName", name, SendMessageOptions.DontRequireReceiver);
