@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.20";
+        public  const string Version = "3.1.28";
 
         public static void Load()
         {
@@ -278,8 +278,9 @@ namespace CNRSettingsMod
         private bool    _gamepadEnabled     = false;
         private float   _controllerDeadzone = 0.1f;
         private float   _controllerSens     = 1.5f;  // left-stick magnitude multiplier
-        private float   _controllerCamSens  = 0.5f; // right-stick camera scale per frame
-        private float   _controllerAimMult  = 0.5f;
+        private float   _controllerCamSens    = 0.5f; // right-stick camera scale per frame
+        private float   _controllerCamFalloff = 1.0f; // 1.0 = linear, >1 = slow start / fast end
+        private float   _controllerAimMult    = 0.5f;
         private bool    _gpRightStickOk     = true;  // legacy, unused
         private KeyCode[] _gpKeys           = new KeyCode[GP_BIND_COUNT];
         private string[]  _gpAxisBinds      = new string[GP_BIND_COUNT]; // "axisName|+" or "axisName|-", else null
@@ -302,6 +303,18 @@ namespace CNRSettingsMod
         private string _apkVersionName    = null;  // null = not yet checked
         private bool   _apkNeedsUpdate    = true;  // assume needs update until CheckApkVersion confirms otherwise
         private bool   _apkUpdateDismissed = false; // user dismissed banner for this session
+        // -- Networked ammo packs ---------------------------------------------
+        private bool   _ammoPacksEnabled = true;
+        private float  _ammoPackInterval = 45f;    // seconds between pack spawns (master client)
+        private int    _ammoPackMax      = 4;      // max simultaneous active packs
+        private const  string AP_PRE     = "cnr_pk_";
+        private System.Collections.Generic.Dictionary<int, GameObject> _apDict =
+            new System.Collections.Generic.Dictionary<int, GameObject>();
+        private int    _apNextId    = 1;
+        private float  _apSpawnTimer = 0f;
+        private float  _apPollTimer  = 0f;
+        private string _apHudMsg    = "";
+        private float  _apHudTimer  = 0f;
         private float[] _gpStickDetJoyBase = null; // JoyProxy snapshot at Detect press
         private int    _gpLStickJAX   = 0;    // JoyProxy axis for left stick X  (default AXIS_X=0)
         private int    _gpLStickJAY   = 1;    // JoyProxy axis for left stick Y  (default AXIS_Y=1)
@@ -1284,6 +1297,7 @@ namespace CNRSettingsMod
 
         private void UpdateScene(string scene)
         {
+            AmmoPackClear();
             _sceneName        = scene ?? "";
             _inGameScene      = IsGameScene(scene);
             _btnPatched       = false;
@@ -1420,6 +1434,9 @@ namespace CNRSettingsMod
             // the same frame and the jump fires immediately on the first press.
             if (!_hudEditMode) TouchJumpDetect();
 
+            // Networked ammo packs — runs regardless of KBM/gamepad mode
+            if (!_hudEditMode) AmmoPackUpdate();
+
             // ── KBM input ────────────────────────────────────────────────────
             if (!_kbmEnabled) return;
 
@@ -1456,22 +1473,12 @@ namespace CNRSettingsMod
                 || (_kbKeys[6] != KeyCode.None && Input.GetKeyDown(_kbKeys[6])))
             {
                 _kbmScrollAccum = 0f;
-                if (_dragGOs[15] != null)  // Index 15 = Next gun button
-                {
-                    _dragGOs[15].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
-                    _dragGOs[15].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
-                }
                 KbmSwitchWeapon(+1);
             }
             else if (_kbmScrollAccum <= -0.1f
                 || (_kbKeys[7] != KeyCode.None && Input.GetKeyDown(_kbKeys[7])))
             {
                 _kbmScrollAccum = 0f;
-                if (_dragGOs[14] != null)  // Index 14 = Prev gun button
-                {
-                    _dragGOs[14].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
-                    _dragGOs[14].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
-                }
                 KbmSwitchWeapon(-1);
             }
 
@@ -2753,7 +2760,25 @@ namespace CNRSettingsMod
                 GUIUtility.ScaleAroundPivot(Vector2.one, Vector2.zero);
             }
 
-            if (!_showSettings && !_hudEditMode) return;
+            if (!_showSettings && !_hudEditMode)
+            {
+                // Ammo pack pickup HUD message (shown in-game while not in settings/edit)
+                if (_ammoPacksEnabled && _inGameScene && _apHudTimer > 0f && _apHudMsg.Length > 0)
+                {
+                    float alpha = Mathf.Clamp01(_apHudTimer);
+                    Color prev = GUI.color;
+                    GUI.color = new Color(1f, 0.85f, 0f, alpha);
+                    GUIStyle apStyle = new GUIStyle(GUI.skin.label);
+                    apStyle.fontSize  = Mathf.RoundToInt(Screen.width / 18f);
+                    apStyle.fontStyle = FontStyle.Bold;
+                    apStyle.alignment = TextAnchor.MiddleCenter;
+                    float mw = Screen.width * 0.5f;
+                    float mh = 56f * (Screen.width / REF_W);
+                    GUI.Label(new Rect((Screen.width - mw) * 0.5f, Screen.height * 0.2f, mw, mh), _apHudMsg, apStyle);
+                    GUI.color = prev;
+                }
+                return;
+            }
 
             float scale = Screen.width / REF_W;
             GUIUtility.ScaleAroundPivot(new Vector2(scale, scale), Vector2.zero);
@@ -3018,6 +3043,39 @@ namespace CNRSettingsMod
             }
             GUILayout.Space(6f);
 
+            // ---- Ammo Packs (Online) --------------------------------------
+            SectionHeader("Ammo Packs (Online)");
+            GUILayout.Space(4f);
+            {
+                bool clicked = GUILayout.Button(GUIContent.none, GhostBtnStyle(), GUILayout.Height(34f));
+                Rect ra = GUILayoutUtility.GetLastRect();
+                Texture2D chkTex = _ammoPacksEnabled
+                    ? (_spSelectKuang ?? MakeTex(2, 2, Color.white))
+                    : (_spPropKuang   ?? MakeTex(2, 2, new Color(0.35f, 0.35f, 0.35f)));
+                GUI.DrawTexture(new Rect(ra.x + 3f, ra.y + 2f, 30f, 30f), chkTex, ScaleMode.ScaleToFit);
+                GUI.Label(new Rect(ra.x + 39f, ra.y, ra.width - 42f, ra.height), "Enable ammo packs", LabelStyle());
+                if (clicked)
+                {
+                    _ammoPacksEnabled = !_ammoPacksEnabled;
+                    HudCfgSetInt("CNRMod_AmmoPacksOn", _ammoPacksEnabled ? 1 : 0);
+                    HudCfgSave();
+                }
+            }
+            GUILayout.Label("  Host spawns gold cubes on the map every N seconds.\n  Walk over them to pick up.", HintStyle());
+            GUILayout.Space(6f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Interval  [" + Mathf.RoundToInt(_ammoPackInterval) + " s]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newApInt = DrawSlider(_ammoPackInterval, 15f, 120f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newApInt - _ammoPackInterval) > 0.5f)
+            {
+                _ammoPackInterval = Mathf.Round(newApInt);
+                HudCfgSetFloat("CNRMod_AmmoPackInterval", _ammoPackInterval);
+                HudCfgSave();
+            }
+            GUILayout.Label("  Seconds between pack spawns (host only)", HintStyle());
+            GUILayout.Space(14f);
+
             } // end Settings tab
             else if (_activeTab == 1) { DrawKbmTabContent(pw); }
             else if (_activeTab == 3) { DrawControllersTabContent(pw); }
@@ -3214,6 +3272,17 @@ namespace CNRSettingsMod
                 HudCfgSetFloat("CNRMod_CtrlCamSens", _controllerCamSens);
             }
             GUILayout.Label("  Right stick camera speed", HintStyle());
+            GUILayout.Space(6f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Falloff  [" + _controllerCamFalloff.ToString("F2") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
+            float newFalloff = DrawSlider(_controllerCamFalloff, 1.0f, 3.0f);
+            GUILayout.EndHorizontal();
+            if (Mathf.Abs(newFalloff - _controllerCamFalloff) > 0.01f)
+            {
+                _controllerCamFalloff = Mathf.Round(newFalloff * 20f) / 20f;
+                HudCfgSetFloat("CNRMod_CtrlCamFalloff", _controllerCamFalloff);
+            }
+            GUILayout.Label("  1.0 = linear  2.0+ = slow at low deflection, same max speed", HintStyle());
             GUILayout.Space(6f);
             GUILayout.BeginHorizontal();
             GUILayout.Label("Aimed   [" + Mathf.RoundToInt(_controllerAimMult * 100f) + "%]", LabelStyle(), GUILayout.Width(pw * 0.42f));
@@ -3970,15 +4039,7 @@ namespace CNRSettingsMod
 
         private void KbmToggleLeaderboard()
         {
-            GameObject lb = GameObject.Find("Panel(LocalLeaderboard)");
-            if (lb == null) return;
-            UIPanel lbPanel = lb.GetComponent<UIPanel>();
-            if (lbPanel != null)
-            {
-                float targetAlpha = lbPanel.alpha > 0.5f ? 0f : 1f;
-                if (targetAlpha > 0f) lb.SetActive(true);
-                TweenAlpha.Begin(lb, 0.2f, targetAlpha);
-            }
+            TapGO(_dragGOs[11]); // Image Button(InnerLeaderboard)
         }
 
         private void KbmHandleChat()
@@ -4006,44 +4067,236 @@ namespace CNRSettingsMod
             KbmSetCursorLocked(false);
         }
 
-        // Trigger a weapon switch.
-        // In CNR multiplayer there is one CRWeaponManager per player in the scene.
-        // FindObjectOfType returns an arbitrary one — if it's an enemy's, the weapon name
-        // we calculate comes from their list, and the local player's weapon manager will
-        // fail to find a match →no actual switch.  Fix: prefer the weapon manager that is
-        // a child of CRPlayer.mInstance (always the local player).
-        // We also call SwitchWeapons() directly rather than going through CRInput.m_bSwitch,
-        // because all weapon managers share the same CRInput singleton and the first one to
-        // run Update() consumes m_bSwitch — that may not be the local player's.
+        // Simulate a full NGUI finger tap on a weapon switch button.
+        // A real tap fires: OnPress(true) → OnPress(false) → OnClick.
+        // OnClick is what UIButtonEventKit handles to actually perform the switch.
+        private void TapGO(GameObject go)
+        {
+            if (go == null) return;
+            go.SendMessage("OnPress", true,  SendMessageOptions.DontRequireReceiver);
+            go.SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+            go.SendMessage("OnClick",        SendMessageOptions.DontRequireReceiver);
+            // Clear NGUI focus so the button doesn't stay "hot" — prevents the next
+            // unrelated input (jump, fire, etc.) from replaying on this button.
+            UICamera.hoveredObject  = null;
+            UICamera.selectedObject = null;
+        }
+
         private void KbmSwitchWeapon(int dir)
         {
-            if ((object)_weaponManager == null)
+            // dir > 0 = next gun (_dragGOs[15] = Image Button(RightSwitch))
+            // dir < 0 = prev gun (_dragGOs[14] = Image Button(LeftSwitch))
+            TapGO(dir > 0 ? _dragGOs[15] : _dragGOs[14]);
+        }
+
+        // =====================================================================
+        // Networked ammo packs — ground pickups synced via Photon room props
+        // =====================================================================
+        private void AmmoPackUpdate()
+        {
+            if (!_ammoPacksEnabled) return;
+            if (!_inGameScene)      return;
+            if (PhotonNetwork.room == null) return;
+
+            // Master client drives the spawn timer
+            if (PhotonNetwork.isMasterClient)
             {
-                // Prefer local player's weapon manager; fall back to FindObjectOfType
-                // (single-player has only one CRWeaponManager so either path works there).
-                if ((object)CRPlayer.mInstance != null)
-                    _weaponManager = ((Component)CRPlayer.mInstance).GetComponentInChildren<CRWeaponManager>();
-                if ((object)_weaponManager == null)
-                    _weaponManager = (CRWeaponManager)UnityEngine.Object.FindObjectOfType(typeof(CRWeaponManager));
-                if ((object)_weaponManager == null) return;
+                _apSpawnTimer += Time.deltaTime;
+                if (_apSpawnTimer >= _ammoPackInterval)
+                {
+                    _apSpawnTimer = 0f;
+                    if (_apDict.Count < _ammoPackMax) SpawnPackMaster();
+                }
             }
-            var weapons = _weaponManager.allWeapons;
-            if (weapons == null || weapons.Count < 2) return;
-            int cur  = _weaponManager.index;
-            int next = (((cur + dir) % weapons.Count) + weapons.Count) % weapons.Count;
-            string name = weapons[next].weaponName;
-            if (string.IsNullOrEmpty(name)) return;
-            // Directly call SwitchWeapons — deselects current GO, enables next GO, plays audio.
-            // Update index so subsequent calls advance from the correct position.
-            _weaponManager.SwitchWeapons(
-                ((Component)weapons[cur]).gameObject,
-                ((Component)weapons[next]).gameObject);
-            _weaponManager.index = next;
-            // Update the NGUI HUD weapon icon (SwitchWeapons only sends "selectWeapon" to the
-            // weapon GO; it does NOT call receiveGunName, so the HUD sprite must be updated here).
-            if ((object)NGUI.mInstance != null)
-                ((Component)NGUI.mInstance).gameObject.SendMessage(
-                    "receiveGunName", name, SendMessageOptions.DontRequireReceiver);
+
+            // All clients: poll room custom props every 0.5 s for pack changes
+            // (PUN 1.17 has no OnPhotonCustomRoomPropertiesChanged callback)
+            _apPollTimer += Time.deltaTime;
+            if (_apPollTimer >= 0.5f)
+            {
+                _apPollTimer = 0f;
+                AmmoPackSync();
+            }
+
+            // Proximity pickup — CharacterController doesn't reliably fire OnTriggerEnter
+            GameObject player = GameObject.FindWithTag("Player");
+            if (player != null && _apDict.Count > 0)
+            {
+                Vector3 pp   = player.transform.position;
+                int     pick = -1;
+                float   best = 2.0f;
+                foreach (var kv in _apDict)
+                {
+                    if (kv.Value == null) continue;
+                    float d = Vector3.Distance(pp, kv.Value.transform.position);
+                    if (d < best) { best = d; pick = kv.Key; }
+                }
+                if (pick >= 0) AmmoPackPickup(pick);
+            }
+
+            // Spin active pack cubes
+            foreach (var kv in _apDict)
+                if (kv.Value != null)
+                    kv.Value.transform.Rotate(0f, 90f * Time.deltaTime, 0f, Space.World);
+
+            // Tick down HUD msg timer
+            if (_apHudTimer > 0f) _apHudTimer -= Time.deltaTime;
+        }
+
+        private void AmmoPackSync()
+        {
+            Hashtable props = PhotonNetwork.room.customProperties;
+            if (props == null) return;
+
+            var keys = new System.Collections.Generic.List<string>();
+            foreach (object key in props.Keys)
+            {
+                string k = key as string;
+                if (k != null && k.StartsWith(AP_PRE)) keys.Add(k);
+            }
+
+            foreach (string k in keys)
+            {
+                int id;
+                if (!int.TryParse(k.Substring(AP_PRE.Length), out id)) continue;
+                string val = props[k] as string;
+
+                if (string.IsNullOrEmpty(val))
+                {
+                    DespawnPackLocal(id);
+                }
+                else if (!_apDict.ContainsKey(id))
+                {
+                    string[] p = val.Split(',');
+                    if (p.Length >= 3)
+                    {
+                        float x = 0f, y = 0f, z = 0f;
+                        bool ok = float.TryParse(p[0], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out x)
+                               && float.TryParse(p[1], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out y)
+                               && float.TryParse(p[2], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out z);
+                        if (ok) SpawnPackLocal(id, new Vector3(x, y, z));
+                    }
+                }
+            }
+        }
+
+        private void SpawnPackMaster()
+        {
+            if (PhotonNetwork.room == null) return;
+
+            Vector3 origin = Vector3.zero;
+            GameObject player = GameObject.FindWithTag("Player");
+            if (player != null) origin = player.transform.position;
+
+            // Place packs at NE / NW / SE / SW quadrants, 12 m out
+            int   slot  = (_apNextId - 1) % 4;
+            float angle = slot * 90f * Mathf.Deg2Rad;
+            float cx    = origin.x + Mathf.Cos(angle) * 12f;
+            float cz    = origin.z + Mathf.Sin(angle) * 12f;
+
+            // Raycast from high above down to find actual ground Y
+            float groundY = origin.y;
+            RaycastHit hit;
+            if (Physics.Raycast(new Vector3(cx, origin.y + 30f, cz), Vector3.down, out hit, 60f))
+                groundY = hit.point.y;
+
+            Vector3 pos = new Vector3(cx, groundY, cz);
+
+            int    id  = _apNextId++;
+            string val = pos.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+                       + "," + pos.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+                       + "," + pos.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+
+            var ht = new Hashtable();
+            ht[AP_PRE + id] = val;
+            PhotonNetwork.room.SetCustomProperties(ht);
+            SettingsModEntry.Log("AmmoPackMaster spawned id=" + id + " pos=" + pos);
+        }
+
+        private void SpawnPackLocal(int id, Vector3 pos)
+        {
+            if (_apDict.ContainsKey(id)) return;
+
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "CNRAmmoPack_" + id;
+            go.transform.position   = pos + new Vector3(0f, 0.3f, 0f);
+            go.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
+            go.transform.rotation   = Quaternion.Euler(30f, 45f, 0f);
+
+            // Gold colour
+            Renderer rend = go.GetComponent<Renderer>();
+            if (rend != null)
+                rend.material.color = new Color(1f, 0.75f, 0f);
+
+            // Remove box collider — we use proximity check instead
+            Collider col = go.GetComponent<Collider>();
+            if (col != null) UnityEngine.Object.Destroy(col);
+
+            _apDict[id] = go;
+            SettingsModEntry.Log("AmmoPackLocal spawn id=" + id + " pos=" + pos);
+        }
+
+        private void DespawnPackLocal(int id)
+        {
+            GameObject go;
+            if (_apDict.TryGetValue(id, out go))
+            {
+                if (go != null) UnityEngine.Object.Destroy(go);
+                _apDict.Remove(id);
+            }
+        }
+
+        private void AmmoPackPickup(int id)
+        {
+            DespawnPackLocal(id);
+
+            // Broadcast despawn to all clients via room props
+            if (PhotonNetwork.room != null)
+            {
+                var ht = new Hashtable();
+                ht[AP_PRE + id] = "";
+                PhotonNetwork.room.SetCustomProperties(ht);
+            }
+
+            // Refill ammo: clear noBullets flag and update the HUD bullet display
+            try
+            {
+                if (_weaponManager == null)
+                    _weaponManager = (CRWeaponManager)UnityEngine.Object.FindObjectOfType(typeof(CRWeaponManager));
+                if (_weaponManager != null && _weaponManager.SelectedWeapon != null)
+                    _weaponManager.SelectedWeapon.noBullets = false;
+                if (NGUI.mInstance != null)
+                {
+                    NGUI.mInstance.noClips = false;
+                    NGUI.mInstance.SendMessage("receiveBullets", "999",
+                        SendMessageOptions.DontRequireReceiver);
+                }
+            }
+            catch { }
+
+            _apHudMsg   = "+  Ammo Pack";
+            _apHudTimer = 2.5f;
+            SettingsModEntry.Log("AmmoPackPickup id=" + id);
+        }
+
+        private void AmmoPackClear()
+        {
+            foreach (var kv in _apDict)
+                if (kv.Value != null) UnityEngine.Object.Destroy(kv.Value);
+            _apDict.Clear();
+            _apSpawnTimer = 0f;
+            _apPollTimer  = 0f;
+            _apHudTimer   = 0f;
+            _apHudMsg     = "";
+        }
+
+        // Called when Photon master client changes (PUN1 SendMonoMessage)
+        private void OnMasterClientSwitched(PhotonPlayer newMaster)
+        {
+            _apSpawnTimer = 0f; // new master restarts the spawn cycle
         }
 
         private void KbmInjectJoystick()
@@ -4457,10 +4710,24 @@ namespace CNRSettingsMod
                     float rmag = Mathf.Sqrt(rx * rx + ry * ry);
                     if (rmag > _controllerDeadzone)
                     {
+                        // Apply power curve to radial magnitude so the direction is preserved
+                        // and full deflection (rmag=1) still produces the same max speed.
+                        // falloff 1.0 = linear (identical to old rx*camSens); 2.0+ = slow start.
+                        float curved = Mathf.Pow(rmag, _controllerCamFalloff);
                         float camSens = _isAiming ? (_controllerCamSens * _controllerAimMult) : _controllerCamSens;
-                        KbmInjectMouseLook(rx * camSens, ry * camSens);
+                        KbmInjectMouseLook(rx / rmag * curved * camSens, ry / rmag * curved * camSens);
                     }
                 }
+            }
+
+            // When no finger is on the screen, clear NGUI's hover target every frame.
+            // A real touchscreen tap sets UICamera.hoveredObject to the tapped button and NGUI
+            // never clears it on lift — so the next controller input (jump, fire, etc.) blindly
+            // re-fires on that button.  Clearing here when touchCount==0 breaks that stale link.
+            if (Input.touchCount == 0)
+            {
+                UICamera.hoveredObject  = null;
+                UICamera.selectedObject = null;
             }
 
             // Snapshot current axis-held state before running actions (for rising-edge detection).
@@ -5577,8 +5844,9 @@ namespace CNRSettingsMod
             _gamepadEnabled      = HudCfgGetInt("CNRMod_GamepadEnabled", 0) == 1;
             _controllerDeadzone  = HudCfgGetFloat("CNRMod_CtrlDeadzone",  0.1f);
             _controllerSens      = HudCfgGetFloat("CNRMod_CtrlSens",      1.5f);
-            _controllerCamSens   = HudCfgGetFloat("CNRMod_CtrlCamSens",   0.5f);
-            _controllerAimMult   = HudCfgGetFloat("CNRMod_CtrlAimMult",   0.5f);
+            _controllerCamSens    = HudCfgGetFloat("CNRMod_CtrlCamSens",     0.5f);
+            _controllerCamFalloff = HudCfgGetFloat("CNRMod_CtrlCamFalloff", 1.0f);
+            _controllerAimMult    = HudCfgGetFloat("CNRMod_CtrlAimMult",    0.5f);
             for (int ki = 0; ki < KBM_BIND_COUNT; ki++)
                 _kbKeys[ki] = (KeyCode)HudCfgGetInt(KBM_PREF_KEYS[ki], (int)KBM_DEFAULTS[ki]);
             for (int gi = 0; gi < GP_BIND_COUNT; gi++)
@@ -5591,6 +5859,8 @@ namespace CNRSettingsMod
             _gpLStickJAY = HudCfgGetInt("CNRMod_LStickJAY", 1);
             _gpRStickJAX = HudCfgGetInt("CNRMod_RStickJAX", 11);
             _gpRStickJAY = HudCfgGetInt("CNRMod_RStickJAY", 14);
+            _ammoPacksEnabled = HudCfgGetInt("CNRMod_AmmoPacksOn", 1) == 1;
+            _ammoPackInterval = HudCfgGetFloat("CNRMod_AmmoPackInterval", 45f);
             string rax = HudCfgGet("CNRMod_RAxisX", ""); if (rax.Length > 0) _gpRAxisX = rax;
             string ray = HudCfgGet("CNRMod_RAxisY", ""); if (ray.Length > 0) _gpRAxisY = ray;
             string lax = HudCfgGet("CNRMod_LAxisX", ""); if (lax.Length > 0) _gpLAxisX = lax;
