@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.16";
+        public  const string Version = "3.1.17";
 
         public static void Load()
         {
@@ -1456,12 +1456,16 @@ namespace CNRSettingsMod
                 || (_kbKeys[6] != KeyCode.None && Input.GetKeyDown(_kbKeys[6])))
             {
                 _kbmScrollAccum = 0f;
+                if (_dragGOs[15] != null)  // Index 15 = Next gun button
+                    _dragGOs[15].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
                 KbmSwitchWeapon(+1);
             }
             else if (_kbmScrollAccum <= -0.1f
                 || (_kbKeys[7] != KeyCode.None && Input.GetKeyDown(_kbKeys[7])))
             {
                 _kbmScrollAccum = 0f;
+                if (_dragGOs[14] != null)  // Index 14 = Prev gun button
+                    _dragGOs[14].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
                 KbmSwitchWeapon(-1);
             }
 
@@ -4456,8 +4460,21 @@ namespace CNRSettingsMod
             }
 
             // ---- Weapon switch (index 2 = next, 3 = prev, down) — works in CNR mode ----
-            if ((_gpKeys[2] != KeyCode.None && Input.GetKeyDown(_gpKeys[2])) || (axisNow[2] && !_gpAxisPrevHeld[2])) KbmSwitchWeapon(+1);
-            if ((_gpKeys[3] != KeyCode.None && Input.GetKeyDown(_gpKeys[3])) || (axisNow[3] && !_gpAxisPrevHeld[3])) KbmSwitchWeapon(-1);
+            // Click the on-screen button + call KbmSwitchWeapon directly (same belt-and-suspenders
+            // pattern as fire: SendMessage hits any handlers on the GO; KbmSwitchWeapon sets
+            // CRInput.m_bSwitch + m_PropIconName which is the real CNR weapon-swap mechanism).
+            if ((_gpKeys[2] != KeyCode.None && Input.GetKeyDown(_gpKeys[2])) || (axisNow[2] && !_gpAxisPrevHeld[2]))
+            {
+                if (_dragGOs[15] != null)  // Index 15 = Next gun button
+                    _dragGOs[15].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+                KbmSwitchWeapon(+1);
+            }
+            if ((_gpKeys[3] != KeyCode.None && Input.GetKeyDown(_gpKeys[3])) || (axisNow[3] && !_gpAxisPrevHeld[3]))
+            {
+                if (_dragGOs[14] != null)  // Index 14 = Prev gun button
+                    _dragGOs[14].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+                KbmSwitchWeapon(-1);
+            }
 
             // Actions below require single-player (PlayerLogic) to be active.
             if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied)
