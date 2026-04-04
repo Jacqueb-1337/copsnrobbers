@@ -58,7 +58,29 @@ if ($device) {
             'new'          => false,
         ]);
     }
-    // Wrong / missing token
+    // No token sent = fresh reinstall on same device; re-issue a new token for the existing account.
+    if ($token_in === '') {
+        $new_token = bin2hex(random_bytes(32));
+        $now = time();
+        $canonical_name = $device['acct_name'];
+        $placeholders = ['Player', 'New Player', ''];
+        if (!in_array($display_name, $placeholders, true) && $display_name !== $canonical_name) {
+            $pdo->prepare("UPDATE accounts SET display_name=?, last_seen=? WHERE id=?")
+                ->execute([$display_name, $now, $device['account_id']]);
+            $canonical_name = $display_name;
+        } else {
+            $pdo->prepare("UPDATE accounts SET last_seen=? WHERE id=?")->execute([$now, $device['account_id']]);
+        }
+        $pdo->prepare("UPDATE devices SET token=?, last_seen=? WHERE android_id=?")->execute([$new_token, $now, $android_id]);
+        ok([
+            'token'        => $new_token,
+            'coins'        => (int)$device['coins'],
+            'gems'         => (int)$device['gems'],
+            'display_name' => $canonical_name,
+            'new'          => false,
+        ]);
+    }
+    // Wrong token sent = someone else trying to claim this device
     fail('device already registered — use your stored token or claim.php to link account', 409);
 }
 
