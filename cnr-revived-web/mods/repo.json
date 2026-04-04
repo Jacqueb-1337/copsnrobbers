@@ -567,11 +567,51 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.20",
+      "latestVersion": "3.1.28",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.28",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.28.dll",
+          "changelog": "added ammo packs that spawn across the map "
+        },
+        {
+          "version": "3.1.27",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.27.dll",
+          "changelog": "Networked ammo packs: host spawns synced gold cube pickups every 45 s (configurable); all clients see and pick up the same packs; position sync via Photon room custom properties"
+        },
+        {
+          "version": "3.1.26",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.26.dll",
+          "changelog": "Fixed player list button on controller/KBM: now taps the real Image Button(InnerLeaderboard) via TapGO instead of manually tweening the panel"
+        },
+        {
+          "version": "3.1.25",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.25.dll",
+          "changelog": "Added right stick falloff slider (1.0=linear, up to 3.0): power curve on radial magnitude so small deflections are slow but full push still hits max speed"
+        },
+        {
+          "version": "3.1.24",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.24.dll",
+          "changelog": "Fixed sticky NGUI hover: every frame when no finger is touching, clear UICamera.hoveredObject so controller inputs can't replay on the last-tapped on-screen button"
+        },
+        {
+          "version": "3.1.23",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.23.dll",
+          "changelog": "Fixed sticky button bug: after any TapGO call (weapon switch on controller or KBM), clear UICamera.hoveredObject/selectedObject so the button doesn't replay on next unrelated input"
+        },
+        {
+          "version": "3.1.22",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.22.dll",
+          "changelog": "Weapon switch: simulate full NGUI tap (OnPress true + false + OnClick) on the PrevGun/NextGun buttons"
+        },
+        {
+          "version": "3.1.21",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.21.dll",
+          "changelog": "Weapon switch: directly toggle weapon GOs instead of calling SwitchWeapons() (which crashed on missing AudioSource in CNR mode); also call PropBtnPressed for network sync"
+        },
         {
           "version": "3.1.20",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.20.dll",
