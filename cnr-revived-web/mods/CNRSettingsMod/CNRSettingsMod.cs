@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.12";
+        public  const string Version = "3.1.13";
 
         public static void Load()
         {
@@ -2698,6 +2698,36 @@ namespace CNRSettingsMod
                     "proxy.fires=" + _proxyFires + " gml.fires=" + _gmlFires + "\n" +
                     "frame=" + _dbgFrame;
                 GUI.Box(new Rect(10, 10, 420, 260), dbgText, dbgStyle);
+            }
+
+            // ---- APK update overlay (main menu, outside settings panel) --------
+            if (_apkNeedsUpdate && !_apkUpdateDismissed && !_showSettings && !_hudEditMode && _sceneName == "MainMenu")
+            {
+                if (_gsApkBanner == null)
+                {
+                    _gsApkBanner = new GUIStyle(GUI.skin.box);
+                    _gsApkBanner.fontSize = 13;
+                    _gsApkBanner.fontStyle = FontStyle.Bold;
+                    _gsApkBanner.normal.textColor = new Color(1f, 0.85f, 0.2f);
+                    _gsApkBanner.wordWrap = true;
+                    _gsApkBanner.alignment = TextAnchor.MiddleCenter;
+                    _gsApkBanner.normal.background = _texApkBannerBg ?? (_texApkBannerBg = MakeTex(2, 2, new Color(0.5f, 0.1f, 0f, 0.92f)));
+                }
+                float bScale = Screen.width / REF_W;
+                GUIUtility.ScaleAroundPivot(new Vector2(bScale, bScale), Vector2.zero);
+                float bvw = REF_W;
+                float bvh = Screen.height / bScale;
+                float bw = Mathf.Min(bvw * 0.88f, 400f);
+                float bh = 90f;
+                float bx = (bvw - bw) * 0.5f;
+                float by = bvh - bh - 20f;
+                string apkVer = string.IsNullOrEmpty(_apkVersionName) ? "unknown" : _apkVersionName;
+                GUI.Box(new Rect(bx, by, bw, 54f), "APK update required (current: " + apkVer + ")\nGamepad R-stick, D-pad, triggers need the patched APK", _gsApkBanner);
+                if (GUI.Button(new Rect(bx, by + 57f, bw * 0.65f - 4f, 28f), "Download APK"))
+                    Application.OpenURL("https://play.jacqueb.me/releases/CopsNRobbers-v3.0.2-cnr1.apk");
+                if (GUI.Button(new Rect(bx + bw * 0.65f + 4f, by + 57f, bw * 0.35f - 4f, 28f), "Dismiss"))
+                    _apkUpdateDismissed = true;
+                GUIUtility.ScaleAroundPivot(Vector2.one, Vector2.zero);
             }
 
             if (!_showSettings && !_hudEditMode) return;
