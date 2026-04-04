@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.9";
+        public  const string Version = "3.1.10";
 
         public static void Load()
         {
@@ -1238,6 +1238,7 @@ namespace CNRSettingsMod
             catch (Exception ex)
             {
                 SettingsModEntry.Log("CheckApkVersion err: " + ex.Message);
+                _apkNeedsUpdate = true; // show banner anyway; better safe than silent
             }
         }
 
