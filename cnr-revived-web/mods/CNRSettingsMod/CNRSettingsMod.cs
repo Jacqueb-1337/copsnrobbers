@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.4";
+        public  const string Version = "3.1.5";
 
         public static void Load()
         {
@@ -1303,6 +1303,12 @@ namespace CNRSettingsMod
 
         private void Update()
         {
+            // Gamepad axis capture polling — runs every frame, in all scenes.
+            if (_gpCaptureIdx >= 0 && _gpCaptureCooldown <= 0)
+                GpCaptureAxisPoll();
+            else if (_gpCaptureCooldown > 0)
+                _gpCaptureCooldown--;
+
             // Set UICamera.useMouse — must run in ALL scenes (including main menu).
             // In KBM mode: always true so hardware mouse clicks reach NGUI everywhere.
             // In pure touch mode: leave at Android default (false).
@@ -3556,7 +3562,7 @@ namespace CNRSettingsMod
 
         private void DrawGpCaptureOverlay()
         {
-            if (_gpCaptureCooldown > 0) { _gpCaptureCooldown--; return; }
+            if (_gpCaptureCooldown > 0) return; // still counting down in Update()
 
             float w = _winRect.width;
             float h = _winRect.height;
@@ -3587,57 +3593,7 @@ namespace CNRSettingsMod
             }
 
             // ---- Poll axes for threshold-based bindings (triggers, D-pad, sticks) ----
-            // Only check once per Repaint to avoid double-firing
-            if (Event.current.type == EventType.Repaint)
-            {
-                // JoyProxy axes — all gamepad axes including L-stick (0,1), R-stick, triggers, dpad
-                // Use delta-from-baseline so sticks resting at non-zero don't auto-fire.
-                if (_joyProxy != null && _gpJoyBaseline != null)
-                {
-                    float[] joyNow = _joyProxy.Snapshot();
-                    int[] joyAxes = { 0, 1, 11, 14, 15, 16, 17, 18 };
-                    foreach (int axId in joyAxes)
-                    {
-                        if (axId >= joyNow.Length) continue;
-                        float bl = axId < _gpJoyBaseline.Length ? _gpJoyBaseline[axId] : 0f;
-                        float delta = joyNow[axId] - bl;
-                        if (Mathf.Abs(delta) > 0.35f)
-                        {
-                            string dir = delta > 0f ? "+" : "-";
-                            _gpAxisBinds[_gpCaptureIdx] = "JA:" + axId + "|" + dir;
-                            HudCfgSet(GP_AXIS_PREF_KEYS[_gpCaptureIdx], _gpAxisBinds[_gpCaptureIdx]);
-                            _gpKeys[_gpCaptureIdx] = KeyCode.None;
-                            HudCfgSetInt(GP_PREF_KEYS[_gpCaptureIdx], (int)KeyCode.None);
-                            HudCfgSave();
-                            _gpCaptureIdx = -1;
-                            return;
-                        }
-                    }
-                }
-                // Unity InputManager axes (Horizontal / Vertical) — fallback
-                if (_gpAxisBaseline != null)
-                {
-                    for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
-                    {
-                        string an = GP_ALL_AXES[ai];
-                        float cur = TryGetAxisRaw(an);
-                        if (float.IsNaN(cur)) continue;
-                        float baseline = float.IsNaN(_gpAxisBaseline[ai]) ? 0f : _gpAxisBaseline[ai];
-                        float delta = cur - baseline;
-                        if (Mathf.Abs(delta) > 0.45f)
-                        {
-                            string dir = delta > 0f ? "+" : "-";
-                            _gpAxisBinds[_gpCaptureIdx] = an + "|" + dir;
-                            HudCfgSet(GP_AXIS_PREF_KEYS[_gpCaptureIdx], _gpAxisBinds[_gpCaptureIdx]);
-                            _gpKeys[_gpCaptureIdx] = KeyCode.None;
-                            HudCfgSetInt(GP_PREF_KEYS[_gpCaptureIdx], (int)KeyCode.None);
-                            HudCfgSave();
-                            _gpCaptureIdx = -1;
-                            return;
-                        }
-                    }
-                }
-            }
+            // Detection is now handled in Update() via GpCaptureAxisPoll() for reliability.
 
             // ---- Key / button press ----------------------------------------
             Event e = Event.current;
@@ -4016,6 +3972,62 @@ namespace CNRSettingsMod
         }
 
         // True if the axis binding for slot idx is currently beyond threshold.
+        // Called from Update() every frame while a Rebind capture is active.
+        // Checks JoyProxy axes (delta from baseline) then Unity InputManager axes.
+        private void GpCaptureAxisPoll()
+        {
+            int idx = _gpCaptureIdx;
+            if (idx < 0) return;
+
+            // --- JoyProxy path (all axes: L-stick, R-stick, triggers, dpad) ---
+            if (_joyProxy != null && _gpJoyBaseline != null)
+            {
+                float[] joyNow = _joyProxy.Snapshot();
+                int[] joyAxes = { 0, 1, 11, 14, 15, 16, 17, 18 };
+                foreach (int axId in joyAxes)
+                {
+                    if (axId >= joyNow.Length) continue;
+                    float bl = axId < _gpJoyBaseline.Length ? _gpJoyBaseline[axId] : 0f;
+                    float delta = joyNow[axId] - bl;
+                    if (Mathf.Abs(delta) > 0.30f)
+                    {
+                        string dir = delta > 0f ? "+" : "-";
+                        _gpAxisBinds[idx] = "JA:" + axId + "|" + dir;
+                        HudCfgSet(GP_AXIS_PREF_KEYS[idx], _gpAxisBinds[idx]);
+                        _gpKeys[idx] = KeyCode.None;
+                        HudCfgSetInt(GP_PREF_KEYS[idx], (int)KeyCode.None);
+                        HudCfgSave();
+                        _gpCaptureIdx = -1;
+                        return;
+                    }
+                }
+            }
+
+            // --- Unity InputManager fallback (Horizontal / Vertical from L-stick) ---
+            if (_gpAxisBaseline != null)
+            {
+                for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
+                {
+                    string an = GP_ALL_AXES[ai];
+                    float cur = TryGetAxisRaw(an);
+                    if (float.IsNaN(cur)) continue;
+                    float baseline = float.IsNaN(_gpAxisBaseline[ai]) ? 0f : _gpAxisBaseline[ai];
+                    float delta = cur - baseline;
+                    if (Mathf.Abs(delta) > 0.40f)
+                    {
+                        string dir = delta > 0f ? "+" : "-";
+                        _gpAxisBinds[idx] = an + "|" + dir;
+                        HudCfgSet(GP_AXIS_PREF_KEYS[idx], _gpAxisBinds[idx]);
+                        _gpKeys[idx] = KeyCode.None;
+                        HudCfgSetInt(GP_PREF_KEYS[idx], (int)KeyCode.None);
+                        HudCfgSave();
+                        _gpCaptureIdx = -1;
+                        return;
+                    }
+                }
+            }
+        }
+
         private bool GpAxisHeld(int idx)
         {
             if (string.IsNullOrEmpty(_gpAxisBinds[idx])) return false;
