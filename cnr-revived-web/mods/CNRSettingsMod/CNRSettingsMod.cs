@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.38";
+        public  const string Version = "3.1.39";
 
         public static void Load()
         {
@@ -1457,12 +1457,22 @@ namespace CNRSettingsMod
                 || (_kbKeys[6] != KeyCode.None && Input.GetKeyDown(_kbKeys[6])))
             {
                 _kbmScrollAccum = 0f;
+                if (_dragGOs[15] != null)  // Index 15 = Next gun button
+                {
+                    _dragGOs[15].SendMessage("OnPress", true,  SendMessageOptions.DontRequireReceiver);
+                    _dragGOs[15].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                }
                 KbmSwitchWeapon(+1);
             }
             else if (_kbmScrollAccum <= -0.1f
                 || (_kbKeys[7] != KeyCode.None && Input.GetKeyDown(_kbKeys[7])))
             {
                 _kbmScrollAccum = 0f;
+                if (_dragGOs[14] != null)  // Index 14 = Prev gun button
+                {
+                    _dragGOs[14].SendMessage("OnPress", true,  SendMessageOptions.DontRequireReceiver);
+                    _dragGOs[14].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                }
                 KbmSwitchWeapon(-1);
             }
 
