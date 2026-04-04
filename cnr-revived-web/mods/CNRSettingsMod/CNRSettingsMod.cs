@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.34";
+        public  const string Version = "3.1.35";
 
         public static void Load()
         {
@@ -4261,9 +4261,7 @@ namespace CNRSettingsMod
                 PhotonNetwork.room.SetCustomProperties(htEvict);
             }
 
-            Vector3 origin = Vector3.zero;
-            GameObject player = GameObject.FindWithTag("Player");
-            if (player != null) origin = player.transform.position;
+            Vector3 origin = PickRandomPlayerOrigin();
 
             // Offset 45 degrees from ammo packs so they don't overlap
             int   slot  = (_hpNextId - 1) % 4;
@@ -4383,6 +4381,24 @@ namespace CNRSettingsMod
             }
         }
 
+        // Returns position of a randomly chosen player (local + all remotes).
+        // Falls back to Vector3.zero if no player objects are found.
+        private Vector3 PickRandomPlayerOrigin()
+        {
+            var positions = new System.Collections.Generic.List<Vector3>();
+
+            GameObject local = GameObject.FindWithTag("Player");
+            if (local != null) positions.Add(local.transform.position);
+
+            // Remote players' WeaponManager sibling objects are tagged "WeaponManagerOnline"
+            GameObject[] remotes = GameObject.FindGameObjectsWithTag("WeaponManagerOnline");
+            foreach (GameObject r in remotes)
+                positions.Add(r.transform.position);
+
+            if (positions.Count == 0) return Vector3.zero;
+            return positions[UnityEngine.Random.Range(0, positions.Count)];
+        }
+
         private void SpawnPackMaster()
         {
             if (PhotonNetwork.room == null) return;
@@ -4398,9 +4414,7 @@ namespace CNRSettingsMod
                 PhotonNetwork.room.SetCustomProperties(htEvict);
             }
 
-            Vector3 origin = Vector3.zero;
-            GameObject player = GameObject.FindWithTag("Player");
-            if (player != null) origin = player.transform.position;
+            Vector3 origin = PickRandomPlayerOrigin();
 
             // Place packs at NE / NW / SE / SW quadrants, 12 m out
             int   slot  = (_apNextId - 1) % 4;
