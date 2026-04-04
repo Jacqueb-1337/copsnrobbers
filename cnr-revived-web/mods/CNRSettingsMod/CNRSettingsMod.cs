@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.28";
+        public  const string Version = "3.1.29";
 
         public static void Load()
         {
@@ -4197,10 +4197,18 @@ namespace CNRSettingsMod
             float cx    = origin.x + Mathf.Cos(angle) * 12f;
             float cz    = origin.z + Mathf.Sin(angle) * 12f;
 
-            // Raycast from high above down to find actual ground Y
+            // Two-step ground detection so packs spawn on the same floor level as
+            // the host player, even on multi-level maps:
+            //   1. Short downcast from player position → finds the player's actual floor Y.
+            //   2. Narrow downcast at the pack XZ starting 2 m above that floor Y,
+            //      searching only 4 m down → lands on the same-level surface without
+            //      falling through to a lower floor or hitting a ceiling above.
+            //   Fallback: player's Y if nothing is hit.
             float groundY = origin.y;
             RaycastHit hit;
-            if (Physics.Raycast(new Vector3(cx, origin.y + 30f, cz), Vector3.down, out hit, 60f))
+            if (Physics.Raycast(origin + Vector3.up * 0.5f, Vector3.down, out hit, 5f))
+                groundY = hit.point.y;
+            if (Physics.Raycast(new Vector3(cx, groundY + 2f, cz), Vector3.down, out hit, 4f))
                 groundY = hit.point.y;
 
             Vector3 pos = new Vector3(cx, groundY, cz);
