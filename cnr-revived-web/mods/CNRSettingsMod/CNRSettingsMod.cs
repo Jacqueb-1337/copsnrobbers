@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.5";
+        public  const string Version = "3.1.6";
 
         public static void Load()
         {
@@ -295,6 +295,8 @@ namespace CNRSettingsMod
         private string _gpLAxisX      = null;
         private string _gpLAxisY      = null;
         private int    _gpStickDetect = 0;    // 0=idle, 1=LX, 2=LY, 3=RX, 4=RY
+        private float[] _gpStickDetAxBase  = null; // Unity InputManager baseline at Detect press
+        private float[] _gpStickDetJoyBase = null; // JoyProxy snapshot at Detect press
         private int    _gpLStickJAX   = 0;    // JoyProxy axis for left stick X  (default AXIS_X=0)
         private int    _gpLStickJAY   = 1;    // JoyProxy axis for left stick Y  (default AXIS_Y=1)
         private int    _gpRStickJAX   = 11;   // JoyProxy axis for right stick X (default AXIS_Z=11)
@@ -1308,6 +1310,9 @@ namespace CNRSettingsMod
                 GpCaptureAxisPoll();
             else if (_gpCaptureCooldown > 0)
                 _gpCaptureCooldown--;
+
+            // Stick Axes detection polling (Detect button in Controllers tab).
+            if (_gpStickDetect > 0) GpStickDetectPoll();
 
             // Set UICamera.useMouse — must run in ALL scenes (including main menu).
             // In KBM mode: always true so hardware mouse clicks reach NGUI everywhere.
@@ -3105,44 +3110,33 @@ namespace CNRSettingsMod
                 else
                 {
                     if (GUILayout.Button("Detect", BtnStyle(11, new Color(0.5f, 1f, 0.6f)), GUILayout.Width(pw * 0.24f), GUILayout.Height(26f)))
-                        _gpStickDetect = si + 1;
-                }
-                GUILayout.EndHorizontal();
-                if (_gpStickDetect == si + 1) GUILayout.Label("  >>> Move the axis now...", HintStyle());
-                GUILayout.Space(2f);
-            }
-            // Poll JoyProxy for detection
-            if (_gpStickDetect > 0 && _joyProxy != null && _joyProxy.HasData)
-            {
-                int[] excludeLX = { _gpLStickJAY, _gpRStickJAX, _gpRStickJAY };
-                int[] excludeLY = { _gpLStickJAX, _gpRStickJAX, _gpRStickJAY };
-                int[] excludeRX = { _gpLStickJAX, _gpLStickJAY, _gpRStickJAY };
-                int[] excludeRY = { _gpLStickJAX, _gpLStickJAY, _gpRStickJAX };
-                int[] excludes  = _gpStickDetect == 1 ? excludeLX
-                                : _gpStickDetect == 2 ? excludeLY
-                                : _gpStickDetect == 3 ? excludeRX
-                                : excludeRY;
-                int[] candidates = { 0, 1, 11, 14, 15, 16, 17, 18 };
-                foreach (int axId in candidates)
-                {
-                    bool skip = false;
-                    foreach (int ex in excludes) if (ex == axId) { skip = true; break; }
-                    if (skip) continue;
-                    if (Mathf.Abs(_joyProxy.Get(axId)) > 0.5f)
                     {
-                        switch (_gpStickDetect)
-                        {
-                            case 1: _gpLStickJAX = axId; HudCfgSetInt("CNRMod_LStickJAX", axId); break;
-                            case 2: _gpLStickJAY = axId; HudCfgSetInt("CNRMod_LStickJAY", axId); break;
-                            case 3: _gpRStickJAX = axId; HudCfgSetInt("CNRMod_RStickJAX", axId); break;
-                            case 4: _gpRStickJAY = axId; HudCfgSetInt("CNRMod_RStickJAY", axId); break;
-                        }
-                        HudCfgSave();
-                        _gpStickDetect = 0;
-                        break;
+                        if (!_joyProxySetup) SetupJoyProxy();
+                        _gpStickDetect = si + 1;
+                        // snapshot baselines so we can detect delta accurately
+                        _gpStickDetAxBase = new float[GP_ALL_AXES.Length];
+                        for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
+                            _gpStickDetAxBase[ai] = TryGetAxisRaw(GP_ALL_AXES[ai]);
+                        _gpStickDetJoyBase = _joyProxy != null ? _joyProxy.Snapshot() : new float[20];
                     }
                 }
+                GUILayout.EndHorizontal();
+                if (_gpStickDetect == si + 1)
+                {
+                    bool joyOk = _joyProxy != null && _joyProxy.HasData;
+                    string dbg = "proxy.fires=" + _proxyFires + " joy.HasData=" + (joyOk ? "Y" : "N");
+                    if (joyOk)
+                    {
+                        dbg += "  JA0=" + _joyProxy.Get(0).ToString("F2")
+                             + " JA1=" + _joyProxy.Get(1).ToString("F2")
+                             + " JA11=" + _joyProxy.Get(11).ToString("F2")
+                             + " JA14=" + _joyProxy.Get(14).ToString("F2");
+                    }
+                    GUILayout.Label("  >>> Move the axis now...  (" + dbg + ")", HintStyle());
+                }
+                GUILayout.Space(2f);
             }
+            // Detection is handled in Update() via GpStickDetectPoll().
             GUILayout.Space(14f);
 
             // ---- Button Bindings ------------------------------------------
@@ -4028,6 +4022,94 @@ namespace CNRSettingsMod
             }
         }
 
+        // Called from Update() every frame while the Stick Axes "Detect" mode is active.
+        // Checks JoyProxy (delta-from-baseline) first, then Unity InputManager as fallback.
+        // Unity fallback can only identify L-stick axes via "Horizontal"/"Vertical", but it
+        // at least makes L-stick X/Y detectable even when JoyProxy has no data yet.
+        private void GpStickDetectPoll()
+        {
+            int slot = _gpStickDetect; // 1=LX, 2=LY, 3=RX, 4=RY
+            if (slot <= 0) return;
+
+            // --- JoyProxy path (delta from baseline, works for all axes) ---
+            if (_joyProxy != null && _gpStickDetJoyBase != null)
+            {
+                float[] joyNow = _joyProxy.Snapshot();
+                int[] excludeLX = { _gpLStickJAY, _gpRStickJAX, _gpRStickJAY };
+                int[] excludeLY = { _gpLStickJAX, _gpRStickJAX, _gpRStickJAY };
+                int[] excludeRX = { _gpLStickJAX, _gpLStickJAY, _gpRStickJAY };
+                int[] excludeRY = { _gpLStickJAX, _gpLStickJAY, _gpRStickJAX };
+                int[] excludes  = slot == 1 ? excludeLX
+                                : slot == 2 ? excludeLY
+                                : slot == 3 ? excludeRX
+                                : excludeRY;
+                int[] candidates = { 0, 1, 11, 14, 15, 16, 17, 18 };
+                foreach (int axId in candidates)
+                {
+                    bool skip = false;
+                    foreach (int ex in excludes) if (ex == axId) { skip = true; break; }
+                    if (skip) continue;
+                    float bl = axId < _gpStickDetJoyBase.Length ? _gpStickDetJoyBase[axId] : 0f;
+                    float delta = joyNow[axId] - bl;
+                    if (Mathf.Abs(delta) > 0.30f)
+                    {
+                        switch (slot)
+                        {
+                            case 1: _gpLStickJAX = axId; HudCfgSetInt("CNRMod_LStickJAX", axId); break;
+                            case 2: _gpLStickJAY = axId; HudCfgSetInt("CNRMod_LStickJAY", axId); break;
+                            case 3: _gpRStickJAX = axId; HudCfgSetInt("CNRMod_RStickJAX", axId); break;
+                            case 4: _gpRStickJAY = axId; HudCfgSetInt("CNRMod_RStickJAY", axId); break;
+                        }
+                        HudCfgSave();
+                        _gpStickDetect = 0;
+                        return;
+                    }
+                }
+            }
+
+            // --- Unity InputManager fallback (L-stick only: maps to JA:0/JA:1) ---
+            if (_gpStickDetAxBase != null)
+            {
+                // Find axis with largest delta above threshold
+                int bestAi = -1;
+                float bestDelta = 0.35f;
+                for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
+                {
+                    float cur = TryGetAxisRaw(GP_ALL_AXES[ai]);
+                    if (float.IsNaN(cur)) continue;
+                    float bl = float.IsNaN(_gpStickDetAxBase[ai]) ? 0f : _gpStickDetAxBase[ai];
+                    float d = Mathf.Abs(cur - bl);
+                    if (d > bestDelta) { bestDelta = d; bestAi = ai; }
+                }
+                if (bestAi >= 0)
+                {
+                    // Map Unity axis name to Android MotionEvent axis constant
+                    int jaId = UnityAxisNameToJoystickAxis(GP_ALL_AXES[bestAi]);
+                    if (jaId >= 0)
+                    {
+                        switch (slot)
+                        {
+                            case 1: _gpLStickJAX = jaId; HudCfgSetInt("CNRMod_LStickJAX", jaId); break;
+                            case 2: _gpLStickJAY = jaId; HudCfgSetInt("CNRMod_LStickJAY", jaId); break;
+                            case 3: _gpRStickJAX = jaId; HudCfgSetInt("CNRMod_RStickJAX", jaId); break;
+                            case 4: _gpRStickJAY = jaId; HudCfgSetInt("CNRMod_RStickJAY", jaId); break;
+                        }
+                        HudCfgSave();
+                        _gpStickDetect = 0;
+                    }
+                }
+            }
+        }
+
+        // Maps known Unity InputManager axis names to Android MotionEvent axis constants.
+        // Returns -1 if the mapping is unknown.
+        private static int UnityAxisNameToJoystickAxis(string name)
+        {
+            if (name == "Horizontal") return 0;  // AXIS_X  = left stick X
+            if (name == "Vertical")   return 1;  // AXIS_Y  = left stick Y
+            return -1;
+        }
+
         private bool GpAxisHeld(int idx)
         {
             if (string.IsNullOrEmpty(_gpAxisBinds[idx])) return false;
@@ -4659,7 +4741,8 @@ namespace CNRSettingsMod
                 try
                 {
                     int src = e.Call<int>("getSource");
-                    if ((src & 0x01000010) != 0) // SOURCE_JOYSTICK
+                    // Accept SOURCE_JOYSTICK (0x01000010) or SOURCE_GAMEPAD class bit (0x00000400)
+                    if ((src & 0x01000010) != 0 || (src & 0x00000400) != 0)
                     {
                         lock (_lk)
                         {
@@ -4699,7 +4782,8 @@ namespace CNRSettingsMod
                 try
                 {
                     int src = ev.Call<int>("getSource");
-                    if ((src & 0x01000010) == 0) return; // not SOURCE_JOYSTICK
+                    // Accept SOURCE_JOYSTICK (0x01000010) or SOURCE_GAMEPAD class bit (0x00000400)
+                    if ((src & 0x01000010) == 0 && (src & 0x00000400) == 0) return;
                     lock (_lk)
                     {
                         _ax[0]  = ev.Call<float>("getAxisValue", 0);
