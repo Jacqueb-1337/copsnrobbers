@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.29";
+        public  const string Version = "3.1.30";
 
         public static void Load()
         {
@@ -305,11 +305,13 @@ namespace CNRSettingsMod
         private bool   _apkUpdateDismissed = false; // user dismissed banner for this session
         // -- Networked ammo packs ---------------------------------------------
         private bool   _ammoPacksEnabled = true;
-        private float  _ammoPackInterval = 45f;    // seconds between pack spawns (master client)
-        private int    _ammoPackMax      = 4;      // max simultaneous active packs
+        private float  _ammoPackInterval = 20f;    // seconds between pack spawns (master client)
+        private int    _ammoPackMax      = 2;      // max simultaneous active packs (FIFO)
         private const  string AP_PRE     = "cnr_pk_";
         private System.Collections.Generic.Dictionary<int, GameObject> _apDict =
             new System.Collections.Generic.Dictionary<int, GameObject>();
+        private System.Collections.Generic.List<int> _apSpawnOrder =
+            new System.Collections.Generic.List<int>();
         private int    _apNextId    = 1;
         private float  _apSpawnTimer = 0f;
         private float  _apPollTimer  = 0f;
@@ -3065,7 +3067,7 @@ namespace CNRSettingsMod
             GUILayout.Space(6f);
             GUILayout.BeginHorizontal();
             GUILayout.Label("Interval  [" + Mathf.RoundToInt(_ammoPackInterval) + " s]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newApInt = DrawSlider(_ammoPackInterval, 15f, 120f);
+            float newApInt = DrawSlider(_ammoPackInterval, 10f, 60f);
             GUILayout.EndHorizontal();
             if (Mathf.Abs(newApInt - _ammoPackInterval) > 0.5f)
             {
@@ -4105,7 +4107,7 @@ namespace CNRSettingsMod
                 if (_apSpawnTimer >= _ammoPackInterval)
                 {
                     _apSpawnTimer = 0f;
-                    if (_apDict.Count < _ammoPackMax) SpawnPackMaster();
+                    SpawnPackMaster(); // handles FIFO eviction internally
                 }
             }
 
@@ -4187,6 +4189,17 @@ namespace CNRSettingsMod
         {
             if (PhotonNetwork.room == null) return;
 
+            // FIFO eviction: if already at max, despawn oldest before spawning new
+            if (_apDict.Count >= _ammoPackMax && _apSpawnOrder.Count > 0)
+            {
+                int oldest = _apSpawnOrder[0];
+                _apSpawnOrder.RemoveAt(0);
+                DespawnPackLocal(oldest);
+                var htEvict = new Hashtable();
+                htEvict[AP_PRE + oldest] = "";
+                PhotonNetwork.room.SetCustomProperties(htEvict);
+            }
+
             Vector3 origin = Vector3.zero;
             GameObject player = GameObject.FindWithTag("Player");
             if (player != null) origin = player.transform.position;
@@ -4244,6 +4257,7 @@ namespace CNRSettingsMod
             if (col != null) UnityEngine.Object.Destroy(col);
 
             _apDict[id] = go;
+            _apSpawnOrder.Add(id);
             SettingsModEntry.Log("AmmoPackLocal spawn id=" + id + " pos=" + pos);
         }
 
@@ -4255,6 +4269,7 @@ namespace CNRSettingsMod
                 if (go != null) UnityEngine.Object.Destroy(go);
                 _apDict.Remove(id);
             }
+            _apSpawnOrder.Remove(id);
         }
 
         private void AmmoPackPickup(int id)
@@ -4269,9 +4284,21 @@ namespace CNRSettingsMod
                 PhotonNetwork.room.SetCustomProperties(ht);
             }
 
-            // Refill ammo: clear noBullets flag and update the HUD bullet display
+            // Refill ammo: CRJoyStickController.ctrlBulletNum is the actual tracked
+            // bullet count that gates firing. Also clear noBullets on the weapon and
+            // update the HUD display via receiveBullets.
             try
             {
+                if (CRJoyStickController.mInstance != null)
+                {
+                    System.Reflection.FieldInfo fiBullet = typeof(CRJoyStickController)
+                        .GetField("ctrlBulletNum",
+                            System.Reflection.BindingFlags.Public |
+                            System.Reflection.BindingFlags.NonPublic |
+                            System.Reflection.BindingFlags.Instance);
+                    if (fiBullet != null)
+                        fiBullet.SetValue(CRJoyStickController.mInstance, 999);
+                }
                 if (_weaponManager == null)
                     _weaponManager = (CRWeaponManager)UnityEngine.Object.FindObjectOfType(typeof(CRWeaponManager));
                 if (_weaponManager != null && _weaponManager.SelectedWeapon != null)
@@ -4279,8 +4306,14 @@ namespace CNRSettingsMod
                 if (NGUI.mInstance != null)
                 {
                     NGUI.mInstance.noClips = false;
-                    NGUI.mInstance.SendMessage("receiveBullets", "999",
-                        SendMessageOptions.DontRequireReceiver);
+                    // Call private receiveBullets directly — updates HUD label and
+                    // keeps noClips = false (SendMessage is unreliable for private methods)
+                    System.Reflection.MethodInfo miRB = typeof(NGUI).GetMethod(
+                        "receiveBullets",
+                        System.Reflection.BindingFlags.NonPublic |
+                        System.Reflection.BindingFlags.Instance);
+                    if (miRB != null)
+                        miRB.Invoke(NGUI.mInstance, new object[] { "999" });
                 }
             }
             catch { }
@@ -4295,6 +4328,7 @@ namespace CNRSettingsMod
             foreach (var kv in _apDict)
                 if (kv.Value != null) UnityEngine.Object.Destroy(kv.Value);
             _apDict.Clear();
+            _apSpawnOrder.Clear();
             _apSpawnTimer = 0f;
             _apPollTimer  = 0f;
             _apHudTimer   = 0f;
@@ -5868,7 +5902,7 @@ namespace CNRSettingsMod
             _gpRStickJAX = HudCfgGetInt("CNRMod_RStickJAX", 11);
             _gpRStickJAY = HudCfgGetInt("CNRMod_RStickJAY", 14);
             _ammoPacksEnabled = HudCfgGetInt("CNRMod_AmmoPacksOn", 1) == 1;
-            _ammoPackInterval = HudCfgGetFloat("CNRMod_AmmoPackInterval", 45f);
+            _ammoPackInterval = HudCfgGetFloat("CNRMod_AmmoPackInterval", 20f);
             string rax = HudCfgGet("CNRMod_RAxisX", ""); if (rax.Length > 0) _gpRAxisX = rax;
             string ray = HudCfgGet("CNRMod_RAxisY", ""); if (ray.Length > 0) _gpRAxisY = ray;
             string lax = HudCfgGet("CNRMod_LAxisX", ""); if (lax.Length > 0) _gpLAxisX = lax;
