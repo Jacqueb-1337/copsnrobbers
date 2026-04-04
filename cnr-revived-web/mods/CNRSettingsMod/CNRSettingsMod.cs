@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.3";
+        public  const string Version = "3.1.4";
 
         public static void Load()
         {
@@ -3169,14 +3169,15 @@ namespace CNRSettingsMod
                 }
                 if (GUILayout.Button("Rebind", BtnStyle(12, new Color(0.6f, 0.9f, 1f)), GUILayout.Height(28f)))
                 {
+                    if (!_joyProxySetup) SetupJoyProxy();
                     _gpCaptureIdx      = i;
                     _gpCaptureCooldown = 4;
                     // snapshot Unity InputManager axes baseline
                     _gpAxisBaseline = new float[GP_ALL_AXES.Length];
                     for (int ai = 0; ai < GP_ALL_AXES.Length; ai++)
                         _gpAxisBaseline[ai] = TryGetAxisRaw(GP_ALL_AXES[ai]);
-                    // snapshot JoyProxy axes baseline (triggers rest at 0, dpad at 0)
-                    _gpJoyBaseline = _joyProxy != null ? _joyProxy.Snapshot() : null;
+                    // snapshot JoyProxy axes baseline
+                    _gpJoyBaseline = _joyProxy != null ? _joyProxy.Snapshot() : new float[20];
                 }
                 GUILayout.EndHorizontal();
                 GUILayout.Space(2f);
@@ -3589,17 +3590,18 @@ namespace CNRSettingsMod
             // Only check once per Repaint to avoid double-firing
             if (Event.current.type == EventType.Repaint)
             {
-                // JoyProxy axes (right stick, triggers, dpad) — primary for Android gamepad
-                if (_joyProxy != null && _joyProxy.HasData && _gpJoyBaseline != null)
+                // JoyProxy axes — all gamepad axes including L-stick (0,1), R-stick, triggers, dpad
+                // Use delta-from-baseline so sticks resting at non-zero don't auto-fire.
+                if (_joyProxy != null && _gpJoyBaseline != null)
                 {
                     float[] joyNow = _joyProxy.Snapshot();
-                    int[] joyAxes = { 11, 14, 15, 16, 17, 18 };
+                    int[] joyAxes = { 0, 1, 11, 14, 15, 16, 17, 18 };
                     foreach (int axId in joyAxes)
                     {
                         if (axId >= joyNow.Length) continue;
                         float bl = axId < _gpJoyBaseline.Length ? _gpJoyBaseline[axId] : 0f;
                         float delta = joyNow[axId] - bl;
-                        if (Mathf.Abs(delta) > 0.4f)
+                        if (Mathf.Abs(delta) > 0.35f)
                         {
                             string dir = delta > 0f ? "+" : "-";
                             _gpAxisBinds[_gpCaptureIdx] = "JA:" + axId + "|" + dir;
