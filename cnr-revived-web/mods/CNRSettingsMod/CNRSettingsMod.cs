@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.36";
+        public  const string Version = "3.1.37";
 
         public static void Load()
         {
@@ -4548,7 +4548,8 @@ namespace CNRSettingsMod
                                                  : "machineGun";
                             string countField = isGrenade ? "ammoCount" : "clips";
 
-                            var container = wsType.GetField(containerField) != null ? wsType.GetField(containerField).GetValue(selectedWeapon) : null;
+                            var containerFldInfo = wsType.GetField(containerField);
+                            var container = containerFldInfo != null ? containerFldInfo.GetValue(selectedWeapon) : null;
                             if (container != null)
                             {
                                 var cType = container.GetType();
@@ -4557,6 +4558,7 @@ namespace CNRSettingsMod
                                 {
                                     int cur = (int)fld.GetValue(container);
                                     fld.SetValue(container, cur + addAmount);
+                                    containerFldInfo.SetValue(selectedWeapon, container); // write back for value types (structs)
                                     var irField = wsType.GetField("isReload");
                                     if (irField != null) irField.SetValue(selectedWeapon, false);
                                     ammoAdded = true;
