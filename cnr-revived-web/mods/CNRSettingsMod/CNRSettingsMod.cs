@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.31";
+        public  const string Version = "3.1.34";
 
         public static void Load()
         {
@@ -305,8 +305,10 @@ namespace CNRSettingsMod
         private bool   _apkUpdateDismissed = false; // user dismissed banner for this session
         // -- Networked ammo packs ---------------------------------------------
         private bool   _ammoPacksEnabled = true;
-        private float  _ammoPackInterval = 20f;    // seconds between pack spawns (master client)
+        private const  float PACK_INTERVAL = 20f;   // seconds between pack spawns (hardcoded)
         private int    _ammoPackMax      = 2;      // max simultaneous active packs (FIFO)
+
+        // Ammo packs
         private const  string AP_PRE     = "cnr_pk_";
         private System.Collections.Generic.Dictionary<int, GameObject> _apDict =
             new System.Collections.Generic.Dictionary<int, GameObject>();
@@ -317,6 +319,18 @@ namespace CNRSettingsMod
         private float  _apPollTimer  = 0f;
         private string _apHudMsg    = "";
         private float  _apHudTimer  = 0f;
+
+        // Health packs
+        private const  string HP_PRE     = "cnr_hp_";
+        private System.Collections.Generic.Dictionary<int, GameObject> _hpDict =
+            new System.Collections.Generic.Dictionary<int, GameObject>();
+        private System.Collections.Generic.List<int> _hpSpawnOrder =
+            new System.Collections.Generic.List<int>();
+        private int    _hpNextId    = 1;
+        private float  _hpSpawnTimer = 0f;
+        private float  _hpPollTimer  = 0f;
+        private string _hpHudMsg    = "";
+        private float  _hpHudTimer  = 0f;
         private float[] _gpStickDetJoyBase = null; // JoyProxy snapshot at Detect press
         private int    _gpLStickJAX   = 0;    // JoyProxy axis for left stick X  (default AXIS_X=0)
         private int    _gpLStickJAY   = 1;    // JoyProxy axis for left stick Y  (default AXIS_Y=1)
@@ -1438,6 +1452,7 @@ namespace CNRSettingsMod
 
             // Networked ammo packs — runs regardless of KBM/gamepad mode
             if (!_hudEditMode) AmmoPackUpdate();
+            if (!_hudEditMode) HealthPackUpdate();
 
             // ── KBM input ────────────────────────────────────────────────────
             if (!_kbmEnabled) return;
@@ -2764,20 +2779,34 @@ namespace CNRSettingsMod
 
             if (!_showSettings && !_hudEditMode)
             {
-                // Ammo pack pickup HUD message (shown in-game while not in settings/edit)
-                if (_ammoPacksEnabled && _inGameScene && _apHudTimer > 0f && _apHudMsg.Length > 0)
+                // Pack pickup HUD messages (shown in-game while not in settings/edit)
+                if (_ammoPacksEnabled && _inGameScene)
                 {
-                    float alpha = Mathf.Clamp01(_apHudTimer);
-                    Color prev = GUI.color;
-                    GUI.color = new Color(1f, 0.85f, 0f, alpha);
                     GUIStyle apStyle = new GUIStyle(GUI.skin.label);
                     apStyle.fontSize  = Mathf.RoundToInt(Screen.width / 18f);
                     apStyle.fontStyle = FontStyle.Bold;
                     apStyle.alignment = TextAnchor.MiddleCenter;
                     float mw = Screen.width * 0.5f;
                     float mh = 56f * (Screen.width / REF_W);
-                    GUI.Label(new Rect((Screen.width - mw) * 0.5f, Screen.height * 0.2f, mw, mh), _apHudMsg, apStyle);
-                    GUI.color = prev;
+
+                    if (_apHudTimer > 0f && _apHudMsg.Length > 0)
+                    {
+                        float alpha = Mathf.Clamp01(_apHudTimer);
+                        Color prev = GUI.color;
+                        GUI.color = new Color(1f, 0.85f, 0f, alpha);
+                        GUI.Label(new Rect((Screen.width - mw) * 0.5f, Screen.height * 0.2f, mw, mh), _apHudMsg, apStyle);
+                        GUI.color = prev;
+                    }
+
+                    if (_hpHudTimer > 0f && _hpHudMsg.Length > 0)
+                    {
+                        float alpha = Mathf.Clamp01(_hpHudTimer);
+                        Color prev = GUI.color;
+                        GUI.color = new Color(0.85f, 0.15f, 0.15f, alpha);
+                        float yOff = (_apHudTimer > 0f) ? Screen.height * 0.27f : Screen.height * 0.2f;
+                        GUI.Label(new Rect((Screen.width - mw) * 0.5f, yOff, mw, mh), _hpHudMsg, apStyle);
+                        GUI.color = prev;
+                    }
                 }
                 return;
             }
@@ -3063,19 +3092,7 @@ namespace CNRSettingsMod
                     HudCfgSave();
                 }
             }
-            GUILayout.Label("  Host spawns gold cubes on the map every N seconds.\n  Walk over them to pick up.", HintStyle());
-            GUILayout.Space(6f);
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Interval  [" + Mathf.RoundToInt(_ammoPackInterval) + " s]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newApInt = DrawSlider(_ammoPackInterval, 10f, 60f);
-            GUILayout.EndHorizontal();
-            if (Mathf.Abs(newApInt - _ammoPackInterval) > 0.5f)
-            {
-                _ammoPackInterval = Mathf.Round(newApInt);
-                HudCfgSetFloat("CNRMod_AmmoPackInterval", _ammoPackInterval);
-                HudCfgSave();
-            }
-            GUILayout.Label("  Seconds between pack spawns (host only)", HintStyle());
+            GUILayout.Label("  Host spawns gold cubes (ammo) and red cubes (health) every 20 s.\n  Walk over them to pick up.", HintStyle());
             GUILayout.Space(14f);
 
             } // end Settings tab
@@ -4104,7 +4121,7 @@ namespace CNRSettingsMod
             if (PhotonNetwork.isMasterClient)
             {
                 _apSpawnTimer += Time.deltaTime;
-                if (_apSpawnTimer >= _ammoPackInterval)
+                if (_apSpawnTimer >= PACK_INTERVAL)
                 {
                     _apSpawnTimer = 0f;
                     SpawnPackMaster(); // handles FIFO eviction internally
@@ -4143,6 +4160,187 @@ namespace CNRSettingsMod
 
             // Tick down HUD msg timer
             if (_apHudTimer > 0f) _apHudTimer -= Time.deltaTime;
+        }
+
+        private void HealthPackUpdate()
+        {
+            if (!_ammoPacksEnabled) return;
+            if (!_inGameScene)      return;
+            if (PhotonNetwork.room == null) return;
+
+            if (PhotonNetwork.isMasterClient)
+            {
+                _hpSpawnTimer += Time.deltaTime;
+                if (_hpSpawnTimer >= PACK_INTERVAL)
+                {
+                    _hpSpawnTimer = 0f;
+                    SpawnHealthPackMaster();
+                }
+            }
+
+            _hpPollTimer += Time.deltaTime;
+            if (_hpPollTimer >= 0.5f)
+            {
+                _hpPollTimer = 0f;
+                HealthPackSync();
+            }
+
+            GameObject player = GameObject.FindWithTag("Player");
+            if (player != null && _hpDict.Count > 0)
+            {
+                Vector3 pp   = player.transform.position;
+                int     pick = -1;
+                float   best = 2.0f;
+                foreach (var kv in _hpDict)
+                {
+                    if (kv.Value == null) continue;
+                    float d = Vector3.Distance(pp, kv.Value.transform.position);
+                    if (d < best) { best = d; pick = kv.Key; }
+                }
+                if (pick >= 0) HealthPackPickup(pick);
+            }
+
+            foreach (var kv in _hpDict)
+                if (kv.Value != null)
+                    kv.Value.transform.Rotate(0f, 90f * Time.deltaTime, 0f, Space.World);
+
+            if (_hpHudTimer > 0f) _hpHudTimer -= Time.deltaTime;
+        }
+
+        private void HealthPackSync()
+        {
+            Hashtable props = PhotonNetwork.room.customProperties;
+            if (props == null) return;
+
+            var keys = new System.Collections.Generic.List<string>();
+            foreach (object key in props.Keys)
+            {
+                string k = key as string;
+                if (k != null && k.StartsWith(HP_PRE)) keys.Add(k);
+            }
+
+            foreach (string k in keys)
+            {
+                int id;
+                if (!int.TryParse(k.Substring(HP_PRE.Length), out id)) continue;
+                string val = props[k] as string;
+
+                if (string.IsNullOrEmpty(val))
+                {
+                    DespawnHealthPackLocal(id);
+                }
+                else if (!_hpDict.ContainsKey(id))
+                {
+                    string[] p = val.Split(',');
+                    if (p.Length >= 3)
+                    {
+                        float x = 0f, y = 0f, z = 0f;
+                        bool ok = float.TryParse(p[0], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out x)
+                               && float.TryParse(p[1], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out y)
+                               && float.TryParse(p[2], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out z);
+                        if (ok) SpawnHealthPackLocal(id, new Vector3(x, y, z));
+                    }
+                }
+            }
+        }
+
+        private void SpawnHealthPackMaster()
+        {
+            if (PhotonNetwork.room == null) return;
+
+            if (_hpDict.Count >= _ammoPackMax && _hpSpawnOrder.Count > 0)
+            {
+                int oldest = _hpSpawnOrder[0];
+                _hpSpawnOrder.RemoveAt(0);
+                DespawnHealthPackLocal(oldest);
+                var htEvict = new Hashtable();
+                htEvict[HP_PRE + oldest] = "";
+                PhotonNetwork.room.SetCustomProperties(htEvict);
+            }
+
+            Vector3 origin = Vector3.zero;
+            GameObject player = GameObject.FindWithTag("Player");
+            if (player != null) origin = player.transform.position;
+
+            // Offset 45 degrees from ammo packs so they don't overlap
+            int   slot  = (_hpNextId - 1) % 4;
+            float angle = (slot * 90f + 45f) * Mathf.Deg2Rad;
+            float cx    = origin.x + Mathf.Cos(angle) * 12f;
+            float cz    = origin.z + Mathf.Sin(angle) * 12f;
+
+            float groundY = origin.y;
+            RaycastHit hit;
+            if (Physics.Raycast(origin + Vector3.up * 0.5f, Vector3.down, out hit, 5f))
+                groundY = hit.point.y;
+            if (Physics.Raycast(new Vector3(cx, groundY + 2f, cz), Vector3.down, out hit, 4f))
+                groundY = hit.point.y;
+
+            Vector3 pos = new Vector3(cx, groundY, cz);
+
+            int    id  = _hpNextId++;
+            string val = pos.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+                       + "," + pos.y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+                       + "," + pos.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+
+            var ht = new Hashtable();
+            ht[HP_PRE + id] = val;
+            PhotonNetwork.room.SetCustomProperties(ht);
+            SettingsModEntry.Log("HealthPackMaster spawned id=" + id + " pos=" + pos);
+        }
+
+        private void SpawnHealthPackLocal(int id, Vector3 pos)
+        {
+            if (_hpDict.ContainsKey(id)) return;
+
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "CNRHealthPack_" + id;
+            go.transform.position   = pos + new Vector3(0f, 0.3f, 0f);
+            go.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
+            go.transform.rotation   = Quaternion.Euler(30f, 45f, 0f);
+
+            Renderer rend = go.GetComponent<Renderer>();
+            if (rend != null)
+                rend.material.color = new Color(0.85f, 0.15f, 0.15f); // Red
+
+            Collider col = go.GetComponent<Collider>();
+            if (col != null) UnityEngine.Object.Destroy(col);
+
+            _hpDict[id] = go;
+            _hpSpawnOrder.Add(id);
+            SettingsModEntry.Log("HealthPackLocal spawn id=" + id + " pos=" + pos);
+        }
+
+        private void DespawnHealthPackLocal(int id)
+        {
+            GameObject go;
+            if (_hpDict.TryGetValue(id, out go))
+            {
+                if (go != null) UnityEngine.Object.Destroy(go);
+                _hpDict.Remove(id);
+            }
+            _hpSpawnOrder.Remove(id);
+        }
+
+        private void HealthPackPickup(int id)
+        {
+            DespawnHealthPackLocal(id);
+
+            if (PhotonNetwork.room != null)
+            {
+                var ht = new Hashtable();
+                ht[HP_PRE + id] = "";
+                PhotonNetwork.room.SetCustomProperties(ht);
+            }
+
+            if (PlayerLogic.mInstance != null && !PlayerLogic.mInstance.bDied)
+                PlayerLogic.mInstance.blood = 100;
+
+            _hpHudMsg   = "+ Health";
+            _hpHudTimer = 2.5f;
+            SettingsModEntry.Log("HealthPackPickup id=" + id);
         }
 
         private void AmmoPackSync()
@@ -4284,37 +4482,87 @@ namespace CNRSettingsMod
                 PhotonNetwork.room.SetCustomProperties(ht);
             }
 
-            // Refill ammo: mirror what the server normally does after a buy.
-            // noClips=false gates the mobile fire button; Bullets label shows count.
-            // Direct access - no reflection needed since we reference NGUI and UILabel already.
-            if (NGUI.mInstance != null)
-                NGUI.mInstance.noClips = false;
-            else
-                SettingsModEntry.Log("AmmoPickup: NGUI.mInstance null");
-
-            // Clear noBullets on selected weapon (prevents CRCrossHair from blocking fire)
-            if (_weaponManager == null)
-                _weaponManager = (CRWeaponManager)UnityEngine.Object.FindObjectOfType(typeof(CRWeaponManager));
-            if (_weaponManager != null && _weaponManager.SelectedWeapon != null)
-                _weaponManager.SelectedWeapon.noBullets = false;
-
-            // Update the Bullets HUD label directly (bypasses NGUI.go private field)
+            // Add ammo directly to the weapon's internal reserve count via reflection.
+            // The local player's WeaponManager is tagged "WeaponManager" (online players use
+            // "WeaponManagerOnline"). WeaponManager.SelectedWeapon is the active WeaponScript.
+            // WeaponScript.machineGun.clips = reserve ammo for machine guns (same as PorcCollider).
+            bool ammoAdded = false;
             try
             {
-                var bulletsGo = UnityEngine.GameObject.Find("Bullets");
-                if (bulletsGo != null)
+                var wmGo = UnityEngine.GameObject.FindWithTag("WeaponManager");
+                if (wmGo != null)
                 {
-                    var lbl = bulletsGo.GetComponent<UILabel>();
-                    if (lbl != null)
-                        lbl.text = "999";
+                    var wm = wmGo.GetComponent("WeaponManager");
+                    if (wm != null)
+                    {
+                        var swField = wm.GetType().GetField("SelectedWeapon");
+                        var selectedWeapon = swField != null ? swField.GetValue(wm) : null;
+                        if (selectedWeapon != null)
+                        {
+                            var wsType = selectedWeapon.GetType();
+                            var wnField = wsType.GetField("weaponName");
+                            var wName   = wnField != null ? (wnField.GetValue(selectedWeapon) as string ?? "") : "";
+
+                            // Per-weapon ammo amounts matching PorcCollider (the in-game ammo box)
+                            bool isGrenade = false, isShotgun = false;
+                            int addAmount = 30;
+                            switch (wName)
+                            {
+                                case "Deagle":           addAmount = 10;  break;
+                                case "G36K":             addAmount = 40;  break;
+                                case "GLOCK21":          addAmount = 20;  break;
+                                case "M67":              addAmount =  5;  isGrenade = true; break;
+                                case "M87T":             addAmount = 10;  isShotgun = true; break;
+                                case "MP5KA4":           addAmount = 40;  break;
+                                case "MP5KA5":           addAmount = 50;  break;
+                                case "RPG":              addAmount =  5;  isGrenade = true; break;
+                                case "Blaser R93":       addAmount =  5;  break;
+                                case "STW-25":           addAmount = 50;  break;
+                                case "UZI":              addAmount = 60;  break;
+                                case "M249":             addAmount = 100; break;
+                                case "MilkBomb":         addAmount =  5;  isGrenade = true; break;
+                                case "CandyRifle":       addAmount = 50;  break;
+                                case "ChristmasSniper":  addAmount = 50;  break;
+                                case "SantaGun":         addAmount = 50;  break;
+                                case "GingerbreadBomb":  addAmount =  5;  isGrenade = true; break;
+                                case "AUG":              addAmount = 40;  break;
+                                case "M3":               addAmount =  7;  isShotgun = true; break;
+                            }
+
+                            string containerField = isGrenade ? "grenadeLauncher"
+                                                 : isShotgun  ? "ShotGun"
+                                                 : "machineGun";
+                            string countField = isGrenade ? "ammoCount" : "clips";
+
+                            var container = wsType.GetField(containerField) != null ? wsType.GetField(containerField).GetValue(selectedWeapon) : null;
+                            if (container != null)
+                            {
+                                var cType = container.GetType();
+                                var fld   = cType.GetField(countField);
+                                if (fld != null)
+                                {
+                                    int cur = (int)fld.GetValue(container);
+                                    fld.SetValue(container, cur + addAmount);
+                                    var irField = wsType.GetField("isReload");
+                                    if (irField != null) irField.SetValue(selectedWeapon, false);
+                                    ammoAdded = true;
+                                    SettingsModEntry.Log("AmmoPickup: +" + addAmount + " to " + wName
+                                        + " (" + containerField + "." + countField + " was " + cur + ")");
+                                }
+                            }
+                        }
+                    }
                 }
             }
             catch (System.Exception ex)
             {
-                SettingsModEntry.Log("AmmoPickup label error: " + ex.Message);
+                SettingsModEntry.Log("AmmoPickup reflection error: " + ex.Message);
             }
 
-            _apHudMsg   = "+  Ammo Pack";
+            if (!ammoAdded)
+                SettingsModEntry.Log("AmmoPickup: could not add ammo via reflection");
+
+            _apHudMsg   = "+ Ammo";
             _apHudTimer = 2.5f;
             SettingsModEntry.Log("AmmoPackPickup id=" + id);
         }
@@ -4329,12 +4577,22 @@ namespace CNRSettingsMod
             _apPollTimer  = 0f;
             _apHudTimer   = 0f;
             _apHudMsg     = "";
+
+            foreach (var kv in _hpDict)
+                if (kv.Value != null) UnityEngine.Object.Destroy(kv.Value);
+            _hpDict.Clear();
+            _hpSpawnOrder.Clear();
+            _hpSpawnTimer = 0f;
+            _hpPollTimer  = 0f;
+            _hpHudTimer   = 0f;
+            _hpHudMsg     = "";
         }
 
         // Called when Photon master client changes (PUN1 SendMonoMessage)
         private void OnMasterClientSwitched(PhotonPlayer newMaster)
         {
-            _apSpawnTimer = 0f; // new master restarts the spawn cycle
+            _apSpawnTimer = 0f;
+            _hpSpawnTimer = 0f;
         }
 
         private void KbmInjectJoystick()
@@ -5898,7 +6156,7 @@ namespace CNRSettingsMod
             _gpRStickJAX = HudCfgGetInt("CNRMod_RStickJAX", 11);
             _gpRStickJAY = HudCfgGetInt("CNRMod_RStickJAY", 14);
             _ammoPacksEnabled = HudCfgGetInt("CNRMod_AmmoPacksOn", 1) == 1;
-            _ammoPackInterval = HudCfgGetFloat("CNRMod_AmmoPackInterval", 20f);
+            // (nothing to load for pack interval — now hardcoded to 20 s)
             string rax = HudCfgGet("CNRMod_RAxisX", ""); if (rax.Length > 0) _gpRAxisX = rax;
             string ray = HudCfgGet("CNRMod_RAxisY", ""); if (ray.Length > 0) _gpRAxisY = ray;
             string lax = HudCfgGet("CNRMod_LAxisX", ""); if (lax.Length > 0) _gpLAxisX = lax;
