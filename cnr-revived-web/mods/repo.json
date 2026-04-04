@@ -575,7 +575,7 @@
         {
           "version": "3.1.30",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.30.dll",
-          "changelog": "added spawn intervals and order tracking for ammo packs, and fixed some bugs"
+          "changelog": "ammo packs now directly update the HUD bullet counter and re-enable firing; faster spawn interval (20 s default); max 2 packs with FIFO eviction"
         },
         {
           "version": "3.1.29",
