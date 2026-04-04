@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.30";
+        public  const string Version = "3.1.31";
 
         public static void Load()
         {
@@ -4284,39 +4284,35 @@ namespace CNRSettingsMod
                 PhotonNetwork.room.SetCustomProperties(ht);
             }
 
-            // Refill ammo: CRJoyStickController.ctrlBulletNum is the actual tracked
-            // bullet count that gates firing. Also clear noBullets on the weapon and
-            // update the HUD display via receiveBullets.
+            // Refill ammo: mirror what the server normally does after a buy.
+            // noClips=false gates the mobile fire button; Bullets label shows count.
+            // Direct access - no reflection needed since we reference NGUI and UILabel already.
+            if (NGUI.mInstance != null)
+                NGUI.mInstance.noClips = false;
+            else
+                SettingsModEntry.Log("AmmoPickup: NGUI.mInstance null");
+
+            // Clear noBullets on selected weapon (prevents CRCrossHair from blocking fire)
+            if (_weaponManager == null)
+                _weaponManager = (CRWeaponManager)UnityEngine.Object.FindObjectOfType(typeof(CRWeaponManager));
+            if (_weaponManager != null && _weaponManager.SelectedWeapon != null)
+                _weaponManager.SelectedWeapon.noBullets = false;
+
+            // Update the Bullets HUD label directly (bypasses NGUI.go private field)
             try
             {
-                if (CRJoyStickController.mInstance != null)
+                var bulletsGo = UnityEngine.GameObject.Find("Bullets");
+                if (bulletsGo != null)
                 {
-                    System.Reflection.FieldInfo fiBullet = typeof(CRJoyStickController)
-                        .GetField("ctrlBulletNum",
-                            System.Reflection.BindingFlags.Public |
-                            System.Reflection.BindingFlags.NonPublic |
-                            System.Reflection.BindingFlags.Instance);
-                    if (fiBullet != null)
-                        fiBullet.SetValue(CRJoyStickController.mInstance, 999);
-                }
-                if (_weaponManager == null)
-                    _weaponManager = (CRWeaponManager)UnityEngine.Object.FindObjectOfType(typeof(CRWeaponManager));
-                if (_weaponManager != null && _weaponManager.SelectedWeapon != null)
-                    _weaponManager.SelectedWeapon.noBullets = false;
-                if (NGUI.mInstance != null)
-                {
-                    NGUI.mInstance.noClips = false;
-                    // Call private receiveBullets directly — updates HUD label and
-                    // keeps noClips = false (SendMessage is unreliable for private methods)
-                    System.Reflection.MethodInfo miRB = typeof(NGUI).GetMethod(
-                        "receiveBullets",
-                        System.Reflection.BindingFlags.NonPublic |
-                        System.Reflection.BindingFlags.Instance);
-                    if (miRB != null)
-                        miRB.Invoke(NGUI.mInstance, new object[] { "999" });
+                    var lbl = bulletsGo.GetComponent<UILabel>();
+                    if (lbl != null)
+                        lbl.text = "999";
                 }
             }
-            catch { }
+            catch (System.Exception ex)
+            {
+                SettingsModEntry.Log("AmmoPickup label error: " + ex.Message);
+            }
 
             _apHudMsg   = "+  Ammo Pack";
             _apHudTimer = 2.5f;
