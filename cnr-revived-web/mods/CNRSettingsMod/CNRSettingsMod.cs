@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.8";
+        public  const string Version = "3.1.9";
 
         public static void Load()
         {
@@ -298,6 +298,10 @@ namespace CNRSettingsMod
         private string _gpRAxisY      = null;  // Unity axis name for right stick Y (set by Detect)
         private int    _gpStickDetect = 0;    // 0=idle, 1=LX, 2=LY, 3=RX, 4=RY
         private float[] _gpStickDetAxBase  = null; // Unity InputManager baseline at Detect press
+        // -- APK version check ------------------------------------------------
+        private string _apkVersionName    = null;  // read from PackageManager on Start()
+        private bool   _apkNeedsUpdate    = false; // true if versionName doesn't contain "-cnr"
+        private bool   _apkUpdateDismissed = false; // user dismissed banner for this session
         private float[] _gpStickDetJoyBase = null; // JoyProxy snapshot at Detect press
         private int    _gpLStickJAX   = 0;    // JoyProxy axis for left stick X  (default AXIS_X=0)
         private int    _gpLStickJAY   = 1;    // JoyProxy axis for left stick Y  (default AXIS_Y=1)
@@ -1123,6 +1127,7 @@ namespace CNRSettingsMod
         private static Texture2D _texGhostHover   = null; // ghost-button hover
         private static Texture2D _texGhostActive  = null; // ghost-button press
         private static Texture2D _texWipBg        = null; // WIP warning banner bg
+        private static Texture2D _texApkBannerBg  = null; // APK update banner bg (red-orange)
 
         // Cached GUIStyles (nullified when sprites/font are first loaded)
         private static GUIStyle  _gsWinBg         = null;
@@ -1136,6 +1141,7 @@ namespace CNRSettingsMod
         private static GUIStyle  _gsInvisBg        = null;
         private static GUIStyle  _gsInvisThumb     = null;
         private static GUIStyle  _gsWipBanner      = null;
+        private static GUIStyle  _gsApkBanner      = null; // reuse layout, different bg colour
         private static GUIStyle  _gsKeyLabelCtrl   = null;  // key/axis badge in Controllers tab
         private static GUIStyle  _gsKeyLabelKbm    = null;  // key badge in KB+Mouse tab
         private static System.Collections.Generic.Dictionary<long, GUIStyle> _gsBtnCache
@@ -1212,6 +1218,27 @@ namespace CNRSettingsMod
             UpdateScene(Application.loadedLevelName);
             RegisterWithEconomyHook();
             KbmRegisterMouseListener();
+            CheckApkVersion();
+        }
+
+        private void CheckApkVersion()
+        {
+            try
+            {
+                using (AndroidJavaClass up = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                using (AndroidJavaObject ac = up.GetStatic<AndroidJavaObject>("currentActivity"))
+                using (AndroidJavaObject pm = ac.Call<AndroidJavaObject>("getPackageManager"))
+                using (AndroidJavaObject pi = pm.Call<AndroidJavaObject>("getPackageInfo", ac.Call<string>("getPackageName"), 0))
+                {
+                    _apkVersionName = pi.Get<string>("versionName") ?? "";
+                    _apkNeedsUpdate = !_apkVersionName.Contains("-cnr");
+                    SettingsModEntry.Log("APK versionName=" + _apkVersionName + " needsUpdate=" + _apkNeedsUpdate);
+                }
+            }
+            catch (Exception ex)
+            {
+                SettingsModEntry.Log("CheckApkVersion err: " + ex.Message);
+            }
         }
 
         private void RegisterWithEconomyHook()
@@ -2718,6 +2745,32 @@ namespace CNRSettingsMod
         private void DrawSettingsWindow(int id)
         {
             float pw = _winRect.width - 28f;
+
+            // ---- APK update banner ------------------------------------------
+            if (_apkNeedsUpdate && !_apkUpdateDismissed)
+            {
+                if (_gsApkBanner == null)
+                {
+                    _gsApkBanner = new GUIStyle(GUI.skin.box);
+                    _gsApkBanner.fontSize = 13;
+                    _gsApkBanner.fontStyle = FontStyle.Bold;
+                    _gsApkBanner.normal.textColor = new Color(1f, 0.85f, 0.2f);
+                    _gsApkBanner.wordWrap = true;
+                    _gsApkBanner.alignment = TextAnchor.MiddleCenter;
+                    _gsApkBanner.normal.background = _texApkBannerBg ?? (_texApkBannerBg = MakeTex(2, 2, new Color(0.5f, 0.1f, 0f, 0.92f)));
+                }
+                string apkVer = string.IsNullOrEmpty(_apkVersionName) ? "unknown" : _apkVersionName;
+                GUILayout.Box("⚠  APK update required (current: " + apkVer + ")\n   Gamepad axes (R-stick, D-pad, triggers) need the patched APK.", _gsApkBanner, GUILayout.ExpandWidth(true));
+                GUILayout.Space(2f);
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("Download APK", GUILayout.Height(30f)))
+                    Application.OpenURL("https://play.jacqueb.me/releases/CopsNRobbers-v3.0.2-cnr1.apk");
+                GUILayout.Space(4f);
+                if (GUILayout.Button("Dismiss", GUILayout.Width(80f), GUILayout.Height(30f)))
+                    _apkUpdateDismissed = true;
+                GUILayout.EndHorizontal();
+                GUILayout.Space(6f);
+            }
 
             // ---- Tab bar ----
             GUILayout.Space(2f);
