@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.17";
+        public  const string Version = "3.1.18";
 
         public static void Load()
         {
@@ -1457,7 +1457,10 @@ namespace CNRSettingsMod
             {
                 _kbmScrollAccum = 0f;
                 if (_dragGOs[15] != null)  // Index 15 = Next gun button
+                {
                     _dragGOs[15].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+                    _dragGOs[15].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                }
                 KbmSwitchWeapon(+1);
             }
             else if (_kbmScrollAccum <= -0.1f
@@ -1465,7 +1468,10 @@ namespace CNRSettingsMod
             {
                 _kbmScrollAccum = 0f;
                 if (_dragGOs[14] != null)  // Index 14 = Prev gun button
+                {
                     _dragGOs[14].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+                    _dragGOs[14].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                }
                 KbmSwitchWeapon(-1);
             }
 
@@ -1903,15 +1909,22 @@ namespace CNRSettingsMod
 
             if (!fireHeld)
             {
-                // On release: let JoyStickController reset mStatus to idle/walk next frame.
-                if (_kbmFireWasHeld && (object)_joyStickCtrl != null && _fiFireHoldCount != null)
-                    _fiFireHoldCount.SetValue(_joyStickCtrl, 0f);
+                if (_kbmFireWasHeld)
+                {
+                    // On release: let JoyStickController reset mStatus to idle/walk next frame.
+                    if ((object)_joyStickCtrl != null && _fiFireHoldCount != null)
+                        _fiFireHoldCount.SetValue(_joyStickCtrl, 0f);
+                    // Release the NGUI button so it doesn't stay stuck in pressed state.
+                    if (_dragGOs[0] != null)
+                        _dragGOs[0].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                }
                 _kbmFireWasHeld = false;
                 return;
             }
 
             if (NGUI.mInstance != null && NGUI.mInstance.noClips) return;
 
+            bool fireRisingEdge = !_kbmFireWasHeld;
             _kbmFireWasHeld = true;
 
             // ---- Single-player path (PlayerLogic / JoyStickController scenes) ----
@@ -1927,15 +1940,16 @@ namespace CNRSettingsMod
                     _fiFireHoldCount.SetValue(_joyStickCtrl, 0.235f);
             }
 
-            // ---- CNR multiplayer path: "click" the on-screen fire button ----
-            // SendMessage("OnPress", true) replicates a real finger press — any UIButtonMessage
-            // on the button with trigger=OnPress will send "FireBtnPressed" to UIMenuDirectorExt,
-            // which calls GenFireEvent().  Also set m_bFire directly as a belt-and-suspenders
-            // fallback in case CRUIEventInteract isn't subscribed.
-            if (_dragGOs[0] != null)
-                _dragGOs[0].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
-            if ((object)UIMenuDirector.mInstance != null)
-                UIMenuDirector.mInstance.GenFireEvent();
+            // ---- CNR multiplayer path ----
+            // OnPress(true) on rising edge only; OnPress(false) is sent on release (above).
+            // m_bFire/fireFlag are set every frame to keep auto-fire running while held.
+            if (fireRisingEdge)
+            {
+                if (_dragGOs[0] != null)
+                    _dragGOs[0].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+                if ((object)UIMenuDirector.mInstance != null)
+                    UIMenuDirector.mInstance.GenFireEvent();
+            }
             if ((object)CRInput.mInstance != null)
                 CRInput.mInstance.m_bFire = true;
             if ((object)CRJoyStickController.mInstance != null)
@@ -4443,14 +4457,18 @@ namespace CNRSettingsMod
             for (int bi = 0; bi < GP_BIND_COUNT; bi++) axisNow[bi] = GpAxisHeld(bi);
 
             // ---- Fire (index 0, held) — works in both single-player AND CNR mode ----
-            // "Click" the fire button: SendMessage replicates a real touch press so any
-            // UIButtonMessage on the GO sends FireBtnPressed → GenFireEvent.  Also set
-            // m_bFire / fireFlag directly as fallback, same as CRUIEventInteract.OnFire().
-            bool fireHeld = (_gpKeys[0] != KeyCode.None && Input.GetKey(_gpKeys[0])) || axisNow[0];
+            // OnPress(true) only on rising edge, OnPress(false) on falling edge — prevents
+            // the NGUI button from getting stuck in a permanently-pressed state.
+            // m_bFire/fireFlag are set every frame while held so auto-fire weapons keep firing.
+            bool fireDown = (_gpKeys[0] != KeyCode.None && Input.GetKeyDown(_gpKeys[0])) || (axisNow[0] && !_gpAxisPrevHeld[0]);
+            bool fireUp   = (_gpKeys[0] != KeyCode.None && Input.GetKeyUp(_gpKeys[0]))   || (!axisNow[0] && _gpAxisPrevHeld[0]);
+            bool fireHeld = (_gpKeys[0] != KeyCode.None && Input.GetKey(_gpKeys[0]))     || axisNow[0];
+            if (fireDown && _dragGOs[0] != null)
+                _dragGOs[0].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+            if (fireUp && _dragGOs[0] != null)
+                _dragGOs[0].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
             if (fireHeld)
             {
-                if (_dragGOs[0] != null)
-                    _dragGOs[0].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
                 if ((object)UIMenuDirector.mInstance != null)
                     UIMenuDirector.mInstance.GenFireEvent();
                 if ((object)CRInput.mInstance != null)
@@ -4466,13 +4484,19 @@ namespace CNRSettingsMod
             if ((_gpKeys[2] != KeyCode.None && Input.GetKeyDown(_gpKeys[2])) || (axisNow[2] && !_gpAxisPrevHeld[2]))
             {
                 if (_dragGOs[15] != null)  // Index 15 = Next gun button
+                {
                     _dragGOs[15].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+                    _dragGOs[15].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                }
                 KbmSwitchWeapon(+1);
             }
             if ((_gpKeys[3] != KeyCode.None && Input.GetKeyDown(_gpKeys[3])) || (axisNow[3] && !_gpAxisPrevHeld[3]))
             {
                 if (_dragGOs[14] != null)  // Index 14 = Prev gun button
+                {
                     _dragGOs[14].SendMessage("OnPress", true, SendMessageOptions.DontRequireReceiver);
+                    _dragGOs[14].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                }
                 KbmSwitchWeapon(-1);
             }
 
