@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.7";
+        public const  string Version = "3.1.8";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10574,52 +10574,79 @@ namespace CNRMods
                             var wnField = wsType.GetField("weaponName");
                             var wName   = wnField != null ? (wnField.GetValue(selectedWeapon) as string ?? "") : "";
 
-                            bool isGrenade = false, isShotgun = false;
-                            int addAmount = 30;
-                            switch (wName)
+                            // Use WeaponScript.GunType as the authoritative weapon class:
+                            //   0 = MACHINE_GUN, 1 = GRENADE_LAUNCHER, 2 = SHOTGUN, 3 = KNIFE
+                            // Using GunType (not weaponName) to pick container/count means grenade-type
+                            // weapons get their ammoCount topped up directly — no "clips reserve" needed.
+                            var gtField  = wsType.GetField("GunType");
+                            int gunType  = 0; // default MACHINE_GUN
+                            if (gtField != null)
                             {
-                                case "Deagle":           addAmount = 10;  break;
-                                case "G36K":             addAmount = 40;  break;
-                                case "GLOCK21":          addAmount = 20;  break;
-                                case "M67":              addAmount =  5;  isGrenade = true; break;
-                                case "M87T":             addAmount = 10;  isShotgun = true; break;
-                                case "MP5KA4":           addAmount = 40;  break;
-                                case "MP5KA5":           addAmount = 50;  break;
-                                case "RPG":              addAmount =  5;  isGrenade = true; break;
-                                case "Blaser R93":       addAmount =  5;  break;
-                                case "STW-25":           addAmount = 50;  break;
-                                case "UZI":              addAmount = 60;  break;
-                                case "M249":             addAmount = 100; break;
-                                case "MilkBomb":         addAmount =  5;  isGrenade = true; break;
-                                case "CandyRifle":       addAmount = 50;  break;
-                                case "ChristmasSniper":  addAmount = 50;  break;
-                                case "SantaGun":         addAmount = 50;  break;
-                                case "GingerbreadBomb":  addAmount =  5;  isGrenade = true; break;
-                                case "AUG":              addAmount = 40;  break;
-                                case "M3":               addAmount =  7;  isShotgun = true; break;
+                                object raw = gtField.GetValue(selectedWeapon);
+                                if (raw != null) gunType = System.Convert.ToInt32(raw);
                             }
 
-                            string containerField = isGrenade ? "grenadeLauncher"
-                                                 : isShotgun  ? "ShotGun"
-                                                 : "machineGun";
-                            string countField = isGrenade ? "ammoCount" : "clips";
-
-                            var containerFldInfo = wsType.GetField(containerField);
-                            var container = containerFldInfo != null ? containerFldInfo.GetValue(selectedWeapon) : null;
-                            if (container != null)
+                            if (gunType == 3) // KNIFE — no ammo field
                             {
-                                var cType = container.GetType();
-                                var fld   = cType.GetField(countField);
-                                if (fld != null)
+                                ModEntry.Log("AmmoPickup: KNIFE has no ammo");
+                            }
+                            else
+                            {
+                                // Per-weapon amounts; type-based defaults for unknown names
+                                int addAmount = (gunType == 1) ?  5   // unknown grenade
+                                             : (gunType == 2) ?  7   // unknown shotgun
+                                             :                  30;  // unknown machine gun
+                                switch (wName)
                                 {
-                                    int cur = (int)fld.GetValue(container);
-                                    fld.SetValue(container, cur + addAmount);
-                                    containerFldInfo.SetValue(selectedWeapon, container);
-                                    var irField = wsType.GetField("isReload");
-                                    if (irField != null) irField.SetValue(selectedWeapon, false);
-                                    ammoAdded = true;
-                                    ModEntry.Log("AmmoPickup: +" + addAmount + " to " + wName
-                                        + " (" + containerField + "." + countField + " was " + cur + ")");
+                                    case "Deagle":           addAmount = 10;  break;
+                                    case "G36K":             addAmount = 40;  break;
+                                    case "GLOCK21":          addAmount = 20;  break;
+                                    case "M67":              addAmount =  5;  break;
+                                    case "M87T":             addAmount = 10;  break;
+                                    case "MP5KA4":           addAmount = 40;  break;
+                                    case "MP5KA5":           addAmount = 50;  break;
+                                    case "RPG":              addAmount =  5;  break;
+                                    case "Blaser R93":       addAmount =  5;  break;
+                                    case "STW-25":           addAmount = 50;  break;
+                                    case "UZI":              addAmount = 60;  break;
+                                    case "M249":             addAmount = 100; break;
+                                    case "MilkBomb":         addAmount =  5;  break;
+                                    case "CandyRifle":       addAmount = 50;  break;
+                                    case "ChristmasSniper":  addAmount = 50;  break;
+                                    case "SantaGun":         addAmount = 50;  break;
+                                    case "GingerbreadBomb":  addAmount =  5;  break;
+                                    case "AUG":              addAmount = 40;  break;
+                                    case "M3":               addAmount =  7;  break;
+                                }
+
+                                // GRENADE_LAUNCHER (1): add directly to grenadeLauncher.ammoCount
+                                //   (no reserve/clips concept — ammoCount IS the total on-hand count)
+                                // SHOTGUN (2):           add to ShotGun.clips reserve
+                                // MACHINE_GUN (0):       add to machineGun.clips reserve
+                                string containerField = (gunType == 1) ? "grenadeLauncher"
+                                                     : (gunType == 2) ? "ShotGun"
+                                                     :                  "machineGun";
+                                string countField     = (gunType == 1) ? "ammoCount" : "clips";
+
+                                var containerFldInfo = wsType.GetField(containerField);
+                                var container = containerFldInfo != null ? containerFldInfo.GetValue(selectedWeapon) : null;
+                                if (container != null)
+                                {
+                                    var cType = container.GetType();
+                                    var fld   = cType.GetField(countField);
+                                    if (fld != null)
+                                    {
+                                        int cur = (int)fld.GetValue(container);
+                                        fld.SetValue(container, cur + addAmount);
+                                        containerFldInfo.SetValue(selectedWeapon, container); // writeback for value types
+                                        // Clear any reload lock so the weapon fires immediately after pickup
+                                        var irField = wsType.GetField("isReload");
+                                        if (irField != null) irField.SetValue(selectedWeapon, false);
+                                        ammoAdded = true;
+                                        ModEntry.Log("AmmoPickup: +" + addAmount + " to " + wName
+                                            + " (gunType=" + gunType + " " + containerField + "." + countField
+                                            + " was " + cur + ")");
+                                    }
                                 }
                             }
                         }
