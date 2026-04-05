@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.57";
+        public  const string Version = "3.1.58";
 
         public static void Load()
         {
@@ -3096,10 +3096,17 @@ namespace CNRSettingsMod
 
         private void DrawSettingsWindow(int id)
         {
-            // During a swipe, clear hotControl at the very top of every pass so no
-            // inner control (checkbox, slider, button) can claim pressed state.
-            if (_swipeIsScrolling)
+            // During a swipe, evict hotControl AND eat the event before any control
+            // runs. Controls check GetTypeForControl(id) which returns Used when the
+            // event is eaten, so neither sliders nor checkboxes can process it.
+            // We must NOT eat Repaint/Layout -- GUILayout needs those to size content.
+            if (_swipeIsScrolling &&
+                Event.current.type != EventType.Repaint &&
+                Event.current.type != EventType.Layout)
+            {
                 GUIUtility.hotControl = 0;
+                Event.current.Use();
+            }
 
             float pw = _winRect.width - 28f;
 
@@ -3154,7 +3161,9 @@ namespace CNRSettingsMod
                        : (_activeTab == 1) ? _scrollKbm
                        : (_activeTab == 3) ? _scrollCtrl
                        : _scrollAccount;
-            sv = GUILayout.BeginScrollView(sv, false, true, GUIStyle.none, _gsVScroll,
+            // Use invisible scrollbar styles -- we handle scrolling via swipe in Update().
+            // Hiding the interactive bar removes the second input path that could fight our swipe.
+            sv = GUILayout.BeginScrollView(sv, false, false, GUIStyle.none, GUIStyle.none,
                 GUILayout.Width(_winRect.width - 4f),
                 GUILayout.Height(_winRect.height - 104f));
             if (_activeTab == 0) _scroll = sv;
