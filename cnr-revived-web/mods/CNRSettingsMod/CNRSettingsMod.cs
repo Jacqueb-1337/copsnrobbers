@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.53";
+        public  const string Version = "3.1.54";
 
         public static void Load()
         {
@@ -284,7 +284,9 @@ namespace CNRSettingsMod
         private bool  _swipeDragging    = false;
         private float _swipeStartScreenY = 0f;
         private float _swipePrevScreenY  = 0f;
-        private const float SwipeDeadZonePx = 12f; // screen pixels before drag counts as swipe
+        private float _swipeGuiDownY    = 0f;  // IMGUI y at finger-down (for OnGUI displacement check)
+        private const float SwipeDeadZonePx  = 12f;  // screen pixels before Update() drag counts as swipe
+        private const float SwipeGuiDeadZone = 8f;   // IMGUI-space pixels for OnGUI click suppression
         private float   _kbmDeadzone   = 0.05f; // keyboard/mouse inject: axis magnitude below this is zeroed
         private float   _touchDeadzone = 0.1f;  // touch joystick: normalised magnitude below this is zeroed
         // -- Gamepad / controller state ----------------------------------------
@@ -3061,12 +3063,16 @@ namespace CNRSettingsMod
                     _gsWinBg.fontSize            = 15;
                     if (_gameFont != null) _gsWinBg.font = _gameFont;
                 }
-                // Swipe-to-scroll: if a drag was in progress when the finger lifts,
-                // consume the MouseUp so no button fires accidentally.
-                if (_swipeDragging && Event.current.type == EventType.MouseUp)
+                // Swipe-to-scroll click suppression.
+                // Track finger-down position here in IMGUI space so we can check
+                // raw displacement on lift -- no dependency on Update() flag timing.
+                if (Event.current.type == EventType.MouseDown)
+                    _swipeGuiDownY = Event.current.mousePosition.y;
+                if (Event.current.type == EventType.MouseUp &&
+                    (_swipeDragging || Mathf.Abs(Event.current.mousePosition.y - _swipeGuiDownY) > SwipeGuiDeadZone))
                 {
                     _swipeDragging = false;
-                    Event.current.Use();
+                    Event.current.Use(); // button under finger won't fire
                 }
                 _winRect = GUI.Window(9902, _winRect, DrawSettingsWindow, "  [CNR Mod]  Settings", _gsWinBg);
             }
