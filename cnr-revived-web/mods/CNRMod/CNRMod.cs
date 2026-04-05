@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.20";
+        public const  string Version = "3.1.21";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10777,6 +10777,11 @@ namespace CNRMods
                 _fiMaxFwd    = mt.GetField("maxForwardSpeed");
                 _fiMaxSide   = mt.GetField("maxSidewaysSpeed");
                 _fiMaxBack   = mt.GetField("maxBackwardsSpeed");
+                ModEntry.Log("SpeedHook cache: movement=" + (mt != null ? mt.Name : "NULL")
+                    + " RunSpeed=" + (_fiRunSpeed != null ? "ok" : "NULL")
+                    + " maxFwd=" + (_fiMaxFwd != null ? "ok" : "NULL")
+                    + " maxSide=" + (_fiMaxSide != null ? "ok" : "NULL")
+                    + " maxBack=" + (_fiMaxBack != null ? "ok" : "NULL"));
             }
             if (_fiMovement == null || _fiRunSpeed == null || _fiWalkSpeed == null) return;
 
@@ -10804,17 +10809,20 @@ namespace CNRMods
                 _dbgTimer   = 0f;
             }
 
-            // movement is a struct — get, mutate, set back.
-            // RunSpeed/WalkSpeed are source values; maxForwardSpeed/maxSidewaysSpeed/maxBackwardsSpeed
-            // are what FPScontroller actually enforces each frame (set by OnRunning/OffRunning).
-            // We must update all five so the cap matches the raised speed.
+            // FPScontrollerMovement is a class (ref type) — GetValue returns the real object.
+            // maxForwardSpeed/maxSidewaysSpeed/maxBackwardsSpeed are the actual per-frame caps.
             object mv = _fiMovement.GetValue(_fpsCtrl);
+            float fwdBefore = _fiMaxFwd  != null ? (float)_fiMaxFwd.GetValue(mv)  : -1f;
             _fiRunSpeed.SetValue(mv,  TargetRunSpeed  * mult);
             _fiWalkSpeed.SetValue(mv, TargetWalkSpeed * mult);
             if (_fiMaxFwd  != null) _fiMaxFwd.SetValue(mv,  TargetRunSpeed  * mult);
             if (_fiMaxSide != null) _fiMaxSide.SetValue(mv, TargetRunSpeed  * mult);
             if (_fiMaxBack != null) _fiMaxBack.SetValue(mv, TargetWalkSpeed * mult * 0.5f);
-            _fiMovement.SetValue(_fpsCtrl, mv);
+            float fwdAfter  = _fiMaxFwd  != null ? (float)_fiMaxFwd.GetValue(mv)  : -1f;
+            if (sprite != _lastSprite || _dbgTimer >= 4.9f)
+                ModEntry.Log("SpeedHook vals: maxFwd " + fwdBefore + "->" + fwdAfter
+                    + " _fiMaxFwd=" + (_fiMaxFwd != null ? "ok" : "NULL")
+                    + " mult=" + mult + " mv=" + (mv != null ? mv.GetType().Name : "NULL"));
         }
     }
 
