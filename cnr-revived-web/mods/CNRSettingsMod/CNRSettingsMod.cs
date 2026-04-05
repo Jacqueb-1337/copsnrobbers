@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.48";
+        public  const string Version = "3.1.49";
 
         public static void Load()
         {
@@ -3097,7 +3097,7 @@ namespace CNRSettingsMod
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Normal  [" + _sensNormal.ToString("F1") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newSens = DrawSlider(_sensNormal, 1f, 20f);
+            float newSens = DrawSlider(_sensNormal, 1f, 100f);
             GUILayout.EndHorizontal();
             if (Mathf.Abs(newSens - _sensNormal) > 0.05f)
             {
