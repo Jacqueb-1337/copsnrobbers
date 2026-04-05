@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.28";
+        public const  string Version = "3.1.29";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -764,10 +764,9 @@ namespace CNRMods
             var ht = new System.Collections.Hashtable();
             ht["version"] = ModEntry.Version;
             if (!string.IsNullOrEmpty(skin)) ht["skin"] = skin;
-            if (CtfMode.PendingCtf || CtfMode.IsCtfRoom)
+            if (CtfMode.IsCtfRoom)
             {
                 ht["ctf"] = "1";
-                CtfMode.IsCtfRoom = true;
             }
             ModEntry.RaiseCnrEvent(ht);
             ModEntry.Log("CnrEvent broadcast (delayed): v" + ModEntry.Version + " skin=" + (string.IsNullOrEmpty(skin) ? "(none)" : skin) + (CtfMode.IsCtfRoom ? " ctf=1" : ""));
@@ -9485,11 +9484,16 @@ namespace CNRMods
         public static int     RobberScore      = 0;
         public const  int     WinScore         = 30;
 
+        // Monotonically incremented on every game-state change (pickup, drop, score, return).
+        // Receivers reject incoming state with gen < StateGen so a stale authority broadcast
+        // can never overwrite a more-recent carrier pickup, preventing teleporting flags.
+        public static int     StateGen         = 0;
+
         // Pack full state into a single string for event 199 {ctf_s:"..."}.
-        // Format: copScore|robberScore|copStatus|robberStatus|cdrop|rdrop|ccarrier|rcarrier
+        // Format: stateGen|copScore|robberScore|copStatus|robberStatus|cdrop|rdrop|ccarrier|rcarrier
         public static string PackState()
         {
-            return CopScore + "|" + RobberScore + "|"
+            return StateGen + "|" + CopScore + "|" + RobberScore + "|"
                  + (CopFlagStatus ?? "") + "|" + (RobberFlagStatus ?? "") + "|"
                  + Vec3Str(CopDropPos) + "|" + Vec3Str(RobberDropPos) + "|"
                  + Vec3Str(CopCarrierPos) + "|" + Vec3Str(RobberCarrierPos);
@@ -9500,17 +9504,22 @@ namespace CNRMods
             try
             {
                 string[] p = s.Split('|');
-                if (p.Length < 6) return;
-                int cs; int.TryParse(p[0], out cs); CopScore         = cs;
-                int rs; int.TryParse(p[1], out rs); RobberScore      = rs;
-                CopFlagStatus    = p[2];
-                RobberFlagStatus = p[3];
-                ParseVec(p[4], ref CopDropPos);
-                ParseVec(p[5], ref RobberDropPos);
-                if (p.Length >= 8)
+                if (p.Length < 7) return;
+                // p[0] = stateGen — reject strictly older state to prevent stale authority
+                // broadcasts from overwriting more-recent carrier pickup/drop events.
+                int gen; int.TryParse(p[0], out gen);
+                if (gen < StateGen) return;
+                StateGen         = gen;
+                int cs; int.TryParse(p[1], out cs); CopScore         = cs;
+                int rs; int.TryParse(p[2], out rs); RobberScore      = rs;
+                CopFlagStatus    = p[3];
+                RobberFlagStatus = p[4];
+                ParseVec(p[5], ref CopDropPos);
+                ParseVec(p[6], ref RobberDropPos);
+                if (p.Length >= 9)
                 {
-                    ParseVec(p[6], ref CopCarrierPos);
-                    ParseVec(p[7], ref RobberCarrierPos);
+                    ParseVec(p[7], ref CopCarrierPos);
+                    ParseVec(p[8], ref RobberCarrierPos);
                 }
             }
             catch { }
@@ -9544,6 +9553,7 @@ namespace CNRMods
             RobberCarrierPos = Vector3.zero;
             CopScore         = 0;
             RobberScore      = 0;
+            StateGen         = 0;
         }
     }
 
@@ -9780,12 +9790,15 @@ namespace CNRMods
             { Destroy(gameObject); yield break; }
 
             // Wait for CTF confirmation.
+            // Only use IsCtfRoom (not PendingCtf) so a stale PendingCtf from a previous
+            // CTF selection can never activate CTF inside a vanilla Stronghold room.
+            // The master gets IsCtfRoom=true from OnEnteredRoom before this coroutine
+            // even starts; joiners wait for the master's ctf=1 broadcast (≤3s delay).
             timeout = 8f;
-            while (!CtfMode.IsCtfRoom && !CtfMode.PendingCtf && timeout > 0f)
+            while (!CtfMode.IsCtfRoom && timeout > 0f)
             { timeout -= Time.deltaTime; yield return null; }
-            if (!CtfMode.IsCtfRoom && !CtfMode.PendingCtf)
+            if (!CtfMode.IsCtfRoom)
             { Destroy(gameObject); yield break; }   // vanilla Stronghold -- leave it alone
-            CtfMode.IsCtfRoom = true;
 
             _myId = CNRMultiplayerManager.mInstance.myPlayerInfo.mId;
             ModEntry.Log("CtfHook: confirmed, myId=" + _myId);
@@ -9918,18 +9931,18 @@ namespace CNRMods
                     && Vector3.Distance(pp, CtfMode.CopDropPos) < 2.5f)
                 {
                     if (team == TeamType.Robber)       // enemy scoops it up
-                    { CtfMode.CopCarrierPos = pp; CtfMode.CopFlagStatus = _myId; BroadcastState(); }
+                    { CtfMode.CopCarrierPos = pp; CtfMode.CopFlagStatus = _myId; CtfMode.StateGen++; BroadcastState(); }
                     else if (team == TeamType.Cop)     // own team returns it
-                    { CtfMode.CopFlagStatus = CtfMode.AT_BASE; BroadcastState(); }
+                    { CtfMode.CopFlagStatus = CtfMode.AT_BASE; CtfMode.StateGen++; BroadcastState(); }
                 }
 
                 if (CtfMode.RobberFlagStatus == CtfMode.DROPPED
                     && Vector3.Distance(pp, CtfMode.RobberDropPos) < 2.5f)
                 {
                     if (team == TeamType.Cop)          // enemy scoops it up
-                    { CtfMode.RobberCarrierPos = pp; CtfMode.RobberFlagStatus = _myId; BroadcastState(); }
+                    { CtfMode.RobberCarrierPos = pp; CtfMode.RobberFlagStatus = _myId; CtfMode.StateGen++; BroadcastState(); }
                     else if (team == TeamType.Robber)  // own team returns it
-                    { CtfMode.RobberFlagStatus = CtfMode.AT_BASE; BroadcastState(); }
+                    { CtfMode.RobberFlagStatus = CtfMode.AT_BASE; CtfMode.StateGen++; BroadcastState(); }
                 }
             }
 
@@ -9940,7 +9953,7 @@ namespace CNRMods
             {
                 _copDropTimer += Time.deltaTime;
                 if (_copDropTimer >= AutoReturnSecs)
-                { CtfMode.CopFlagStatus = CtfMode.AT_BASE; _copDropTimer = 0f; BroadcastState(); }
+                { CtfMode.CopFlagStatus = CtfMode.AT_BASE; _copDropTimer = 0f; CtfMode.StateGen++; BroadcastState(); }
             }
             else _copDropTimer = 0f;
 
@@ -9948,7 +9961,7 @@ namespace CNRMods
             {
                 _robDropTimer += Time.deltaTime;
                 if (_robDropTimer >= AutoReturnSecs)
-                { CtfMode.RobberFlagStatus = CtfMode.AT_BASE; _robDropTimer = 0f; BroadcastState(); }
+                { CtfMode.RobberFlagStatus = CtfMode.AT_BASE; _robDropTimer = 0f; CtfMode.StateGen++; BroadcastState(); }
             }
             else _robDropTimer = 0f;
 
@@ -9964,7 +9977,7 @@ namespace CNRMods
             { CtfMode.CopFlagStatus = CtfMode.DROPPED; CtfMode.CopDropPos = info.mPosition; changed = true; }
             if (CtfMode.RobberFlagStatus == _myId)
             { CtfMode.RobberFlagStatus = CtfMode.DROPPED; CtfMode.RobberDropPos = info.mPosition; changed = true; }
-            if (changed) BroadcastState();
+            if (changed) { CtfMode.StateGen++; BroadcastState(); }
         }
 
         // Called by CtfZone.OnTriggerEnter.  Only fires for the local player's collider
@@ -9984,12 +9997,12 @@ namespace CNRMods
                 // Robber picks up the cop flag (at base only; dropped flags use proximity check).
                 if (myTeam == TeamType.Robber && !string.IsNullOrEmpty(_myId)
                     && CtfMode.CopFlagStatus == CtfMode.AT_BASE)
-                { CtfMode.CopCarrierPos = myInfo.mPosition; CtfMode.CopFlagStatus = _myId; BroadcastState(); return; }
+                { CtfMode.CopCarrierPos = myInfo.mPosition; CtfMode.CopFlagStatus = _myId; CtfMode.StateGen++; BroadcastState(); return; }
                 // Cop delivers the robber flag home -- score!
                 if (myTeam == TeamType.Cop && !string.IsNullOrEmpty(_myId) && CtfMode.RobberFlagStatus == _myId)
                 {
                     CtfMode.CopScore++; CtfMode.RobberFlagStatus = CtfMode.AT_BASE;
-                    BroadcastState(); ModEntry.Log("CtfHook: COP SCORES! " + CtfMode.CopScore);
+                    CtfMode.StateGen++; BroadcastState(); ModEntry.Log("CtfHook: COP SCORES! " + CtfMode.CopScore);
                     if (CtfMode.CopScore >= CtfMode.WinScore) _gameOver = true;
                     return;
                 }
@@ -9999,12 +10012,12 @@ namespace CNRMods
                 // Cop picks up the robber flag (at base only; dropped flags use proximity check).
                 if (myTeam == TeamType.Cop && !string.IsNullOrEmpty(_myId)
                     && CtfMode.RobberFlagStatus == CtfMode.AT_BASE)
-                { CtfMode.RobberCarrierPos = myInfo.mPosition; CtfMode.RobberFlagStatus = _myId; BroadcastState(); return; }
+                { CtfMode.RobberCarrierPos = myInfo.mPosition; CtfMode.RobberFlagStatus = _myId; CtfMode.StateGen++; BroadcastState(); return; }
                 // Robber delivers the cop flag home -- score!
                 if (myTeam == TeamType.Robber && !string.IsNullOrEmpty(_myId) && CtfMode.CopFlagStatus == _myId)
                 {
                     CtfMode.RobberScore++; CtfMode.CopFlagStatus = CtfMode.AT_BASE;
-                    BroadcastState(); ModEntry.Log("CtfHook: ROBBER SCORES! " + CtfMode.RobberScore);
+                    CtfMode.StateGen++; BroadcastState(); ModEntry.Log("CtfHook: ROBBER SCORES! " + CtfMode.RobberScore);
                     if (CtfMode.RobberScore >= CtfMode.WinScore) _gameOver = true;
                     return;
                 }
