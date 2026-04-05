@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.22";
+        public const  string Version = "3.1.23";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10732,101 +10732,62 @@ namespace CNRMods
     // -------------------------------------------------------------------------
     public class SpeedHook : MonoBehaviour
     {
-        // Default vanilla values: WalkSpeed=6, RunSpeed=9.
-        // Bump run by ~22% (9 -> 11) and walk proportionally (6 -> 7.3).
-        private const float TargetRunSpeed  = 11f;
-        private const float TargetWalkSpeed = 7.3f;
-        // Extra multiplier applied while holding any melee weapon.
-        private const float MeleeSpeedMult  = 3f;
+        // Vanilla JoyStickController.moveSpeed = 7f.
+        // Melee multiplier: 1.15 = 15% faster while holding knife.
+        private const float BaseMoveSpeed   = 7f;
+        private const float MeleeSpeedMult  = 1.15f;
 
-        private MonoBehaviour _fpsCtrl      = null;
-        private FieldInfo     _fiMovement   = null;
-        private FieldInfo     _fiRunSpeed   = null;
-        private FieldInfo     _fiWalkSpeed  = null;
-        private FieldInfo     _fiMaxFwd     = null;
-        private FieldInfo     _fiMaxSide    = null;
-        private FieldInfo     _fiMaxBack    = null;
-        private FieldInfo     _fiVelocity   = null;
-        private UISprite      _gunIconSprite = null; // SwitchButtonBackground UISprite
+        private MonoBehaviour _joyCtrl      = null;
+        private FieldInfo     _fiMoveSpeed  = null;
+        private UISprite      _gunIconSprite = null;
         private float         _dbgTimer     = 0f;
         private string        _lastSprite   = null;
 
-        void OnLevelWasLoaded(int level) { _fpsCtrl = null; _gunIconSprite = null; }
+        void OnLevelWasLoaded(int level) { _joyCtrl = null; _gunIconSprite = null; }
 
         void Update()
         {
-            // Re-acquire FPScontroller if missing (scene change, respawn).
-            if (_fpsCtrl == null || !((Component)_fpsCtrl).gameObject.activeInHierarchy)
+            // Re-acquire JoyStickController if missing (scene change, respawn).
+            if (_joyCtrl == null || !((Component)_joyCtrl).gameObject.activeInHierarchy)
             {
-                _fpsCtrl    = null;
-                _fiMovement = null;
+                _joyCtrl    = null;
+                _fiMoveSpeed = null;
                 GameObject pg = GameObject.FindWithTag("Player");
                 if (pg == null) return;
-                _fpsCtrl = pg.GetComponent("FPScontroller") as MonoBehaviour;
-                if (_fpsCtrl == null) return;
+                _joyCtrl = pg.GetComponent("JoyStickController") as MonoBehaviour;
+                if (_joyCtrl == null) return;
             }
 
-            // Cache FieldInfos once.
-            if (_fiMovement == null)
+            // Cache FieldInfo once.
+            if (_fiMoveSpeed == null)
             {
-                System.Type t = _fpsCtrl.GetType();
-                _fiMovement  = t.GetField("movement");
-                if (_fiMovement == null) return;
-                System.Type mt = _fiMovement.FieldType;
-                _fiRunSpeed  = mt.GetField("RunSpeed");
-                _fiWalkSpeed = mt.GetField("WalkSpeed");
-                _fiMaxFwd    = mt.GetField("maxForwardSpeed");
-                _fiMaxSide   = mt.GetField("maxSidewaysSpeed");
-                _fiMaxBack   = mt.GetField("maxBackwardsSpeed");
-                _fiVelocity  = mt.GetField("velocity");
-                ModEntry.Log("SpeedHook cache: movement=" + (mt != null ? mt.Name : "NULL")
-                    + " RunSpeed=" + (_fiRunSpeed != null ? "ok" : "NULL")
-                    + " maxFwd=" + (_fiMaxFwd != null ? "ok" : "NULL")
-                    + " maxSide=" + (_fiMaxSide != null ? "ok" : "NULL")
-                    + " maxBack=" + (_fiMaxBack != null ? "ok" : "NULL"));
+                _fiMoveSpeed = _joyCtrl.GetType().GetField("moveSpeed");
+                ModEntry.Log("SpeedHook: JoyStickController acquired, moveSpeed="
+                    + (_fiMoveSpeed != null ? "ok" : "NULL"));
+                if (_fiMoveSpeed == null) return;
             }
-            if (_fiMovement == null || _fiRunSpeed == null || _fiWalkSpeed == null) return;
 
-            // Cache the gun icon UISprite (SwitchButtonBackground) — its spriteName
-            // always reflects the currently equipped weapon, directly sourced from the HUD.
+            // Cache the gun icon UISprite for melee detection.
             if (_gunIconSprite == null)
             {
                 GameObject go = GameObject.Find("SwitchButtonBackground");
                 if (go != null) _gunIconSprite = go.GetComponent<UISprite>();
-                ModEntry.Log("SpeedHook: SwitchButtonBackground=" + (go != null ? "found" : "NOT FOUND")
-                    + " sprite=" + (_gunIconSprite != null ? _gunIconSprite.spriteName : "null"));
             }
 
-            // Apply bonus when the gun icon is showing a melee weapon.
-            string sprite = _gunIconSprite != null ? _gunIconSprite.spriteName : null;
-            bool hasMelee = sprite == "BallisticKnife" || sprite == "GingerbreadKnife";
-            float mult = hasMelee ? MeleeSpeedMult : 1f;
+            string sprite   = _gunIconSprite != null ? _gunIconSprite.spriteName : null;
+            bool   hasMelee = sprite == "BallisticKnife" || sprite == "GingerbreadKnife";
+            float  target   = BaseMoveSpeed * (hasMelee ? MeleeSpeedMult : 1f);
 
-            // Log sprite name when it changes, and also every 5s.
+            _fiMoveSpeed.SetValue(_joyCtrl, target);
+
             _dbgTimer += Time.deltaTime;
             if (sprite != _lastSprite || _dbgTimer >= 5f)
             {
-                ModEntry.Log("SpeedHook: sprite=" + (sprite ?? "null") + " hasMelee=" + hasMelee + " mult=" + mult);
+                ModEntry.Log("SpeedHook: sprite=" + (sprite ?? "null")
+                    + " hasMelee=" + hasMelee + " moveSpeed=" + target);
                 _lastSprite = sprite;
                 _dbgTimer   = 0f;
             }
-
-            // FPScontrollerMovement is a class (ref type) — GetValue returns the real object.
-            // maxForwardSpeed/maxSidewaysSpeed/maxBackwardsSpeed are the actual per-frame caps.
-            object mv = _fiMovement.GetValue(_fpsCtrl);
-            float fwdBefore = _fiMaxFwd  != null ? (float)_fiMaxFwd.GetValue(mv)  : -1f;
-            _fiRunSpeed.SetValue(mv,  TargetRunSpeed  * mult);
-            _fiWalkSpeed.SetValue(mv, TargetWalkSpeed * mult);
-            if (_fiMaxFwd  != null) _fiMaxFwd.SetValue(mv,  TargetRunSpeed  * mult);
-            if (_fiMaxSide != null) _fiMaxSide.SetValue(mv, TargetRunSpeed  * mult);
-            if (_fiMaxBack != null) _fiMaxBack.SetValue(mv, TargetWalkSpeed * mult * 0.5f);
-            float fwdAfter  = _fiMaxFwd  != null ? (float)_fiMaxFwd.GetValue(mv)  : -1f;
-            Vector3 vel = _fiVelocity != null ? (Vector3)_fiVelocity.GetValue(mv) : Vector3.zero;
-            float speed = new Vector3(vel.x, 0f, vel.z).magnitude;
-            if (sprite != _lastSprite || _dbgTimer >= 4.9f)
-                ModEntry.Log("SpeedHook vals: maxFwd " + fwdBefore + "->" + fwdAfter
-                    + " speed=" + speed.ToString("F2")
-                    + " mult=" + mult + " mv=" + (mv != null ? mv.GetType().Name : "NULL"));
         }
     }
 
