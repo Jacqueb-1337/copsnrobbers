@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.8";
+        public const  string Version = "3.1.9";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9886,6 +9886,36 @@ namespace CNRMods
                     : StrongholdHoldState.copHold;    // robber flag stolen / dropped = warning
             }
 
+            // Proximity pickup of dropped flags at their drop location.
+            // The CtfZone trigger colliders are fixed at the base; a dropped flag is visible at
+            // dropPos (anywhere on the map) but has no trigger there.  Check distance each frame
+            // so any live player within 2.5m of the drop spot can pick it up or return it.
+            // Runs on all clients (local player only) like OnZoneEnter does.
+            if (myInfo != null && !string.IsNullOrEmpty(_myId)
+                && myInfo.mStatus != PlayerStatus.dead)
+            {
+                Vector3    pp     = myInfo.mPosition;
+                TeamType   team   = myInfo.mTeam;
+
+                if (CtfMode.CopFlagStatus == CtfMode.DROPPED
+                    && Vector3.Distance(pp, CtfMode.CopDropPos) < 2.5f)
+                {
+                    if (team == TeamType.Robber)       // enemy scoops it up
+                    { CtfMode.CopFlagStatus = _myId;           BroadcastState(); }
+                    else if (team == TeamType.Cop)     // own team returns it
+                    { CtfMode.CopFlagStatus = CtfMode.AT_BASE; BroadcastState(); }
+                }
+
+                if (CtfMode.RobberFlagStatus == CtfMode.DROPPED
+                    && Vector3.Distance(pp, CtfMode.RobberDropPos) < 2.5f)
+                {
+                    if (team == TeamType.Cop)          // enemy scoops it up
+                    { CtfMode.RobberFlagStatus = _myId;           BroadcastState(); }
+                    else if (team == TeamType.Robber)  // own team returns it
+                    { CtfMode.RobberFlagStatus = CtfMode.AT_BASE; BroadcastState(); }
+                }
+            }
+
             if (!isAuthority) return;
 
             // Auto-return dropped flags.
@@ -9934,13 +9964,10 @@ namespace CNRMods
 
             if (flagId == 1) // Zone 1 = cop base / cop flag spawn
             {
-                // Robber picks up the cop flag (at base or dropped by a dead cop).
+                // Robber picks up the cop flag (at base only; dropped flags use proximity check).
                 if (myTeam == TeamType.Robber && !string.IsNullOrEmpty(_myId)
-                    && (CtfMode.CopFlagStatus == CtfMode.AT_BASE || CtfMode.CopFlagStatus == CtfMode.DROPPED))
+                    && CtfMode.CopFlagStatus == CtfMode.AT_BASE)
                 { CtfMode.CopFlagStatus = _myId; BroadcastState(); return; }
-                // Cop returns their own dropped flag to base.
-                if (myTeam == TeamType.Cop && CtfMode.CopFlagStatus == CtfMode.DROPPED)
-                { CtfMode.CopFlagStatus = CtfMode.AT_BASE; BroadcastState(); return; }
                 // Cop delivers the robber flag home -- score!
                 if (myTeam == TeamType.Cop && !string.IsNullOrEmpty(_myId) && CtfMode.RobberFlagStatus == _myId)
                 {
@@ -9952,13 +9979,10 @@ namespace CNRMods
             }
             else // Zone 2 = robber base / robber flag spawn
             {
-                // Cop picks up the robber flag (at base or dropped by a dead robber).
+                // Cop picks up the robber flag (at base only; dropped flags use proximity check).
                 if (myTeam == TeamType.Cop && !string.IsNullOrEmpty(_myId)
-                    && (CtfMode.RobberFlagStatus == CtfMode.AT_BASE || CtfMode.RobberFlagStatus == CtfMode.DROPPED))
+                    && CtfMode.RobberFlagStatus == CtfMode.AT_BASE)
                 { CtfMode.RobberFlagStatus = _myId; BroadcastState(); return; }
-                // Robber returns their own dropped flag to base.
-                if (myTeam == TeamType.Robber && CtfMode.RobberFlagStatus == CtfMode.DROPPED)
-                { CtfMode.RobberFlagStatus = CtfMode.AT_BASE; BroadcastState(); return; }
                 // Robber delivers the cop flag home -- score!
                 if (myTeam == TeamType.Robber && !string.IsNullOrEmpty(_myId) && CtfMode.CopFlagStatus == _myId)
                 {
