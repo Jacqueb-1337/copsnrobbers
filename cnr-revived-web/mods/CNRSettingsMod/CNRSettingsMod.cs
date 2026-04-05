@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.51";
+        public  const string Version = "3.1.52";
 
         public static void Load()
         {
@@ -279,6 +279,12 @@ namespace CNRSettingsMod
         private Vector2 _scrollKbm     = Vector2.zero;
         private Vector2 _scrollAccount = Vector2.zero;
         private Vector2 _scrollCtrl    = Vector2.zero;
+        // -- Swipe-to-scroll (touch) -------------------------------------------
+        private bool  _swipeActive   = false;
+        private bool  _swipeDragging = false;
+        private float _swipeStartY   = 0f;
+        private float _swipePrevY    = 0f;
+        private const float SwipeDeadZone = 10f; // scaled-GUI-px before drag counts as swipe
         private float   _kbmDeadzone   = 0.05f; // keyboard/mouse inject: axis magnitude below this is zeroed
         private float   _touchDeadzone = 0.1f;  // touch joystick: normalised magnitude below this is zeroed
         // -- Gamepad / controller state ----------------------------------------
@@ -3017,6 +3023,33 @@ namespace CNRSettingsMod
                     _gsWinBg.fontSize            = 15;
                     if (_gameFont != null) _gsWinBg.font = _gameFont;
                 }
+                // --- Swipe-to-scroll: intercept events before GUI.Window so the button-click
+                //     that fires on finger-lift is suppressed when a drag was in progress.
+                {
+                    Event e = Event.current;
+                    if (e.type == EventType.MouseDown)
+                    {
+                        _swipeActive   = true;
+                        _swipeDragging = false;
+                        _swipeStartY   = e.mousePosition.y;
+                        _swipePrevY    = e.mousePosition.y;
+                    }
+                    else if (e.type == EventType.MouseDrag && _swipeActive)
+                    {
+                        float dy = e.mousePosition.y - _swipePrevY;
+                        _swipePrevY = e.mousePosition.y;
+                        if (!_swipeDragging && Mathf.Abs(e.mousePosition.y - _swipeStartY) > SwipeDeadZone)
+                            _swipeDragging = true;
+                        if (_swipeDragging) { ApplySwipeDelta(dy); e.Use(); }
+                    }
+                    else if (e.type == EventType.MouseUp)
+                    {
+                        bool wasDragging = _swipeDragging;
+                        _swipeActive   = false;
+                        _swipeDragging = false;
+                        if (wasDragging) e.Use();
+                    }
+                }
                 _winRect = GUI.Window(9902, _winRect, DrawSettingsWindow, "  [CNR Mod]  Settings", _gsWinBg);
             }
 
@@ -3268,6 +3301,17 @@ namespace CNRSettingsMod
             // Keybind capture overlay � drawn on top of everything else
             if (_captureIdx >= 0) DrawCaptureOverlay();
             if (_gpCaptureIdx >= 0) DrawGpCaptureOverlay();
+        }
+
+        private void ApplySwipeDelta(float dy)
+        {
+            // dy = currY - prevY in scaled IMGUI space (Y=0 is top of screen).
+            // Swipe up (dy < 0) => scroll.y increases (see content below).
+            // Swipe down (dy > 0) => scroll.y decreases (see content above).
+            if      (_activeTab == 0) _scroll.y        = Mathf.Max(0f, _scroll.y        - dy);
+            else if (_activeTab == 1) _scrollKbm.y     = Mathf.Max(0f, _scrollKbm.y     - dy);
+            else if (_activeTab == 3) _scrollCtrl.y    = Mathf.Max(0f, _scrollCtrl.y    - dy);
+            else                      _scrollAccount.y = Mathf.Max(0f, _scrollAccount.y - dy);
         }
 
         // =====================================================================
