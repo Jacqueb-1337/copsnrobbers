@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.31";
+        public const  string Version = "3.1.32";
 
         // -- Mod version registry ? every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9433,15 +9433,16 @@ namespace CNRMods
             string acctLabel = SettingsModPresent ? "Settings" : "Account";
 
             const float pad = 6f, textBtnH = 26f;
+            const float iconAspect = 769f / 693f; // all three icon PNGs are 769x693
 
             // -- Mail button ? to the right of the user agreement button -------
             float mailW, mailH, mailX, mailY;
             if (_ecoNguiCam != null && _goAgreementBtn != null)
             {
                 Rect ar = EcoNguiRect(_ecoNguiCam, _goAgreementBtn, sc);
-                // match anchor button size exactly
-                mailW = ar.width;
+                // width derived from icon aspect ratio so there's no dead space beside the icon
                 mailH = ar.height;
+                mailW = _texMailIcon != null ? mailH * iconAspect : ar.width;
                 mailX = ar.x + ar.width + pad;
                 mailY = ar.y;
                 if (!_ecoDbgLog)
@@ -9454,8 +9455,8 @@ namespace CNRMods
             }
             else
             {
-                mailW = _texMailIcon != null ? textBtnH : 130f;
                 mailH = textBtnH;
+                mailW = _texMailIcon != null ? textBtnH * iconAspect : 130f;
                 mailX = ECO_REF_W - 10f - 260f; mailY = vh - 34f;
             }
 
@@ -9464,16 +9465,16 @@ namespace CNRMods
             if (_ecoNguiCam != null && _goRecordBtn != null)
             {
                 Rect rr = EcoNguiRect(_ecoNguiCam, _goRecordBtn, sc);
-                // match anchor button size exactly
-                acctW = rr.width;
+                // width derived from icon aspect ratio
                 acctH = rr.height;
+                acctW = _texSettingsIcon != null ? acctH * iconAspect : rr.width;
                 acctX = rr.x - acctW - pad;
                 acctY = rr.y;
             }
             else
             {
-                acctW = _texSettingsIcon != null ? textBtnH : 120f;
                 acctH = textBtnH;
+                acctW = _texSettingsIcon != null ? textBtnH * iconAspect : 120f;
                 acctX = ECO_REF_W - 10f - 120f; acctY = vh - 34f;
             }
 
