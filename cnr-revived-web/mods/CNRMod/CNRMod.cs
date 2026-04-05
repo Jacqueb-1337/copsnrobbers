@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.16";
+        public const  string Version = "3.1.17";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10771,10 +10771,11 @@ namespace CNRMods
             }
             if (_fiMovement == null || _fiRunSpeed == null || _fiWalkSpeed == null) return;
 
-            // Apply +15% bonus when carrying a melee weapon.
-            bool hasMelee = PlayerLogic.mInstance != null
-                && (PlayerLogic.mInstance.mWeaponType == WeaponType.BallisticKnife
-                 || PlayerLogic.mInstance.mWeaponType == WeaponType.GingerbreadKnife);
+            // Apply bonus when carrying a melee weapon.
+            // NGUI.mInstance.curWeapon is a string set by the HUD on every weapon switch
+            // and is reliable in both singleplayer and multiplayer.
+            string cw = NGUI.mInstance != null ? NGUI.mInstance.curWeapon : null;
+            bool hasMelee = cw == "BallisticKnife" || cw == "GingerbreadKnife";
             float mult = hasMelee ? MeleeSpeedMult : 1f;
 
             // movement is a struct — get, mutate, set back.
