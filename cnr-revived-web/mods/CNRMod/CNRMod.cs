@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.11";
+        public const  string Version = "3.1.13";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -173,6 +173,7 @@ namespace CNRMods
                 go.AddComponent<EconomyHook>();
                 go.AddComponent<PackHook>();
                 go.AddComponent<SpeedHook>();
+                go.AddComponent<HitRegHook>();
                 GameObject.DontDestroyOnLoad(go);
 
                 Log("Mod root created.  IP=" + (ServerIp != "" ? ServerIp : "(none)") +
@@ -10760,6 +10761,69 @@ namespace CNRMods
             _fiRunSpeed.SetValue(mv,  TargetRunSpeed);
             _fiWalkSpeed.SetValue(mv, TargetWalkSpeed);
             _fiMovement.SetValue(_fpsCtrl, mv);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  HITREG HOOK — fixes the onlinePlayerTag bug that silently blocks bullet
+    //  damage in multiplayer.
+    //
+    //  Root cause:
+    //    WeaponManager.onlinePlayerTag is initialised to the string literal
+    //    "null" in its constructor (UnityScript code) and is never overwritten
+    //    for the LOCAL player's weapon manager.  When a bullet spawns it calls
+    //    SetMyTag(weaponManager.onlinePlayerTag) → bullet.onlinePlayerTag = "null".
+    //    In Bullet.Update(), the guard that fires NetPlayerController.OnDamaged
+    //    is: if (onlinePlayerTag == string.Empty) — "null" != "" → NEVER fires
+    //    → the network damage message is never sent → blood splatter shows but
+    //    no HP is deducted on the target.
+    //
+    //  Fix:
+    //    Every frame, find the local player's WeaponManager (bPlayer == true)
+    //    and set onlinePlayerTag = "" so subsequent bullet spawns inherit the
+    //    correct empty-string value and the Bullet.Update() guard passes.
+    // -------------------------------------------------------------------------
+    public class HitRegHook : MonoBehaviour
+    {
+        private Component  _wmComp     = null;
+        private FieldInfo  _fiOPTag    = null;
+        private FieldInfo  _fiBPlayer  = null;
+
+        void OnLevelWasLoaded(int level) { _wmComp = null; }
+
+        void Update()
+        {
+            if (_wmComp == null || !((Component)_wmComp).gameObject.activeInHierarchy)
+            {
+                _wmComp    = null;
+                _fiOPTag   = null;
+                _fiBPlayer = null;
+
+                // WeaponManager is a MonoBehaviour in the UnityScript .dll.
+                // bPlayer == true identifies the LOCAL player's weapon manager.
+                Component[] all = (Component[])FindObjectsOfType(Type.GetType("WeaponManager"));
+                if (all == null || all.Length == 0) return;
+
+                System.Type wmt = null;
+                foreach (Component c in all)
+                {
+                    if (wmt == null) { wmt = c.GetType(); _fiBPlayer = wmt.GetField("bPlayer"); _fiOPTag = wmt.GetField("onlinePlayerTag"); }
+                    if (_fiBPlayer == null || _fiOPTag == null) return;
+                    bool bp = (bool)_fiBPlayer.GetValue(c);
+                    if (bp) { _wmComp = c; break; }
+                }
+                if (_wmComp == null) return;
+            }
+
+            // Keep onlinePlayerTag at string.Empty so every bullet spawned by
+            // the local player passes the Bullet.Update() damage check and
+            // calls NetPlayerController.OnDamaged → network damage delivery.
+            if (_fiOPTag != null)
+            {
+                string cur = (string)_fiOPTag.GetValue(_wmComp);
+                if (cur != string.Empty)
+                    _fiOPTag.SetValue(_wmComp, string.Empty);
+            }
         }
     }
 }
