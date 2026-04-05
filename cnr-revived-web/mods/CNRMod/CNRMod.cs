@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.13";
+        public const  string Version = "3.1.14";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9903,7 +9903,7 @@ namespace CNRMods
                     && Vector3.Distance(pp, CtfMode.CopDropPos) < 2.5f)
                 {
                     if (team == TeamType.Robber)       // enemy scoops it up
-                    { CtfMode.CopFlagStatus = _myId;           BroadcastState(); }
+                    { CtfMode.CopCarrierPos = pp; CtfMode.CopFlagStatus = _myId; BroadcastState(); }
                     else if (team == TeamType.Cop)     // own team returns it
                     { CtfMode.CopFlagStatus = CtfMode.AT_BASE; BroadcastState(); }
                 }
@@ -9912,7 +9912,7 @@ namespace CNRMods
                     && Vector3.Distance(pp, CtfMode.RobberDropPos) < 2.5f)
                 {
                     if (team == TeamType.Cop)          // enemy scoops it up
-                    { CtfMode.RobberFlagStatus = _myId;           BroadcastState(); }
+                    { CtfMode.RobberCarrierPos = pp; CtfMode.RobberFlagStatus = _myId; BroadcastState(); }
                     else if (team == TeamType.Robber)  // own team returns it
                     { CtfMode.RobberFlagStatus = CtfMode.AT_BASE; BroadcastState(); }
                 }
@@ -9969,7 +9969,7 @@ namespace CNRMods
                 // Robber picks up the cop flag (at base only; dropped flags use proximity check).
                 if (myTeam == TeamType.Robber && !string.IsNullOrEmpty(_myId)
                     && CtfMode.CopFlagStatus == CtfMode.AT_BASE)
-                { CtfMode.CopFlagStatus = _myId; BroadcastState(); return; }
+                { CtfMode.CopCarrierPos = myInfo.mPosition; CtfMode.CopFlagStatus = _myId; BroadcastState(); return; }
                 // Cop delivers the robber flag home -- score!
                 if (myTeam == TeamType.Cop && !string.IsNullOrEmpty(_myId) && CtfMode.RobberFlagStatus == _myId)
                 {
@@ -9984,7 +9984,7 @@ namespace CNRMods
                 // Cop picks up the robber flag (at base only; dropped flags use proximity check).
                 if (myTeam == TeamType.Cop && !string.IsNullOrEmpty(_myId)
                     && CtfMode.RobberFlagStatus == CtfMode.AT_BASE)
-                { CtfMode.RobberFlagStatus = _myId; BroadcastState(); return; }
+                { CtfMode.RobberCarrierPos = myInfo.mPosition; CtfMode.RobberFlagStatus = _myId; BroadcastState(); return; }
                 // Robber delivers the cop flag home -- score!
                 if (myTeam == TeamType.Robber && !string.IsNullOrEmpty(_myId) && CtfMode.CopFlagStatus == _myId)
                 {
@@ -10106,7 +10106,20 @@ namespace CNRMods
             }
             else
             {
+                // Look up carrier's live position from game's own per-client list (5 Hz update).
+                // This is far smoother and more immediate than the 2 Hz CTF-state broadcast.
+                // Fall back to the CTF-broadcast carrier position if the carrier isn't found yet.
                 pos = carrierPos;
+                var mgr = CNRMultiplayerManager.mInstance;
+                if (mgr != null && mgr.otherPlayersInfoList != null)
+                {
+                    for (int i = 0; i < mgr.otherPlayersInfoList.Length; i++)
+                    {
+                        PlayerInfo pi = mgr.otherPlayersInfoList[i];
+                        if (pi != null && pi.mId == status)
+                        { pos = pi.mPosition; break; }
+                    }
+                }
             }
             flagMesh.transform.position = pos + new Vector3(0f, 2.2f, 0f);
         }
