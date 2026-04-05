@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.47";
+        public  const string Version = "3.1.48";
 
         public static void Load()
         {
@@ -245,11 +245,15 @@ namespace CNRSettingsMod
         private FieldInfo     _fiMinY, _fiMaxY; // float minimumY / maximumY on Sliderotate
         private const float   CAM_MIN_Y_DEFAULT = -35f;
         private const float   CAM_MAX_Y_DEFAULT =  35f;
-        // -55° down: noticeably more range than vanilla -35° but stops short of the angle
-        // where the weapon raycast origin passes through the player's own capsule collider.
-        // Vanilla used -35° specifically to prevent self-hits; -70° caused them.
-        private const float   CAM_MIN_Y_WIDE    = -55f;
+        // -70° down: full downward freedom.  Self-hits are prevented by redirecting the
+        // weapon-fire camera direction to CAM_MIN_Y_SHOT on frames where fire is active;
+        // the view pitch itself (tracked in Sliderotate.rotationY) stays at the real -70°.
+        private const float   CAM_MIN_Y_WIDE    = -70f;
         private const float   CAM_MAX_Y_WIDE    =  70f;
+        // Below this pitch while firing, ClampFirePitchForSelfHit() redirects camTransform
+        // to this angle so weapon raycasts (bullets, knife) skip the player's own colliders.
+        // Grenade/RPG throws use physics after spawn and are unaffected.
+        private const float   CAM_MIN_Y_SHOT    = -50f;
         private bool          _wideCam          = false;
         private GameObject   _aimBtn          = null;
         private bool         _unscopeOnFire   = true;   // default: game behaviour (unscope after fire)
@@ -1873,6 +1877,8 @@ namespace CNRSettingsMod
                 ApplyTouchJoystickDeadzone();
             // Update fire-cooldown state for crosshair coloring.
             if (_inGameScene) UpdateWeaponCooldown();
+            // When wide-cam is active, redirect weapon raycasts away from self when looking steeply down.
+            if (_wideCam && _inGameScene) ClampFirePitchForSelfHit();
         }
 
         // Reads nextFireTime from the selected WeaponScript to know if the gun is still cooling down.
@@ -2456,6 +2462,34 @@ namespace CNRSettingsMod
                 _fiMaxY.SetValue(sr, maxY);
             }
             SettingsModEntry.Log("ApplyWideCam: wide=" + _wideCam + " minY=" + minY + " maxY=" + maxY);
+        }
+
+        // When wide-cam allows a deeper downward pitch than CAM_MIN_Y_SHOT, bullet/melee
+        // weapon raycasts can self-hit the player's own colliders.  We prevent this by
+        // temporarily overwriting the camera transform's local euler angle for the frame
+        // in which fire is active.  Our LateUpdate runs before CRWeaponScript.LateUpdate()
+        // (which performs the actual raycast), so it sees the clamped direction.
+        // Sliderotate's internal rotationY tracker is NOT modified, ensuring the view
+        // returns to the real pitch (e.g. -70°) on the very next Sliderotate.Update() pass.
+        // Grenades and RPGs use physics projectiles after spawn and are unaffected.
+        private void ClampFirePitchForSelfHit()
+        {
+            if (_sliderotate == null || _fiRotationY == null || _fiCamTransform == null) return;
+
+            bool fireActive = _kbmFireWasHeld
+                || ((object)CRInput.mInstance         != null && CRInput.mInstance.m_bFire)
+                || ((object)CRJoyStickController.mInstance != null && CRJoyStickController.mInstance.fireFlag);
+            if (!fireActive) return;
+
+            float pitch = (float)_fiRotationY.GetValue(_sliderotate); // negative = looking down
+            if (pitch >= CAM_MIN_Y_SHOT) return;  // within safe range, no redirect needed
+
+            Transform camT = (Transform)_fiCamTransform.GetValue(_sliderotate);
+            if (camT == null) return;
+
+            // Camera euler.x = -rotY (positive euler x = look downward in Unity FPS convention).
+            // Setting x = -CAM_MIN_Y_SHOT = 50° redirects weapon raycasts to the safe angle.
+            camT.localEulerAngles = new Vector3(-CAM_MIN_Y_SHOT, 0f, 0f);
         }
 
         // (fire detection now uses FpsOnFire pref polling in ApplySensitivity)
