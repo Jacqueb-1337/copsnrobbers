@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.26";
+        public const  string Version = "3.1.27";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10161,7 +10161,7 @@ namespace CNRMods
 
         private bool  _packsEnabled  = true;
         private const float PACK_INTERVAL = 20f;
-        private int   _packMax       = 2;
+        private int   _packMax       = 5;
 
         // Ammo packs
         private const string AP_PRE  = "cnr_pk_";
