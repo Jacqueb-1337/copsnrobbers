@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.46";
+        public  const string Version = "3.1.47";
 
         public static void Load()
         {
@@ -245,7 +245,10 @@ namespace CNRSettingsMod
         private FieldInfo     _fiMinY, _fiMaxY; // float minimumY / maximumY on Sliderotate
         private const float   CAM_MIN_Y_DEFAULT = -35f;
         private const float   CAM_MAX_Y_DEFAULT =  35f;
-        private const float   CAM_MIN_Y_WIDE    = -70f;
+        // -55° down: noticeably more range than vanilla -35° but stops short of the angle
+        // where the weapon raycast origin passes through the player's own capsule collider.
+        // Vanilla used -35° specifically to prevent self-hits; -70° caused them.
+        private const float   CAM_MIN_Y_WIDE    = -55f;
         private const float   CAM_MAX_Y_WIDE    =  70f;
         private bool          _wideCam          = false;
         private GameObject   _aimBtn          = null;
@@ -3060,7 +3063,7 @@ namespace CNRSettingsMod
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Normal  [" + _sensNormal.ToString("F1") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newSens = DrawSlider(_sensNormal, 1f, 7f);
+            float newSens = DrawSlider(_sensNormal, 1f, 20f);
             GUILayout.EndHorizontal();
             if (Mathf.Abs(newSens - _sensNormal) > 0.05f)
             {
