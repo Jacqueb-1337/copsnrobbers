@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.14";
+        public const  string Version = "3.1.15";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10736,6 +10736,8 @@ namespace CNRMods
         // Bump run by ~22% (9 -> 11) and walk proportionally (6 -> 7.3).
         private const float TargetRunSpeed  = 11f;
         private const float TargetWalkSpeed = 7.3f;
+        // Extra +15% multiplier applied while holding any melee weapon.
+        private const float MeleeSpeedMult  = 1.15f;
 
         private MonoBehaviour _fpsCtrl    = null;
         private FieldInfo     _fiMovement = null;
@@ -10769,10 +10771,16 @@ namespace CNRMods
             }
             if (_fiMovement == null || _fiRunSpeed == null || _fiWalkSpeed == null) return;
 
+            // Apply +15% bonus when carrying a melee weapon.
+            bool hasMelee = PlayerLogic.mInstance != null
+                && (PlayerLogic.mInstance.mWeaponType == WeaponType.BallisticKnife
+                 || PlayerLogic.mInstance.mWeaponType == WeaponType.GingerbreadKnife);
+            float mult = hasMelee ? MeleeSpeedMult : 1f;
+
             // movement is a struct — get, mutate, set back.
             object mv = _fiMovement.GetValue(_fpsCtrl);
-            _fiRunSpeed.SetValue(mv,  TargetRunSpeed);
-            _fiWalkSpeed.SetValue(mv, TargetWalkSpeed);
+            _fiRunSpeed.SetValue(mv,  TargetRunSpeed  * mult);
+            _fiWalkSpeed.SetValue(mv, TargetWalkSpeed * mult);
             _fiMovement.SetValue(_fpsCtrl, mv);
         }
     }
