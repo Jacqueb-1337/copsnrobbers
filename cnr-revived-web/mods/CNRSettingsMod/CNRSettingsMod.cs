@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.44";
+        public  const string Version = "3.1.45";
 
         public static void Load()
         {
@@ -1178,6 +1178,10 @@ namespace CNRSettingsMod
         private System.Reflection.FieldInfo _fiJumpCharCtrl   = null;
         private System.Collections.Generic.HashSet<int> _jumpTouchIds =
             new System.Collections.Generic.HashSet<int>();
+        // Tracks which touch finger IDs legitimately STARTED on the fire button this frame.
+        // Used by SuppressFalseFire() to cancel fire events from camera-swipe touches.
+        private System.Collections.Generic.HashSet<int> _fireTouchIds =
+            new System.Collections.Generic.HashSet<int>();
 
         // Our own jump arc � replaces JoyStickController's clunky 5-segment arc.
         // The game permanently applies Physics.gravity (-9.81 m/s Y) to the
@@ -1372,6 +1376,7 @@ namespace CNRSettingsMod
             _fiJumpTime       = null;
             _fiJumpCharCtrl   = null;
             _jumpTouchIds.Clear();
+            _fireTouchIds.Clear();
             _ownJumpActive = false;
             _ownJumpVelY   = 0f;
             _kbmFireWasHeld  = false;
@@ -1741,6 +1746,11 @@ namespace CNRSettingsMod
             // Touch camera: route right-side drag through KbmInjectMouseLook so behaviour
             // matches mouse exactly (no Android touch-slop deadzone, same sensitivity slider).
             TouchCameraDetect();
+            // Suppress false fire events caused by camera-swipe touches accidentally
+            // triggering the NGUI fire button (vanilla bug: UIButtonEventKit.OnPress fires
+            // when any touch enters the button's collider, including camera-drag touches).
+            // Only active in CNR multiplayer touch mode.
+            SuppressFalseFire();
             // Jump-on-press: NGUI's OnClick fires on finger-up, so holding the jump
             // button delays the jump until release.  This detects the touch directly
             // and sets OnJump=1 on Began so the jump triggers immediately, and again
@@ -1879,6 +1889,82 @@ namespace CNRSettingsMod
 
             float nft = (float)_fiWmNextFireTime.GetValue(selectedWeapon);
             _weapOnCooldown = Time.time < nft;
+        }
+
+        // Suppresses false fire events in CNR multiplayer touch mode.
+        // The vanilla NGUI UICamera fires OnPress(true) on the fire button whenever
+        // ANY touch enters its collider -- including camera-swipe touches that were
+        // never intended as fire. This sets CRInput.m_bFire / CRJoyStickController.fireFlag
+        // which causes other players to hear continuous gunfire (no damage occurs because
+        // no hit-detection raycast is performed). Fix: track which touch IDs actually BEGAN
+        // on the fire button; cancel any that drift far from it; reset fire flags when no
+        // legitimate fire touch is active.
+        private void SuppressFalseFire()
+        {
+            // Only relevant in CNR multiplayer touch mode.
+            if ((object)CRInput.mInstance == null) return;
+            if (_kbmEnabled && _cursorLocked) return;  // KBM: KbmFireDetect owns fire
+            if (_gamepadEnabled) return;               // Gamepad: its own fire path
+
+            if (_dragGOs[0] == null || _nguiCam == null)
+            {
+                _fireTouchIds.Clear();
+                return;
+            }
+
+            if (Input.touchCount == 0)
+            {
+                _fireTouchIds.Clear();
+                CRInput.mInstance.m_bFire = false;
+                if ((object)CRJoyStickController.mInstance != null)
+                    CRJoyStickController.mInstance.fireFlag = false;
+                return;
+            }
+
+            // Project fire button to screen space.
+            Vector3 worldCenter = _dragGOs[0].transform.position;
+            Vector3 scrCenter   = _nguiCam.WorldToScreenPoint(worldCenter);
+            float   halfW       = _dragGOs[0].transform.lossyScale.x * 0.5f;
+            float   scrRadius   = 80f;
+            if (halfW >= 0.001f)
+            {
+                Vector3 scrEdge = _nguiCam.WorldToScreenPoint(
+                    worldCenter + _nguiCam.transform.right * halfW);
+                scrRadius = Mathf.Max(80f, Mathf.Abs(scrEdge.x - scrCenter.x));
+            }
+            float pressRadius2 = scrRadius * scrRadius;
+            float driftRadius2 = (scrRadius * 1.8f) * (scrRadius * 1.8f);
+
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch t = Input.GetTouch(i);
+                if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
+                {
+                    _fireTouchIds.Remove(t.fingerId);
+                    continue;
+                }
+                float dx = t.position.x - scrCenter.x;
+                float dy = t.position.y - scrCenter.y;
+                float d2 = dx * dx + dy * dy;
+                // Claim touch if it started within the fire button bounds.
+                if (t.phase == TouchPhase.Began && d2 <= pressRadius2)
+                    _fireTouchIds.Add(t.fingerId);
+                // A tracked fire touch that drifted far from the button is now a camera/movement drag.
+                // Release the NGUI button so it stops being treated as pressed.
+                if (_fireTouchIds.Contains(t.fingerId) && d2 > driftRadius2)
+                {
+                    _fireTouchIds.Remove(t.fingerId);
+                    _dragGOs[0].SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
+                }
+            }
+
+            // No tracked fire touch → no legitimate fire from touch input → suppress.
+            if (_fireTouchIds.Count == 0)
+            {
+                CRInput.mInstance.m_bFire = false;
+                if ((object)CRJoyStickController.mInstance != null)
+                    CRJoyStickController.mInstance.fireFlag = false;
+            }
         }
 
         // Supplemental fire-button touch detection.
