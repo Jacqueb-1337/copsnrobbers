@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.55";
+        public  const string Version = "3.1.56";
 
         public static void Load()
         {
@@ -284,7 +284,8 @@ namespace CNRSettingsMod
         private bool  _swipeDragging    = false;
         private float _swipeStartScreenY = 0f;
         private float _swipePrevScreenY  = 0f;
-        private float _swipeGuiDownY    = 0f;  // IMGUI y at finger-down (for OnGUI displacement check)
+        private float _swipeGuiDownY     = 0f;   // IMGUI y at finger-down (for OnGUI displacement check)
+        private bool  _swipeGuiFingerDown = false; // true only while a finger is physically down
         private const float SwipeDeadZonePx  = 12f;  // screen pixels before Update() drag counts as swipe
         private const float SwipeGuiDeadZone = 8f;   // IMGUI-space pixels for OnGUI click suppression
         private float   _kbmDeadzone   = 0.05f; // keyboard/mouse inject: axis magnitude below this is zeroed
@@ -3064,21 +3065,25 @@ namespace CNRSettingsMod
                     if (_gameFont != null) _gsWinBg.font = _gameFont;
                 }
                 // Swipe-to-scroll click suppression.
-                // Record IMGUI finger-down Y so we can check raw displacement on lift.
                 if (Event.current.type == EventType.MouseDown)
-                    _swipeGuiDownY = Event.current.mousePosition.y;
-                // While a swipe is in progress, clear hotControl every pass so no button
-                // is ever in "pressed" state -- the key insight: buttons fire on hotControl
-                // match, not just event type, so Event.Use() alone is not enough.
-                bool guiSwipeDragging = _swipeDragging ||
-                    Mathf.Abs(Event.current.mousePosition.y - _swipeGuiDownY) > SwipeGuiDeadZone;
+                {
+                    _swipeGuiDownY     = Event.current.mousePosition.y;
+                    _swipeGuiFingerDown = true;
+                }
+                // Only check displacement while a finger is actually held down.
+                // Without this guard, (mousePos.y - 0) > 8 is always true on startup,
+                // which clears hotControl permanently and breaks all buttons.
+                bool guiSwipeDragging = _swipeGuiFingerDown && (
+                    _swipeDragging ||
+                    Mathf.Abs(Event.current.mousePosition.y - _swipeGuiDownY) > SwipeGuiDeadZone);
                 if (guiSwipeDragging)
                     GUIUtility.hotControl = 0;
-                if (Event.current.type == EventType.MouseUp && guiSwipeDragging)
+                if (Event.current.type == EventType.MouseUp)
                 {
-                    _swipeDragging = false;
-                    GUIUtility.hotControl = 0;
-                    Event.current.Use();
+                    bool wasDragging = guiSwipeDragging;
+                    _swipeDragging     = false;
+                    _swipeGuiFingerDown = false;
+                    if (wasDragging) { GUIUtility.hotControl = 0; Event.current.Use(); }
                 }
                 _winRect = GUI.Window(9902, _winRect, DrawSettingsWindow, "  [CNR Mod]  Settings", _gsWinBg);
             }
