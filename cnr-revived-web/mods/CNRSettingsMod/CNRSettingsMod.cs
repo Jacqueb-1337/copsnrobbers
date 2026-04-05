@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.45";
+        public  const string Version = "3.1.46";
 
         public static void Load()
         {
@@ -1499,7 +1499,12 @@ namespace CNRSettingsMod
                 return; // suppress all gameplay input
             }
 
-            if (Input.GetKeyDown(KeyCode.Escape) && _cursorLocked) { KbmSetCursorLocked(false); return; }
+            // On some Android phones right-click fires both Mouse1 and KeyCode.Escape
+            // (the OS maps the right button to the Back action which Unity receives as Escape).
+            // Guard: don't unlock on Escape if the aim key (Mouse1) is simultaneously held.
+            bool aimKeyHeld = (_kbKeys[8] == KeyCode.Mouse1 && Input.GetMouseButton(1))
+                           || (_capListener != null && _kbKeys[8] == KeyCode.Mouse1 && _capListener.rmbHeld);
+            if (Input.GetKeyDown(KeyCode.Escape) && _cursorLocked && !aimKeyHeld) { KbmSetCursorLocked(false); return; }
             if (Input.GetMouseButtonDown(0) && !_cursorLocked && !_showSettings && !_wasPauseVisible) { KbmSetCursorLocked(true); return; }
             if (!_cursorLocked || _showSettings) return;
 
