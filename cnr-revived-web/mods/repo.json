@@ -597,11 +597,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.39",
+      "latestVersion": "3.1.41",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.41",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.41.dll",
+          "changelog": "Touch sens slider now controls touch camera; crosshair turns red during fire cooldown (KBM); camera drag restricted to right half of screen; fix move-joystick hijacking camera angle after respawn"
+        },
         {
           "version": "3.1.39",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.39.dll",
