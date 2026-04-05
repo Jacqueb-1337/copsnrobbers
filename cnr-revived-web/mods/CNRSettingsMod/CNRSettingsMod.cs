@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.43";
+        public  const string Version = "3.1.44";
 
         public static void Load()
         {
@@ -1235,25 +1235,31 @@ namespace CNRSettingsMod
             if (Application.platform != RuntimePlatform.Android) return;
             try
             {
-                using (AndroidJavaClass up = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
-                using (AndroidJavaObject ac = up.GetStatic<AndroidJavaObject>("currentActivity"))
+                // Do NOT use 'using' on up/ac — runOnUiThread posts the runnable
+                // asynchronously to the Android UI thread, so ac would be disposed
+                // before the lambda executes, causing a native JNI crash.
+                AndroidJavaClass  up = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                AndroidJavaObject ac = up.GetStatic<AndroidJavaObject>("currentActivity");
+                ac.Call("runOnUiThread", new AndroidJavaRunnable(() =>
                 {
-                    ac.Call("runOnUiThread", new AndroidJavaRunnable(() =>
+                    try
                     {
-                        using (AndroidJavaObject window = ac.Call<AndroidJavaObject>("getWindow"))
-                        using (AndroidJavaObject decorView = window.Call<AndroidJavaObject>("getDecorView"))
-                        {
-                            // SYSTEM_UI_FLAG_IMMERSIVE_STICKY (0x1000) |
-                            // SYSTEM_UI_FLAG_HIDE_NAVIGATION  (0x0002) |
-                            // SYSTEM_UI_FLAG_FULLSCREEN        (0x0004) |
-                            // SYSTEM_UI_FLAG_LAYOUT_STABLE     (0x0100) |
-                            // SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION (0x0200) |
-                            // SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN (0x0400)
-                            int flags = 0x1000 | 0x0002 | 0x0004 | 0x0100 | 0x0200 | 0x0400;
-                            decorView.Call("setSystemUiVisibility", flags);
-                        }
-                    }));
-                }
+                        AndroidJavaObject window    = ac.Call<AndroidJavaObject>("getWindow");
+                        AndroidJavaObject decorView = window.Call<AndroidJavaObject>("getDecorView");
+                        // SYSTEM_UI_FLAG_IMMERSIVE_STICKY (0x1000) |
+                        // SYSTEM_UI_FLAG_HIDE_NAVIGATION  (0x0002) |
+                        // SYSTEM_UI_FLAG_FULLSCREEN        (0x0004) |
+                        // SYSTEM_UI_FLAG_LAYOUT_STABLE     (0x0100) |
+                        // SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION (0x0200) |
+                        // SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN (0x0400)
+                        int flags = 0x1000 | 0x0002 | 0x0004 | 0x0100 | 0x0200 | 0x0400;
+                        decorView.Call("setSystemUiVisibility", flags);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        SettingsModEntry.Log("SetImmersiveMode UI-thread error: " + ex.Message);
+                    }
+                }));
             }
             catch (System.Exception e)
             {
