@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.17";
+        public const  string Version = "3.1.18";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10736,15 +10736,16 @@ namespace CNRMods
         // Bump run by ~22% (9 -> 11) and walk proportionally (6 -> 7.3).
         private const float TargetRunSpeed  = 11f;
         private const float TargetWalkSpeed = 7.3f;
-        // Extra +15% multiplier applied while holding any melee weapon.
+        // Extra multiplier applied while holding any melee weapon.
         private const float MeleeSpeedMult  = 3f;
 
-        private MonoBehaviour _fpsCtrl    = null;
-        private FieldInfo     _fiMovement = null;
-        private FieldInfo     _fiRunSpeed = null;
-        private FieldInfo     _fiWalkSpeed = null;
+        private MonoBehaviour _fpsCtrl      = null;
+        private FieldInfo     _fiMovement   = null;
+        private FieldInfo     _fiRunSpeed   = null;
+        private FieldInfo     _fiWalkSpeed  = null;
+        private UISprite      _gunIconSprite = null; // SwitchButtonBackground UISprite
 
-        void OnLevelWasLoaded(int level) { _fpsCtrl = null; } // re-acquire next Update
+        void OnLevelWasLoaded(int level) { _fpsCtrl = null; _gunIconSprite = null; }
 
         void Update()
         {
@@ -10771,11 +10772,17 @@ namespace CNRMods
             }
             if (_fiMovement == null || _fiRunSpeed == null || _fiWalkSpeed == null) return;
 
-            // Apply bonus when carrying a melee weapon.
-            // NGUI.mInstance.curWeapon is a string set by the HUD on every weapon switch
-            // and is reliable in both singleplayer and multiplayer.
-            string cw = NGUI.mInstance != null ? NGUI.mInstance.curWeapon : null;
-            bool hasMelee = cw == "BallisticKnife" || cw == "GingerbreadKnife";
+            // Cache the gun icon UISprite (SwitchButtonBackground) — its spriteName
+            // always reflects the currently equipped weapon, directly sourced from the HUD.
+            if (_gunIconSprite == null)
+            {
+                GameObject go = GameObject.Find("SwitchButtonBackground");
+                if (go != null) _gunIconSprite = go.GetComponent<UISprite>();
+            }
+
+            // Apply bonus when the gun icon is showing a melee weapon.
+            string sprite = _gunIconSprite != null ? _gunIconSprite.spriteName : null;
+            bool hasMelee = sprite == "BallisticKnife" || sprite == "GingerbreadKnife";
             float mult = hasMelee ? MeleeSpeedMult : 1f;
 
             // movement is a struct — get, mutate, set back.
