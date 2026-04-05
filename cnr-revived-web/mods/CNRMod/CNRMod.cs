@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.19";
+        public const  string Version = "3.1.20";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10743,6 +10743,9 @@ namespace CNRMods
         private FieldInfo     _fiMovement   = null;
         private FieldInfo     _fiRunSpeed   = null;
         private FieldInfo     _fiWalkSpeed  = null;
+        private FieldInfo     _fiMaxFwd     = null;
+        private FieldInfo     _fiMaxSide    = null;
+        private FieldInfo     _fiMaxBack    = null;
         private UISprite      _gunIconSprite = null; // SwitchButtonBackground UISprite
         private float         _dbgTimer     = 0f;
         private string        _lastSprite   = null;
@@ -10771,6 +10774,9 @@ namespace CNRMods
                 System.Type mt = _fiMovement.FieldType;
                 _fiRunSpeed  = mt.GetField("RunSpeed");
                 _fiWalkSpeed = mt.GetField("WalkSpeed");
+                _fiMaxFwd    = mt.GetField("maxForwardSpeed");
+                _fiMaxSide   = mt.GetField("maxSidewaysSpeed");
+                _fiMaxBack   = mt.GetField("maxBackwardsSpeed");
             }
             if (_fiMovement == null || _fiRunSpeed == null || _fiWalkSpeed == null) return;
 
@@ -10799,9 +10805,15 @@ namespace CNRMods
             }
 
             // movement is a struct — get, mutate, set back.
+            // RunSpeed/WalkSpeed are source values; maxForwardSpeed/maxSidewaysSpeed/maxBackwardsSpeed
+            // are what FPScontroller actually enforces each frame (set by OnRunning/OffRunning).
+            // We must update all five so the cap matches the raised speed.
             object mv = _fiMovement.GetValue(_fpsCtrl);
             _fiRunSpeed.SetValue(mv,  TargetRunSpeed  * mult);
             _fiWalkSpeed.SetValue(mv, TargetWalkSpeed * mult);
+            if (_fiMaxFwd  != null) _fiMaxFwd.SetValue(mv,  TargetRunSpeed  * mult);
+            if (_fiMaxSide != null) _fiMaxSide.SetValue(mv, TargetRunSpeed  * mult);
+            if (_fiMaxBack != null) _fiMaxBack.SetValue(mv, TargetWalkSpeed * mult * 0.5f);
             _fiMovement.SetValue(_fpsCtrl, mv);
         }
     }
