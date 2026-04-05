@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.25";
+        public const  string Version = "3.1.26";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -642,7 +642,11 @@ namespace CNRMods
                 ht["version"] = ModEntry.Version;
                 string skin = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
                 if (!string.IsNullOrEmpty(skin)) ht["skin"] = skin;
-                if (CtfMode.IsCtfRoom) ht["ctf"] = "1";
+                if (CtfMode.IsCtfRoom)
+                {
+                    ht["ctf"]   = "1";
+                    ht["ctf_s"] = CtfMode.PackState(); // send full state so new joiners don't see flag at Vector3.zero
+                }
                 ModEntry.RaiseCnrEvent(ht);
                 ModEntry.Log("Master: re-broadcast to new joiner (mapUrl=" + (string.IsNullOrEmpty(url) ? "(none)" : url) + " v" + ModEntry.Version + (CtfMode.IsCtfRoom ? " ctf=1" : "") + ")");
             }
@@ -9752,9 +9756,10 @@ namespace CNRMods
 
         private float _copDropTimer = 0f;
         private float _robDropTimer = 0f;
-        private const float AutoReturnSecs = 30f;
-        private const float BroadcastSecs  = 0.5f;
-        private float _bcastTimer = 0f;
+        private const float AutoReturnSecs  = 30f;
+        private const float BroadcastSecs   = 0.5f;
+        private float _bcastTimer          = 0f;
+        private float _carrierBcastTimer   = 0f; // independent timer so carrier always broadcasts its own position
 
         private PlayerStatus _prevStatus = PlayerStatus.idle;
         private UIModDirector _uiMod;
@@ -9852,6 +9857,16 @@ namespace CNRMods
                 // Keep carrier positions current so remote clients can track the flag marker.
                 if (CtfMode.CopFlagStatus    == _myId) CtfMode.CopCarrierPos    = myInfo.mPosition;
                 if (CtfMode.RobberFlagStatus == _myId) CtfMode.RobberCarrierPos = myInfo.mPosition;
+
+                // Carrier broadcasts its own position periodically, independent of the authority
+                // broadcast. Without this, the authority's copy of CopCarrierPos stays at the
+                // pickup position and every periodic authority broadcast sends a stale location.
+                if (CtfMode.CopFlagStatus == _myId || CtfMode.RobberFlagStatus == _myId)
+                {
+                    _carrierBcastTimer += Time.deltaTime;
+                    if (_carrierBcastTimer >= BroadcastSecs) { _carrierBcastTimer = 0f; BroadcastState(); }
+                }
+                else _carrierBcastTimer = 0f;
             }
 
             // Recolor flags per-client: own flag = green (protect), enemy flag = red (capture).
