@@ -1,4 +1,4 @@
-﻿// CNRSettingsMod.cs -- In-game settings/HUD mod for Cops N Robbers
+// CNRSettingsMod.cs -- In-game settings/HUD mod for Cops N Robbers
 // Entry point: CNRSettingsMod.SettingsModEntry.Load() -- called by CNRMod DLL scanner
 
 using System;
@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.39";
+        public  const string Version = "3.1.41";
 
         public static void Load()
         {
@@ -44,10 +44,10 @@ namespace CNRSettingsMod
                 // MainMenuDirector.Awake(), which fires on every scene transition back
                 // to the main menu.  Without this check each round trip adds another
                 // SettingsModHook MonoBehaviour, and OwnJumpPhysics() gets called N
-                // times per frame after N matches â€” multiplying jump height by N.
+                // times per frame after N matches — multiplying jump height by N.
                 if (GameObject.Find("CNRSettingsMod") != null)
                 {
-                    Log("CNRSettingsMod already running â€” skipping duplicate Load()");
+                    Log("CNRSettingsMod already running — skipping duplicate Load()");
                     return;
                 }
                 GameObject go = new GameObject("CNRSettingsMod");
@@ -1179,7 +1179,7 @@ namespace CNRSettingsMod
         private System.Collections.Generic.HashSet<int> _jumpTouchIds =
             new System.Collections.Generic.HashSet<int>();
 
-        // Our own jump arc â€” replaces JoyStickController's clunky 5-segment arc.
+        // Our own jump arc — replaces JoyStickController's clunky 5-segment arc.
         // The game permanently applies Physics.gravity (-9.81 m/s Y) to the
         // CharacterController via cc.Move in its own Update().  We add our Y on top
         // in LateUpdate.  Net Y per frame = (_ownJumpVelY + (-9.81)) * dt.
@@ -1189,8 +1189,8 @@ namespace CNRSettingsMod
         //
         // Tuned for ~1.3 m peak height, ~0.25 s rise, ~0.25 s fall (0.50 s total).
         // Compare: original arc was ~0.9 m peak, 1.0 s total, uniform/flat.
-        // Peak formula: h = (JumpInitialVel - 9.81)Â² / (2 * |JumpAscendGrav|)
-        //   JumpInitialVel=24 â†’ ~2.5 m,  =22 â†’ ~1.8 m,  =20 â†’ ~1.3 m,  =19 â†’ ~1.0 m,  =18 â†’ ~0.8 m
+        // Peak formula: h = (JumpInitialVel - 9.81)² / (2 * |JumpAscendGrav|)
+        //   JumpInitialVel=24 → ~2.5 m,  =22 → ~1.8 m,  =20 → ~1.3 m,  =19 → ~1.0 m,  =18 → ~0.8 m
         private bool  _ownJumpActive  = false;
         private bool  _kbmJumpPending  = false;  // set on spacebar down, consumed in LateUpdate
         private float _ownJumpVelY   = 0f;
@@ -1202,6 +1202,13 @@ namespace CNRSettingsMod
         private int   _touchCamFingerId  = -1;
         private float _touchCamPrevX     = 0f;
         private float _touchCamPrevY     = 0f;
+        private bool  _prevBDied         = false;  // respawn detection: resets camera finger on revive
+
+        // -- Fire-cooldown crosshair (KBM cursor-locked) ----------------------
+        private bool      _weapOnCooldown   = false;   // set in LateUpdate, read in OnGUI
+        private Component _wmComp           = null;    // cached UnityScript WeaponManager component
+        private FieldInfo _fiWmSelWeapon    = null;    // WeaponManager.SelectedWeapon
+        private FieldInfo _fiWmNextFireTime = null;    // WeaponScript.nextFireTime
 
         // -- Pause panel polling -----------------------------------------------
         private GameObject _pausePanelRef;
@@ -1329,6 +1336,9 @@ namespace CNRSettingsMod
             _ownJumpActive = false;
             _ownJumpVelY   = 0f;
             _kbmFireWasHeld  = false;
+            _prevBDied       = false;
+            _weapOnCooldown  = false;
+            _wmComp          = null;
             LoadPrefs();
             CheckApkVersion(); // re-run on every scene load so new instances (after in-app DLL reload) always have the result
             if (_inGameScene) StartCoroutine(ApplyHUDOnLoad());
@@ -1360,7 +1370,7 @@ namespace CNRSettingsMod
 
         private void Update()
         {
-            // Gamepad axis capture polling â€” runs every frame, in all scenes.
+            // Gamepad axis capture polling — runs every frame, in all scenes.
             if (_gpCaptureIdx >= 0 && _gpCaptureCooldown <= 0)
                 GpCaptureAxisPoll();
             else if (_gpCaptureCooldown > 0)
@@ -1369,7 +1379,7 @@ namespace CNRSettingsMod
             // Stick Axes detection polling (Detect button in Controllers tab).
             if (_gpStickDetect > 0) GpStickDetectPoll();
 
-            // Set UICamera.useMouse â€” must run in ALL scenes (including main menu).
+            // Set UICamera.useMouse — must run in ALL scenes (including main menu).
             // In KBM mode: always true so hardware mouse clicks reach NGUI everywhere.
             // In pure touch mode: leave at Android default (false).
             _uiCamCacheAge -= Time.deltaTime;
@@ -1421,19 +1431,19 @@ namespace CNRSettingsMod
             // the same frame and the jump fires immediately on the first press.
             if (!_hudEditMode) TouchJumpDetect();
 
-            // â”€â”€ KBM input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── KBM input ────────────────────────────────────────────────────
             if (!_kbmEnabled) return;
 
             // Chat input: block all gameplay input while chat is focused
             bool chatFocused = UIInputForChat.current != null;
             if (!_chatWasFocused && chatFocused)
             {
-                // Chat just opened â€” make sure cursor is released
+                // Chat just opened — make sure cursor is released
                 if (_cursorLocked) KbmSetCursorLocked(false);
             }
             if (_chatWasFocused && !chatFocused)
             {
-                // Chat just closed â€” re-lock for gameplay
+                // Chat just closed — re-lock for gameplay
                 if (!_showSettings) KbmSetCursorLocked(true);
             }
             _chatWasFocused = chatFocused;
@@ -1448,7 +1458,7 @@ namespace CNRSettingsMod
             if (Input.GetMouseButtonDown(0) && !_cursorLocked && !_showSettings && !_wasPauseVisible) { KbmSetCursorLocked(true); return; }
             if (!_cursorLocked || _showSettings) return;
 
-            // Jump â€” set pending flag; TriggerOwnJump fires in LateUpdate once _joyStickCtrl is ready.
+            // Jump — set pending flag; TriggerOwnJump fires in LateUpdate once _joyStickCtrl is ready.
             if (Input.GetKeyDown(_kbKeys[1])) _kbmJumpPending = true;
 
             // Weapon scroll + keybinds
@@ -1477,7 +1487,7 @@ namespace CNRSettingsMod
             }
 
             // Aim toggle (index 8)
-            // When capture active, RMB arrives via rmbHeld â€” detect rising edge.
+            // When capture active, RMB arrives via rmbHeld — detect rising edge.
             // When not captured, fall back to Input.GetKeyDown.
             bool aimKeyDown;
             if (_capListener != null && _kbKeys[8] == KeyCode.Mouse1)
@@ -1702,7 +1712,7 @@ namespace CNRSettingsMod
             // In KBM mode with cursor locked: prevent Sliderotate.Update() from running.
             // Sliderotate has an "else" (MouseY-only) branch that reads Input.GetAxis("Mouse Y")
             // and writes to transform.localEulerAngles every Update frame, even without touches.
-            // This causes double-application of mouse input â€” our KbmInjectMouseLook also applies
+            // This causes double-application of mouse input — our KbmInjectMouseLook also applies
             // the same delta in LateUpdate.  Blocking it via cannotRotate eliminates the conflict.
             if (_kbmEnabled && _cursorLocked)
             {
@@ -1710,7 +1720,7 @@ namespace CNRSettingsMod
                 if (_sliderotate != null && _fiCannotRotate != null)
                     _fiCannotRotate.SetValue(_sliderotate, true);
             }
-            // Gamepad right stick also injects via KbmInjectMouseLook â€” suppress Sliderotate too.
+            // Gamepad right stick also injects via KbmInjectMouseLook — suppress Sliderotate too.
             else if (_gamepadEnabled && _joyProxy != null && _inGameScene)
             {
                 if (_sliderotate == null) CacheSliderotate();
@@ -1726,7 +1736,7 @@ namespace CNRSettingsMod
             {
                 float dx, dy;
                 bool captureHandled = false;
-                // Always drain capListener â€” _captureActive may lag behind the actual grant
+                // Always drain capListener — _captureActive may lag behind the actual grant
                 if (_capListener != null)
                 {
                     dx = _capListener.DrainDx();
@@ -1803,6 +1813,32 @@ namespace CNRSettingsMod
             else if (_gamepadEnabled && _inGameScene) GamepadUpdate();
             else if (_inGameScene && _touchDeadzone > 0f)
                 ApplyTouchJoystickDeadzone();
+            // Update fire-cooldown state for crosshair coloring.
+            if (_inGameScene) UpdateWeaponCooldown();
+        }
+
+        // Reads nextFireTime from the selected WeaponScript to know if the gun is still cooling down.
+        private void UpdateWeaponCooldown()
+        {
+            if (_wmComp == null)
+            {
+                var wmGo = GameObject.FindWithTag("WeaponManager");
+                if (wmGo != null) _wmComp = wmGo.GetComponent("WeaponManager");
+            }
+            if (_wmComp == null) { _weapOnCooldown = false; return; }
+
+            if (_fiWmSelWeapon == null)
+                _fiWmSelWeapon = _wmComp.GetType().GetField("SelectedWeapon");
+            var selectedWeapon = _fiWmSelWeapon != null ? _fiWmSelWeapon.GetValue(_wmComp) : null;
+            if (selectedWeapon == null) { _weapOnCooldown = false; return; }
+
+            if (_fiWmNextFireTime == null)
+                _fiWmNextFireTime = selectedWeapon.GetType().GetField("nextFireTime",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            if (_fiWmNextFireTime == null) { _weapOnCooldown = false; return; }
+
+            float nft = (float)_fiWmNextFireTime.GetValue(selectedWeapon);
+            _weapOnCooldown = Time.time < nft;
         }
 
         // Supplemental fire-button touch detection.
@@ -1872,7 +1908,7 @@ namespace CNRSettingsMod
                 if ((object)UIMenuDirector.mInstance != null)
                     UIMenuDirector.mInstance.GenFireEvent();
 
-                _touchFireCooldown = 0.2f;  // slightly less than 0.235f â€” expires first
+                _touchFireCooldown = 0.2f;  // slightly less than 0.235f — expires first
                 break;
             }
         }
@@ -1881,9 +1917,9 @@ namespace CNRSettingsMod
         // Single-player (FreeRun/SingleMode): sets PlayerLogic.mStatus and keeps
         //   JoyStickController.fireStatusHoldTimeCount alive so Update() won't reset to idle.
         // CNR multiplayer: sets CRInput.m_bFire + CRJoyStickController.fireFlag, exactly as
-        //   UIButtonEventKit â†’ GenFireEvent â†’ CRUIEventInteract.OnFire() does â€” but null-safe.
+        //   UIButtonEventKit → GenFireEvent → CRUIEventInteract.OnFire() does — but null-safe.
         //   CRWeaponScript.LateUpdate() reads m_bFire and fires the active melee weapon.
-        // NOTE: In CNR mode PlayerLogic.mInstance is null â€” DON'T use it as a gate for fire!
+        // NOTE: In CNR mode PlayerLogic.mInstance is null — DON'T use it as a gate for fire!
         private void KbmFireDetect()
         {
             if (!_kbmEnabled || !_cursorLocked)
@@ -1896,8 +1932,8 @@ namespace CNRSettingsMod
                 : (_kbKeys[0] != KeyCode.None && Input.GetKey(_kbKeys[0]));
 
             // Cache JoyStickController and fireStatusHoldTimeCount field (single-player scenes).
-            // IMPORTANT: Only search once â€” in CNR mode JoyStickController is absent so searching
-            // every frame is O(all scene components) â†’ causes periodic GC stutter.
+            // IMPORTANT: Only search once — in CNR mode JoyStickController is absent so searching
+            // every frame is O(all scene components) → causes periodic GC stutter.
             if ((object)_joyStickCtrl == null && !_joyStickCtrlSearched)
             {
                 _joyStickCtrlSearched = true;
@@ -1967,10 +2003,10 @@ namespace CNRSettingsMod
         // While the player is in the air (isJumping=true), we keep OnJump=1 in prefs
         // so JoyStickController re-jumps the instant it detects landing.
         //
-        // Hit-testing uses Physics.Raycast from the NGUI camera â€” exactly what UICamera
-        // does internally â€” so the detection correctly respects the button's actual
+        // Hit-testing uses Physics.Raycast from the NGUI camera — exactly what UICamera
+        // does internally — so the detection correctly respects the button's actual
         // collider size regardless of any HUD-editor rescaling.
-        // Handles keyboard jump in KBM mode â€” mirrors TouchJumpDetect but for keyboard.
+        // Handles keyboard jump in KBM mode — mirrors TouchJumpDetect but for keyboard.
         // Runs in LateUpdate so _joyStickCtrl can be cached here before TriggerOwnJump.
         private void KbmJumpDetect()
         {
@@ -1999,10 +2035,16 @@ namespace CNRSettingsMod
         // Suppresses Sliderotate for the tracked finger by toggling cannotRotate for one frame.
         private void TouchCameraDetect()
         {
+            // Respawn: if bDied just cleared, discard any stale tracked camera finger so the
+            // first post-respawn touch doesn't compute a huge delta from a pre-death position.
+            bool nowDied = (object)PlayerLogic.mInstance != null && PlayerLogic.mInstance.bDied;
+            if (_prevBDied && !nowDied) _touchCamFingerId = -1;
+            _prevBDied = nowDied;
+
             if (_kbmEnabled && _cursorLocked) return; // KBM mouse handles camera
             if (_sliderotate == null && Input.touchCount > 0) CacheSliderotate();
             if (_sliderotate == null) return;
-            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
+            if (nowDied) return;
 
             float sw = Screen.width;
             float sh = Screen.height;
@@ -2017,10 +2059,10 @@ namespace CNRSettingsMod
                     continue;
                 }
 
-                // Claim a new camera finger: must start in Sliderotate's zone (right 65%, upper 72%)
+                // Claim a new camera finger: right half of screen only (x >= 50%), upper 72%.
                 if (_touchCamFingerId == -1 && t.phase == TouchPhase.Began)
                 {
-                    if (t.position.x >= sw * 0.35f && t.position.y <= sh * 0.72f)
+                    if (t.position.x >= sw * 0.5f && t.position.y <= sh * 0.72f)
                     {
                         _touchCamFingerId = t.fingerId;
                         _touchCamPrevX    = t.position.x;
@@ -2040,8 +2082,9 @@ namespace CNRSettingsMod
 
                 // Scale matches Sliderotate: raw pixel delta * 0.1, then * sensitivityX via KbmInjectMouseLook.
                 // Touch.position.y is bottom-left origin: positive Y = finger moves UP = camera looks UP.
-                // KbmInjectMouseLook: positive my â†’ rotY increases â†’ cam pitches up. Same sign, no inversion.
-                KbmInjectMouseLook(dx * 0.1f, dy * 0.1f);
+                // KbmInjectMouseLook: positive my → rotY increases → cam pitches up. Same sign, no inversion.
+                float touchSens = _isAiming ? (_sensNormal * _adsMultiplier) : _sensNormal;
+                KbmInjectMouseLook(dx * 0.1f, dy * 0.1f, touchSens);
 
                 // Block Sliderotate from double-processing this touch this frame.
                 if (_fiCannotRotate != null) _fiCannotRotate.SetValue(_sliderotate, true);
@@ -2144,8 +2187,8 @@ namespace CNRSettingsMod
         // net Y displacement = (-9.81 + _ownJumpVelY) * dt.
         //
         // Arc: _ownJumpVelY starts at JumpInitialVel (24), decelerates at JumpAscendGrav
-        // (-41 m/sÂ²) until net Y crosses zero (peak â‰ˆ 2.5 m), then accelerates down via
-        // JumpDescendGrav (-56 m/sÂ²) for a snap-fast landing (~0.3 s fall).
+        // (-41 m/s²) until net Y crosses zero (peak ≈ 2.5 m), then accelerates down via
+        // JumpDescendGrav (-56 m/s²) for a snap-fast landing (~0.3 s fall).
         private void OwnJumpPhysics()
         {
             if (!_ownJumpActive) return;
@@ -2192,7 +2235,7 @@ namespace CNRSettingsMod
             if (_aimBtn == null) CacheAimBtn();
             if (_mainCam == null) CacheMainCam();
 
-            // Detect fire button press: FpsOnFire pref is toggled (0â†”1) on every press.
+            // Detect fire button press: FpsOnFire pref is toggled (0↔1) on every press.
             // Any value change means the fire button was just tapped.
             int curFpsOnFire = PlayerPrefs.GetInt("FpsOnFire", 0);
             if (_prevFpsOnFire != -1 && curFpsOnFire != _prevFpsOnFire)
@@ -2285,7 +2328,7 @@ namespace CNRSettingsMod
 
         public void ToggleAiming() { _isAiming = !_isAiming; }
 
-        // All Sliderotate instances â€” patch every one of them
+        // All Sliderotate instances — patch every one of them
         private System.Collections.Generic.List<MonoBehaviour> _allSliderotates
             = new System.Collections.Generic.List<MonoBehaviour>();
 
@@ -2400,7 +2443,7 @@ namespace CNRSettingsMod
         // [0,1].  If the HUD camera's rect is constrained to the original button region
         // (e.g. right ~65% of screen, with the left reserved for the virtual joystick),
         // buttons dragged into the other region never fire.  Expanding the rect to the full
-        // screen costs nothing â€” the joystick uses VCTouchController, not NGUI, so it is
+        // screen costs nothing — the joystick uses VCTouchController, not NGUI, so it is
         // completely unaffected.
         private void ExpandNguiCamToFullScreen()
         {
@@ -2485,7 +2528,7 @@ namespace CNRSettingsMod
             yield return null;
             yield return null;
             yield return null;
-            // Enter edit mode â€” this calls ReCacheHUD and populates _dragGOs
+            // Enter edit mode — this calls ReCacheHUD and populates _dragGOs
             EnterHudEditMode();
             yield return null;
             // Apply factory reset to all live items
@@ -2704,7 +2747,7 @@ namespace CNRSettingsMod
         // =====================================================================
         private void OnGUI()
         {
-            // KBM debug overlay â€” disabled
+            // KBM debug overlay — disabled
             if (false && _kbmEnabled && _cursorLocked && !_showSettings)
             {
                 GUIStyle dbgStyle = new GUIStyle(GUI.skin.box);
@@ -2722,6 +2765,19 @@ namespace CNRSettingsMod
                     "proxy.fires=" + _proxyFires + " gml.fires=" + _gmlFires + "\n" +
                     "frame=" + _dbgFrame;
                 GUI.Box(new Rect(10, 10, 420, 260), dbgText, dbgStyle);
+            }
+
+            // -- Crosshair (KBM cursor-locked, not settings/hud-edit) ----------
+            if (_kbmEnabled && _cursorLocked && !_showSettings && !_hudEditMode)
+            {
+                float cx = Screen.width  * 0.5f;
+                float cy = Screen.height * 0.5f;
+                GUI.color = _weapOnCooldown ? new Color(1f, 0.15f, 0.15f, 0.90f)
+                                            : new Color(1f,  1f,   1f,   0.90f);
+                GUI.DrawTexture(new Rect(cx - 1f,  cy - 10f, 2f,  20f), Texture2D.whiteTexture); // vertical bar
+                GUI.DrawTexture(new Rect(cx - 10f, cy - 1f,  20f, 2f ), Texture2D.whiteTexture); // horizontal bar
+                GUI.DrawTexture(new Rect(cx - 2f,  cy - 2f,  4f,  4f ), Texture2D.whiteTexture); // centre dot
+                GUI.color = Color.white;
             }
 
             // ---- APK update overlay (main menu, outside settings panel) --------
@@ -2819,7 +2875,7 @@ namespace CNRSettingsMod
                     _gsApkBanner.normal.background = _texApkBannerBg ?? (_texApkBannerBg = MakeTex(2, 2, new Color(0.5f, 0.1f, 0f, 0.92f)));
                 }
                 string apkVer = string.IsNullOrEmpty(_apkVersionName) ? "unknown" : _apkVersionName;
-                GUILayout.Box("âš   APK update required (current: " + apkVer + ")\n   Gamepad axes (R-stick, D-pad, triggers) need the patched APK.", _gsApkBanner, GUILayout.ExpandWidth(true));
+                GUILayout.Box("⚠  APK update required (current: " + apkVer + ")\n   Gamepad axes (R-stick, D-pad, triggers) need the patched APK.", _gsApkBanner, GUILayout.ExpandWidth(true));
                 GUILayout.Space(2f);
                 GUILayout.BeginHorizontal();
                 if (GUILayout.Button("Download APK", GUILayout.Height(30f)))
@@ -3008,7 +3064,7 @@ namespace CNRSettingsMod
                     StartCoroutine(ResetHUDViaEditMode());
                 else
                 {
-                    // Not in game scene yet â€” just wipe prefs; defaults load on next scene entry
+                    // Not in game scene yet — just wipe prefs; defaults load on next scene entry
                     for (int i = 0; i < DRAG_COUNT; i++)
                     {
                         HudCfgDelete(DRAG_ITEMS[i].prefPX);
@@ -3030,7 +3086,7 @@ namespace CNRSettingsMod
             GUILayout.Space(6f);
             GUILayout.EndScrollView();
 
-            // ---- Close & Save â€” pinned to bottom via FlexibleSpace ----------
+            // ---- Close & Save — pinned to bottom via FlexibleSpace ----------
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("  Close & Save  ", BtnStyle(22, Color.white), GUILayout.Height(38f)))
             {
@@ -3041,7 +3097,7 @@ namespace CNRSettingsMod
             }
             GUILayout.Space(6f);
 
-            // Keybind capture overlay â€” drawn on top of everything else
+            // Keybind capture overlay — drawn on top of everything else
             if (_captureIdx >= 0) DrawCaptureOverlay();
             if (_gpCaptureIdx >= 0) DrawGpCaptureOverlay();
         }
@@ -3295,7 +3351,7 @@ namespace CNRSettingsMod
 
             // ---- Button Bindings ------------------------------------------
             SectionHeader("Button Bindings");
-            GUILayout.Label("  Tip: triggers and D-pad are axes â€” move them during Rebind to assign.", HintStyle());
+            GUILayout.Label("  Tip: triggers and D-pad are axes — move them during Rebind to assign.", HintStyle());
             GUILayout.Space(4f);
             float colName = pw * 0.33f;
             float colKey  = pw * 0.30f;
@@ -3484,7 +3540,7 @@ namespace CNRSettingsMod
                 _gsWipBanner.alignment = TextAnchor.MiddleCenter;
                 _gsWipBanner.normal.background = _texWipBg ?? (_texWipBg = MakeTex(2, 2, new Color(0.35f, 0.2f, 0f, 0.85f)));
             }
-            GUILayout.Box("âš   Camera mouse-look is not working yet on Android.\n   Other KBM features (keyboard, buttons) are functional.", _gsWipBanner, GUILayout.ExpandWidth(true));
+            GUILayout.Box("⚠  Camera mouse-look is not working yet on Android.\n   Other KBM features (keyboard, buttons) are functional.", _gsWipBanner, GUILayout.ExpandWidth(true));
             GUILayout.Space(8f);
 
             // ---- KBM Enabled ------------------------------------------------
@@ -3675,7 +3731,7 @@ namespace CNRSettingsMod
             if (kcInt >= 370 && kcInt <= 509) return "JBtn" + ((kcInt - 350) % 20);
             return kc.ToString();
         }
-        // "JA:17|+" â†’ "LT",  "JA:15|-" â†’ "DPad-L",  "Horizontal|-" â†’ "H-"
+        // "JA:17|+" → "LT",  "JA:15|-" → "DPad-L",  "Horizontal|-" → "H-"
         private static string GpAxisBindLabel(string axisBind)
         {
             if (string.IsNullOrEmpty(axisBind)) return "";
@@ -3766,7 +3822,7 @@ namespace CNRSettingsMod
                 }
                 else
                 {
-                    // Normalize Joystick1Button0-19 (350-369) â†’ JoystickButton0-19 (330-349)
+                    // Normalize Joystick1Button0-19 (350-369) → JoystickButton0-19 (330-349)
                     KeyCode toStore = (kcInt >= 350 && kcInt <= 369) ? (KeyCode)(kcInt - 20) : e.keyCode;
                     _gpKeys[_gpCaptureIdx] = toStore;
                     // Clear axis bind for this slot (key bind takes priority)
@@ -3811,13 +3867,13 @@ namespace CNRSettingsMod
                 decor    = window.Call<AndroidJavaObject>("getDecorView");
                 // requestPointerCapture / setOnCapturedPointerListener MUST be called on the
                 // Android UI thread (ViewRootImpl is only available there).
-                // Use the DecorView (FrameLayout) â€” NOT findFocus() â€” because SurfaceView
+                // Use the DecorView (FrameLayout) — NOT findFocus() — because SurfaceView
                 // (Unity's render surface) does not support requestPointerCapture().
-                // Captured events are delivered to the view that requested capture â€”
+                // Captured events are delivered to the view that requested capture —
                 // our OnCapturedPointerListener on the DecorView will receive them.
                 if (capture)
                 {
-                    // Do NOT set _captureActive=true here â€” the runnable checks hasCap
+                    // Do NOT set _captureActive=true here — the runnable checks hasCap
                     // asynchronously and sets it only if capture is actually granted.
                     // Until then, Input.GetAxis("Mouse X/Y") runs as the primary path.
                     _captureActive = false;
@@ -3865,7 +3921,7 @@ namespace CNRSettingsMod
                 decor    = window.Call<AndroidJavaObject>("getDecorView");
                 if (!visible)
                 {
-                    // PointerIcon.TYPE_NULL (0) = hidden cursor â€” available API 24+
+                    // PointerIcon.TYPE_NULL (0) = hidden cursor — available API 24+
                     AndroidJavaClass  piClass  = new AndroidJavaClass("android.view.PointerIcon");
                     AndroidJavaObject nullIcon = piClass.CallStatic<AndroidJavaObject>("getSystemIcon", activity, 0);
                     decor.Call("setPointerIcon", nullIcon);
@@ -4014,7 +4070,7 @@ namespace CNRSettingsMod
         }
 
         // Simulate a full NGUI finger tap on a weapon switch button.
-        // A real tap fires: OnPress(true) â†’ OnPress(false) â†’ OnClick.
+        // A real tap fires: OnPress(true) → OnPress(false) → OnClick.
         // OnClick is what UIButtonEventKit handles to actually perform the switch.
         private void TapGO(GameObject go)
         {
@@ -4022,7 +4078,7 @@ namespace CNRSettingsMod
             go.SendMessage("OnPress", true,  SendMessageOptions.DontRequireReceiver);
             go.SendMessage("OnPress", false, SendMessageOptions.DontRequireReceiver);
             go.SendMessage("OnClick",        SendMessageOptions.DontRequireReceiver);
-            // Clear NGUI focus so the button doesn't stay "hot" â€” prevents the next
+            // Clear NGUI focus so the button doesn't stay "hot" — prevents the next
             // unrelated input (jump, fire, etc.) from replaying on this button.
             UICamera.hoveredObject  = null;
             UICamera.selectedObject = null;
@@ -4077,7 +4133,7 @@ namespace CNRSettingsMod
             }
             // JoyStickController.Update() has three branches: |AxisY| > |AxisX| (forward-dominant),
             // |AxisY| < |AxisX| (strafe-dominant), and both < 0.05 (idle).  The equal-axis
-            // diagonal case (e.g. W+A with both = Â±1) hits none of them and skips the moveSpeed
+            // diagonal case (e.g. W+A with both = ±1) hits none of them and skips the moveSpeed
             // multiplication entirely, making diagonal movement almost stationary.
             // Fix: when strafing diagonally, nudge |AxisX| just below |AxisY| so the
             // forward-dominant branch fires and full moveSpeed is applied.
@@ -4372,7 +4428,7 @@ namespace CNRSettingsMod
             _gpAxesProbed = true;
             foreach (string n in GP_LAXIS_X) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisX = n; break; } }
             foreach (string n in GP_LAXIS_Y) { float v = TryGetAxisRaw(n); if (!float.IsNaN(v)) { _gpLAxisY = n; break; } }
-            // R-stick axes come from user config (Detect buttons in Controllers tab) â€” loaded from prefs.
+            // R-stick axes come from user config (Detect buttons in Controllers tab) — loaded from prefs.
             SettingsModEntry.Log("GP axes probed: LX=" + (_gpLAxisX ?? "?") + " LY=" + (_gpLAxisY ?? "?")
                 + "  RX=" + (_gpRAxisX ?? "?") + " RY=" + (_gpRAxisY ?? "?"));
         }
@@ -4382,7 +4438,7 @@ namespace CNRSettingsMod
             if (!_joyProxySetup) SetupJoyProxy();
             if (!_gpAxesProbed) ProbeGpAxes();
 
-            // ---- Movement inject (left stick â†’ VCAnalogJoystickBase) --------
+            // ---- Movement inject (left stick → VCAnalogJoystickBase) --------
             if (_kbmJoystick == null)
             {
                 VCAnalogJoystickBase inst = VCAnalogJoystickBase.GetInstance("stick");
@@ -4425,7 +4481,7 @@ namespace CNRSettingsMod
                 _kbmFiDeltaPixels.SetValue(_kbmJoystick, new Vector2(injectX, injectY));
             }
 
-            // ---- Right stick â†’ camera (Unity axis names set by Detect) --------
+            // ---- Right stick → camera (Unity axis names set by Detect) --------
             if (_gpRAxisX != null || _joyProxy != null)
             {
                 if (_sliderotate == null) CacheSliderotate();
@@ -4459,7 +4515,7 @@ namespace CNRSettingsMod
 
             // When no finger is on the screen, clear NGUI's hover target every frame.
             // A real touchscreen tap sets UICamera.hoveredObject to the tapped button and NGUI
-            // never clears it on lift â€” so the next controller input (jump, fire, etc.) blindly
+            // never clears it on lift — so the next controller input (jump, fire, etc.) blindly
             // re-fires on that button.  Clearing here when touchCount==0 breaks that stale link.
             if (Input.touchCount == 0)
             {
@@ -4468,12 +4524,12 @@ namespace CNRSettingsMod
             }
 
             // Snapshot current axis-held state before running actions (for rising-edge detection).
-            // Done here â€” before the PlayerLogic guard â€” so CNR-mode actions can read it too.
+            // Done here — before the PlayerLogic guard — so CNR-mode actions can read it too.
             bool[] axisNow = new bool[GP_BIND_COUNT];
             for (int bi = 0; bi < GP_BIND_COUNT; bi++) axisNow[bi] = GpAxisHeld(bi);
 
-            // ---- Fire (index 0, held) â€” works in both single-player AND CNR mode ----
-            // OnPress(true) only on rising edge, OnPress(false) on falling edge â€” prevents
+            // ---- Fire (index 0, held) — works in both single-player AND CNR mode ----
+            // OnPress(true) only on rising edge, OnPress(false) on falling edge — prevents
             // the NGUI button from getting stuck in a permanently-pressed state.
             // m_bFire/fireFlag are set every frame while held so auto-fire weapons keep firing.
             bool fireDown = (_gpKeys[0] != KeyCode.None && Input.GetKeyDown(_gpKeys[0])) || (axisNow[0] && !_gpAxisPrevHeld[0]);
@@ -4493,7 +4549,7 @@ namespace CNRSettingsMod
                     CRJoyStickController.mInstance.fireFlag = true;
             }
 
-            // ---- Weapon switch (index 2 = next, 3 = prev, down) â€” works in CNR mode ----
+            // ---- Weapon switch (index 2 = next, 3 = prev, down) — works in CNR mode ----
             // Click the on-screen button + call KbmSwitchWeapon directly (same belt-and-suspenders
             // pattern as fire: SendMessage hits any handlers on the GO; KbmSwitchWeapon sets
             // CRInput.m_bSwitch + m_PropIconName which is the real CNR weapon-swap mechanism).
@@ -4567,7 +4623,9 @@ namespace CNRSettingsMod
         }
 
         private float _kbmInjectLogTimer = 0f;
-        private void KbmInjectMouseLook(float mx, float my)
+        // sensOverride >= 0: use that value directly instead of the KBM mouse sensitivity.
+        // Touch camera passes _sensNormal so it obeys the touch sensitivity slider, not the KBM one.
+        private void KbmInjectMouseLook(float mx, float my, float sensOverride = -1f)
         {
             if (_sliderotate == null) CacheSliderotate();
             // Re-cache if we've latched onto an inactive GO (e.g. stale prefab or respawn)
@@ -4578,11 +4636,12 @@ namespace CNRSettingsMod
             }
             if (_sliderotate == null || _fiRotationX == null) return;
 
-            float sens = _isAiming ? (_mouseSensNgl * _mouseAdsMult) : _mouseSensNgl;
+            float sens = sensOverride >= 0f ? sensOverride
+                       : (_isAiming ? (_mouseSensNgl * _mouseAdsMult) : _mouseSensNgl);
 
             // Mirror what Sliderotate.Update() does: base horizontal from transform, NOT the
             // private rotationX field.  The field is only updated when a touch is active;
-            // reading it when no touch has occurred gives 0 (stale), causing a snap to 0Â°.
+            // reading it when no touch has occurred gives 0 (stale), causing a snap to 0°.
             Component srComp = _sliderotate as Component;
             float rotX = srComp.transform.localEulerAngles.y + mx * sens;
             float rotY = (float)_fiRotationY.GetValue(_sliderotate) + my * sens;
@@ -4920,7 +4979,7 @@ namespace CNRSettingsMod
             // Expanding the NGUI camera rect (e.g. to full screen) changes the camera's
             // projection matrix, which causes Camera.ScreenPointToRay() to produce a
             // different ray for the same screen position.  JoyStickController uses that
-            // ray with Physics.Raycast to detect the FireButton collider â€” when the rect
+            // ray with Physics.Raycast to detect the FireButton collider — when the rect
             // is expanded the ray misses and one-finger fire stops working entirely.
             // Consequence: NGUI buttons dragged to the left side of the screen (outside
             // the original camera viewport) will not respond to touches.  Acceptable
@@ -4942,7 +5001,7 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
-        // JoyMotionProxy â€” View.OnGenericMotionEventListener on the DecorView.
+        // JoyMotionProxy — View.OnGenericMotionEventListener on the DecorView.
         // Intercepts SOURCE_JOYSTICK MotionEvents to read right stick / trigger /
         // dpad axes that are NOT mapped in the game's InputManager and therefore
         // inaccessible via Input.GetAxisRaw().  Returns false so Unity still receives
@@ -5038,9 +5097,9 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
-        // HoverProxy â€” View.OnHoverListener on Unity's render surface.
+        // HoverProxy — View.OnHoverListener on Unity's render surface.
         // ACTION_HOVER_MOVE goes through ViewRootImpl.dispatchHoverEvent(), NOT
-        // dispatchGenericMotionEvent â€” so Window.Callback and OnGenericMotionListener
+        // dispatchGenericMotionEvent — so Window.Callback and OnGenericMotionListener
         // are both dead for mouse hover.  OnHoverListener on the actual hovered view
         // (mUnityPlayer or its SurfaceView child) intercepts before Unity sees it.
         // Returns false so Unity still processes hover (needed for NGUI + cursor pos).
@@ -5124,7 +5183,7 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
-        // GmlProxy â€” View.OnGenericMotionListener on DecorView.
+        // GmlProxy — View.OnGenericMotionListener on DecorView.
         // Fires for ALL mouse generic motion events (hover + captured move) at the
         // view level, independently of whether Window.Callback fires.
         // Returns false so Unity still receives every event.
@@ -5186,7 +5245,7 @@ namespace CNRSettingsMod
                     }
                 }
                 catch { }
-                return false; // do not consume â€” Unity must still receive the event
+                return false; // do not consume — Unity must still receive the event
             }
         }
 
@@ -5215,7 +5274,7 @@ namespace CNRSettingsMod
         }
 
         // =====================================================================
-        // WindowCallbackProxy â€” wraps Activity Window.Callback to intercept
+        // WindowCallbackProxy — wraps Activity Window.Callback to intercept
         // dispatchGenericMotionEvent before any view sees it.  All other methods
         // are forwarded to the original callback so game input is unaffected.
         // AXIS_RELATIVE_X (27) / AXIS_RELATIVE_Y (28) give hardware mouse velocity
@@ -5509,7 +5568,7 @@ namespace CNRSettingsMod
                     {
                         _dx += e.Call<float>("getAxisValue", AXIS_RELATIVE_X);
                         _dy += e.Call<float>("getAxisValue", AXIS_RELATIVE_Y);
-                        // Sync button state from live button mask â€” catches presses that
+                        // Sync button state from live button mask — catches presses that
                         // arrived as ACTION_DOWN rather than ACTION_BUTTON_PRESS.
                         int bs = e.Call<int>("getButtonState");
                         lmbHeld = (bs & BUTTON_PRIMARY)   != 0;
