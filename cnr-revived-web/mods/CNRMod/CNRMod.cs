@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.23";
+        public const  string Version = "3.1.24";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10735,7 +10735,7 @@ namespace CNRMods
         // Vanilla JoyStickController.moveSpeed = 7f.
         // Melee multiplier: 1.15 = 15% faster while holding knife.
         private const float BaseMoveSpeed   = 7f;
-        private const float MeleeSpeedMult  = 1.15f;
+        private const float MeleeSpeedMult  = 10f;
 
         private MonoBehaviour _joyCtrl      = null;
         private FieldInfo     _fiMoveSpeed  = null;
