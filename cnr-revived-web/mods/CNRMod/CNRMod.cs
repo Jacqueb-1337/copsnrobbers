@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.9";
+        public const  string Version = "3.1.11";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -172,6 +172,7 @@ namespace CNRMods
                 go.AddComponent<ContentManager>();
                 go.AddComponent<EconomyHook>();
                 go.AddComponent<PackHook>();
+                go.AddComponent<SpeedHook>();
                 GameObject.DontDestroyOnLoad(go);
 
                 Log("Mod root created.  IP=" + (ServerIp != "" ? ServerIp : "(none)") +
@@ -10709,6 +10710,56 @@ namespace CNRMods
             _hpPollTimer  = 0f;
             _hpHudTimer   = 0f;
             _hpHudMsg     = "";
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  SPEED HOOK — bumps local player run/walk speed above the FPScontroller defaults
+    // -------------------------------------------------------------------------
+    public class SpeedHook : MonoBehaviour
+    {
+        // Default vanilla values: WalkSpeed=6, RunSpeed=9.
+        // Bump run by ~22% (9 -> 11) and walk proportionally (6 -> 7.3).
+        private const float TargetRunSpeed  = 11f;
+        private const float TargetWalkSpeed = 7.3f;
+
+        private MonoBehaviour _fpsCtrl    = null;
+        private FieldInfo     _fiMovement = null;
+        private FieldInfo     _fiRunSpeed = null;
+        private FieldInfo     _fiWalkSpeed = null;
+
+        void OnLevelWasLoaded(int level) { _fpsCtrl = null; } // re-acquire next Update
+
+        void Update()
+        {
+            // Re-acquire FPScontroller if missing (scene change, respawn).
+            if (_fpsCtrl == null || !((Component)_fpsCtrl).gameObject.activeInHierarchy)
+            {
+                _fpsCtrl    = null;
+                _fiMovement = null;
+                GameObject pg = GameObject.FindWithTag("Player");
+                if (pg == null) return;
+                _fpsCtrl = pg.GetComponent("FPScontroller") as MonoBehaviour;
+                if (_fpsCtrl == null) return;
+            }
+
+            // Cache FieldInfos once.
+            if (_fiMovement == null)
+            {
+                System.Type t = _fpsCtrl.GetType();
+                _fiMovement  = t.GetField("movement");
+                if (_fiMovement == null) return;
+                System.Type mt = _fiMovement.FieldType;
+                _fiRunSpeed  = mt.GetField("RunSpeed");
+                _fiWalkSpeed = mt.GetField("WalkSpeed");
+            }
+            if (_fiMovement == null || _fiRunSpeed == null || _fiWalkSpeed == null) return;
+
+            // movement is a struct — get, mutate, set back.
+            object mv = _fiMovement.GetValue(_fpsCtrl);
+            _fiRunSpeed.SetValue(mv,  TargetRunSpeed);
+            _fiWalkSpeed.SetValue(mv, TargetWalkSpeed);
+            _fiMovement.SetValue(_fpsCtrl, mv);
         }
     }
 }
