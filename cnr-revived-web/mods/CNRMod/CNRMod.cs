@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.27";
+        public const  string Version = "3.1.28";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10827,9 +10827,10 @@ namespace CNRMods
     // -------------------------------------------------------------------------
     public class HitRegHook : MonoBehaviour
     {
-        private Component  _wmComp     = null;
-        private FieldInfo  _fiOPTag    = null;
-        private FieldInfo  _fiBPlayer  = null;
+        private Component      _wmComp     = null;
+        private FieldInfo      _fiOPTag    = null;
+        private FieldInfo      _fiBPlayer  = null;
+        private System.Type    _npcType    = null;  // cached for HitRegRelay attachment
 
         void OnLevelWasLoaded(int level) { _wmComp = null; }
 
@@ -10866,6 +10867,279 @@ namespace CNRMods
                 if (cur != string.Empty)
                     _fiOPTag.SetValue(_wmComp, string.Empty);
             }
+
+            // ── Periodic: attach reliable-damage components ──────────────────
+            // On every 60th frame, ensure ModHitRegReceiver is on the local
+            // player's GO and HitRegRelay is on every NetPlayerController GO.
+            // This covers players joining mid-round without any per-join event.
+            if (Time.frameCount % 60 == 0)
+            {
+                // Cache the NetPlayerController type once
+                if (_npcType == null)
+                    _npcType = System.Type.GetType("NetPlayerController");
+
+                // ModHitRegReceiver on local player GO
+                GameObject ec = GameObject.Find("ExampleCharacter");
+                if (ec != null && ec.GetComponent<ModHitRegReceiver>() == null)
+                    ec.AddComponent<ModHitRegReceiver>();
+
+                // HitRegRelay on each remote-player GO
+                if (_npcType != null)
+                {
+                    foreach (UnityEngine.Object o in FindObjectsOfType(_npcType))
+                    {
+                        GameObject go = ((Component)o).gameObject;
+                        if (go.GetComponent<HitRegRelay>() == null)
+                            go.AddComponent<HitRegRelay>();
+                    }
+                }
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    //  HitRegRelay — component added to each NetPlayerController GO.
+    //
+    //  When a bullet hits and OnDamaged() fires (via SendMessage/SendMessageUpwards
+    //  from the bullet's collision code), we re-send the same damage with
+    //  reliably:true as a backup.  ModHitRegReceiver on the target player's
+    //  ExampleCharacter deduplicates so damage is applied exactly once even when
+    //  both the original unreliable RPC and our reliable backup arrive.
+    //
+    //  Root cause this fixes:
+    //    NetPlayerController.OnDamaged() calls sendMessageToPeersAdapt(...,
+    //    reliably:false) — UDP datagrams that get silently dropped under
+    //    Photon's increased traffic load with 3+ players in a room.
+    // ─────────────────────────────────────────────────────────────────────────────
+    public class HitRegRelay : MonoBehaviour
+    {
+        private static bool        _ready     = false;
+        private static System.Type _mgrType;
+        private static FieldInfo   _fiMgrInst;
+        private static FieldInfo   _fiMyPI;
+        private static MethodInfo  _miSend;
+        private static System.Type _npcType;
+        private static FieldInfo   _fiPInfo;
+        private static FieldInfo   _fiMId;
+        private static uint        _gSeq      = 0u;   // monotonic hit-sequence counter
+
+        void OnDamaged(int damage)
+        {
+            try
+            {
+                if (!EnsureRefl()) return;
+                object mgr = _fiMgrInst.GetValue(null);
+                if (mgr == null) return;
+
+                string shooter = (string)_fiMId.GetValue(_fiMyPI.GetValue(mgr));
+                if (shooter == null || shooter == "null") return;
+
+                Component npc = GetComponent(_npcType);
+                if (npc == null) return;
+                string target = (string)_fiMId.GetValue(_fiPInfo.GetValue(npc));
+                if (target == null || target == "null") return;
+
+                string param = shooter + "@" + damage.ToString()
+                             + "@" + (++_gSeq).ToString();
+                _miSend.Invoke(mgr, new object[] {
+                    new string[] { target },
+                    "ExampleCharacter",
+                    "CNRModReliableDmg",
+                    param,
+                    true          // reliably: true
+                });
+            }
+            catch { }
+        }
+
+        private static bool EnsureRefl()
+        {
+            if (_ready) return true;
+            try
+            {
+                _mgrType = System.Type.GetType("CNRMultiplayerManager");
+                _npcType = System.Type.GetType("NetPlayerController");
+                System.Type piType = System.Type.GetType("PlayerInfo");
+                if (_mgrType == null || _npcType == null || piType == null) return false;
+
+                _fiMgrInst = _mgrType.GetField("mInstance",
+                    BindingFlags.Public | BindingFlags.Static);
+                _fiMyPI    = _mgrType.GetField("myPlayerInfo",
+                    BindingFlags.Public | BindingFlags.Instance);
+                _miSend    = _mgrType.GetMethod("sendMessageToPeersAdapt",
+                    BindingFlags.Public | BindingFlags.Instance);
+                _fiPInfo   = _npcType.GetField("pInfo",
+                    BindingFlags.Public | BindingFlags.Instance);
+                _fiMId     = piType.GetField("mId",
+                    BindingFlags.Public | BindingFlags.Instance);
+
+                _ready = _fiMgrInst != null && _fiMyPI  != null && _miSend  != null
+                      && _fiPInfo   != null && _fiMId   != null;
+                return _ready;
+            }
+            catch { return false; }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    //  ModHitRegReceiver — component added to ExampleCharacter (local player GO).
+    //
+    //  De-duplicates the original unreliable PlayerDamageStrOnline and our
+    //  reliable CNRModReliableDmg backup so damage is applied exactly once:
+    //
+    //    Unreliable arrives (no loss):
+    //      PlayerLogic applies it.  Our PlayerDamageStrOnline handler records it
+    //      and marks the pending-reliable entry "handled" → Update() skips it.
+    //
+    //    Only reliable arrives (unreliable dropped):
+    //      CNRModReliableDmg adds a pending entry.  After APPLY_DELAY seconds
+    //      with no matching unreliable, Update() forwards to the full compiled
+    //      PlayerDamageStrOnline pipeline (_applyingReliable guard prevents
+    //      infinite recursion) so armor, kill-credit, etc. all work correctly.
+    //
+    //    Both arrive (reliable first):
+    //      CNRModReliableDmg queues entry; when unreliable arrives the handler
+    //      marks it handled → no second application.
+    // ─────────────────────────────────────────────────────────────────────────────
+    public class ModHitRegReceiver : MonoBehaviour
+    {
+        private const float APPLY_DELAY    = 0.08f;   // seconds to wait before applying reliable
+        private const float UNRELIABLE_TTL = 0.5f;    // expire stale unreliable records
+
+        private struct UEntry { public int damage; public float time; }
+
+        private struct RelEntry
+        {
+            public string shooterId;
+            public int    damage;
+            public float  time;
+            public bool   handled;  // true = matching unreliable already applied it
+        }
+
+        // Per-shooter lists of recently-received unreliable damage messages
+        private readonly Dictionary<string, List<UEntry>> _unrel =
+            new Dictionary<string, List<UEntry>>();
+
+        // Reliable backup entries waiting for the APPLY_DELAY window
+        private readonly List<RelEntry> _pending = new List<RelEntry>();
+
+        private bool _applyingReliable = false;   // re-entrancy guard
+
+        // ── Fires alongside PlayerLogic.PlayerDamageStrOnline (unreliable path) ──
+        void PlayerDamageStrOnline(string param)
+        {
+            if (_applyingReliable) return;   // skip our own forwarded invocation
+
+            string shooterId;
+            int    damage;
+            if (!Parse2(param, out shooterId, out damage)) return;
+
+            // Record that this unreliable hit was received and applied by PlayerLogic
+            List<UEntry> ulist;
+            if (!_unrel.TryGetValue(shooterId, out ulist))
+            {
+                ulist = new List<UEntry>();
+                _unrel[shooterId] = ulist;
+            }
+            ulist.Add(new UEntry { damage = damage, time = Time.realtimeSinceStartup });
+
+            // Cancel the oldest matching reliable-pending entry so Update() won't re-apply
+            for (int i = 0; i < _pending.Count; i++)
+            {
+                RelEntry e = _pending[i];
+                if (!e.handled && e.shooterId == shooterId && e.damage == damage)
+                {
+                    e.handled = true;
+                    _pending[i] = e;
+                    break;
+                }
+            }
+        }
+
+        // ── Fires when our reliable backup arrives (sent by HitRegRelay on hitter) ──
+        void CNRModReliableDmg(string param)
+        {
+            string shooterId;
+            int    damage;
+            if (!Parse3(param, out shooterId, out damage)) return;
+
+            // If a matching unreliable already arrived, consume it and we're done
+            List<UEntry> ulist;
+            if (_unrel.TryGetValue(shooterId, out ulist))
+            {
+                for (int i = 0; i < ulist.Count; i++)
+                {
+                    if (ulist[i].damage == damage)
+                    {
+                        ulist.RemoveAt(i);
+                        return;   // unreliable already applied — no action needed
+                    }
+                }
+            }
+
+            // Unreliable hasn't arrived yet — queue reliable for deferred application
+            _pending.Add(new RelEntry {
+                shooterId = shooterId,
+                damage    = damage,
+                time      = Time.realtimeSinceStartup,
+                handled   = false
+            });
+        }
+
+        void Update()
+        {
+            float now = Time.realtimeSinceStartup;
+
+            // Apply reliable entries whose wait window has elapsed
+            for (int i = _pending.Count - 1; i >= 0; i--)
+            {
+                RelEntry e = _pending[i];
+                if (now - e.time < APPLY_DELAY) continue;
+
+                _pending.RemoveAt(i);
+                if (e.handled) continue;   // unreliable arrived in time — already applied
+
+                // Unreliable was dropped; apply damage through the full compiled path so
+                // armor, headshot protection, and kill-credit logic all work correctly.
+                _applyingReliable = true;
+                try
+                {
+                    GameObject.Find("ExampleCharacter").SendMessage(
+                        "PlayerDamageStrOnline",
+                        e.shooterId + "@" + e.damage.ToString(),
+                        SendMessageOptions.DontRequireReceiver);
+                }
+                finally { _applyingReliable = false; }
+            }
+
+            // Expire stale unreliable records
+            foreach (KeyValuePair<string, List<UEntry>> kv in _unrel)
+            {
+                List<UEntry> list = kv.Value;
+                for (int j = list.Count - 1; j >= 0; j--)
+                    if (now - list[j].time > UNRELIABLE_TTL)
+                        list.RemoveAt(j);
+            }
+        }
+
+        // Parses "shooterId@damage" (original PlayerDamageStrOnline format)
+        private static bool Parse2(string s, out string id, out int dmg)
+        {
+            id = null; dmg = 0;
+            int at = s.IndexOf('@');
+            if (at < 0) return false;
+            id = s.Substring(0, at);
+            return int.TryParse(s.Substring(at + 1), out dmg);
+        }
+
+        // Parses "shooterId@damage@seq" (CNRModReliableDmg format)
+        private static bool Parse3(string s, out string id, out int dmg)
+        {
+            id = null; dmg = 0;
+            string[] p = s.Split('@');
+            if (p.Length < 2) return false;
+            id = p[0];
+            return int.TryParse(p[1], out dmg);
         }
     }
 }
