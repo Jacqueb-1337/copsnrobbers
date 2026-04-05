@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.54";
+        public  const string Version = "3.1.55";
 
         public static void Load()
         {
@@ -3064,15 +3064,21 @@ namespace CNRSettingsMod
                     if (_gameFont != null) _gsWinBg.font = _gameFont;
                 }
                 // Swipe-to-scroll click suppression.
-                // Track finger-down position here in IMGUI space so we can check
-                // raw displacement on lift -- no dependency on Update() flag timing.
+                // Record IMGUI finger-down Y so we can check raw displacement on lift.
                 if (Event.current.type == EventType.MouseDown)
                     _swipeGuiDownY = Event.current.mousePosition.y;
-                if (Event.current.type == EventType.MouseUp &&
-                    (_swipeDragging || Mathf.Abs(Event.current.mousePosition.y - _swipeGuiDownY) > SwipeGuiDeadZone))
+                // While a swipe is in progress, clear hotControl every pass so no button
+                // is ever in "pressed" state -- the key insight: buttons fire on hotControl
+                // match, not just event type, so Event.Use() alone is not enough.
+                bool guiSwipeDragging = _swipeDragging ||
+                    Mathf.Abs(Event.current.mousePosition.y - _swipeGuiDownY) > SwipeGuiDeadZone;
+                if (guiSwipeDragging)
+                    GUIUtility.hotControl = 0;
+                if (Event.current.type == EventType.MouseUp && guiSwipeDragging)
                 {
                     _swipeDragging = false;
-                    Event.current.Use(); // button under finger won't fire
+                    GUIUtility.hotControl = 0;
+                    Event.current.Use();
                 }
                 _winRect = GUI.Window(9902, _winRect, DrawSettingsWindow, "  [CNR Mod]  Settings", _gsWinBg);
             }
