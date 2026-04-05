@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.50";
+        public  const string Version = "3.1.51";
 
         public static void Load()
         {
@@ -3434,7 +3434,7 @@ namespace CNRSettingsMod
             GUILayout.Space(6f);
             GUILayout.BeginHorizontal();
             GUILayout.Label("Right stick  [" + _controllerCamSens.ToString("F3") + "]", LabelStyle(), GUILayout.Width(pw * 0.42f));
-            float newRCS = DrawSlider(_controllerCamSens, 0.05f, 3.0f);
+            float newRCS = DrawSlider(_controllerCamSens, 0.05f, 15f);
             GUILayout.EndHorizontal();
             if (Mathf.Abs(newRCS - _controllerCamSens) > 0.001f)
             {
