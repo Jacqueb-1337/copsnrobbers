@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.21";
+        public const  string Version = "3.1.22";
 
         // -- Mod version registry � every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -10746,6 +10746,7 @@ namespace CNRMods
         private FieldInfo     _fiMaxFwd     = null;
         private FieldInfo     _fiMaxSide    = null;
         private FieldInfo     _fiMaxBack    = null;
+        private FieldInfo     _fiVelocity   = null;
         private UISprite      _gunIconSprite = null; // SwitchButtonBackground UISprite
         private float         _dbgTimer     = 0f;
         private string        _lastSprite   = null;
@@ -10777,6 +10778,7 @@ namespace CNRMods
                 _fiMaxFwd    = mt.GetField("maxForwardSpeed");
                 _fiMaxSide   = mt.GetField("maxSidewaysSpeed");
                 _fiMaxBack   = mt.GetField("maxBackwardsSpeed");
+                _fiVelocity  = mt.GetField("velocity");
                 ModEntry.Log("SpeedHook cache: movement=" + (mt != null ? mt.Name : "NULL")
                     + " RunSpeed=" + (_fiRunSpeed != null ? "ok" : "NULL")
                     + " maxFwd=" + (_fiMaxFwd != null ? "ok" : "NULL")
@@ -10819,9 +10821,11 @@ namespace CNRMods
             if (_fiMaxSide != null) _fiMaxSide.SetValue(mv, TargetRunSpeed  * mult);
             if (_fiMaxBack != null) _fiMaxBack.SetValue(mv, TargetWalkSpeed * mult * 0.5f);
             float fwdAfter  = _fiMaxFwd  != null ? (float)_fiMaxFwd.GetValue(mv)  : -1f;
+            Vector3 vel = _fiVelocity != null ? (Vector3)_fiVelocity.GetValue(mv) : Vector3.zero;
+            float speed = new Vector3(vel.x, 0f, vel.z).magnitude;
             if (sprite != _lastSprite || _dbgTimer >= 4.9f)
                 ModEntry.Log("SpeedHook vals: maxFwd " + fwdBefore + "->" + fwdAfter
-                    + " _fiMaxFwd=" + (_fiMaxFwd != null ? "ok" : "NULL")
+                    + " speed=" + speed.ToString("F2")
                     + " mult=" + mult + " mv=" + (mv != null ? mv.GetType().Name : "NULL"));
         }
     }
