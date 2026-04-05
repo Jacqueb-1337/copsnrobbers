@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.56";
+        public  const string Version = "3.1.57";
 
         public static void Load()
         {
@@ -286,6 +286,7 @@ namespace CNRSettingsMod
         private float _swipePrevScreenY  = 0f;
         private float _swipeGuiDownY     = 0f;   // IMGUI y at finger-down (for OnGUI displacement check)
         private bool  _swipeGuiFingerDown = false; // true only while a finger is physically down
+        private bool  _swipeIsScrolling  = false; // cached per-frame: finger is down AND past dead zone
         private const float SwipeDeadZonePx  = 12f;  // screen pixels before Update() drag counts as swipe
         private const float SwipeGuiDeadZone = 8f;   // IMGUI-space pixels for OnGUI click suppression
         private float   _kbmDeadzone   = 0.05f; // keyboard/mouse inject: axis magnitude below this is zeroed
@@ -3070,19 +3071,19 @@ namespace CNRSettingsMod
                     _swipeGuiDownY     = Event.current.mousePosition.y;
                     _swipeGuiFingerDown = true;
                 }
-                // Only check displacement while a finger is actually held down.
-                // Without this guard, (mousePos.y - 0) > 8 is always true on startup,
-                // which clears hotControl permanently and breaks all buttons.
-                bool guiSwipeDragging = _swipeGuiFingerDown && (
+                _swipeIsScrolling = _swipeGuiFingerDown && (
                     _swipeDragging ||
                     Mathf.Abs(Event.current.mousePosition.y - _swipeGuiDownY) > SwipeGuiDeadZone);
-                if (guiSwipeDragging)
+                // Clear before GUI.Window so outer controls don't claim hotControl.
+                // DrawSettingsWindow also clears at its top so inner controls can't claim it either.
+                if (_swipeIsScrolling)
                     GUIUtility.hotControl = 0;
                 if (Event.current.type == EventType.MouseUp)
                 {
-                    bool wasDragging = guiSwipeDragging;
+                    bool wasDragging = _swipeIsScrolling;
                     _swipeDragging     = false;
                     _swipeGuiFingerDown = false;
+                    _swipeIsScrolling   = false;
                     if (wasDragging) { GUIUtility.hotControl = 0; Event.current.Use(); }
                 }
                 _winRect = GUI.Window(9902, _winRect, DrawSettingsWindow, "  [CNR Mod]  Settings", _gsWinBg);
@@ -3095,6 +3096,11 @@ namespace CNRSettingsMod
 
         private void DrawSettingsWindow(int id)
         {
+            // During a swipe, clear hotControl at the very top of every pass so no
+            // inner control (checkbox, slider, button) can claim pressed state.
+            if (_swipeIsScrolling)
+                GUIUtility.hotControl = 0;
+
             float pw = _winRect.width - 28f;
 
             // ---- APK update banner ------------------------------------------
