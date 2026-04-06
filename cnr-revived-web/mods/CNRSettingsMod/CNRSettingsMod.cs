@@ -34,7 +34,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.58";
+        public  const string Version = "3.1.59";
 
         public static void Load()
         {
@@ -3065,26 +3065,20 @@ namespace CNRSettingsMod
                     _gsWinBg.fontSize            = 15;
                     if (_gameFont != null) _gsWinBg.font = _gameFont;
                 }
-                // Swipe-to-scroll click suppression.
+                // Swipe-to-scroll: track finger down/up and update _swipeIsScrolling.
                 if (Event.current.type == EventType.MouseDown)
                 {
-                    _swipeGuiDownY     = Event.current.mousePosition.y;
+                    _swipeGuiDownY      = Event.current.mousePosition.y;
                     _swipeGuiFingerDown = true;
                 }
                 _swipeIsScrolling = _swipeGuiFingerDown && (
                     _swipeDragging ||
                     Mathf.Abs(Event.current.mousePosition.y - _swipeGuiDownY) > SwipeGuiDeadZone);
-                // Clear before GUI.Window so outer controls don't claim hotControl.
-                // DrawSettingsWindow also clears at its top so inner controls can't claim it either.
-                if (_swipeIsScrolling)
-                    GUIUtility.hotControl = 0;
                 if (Event.current.type == EventType.MouseUp)
                 {
-                    bool wasDragging = _swipeIsScrolling;
-                    _swipeDragging     = false;
+                    _swipeDragging      = false;
                     _swipeGuiFingerDown = false;
                     _swipeIsScrolling   = false;
-                    if (wasDragging) { GUIUtility.hotControl = 0; Event.current.Use(); }
                 }
                 _winRect = GUI.Window(9902, _winRect, DrawSettingsWindow, "  [CNR Mod]  Settings", _gsWinBg);
             }
@@ -3096,17 +3090,12 @@ namespace CNRSettingsMod
 
         private void DrawSettingsWindow(int id)
         {
-            // During a swipe, evict hotControl AND eat the event before any control
-            // runs. Controls check GetTypeForControl(id) which returns Used when the
-            // event is eaten, so neither sliders nor checkboxes can process it.
-            // We must NOT eat Repaint/Layout -- GUILayout needs those to size content.
-            if (_swipeIsScrolling &&
-                Event.current.type != EventType.Repaint &&
-                Event.current.type != EventType.Layout)
-            {
-                GUIUtility.hotControl = 0;
-                Event.current.Use();
-            }
+            // Once a swipe is in progress, disable ALL interactive controls so nothing
+            // can be toggled/dragged/clicked while the finger is scrolling the page.
+            // GUI.enabled=false makes every control non-interactive but still visible.
+            // We restore it at the very end so the capture overlays still work.
+            bool wasEnabled = GUI.enabled;
+            if (_swipeIsScrolling) GUI.enabled = false;
 
             float pw = _winRect.width - 28f;
 
@@ -3348,7 +3337,8 @@ namespace CNRSettingsMod
             }
             GUILayout.Space(6f);
 
-            // Keybind capture overlay � drawn on top of everything else
+            // Keybind capture overlay — drawn on top of everything else
+            GUI.enabled = wasEnabled; // restore before overlays
             if (_captureIdx >= 0) DrawCaptureOverlay();
             if (_gpCaptureIdx >= 0) DrawGpCaptureOverlay();
         }
