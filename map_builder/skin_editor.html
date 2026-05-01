@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CNR Skin Editor</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #12121e; color: #dde; font-family: 'Segoe UI', sans-serif; font-size: 13px; display: flex; flex-direction: column; height: 100vh; overflow: hidden; user-select: none; }
+
+/* ── Toolbar ── */
+#toolbar { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: #1a1a2e; border-bottom: 1px solid #252545; flex-shrink: 0; flex-wrap: wrap; }
+#toolbar h1 { font-size: 13px; color: #e94560; margin-right: 4px; white-space: nowrap; }
+.sep { width: 1px; background: #252545; align-self: stretch; margin: 0 2px; }
+.btn { padding: 4px 10px; border: 1px solid #333360; background: #1a1a2e; color: #dde; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+.btn:hover { background: #252545; }
+.btn.active { background: #e94560; color: #fff; border-color: #e94560; }
+.btn.green { background: #1a3a22; border-color: #2d6a4f; }
+.btn.green:hover { background: #2d6a4f; }
+.file-btn { position: relative; overflow: hidden; }
+.file-btn input[type=file] { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+
+/* ── Main ── */
+#main { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Left panel ── */
+#left-panel { width: 180px; background: #1a1a2e; border-right: 1px solid #252545; display: flex; flex-direction: column; gap: 0; flex-shrink: 0; overflow-y: auto; }
+.panel-section { padding: 10px; border-bottom: 1px solid #252545; }
+.panel-section h3 { font-size: 10px; text-transform: uppercase; color: #666688; margin-bottom: 8px; letter-spacing: 1px; }
+
+/* Tools */
+.tool-btn { display: flex; align-items: center; gap: 7px; width: 100%; padding: 6px 8px; margin-bottom: 4px; background: #12121e; border: 1px solid #333360; border-radius: 4px; cursor: pointer; font-size: 12px; color: #dde; }
+.tool-btn:hover { background: #252545; }
+.tool-btn.active { background: #e94560; border-color: #e94560; color: #fff; }
+
+/* Color picker area */
+#color-preview { width: 100%; height: 32px; border-radius: 4px; border: 2px solid #333360; margin-bottom: 6px; cursor: pointer; }
+#color-hex { width: 100%; background: #12121e; border: 1px solid #333360; border-radius: 3px; color: #dde; padding: 4px 7px; font-size: 12px; font-family: monospace; outline: none; margin-bottom: 4px; }
+#color-hex:focus { border-color: #e94560; }
+#color-native { width: 32px; height: 26px; border: 1px solid #333360; border-radius: 3px; cursor: pointer; padding: 1px; vertical-align: middle; background: #12121e; }
+#color-row { display: flex; align-items: center; gap: 6px; }
+#color-row span { font-size: 11px; color: #666688; }
+
+/* Recent colors */
+#recent-colors { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.swatch { width: 20px; height: 20px; border-radius: 3px; border: 1px solid #333360; cursor: pointer; flex-shrink: 0; }
+.swatch:hover { border-color: #dde; }
+
+/* Zoom */
+#zoom-val { font-size: 12px; color: #aaaacc; min-width: 32px; text-align: center; }
+
+/* ── Center: 2D canvas ── */
+#canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #0e0e1a; display: flex; align-items: center; justify-content: center; }
+#skin-canvas { image-rendering: pixelated; cursor: crosshair; display: block; }
+#overlay-canvas { position: absolute; pointer-events: none; image-rendering: pixelated; }
+
+/* ── Right: 3D preview ── */
+#right-panel { width: 300px; background: #1a1a2e; border-left: 1px solid #252545; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+#right-panel h3 { font-size: 10px; text-transform: uppercase; color: #666688; letter-spacing: 1px; padding: 10px 10px 6px; border-bottom: 1px solid #252545; flex-shrink: 0; }
+#preview-canvas { flex: 1; display: block; width: 100%; }
+
+/* ── Bottom bar ── */
+#bottom-bar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: #1a1a2e; border-top: 1px solid #252545; flex-shrink: 0; }
+#status { font-size: 11px; color: #666688; flex: 1; }
+#pixel-pos { font-size: 11px; color: #8888aa; font-family: monospace; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #12121e; }
+::-webkit-scrollbar-thumb { background: #333360; border-radius: 3px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>◈ CNR Skin Editor</h1>
+  <div class="sep"></div>
+  <label class="btn file-btn" title="Open a PNG skin file">
+    📂 Open PNG
+    <input type="file" id="file-input" accept=".png,image/png">
+  </label>
+  <button class="btn green" id="btn-export" title="Download as PNG">⬇ Save PNG</button>
+  <div class="sep"></div>
+  <span style="font-size:11px;color:#666688">Zoom:</span>
+  <button class="btn" id="btn-zoom-out">−</button>
+  <span id="zoom-val">8×</span>
+  <button class="btn" id="btn-zoom-in">+</button>
+  <div class="sep"></div>
+  <button class="btn" id="btn-undo" title="Undo (Ctrl+Z)">↩ Undo</button>
+  <button class="btn" id="btn-redo" title="Redo (Ctrl+Y)">↪ Redo</button>
+  <div class="sep"></div>
+  <span style="font-size:11px;color:#666688">UV grid:</span>
+  <button class="btn active" id="btn-uvgrid" title="Toggle UV part outlines">⊞ Parts</button>
+</div>
+
+<div id="main">
+
+  <!-- LEFT -->
+  <div id="left-panel">
+    <div class="panel-section">
+      <h3>Tools</h3>
+      <button class="tool-btn active" id="tool-pencil" data-tool="pencil">✏ Pencil</button>
+      <button class="tool-btn" id="tool-eraser" data-tool="eraser">◻ Eraser</button>
+    </div>
+    <div class="panel-section">
+      <h3>Color</h3>
+      <div id="color-preview" title="Click to open color picker"></div>
+      <div id="color-row">
+        <span>#</span>
+        <input id="color-hex" type="text" maxlength="6" value="ff0000" spellcheck="false">
+        <input id="color-native" type="color" value="#ff0000" title="Pick color">
+      </div>
+      <div id="recent-colors"></div>
+    </div>
+    <div class="panel-section">
+      <h3>Brush size</h3>
+      <div style="display:flex;align-items:center;gap:6px">
+        <button class="btn" id="btn-brush-dec">−</button>
+        <span id="brush-val" style="font-size:12px;color:#aaaacc;min-width:24px;text-align:center">1</span>
+        <button class="btn" id="btn-brush-inc">+</button>
+        <span style="font-size:11px;color:#666688">px</span>
+      </div>
+    </div>
+    <div class="panel-section">
+      <h3>Parts</h3>
+      <div style="font-size:11px;color:#666688;line-height:1.7">
+        <div><span style="color:#ff4444">■</span> Head</div>
+        <div><span style="color:#ff4444;opacity:.5">■</span> Hat / overlay</div>
+        <div><span style="color:#44ff44">■</span> Body</div>
+        <div><span style="color:#4488ff">■</span> Right arm</div>
+        <div><span style="color:#44ffff">■</span> Left arm</div>
+        <div><span style="color:#ffaa00">■</span> Right leg</div>
+        <div><span style="color:#ff66ff">■</span> Left leg</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER: 2D canvas -->
+  <div id="canvas-wrap">
+    <canvas id="skin-canvas"></canvas>
+    <canvas id="overlay-canvas"></canvas>
+  </div>
+
+  <!-- RIGHT: 3D preview -->
+  <div id="right-panel">
+    <h3>3D Preview — drag to rotate</h3>
+    <canvas id="preview-canvas"></canvas>
+  </div>
+
+</div>
+
+<div id="bottom-bar">
+  <span id="status">Open a 64×32 or 64×64 PNG skin to start painting.</span>
+  <span id="pixel-pos"></span>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const SKIN_W = 64, SKIN_H = 32;  // CNR skin format
+
+// UV regions on a 64×32 texture (pixel coords, y=0 at top)
+// [label, x0, y0, x1, y1, css color]
+const UV_PARTS = [
+  ['Head',     0,  0, 32, 16, 'rgba(255,68,68,0.55)'],
+  ['Hat',     32,  0, 64, 16, 'rgba(255,68,68,0.25)'],
+  ['Body',    16, 16, 40, 32, 'rgba(68,255,68,0.45)'],
+  ['R Arm',   40, 16, 56, 32, 'rgba(68,136,255,0.45)'],
+  ['L Arm',   40, 16, 56, 32, 'rgba(68,255,255,0.35)'],  // same region, mirrored in-game
+  ['R Leg',    0, 16, 16, 32, 'rgba(255,170,0,0.45)'],
+  ['L Leg',    0, 16, 16, 32, 'rgba(255,102,255,0.35)'],  // same region, mirrored in-game
+];
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
+const state = {
+  tool:      'pencil',
+  color:     '#ff0000',
+  brushSize: 1,
+  zoom:      8,
+  uvGrid:    true,
+  painting:  false,
+  recentColors: [],
+  undoStack: [],
+  redoStack: [],
+  panOffset: { x: 0, y: 0 },
+  panStart:  null,
+};
+
+// ─── Canvas setup ─────────────────────────────────────────────────────────────
+
+const skinCanvas    = document.getElementById('skin-canvas');
+const skinCtx       = skinCanvas.getContext('2d');
+const overlayCanvas = document.getElementById('overlay-canvas');
+const overlayCtx    = overlayCanvas.getContext('2d');
+
+// The actual pixel data lives here (SKIN_W × SKIN_H)
+const pixelCanvas = document.createElement('canvas');
+pixelCanvas.width  = SKIN_W;
+pixelCanvas.height = SKIN_H;
+const pixelCtx = pixelCanvas.getContext('2d');
+
+// Initialise to transparent checkerboard-visible state (transparent black)
+pixelCtx.clearRect(0, 0, SKIN_W, SKIN_H);
+
+function getZoomedSize() {
+  return { w: SKIN_W * state.zoom, h: SKIN_H * state.zoom };
+}
+
+function resizeCanvases() {
+  const { w, h } = getZoomedSize();
+  skinCanvas.width  = w;
+  skinCanvas.height = h;
+  skinCanvas.style.width  = w + 'px';
+  skinCanvas.style.height = h + 'px';
+  overlayCanvas.width  = w;
+  overlayCanvas.height = h;
+  overlayCanvas.style.width  = w + 'px';
+  overlayCanvas.style.height = h + 'px';
+  // Position overlay on top of skin canvas
+  const wrap = document.getElementById('canvas-wrap');
+  const sc   = skinCanvas.getBoundingClientRect();
+  // overlay is absolute — let CSS handle it with transform matching
+  redrawSkin();
+  redrawOverlay();
+}
+
+function redrawSkin() {
+  const { w, h } = getZoomedSize();
+  skinCtx.clearRect(0, 0, w, h);
+
+  // Checkerboard background
+  const cs = state.zoom < 4 ? 4 : state.zoom;
+  for (let y = 0; y < SKIN_H; y++) {
+    for (let x = 0; x < SKIN_W; x++) {
+      skinCtx.fillStyle = ((x + y) & 1) ? '#2a2a3e' : '#1e1e30';
+      skinCtx.fillRect(x * state.zoom, y * state.zoom, state.zoom, state.zoom);
+    }
+  }
+
+  // Draw pixels (nearest-neighbour)
+  skinCtx.imageSmoothingEnabled = false;
+  skinCtx.drawImage(pixelCanvas, 0, 0, w, h);
+}
+
+function redrawOverlay() {
+  const { w, h } = getZoomedSize();
+  overlayCtx.clearRect(0, 0, w, h);
+
+  if (!state.uvGrid) return;
+
+  // Draw UV part regions
+  const z = state.zoom;
+  for (const [label, x0, y0, x1, y1, col] of UV_PARTS) {
+    overlayCtx.strokeStyle = col.replace(/[\d.]+\)$/, '0.85)');
+    overlayCtx.lineWidth   = 1;
+    overlayCtx.strokeRect(x0 * z + 0.5, y0 * z + 0.5, (x1 - x0) * z - 1, (y1 - y0) * z - 1);
+  }
+
+  // Grid lines (only when zoom >= 4)
+  if (state.zoom >= 4) {
+    overlayCtx.strokeStyle = 'rgba(255,255,255,0.06)';
+    overlayCtx.lineWidth = 0.5;
+    for (let x = 0; x <= SKIN_W; x++) {
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(x * z, 0);
+      overlayCtx.lineTo(x * z, h);
+      overlayCtx.stroke();
+    }
+    for (let y = 0; y <= SKIN_H; y++) {
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(0, y * z);
+      overlayCtx.lineTo(w, y * z);
+      overlayCtx.stroke();
+    }
+  }
+}
+
+// ─── Pixel paint ─────────────────────────────────────────────────────────────
+
+function canvasToPixel(cx, cy) {
+  const rect = skinCanvas.getBoundingClientRect();
+  const lx   = cx - rect.left;
+  const ly   = cy - rect.top;
+  return {
+    px: Math.floor(lx / state.zoom),
+    py: Math.floor(ly / state.zoom),
+  };
+}
+
+function paintPixel(px, py) {
+  if (px < 0 || py < 0 || px >= SKIN_W || py >= SKIN_H) return;
+  const b = state.brushSize;
+  const half = Math.floor(b / 2);
+  for (let dy = -half; dy < b - half; dy++) {
+    for (let dx = -half; dx < b - half; dx++) {
+      const nx = px + dx, ny = py + dy;
+      if (nx < 0 || ny < 0 || nx >= SKIN_W || ny >= SKIN_H) continue;
+      if (state.tool === 'eraser') {
+        pixelCtx.clearRect(nx, ny, 1, 1);
+      } else {
+        pixelCtx.fillStyle = state.color;
+        pixelCtx.fillRect(nx, ny, 1, 1);
+      }
+    }
+  }
+  redrawSkin();
+  update3dTexture();
+}
+
+// ─── Undo / Redo ─────────────────────────────────────────────────────────────
+
+function captureSnapshot() {
+  return pixelCtx.getImageData(0, 0, SKIN_W, SKIN_H);
+}
+
+function pushUndo() {
+  state.undoStack.push(captureSnapshot());
+  if (state.undoStack.length > 60) state.undoStack.shift();
+  state.redoStack.length = 0;
+}
+
+function undo() {
+  if (!state.undoStack.length) return;
+  state.redoStack.push(captureSnapshot());
+  const snap = state.undoStack.pop();
+  pixelCtx.putImageData(snap, 0, 0);
+  redrawSkin();
+  update3dTexture();
+}
+
+function redo() {
+  if (!state.redoStack.length) return;
+  state.undoStack.push(captureSnapshot());
+  const snap = state.redoStack.pop();
+  pixelCtx.putImageData(snap, 0, 0);
+  redrawSkin();
+  update3dTexture();
+}
+
+// ─── Color management ────────────────────────────────────────────────────────
+
+function setColor(hex) {
+  if (!/^#?[0-9a-fA-F]{6}$/.test(hex)) return;
+  if (!hex.startsWith('#')) hex = '#' + hex;
+  state.color = hex;
+  document.getElementById('color-preview').style.background = hex;
+  document.getElementById('color-hex').value = hex.slice(1).toUpperCase();
+  document.getElementById('color-native').value = hex;
+}
+
+function addRecentColor(hex) {
+  state.recentColors = [hex, ...state.recentColors.filter(c => c !== hex)].slice(0, 16);
+  renderRecentColors();
+}
+
+function renderRecentColors() {
+  const el = document.getElementById('recent-colors');
+  el.innerHTML = '';
+  for (const c of state.recentColors) {
+    const s = document.createElement('div');
+    s.className = 'swatch';
+    s.style.background = c;
+    s.title = c;
+    s.addEventListener('click', () => setColor(c));
+    el.appendChild(s);
+  }
+}
+
+// Init color
+setColor('#ff6655');
+
+// ─── Mouse events (paint) ────────────────────────────────────────────────────
+
+let lastPx = -1, lastPy = -1;
+
+skinCanvas.addEventListener('mousedown', e => {
+  if (e.button === 1) { // Middle button pan
+    state.panStart = { mx: e.clientX, my: e.clientY };
+    e.preventDefault();
+    return;
+  }
+  if (e.button !== 0) return;
+  pushUndo();
+  if (state.tool === 'pencil') addRecentColor(state.color);
+  state.painting = true;
+  const { px, py } = canvasToPixel(e.clientX, e.clientY);
+  lastPx = px; lastPy = py;
+  paintPixel(px, py);
+});
+
+skinCanvas.addEventListener('mousemove', e => {
+  const { px, py } = canvasToPixel(e.clientX, e.clientY);
+  document.getElementById('pixel-pos').textContent = `(${px}, ${py})`;
+  if (state.painting && (px !== lastPx || py !== lastPy)) {
+    // Interpolate to avoid gaps when moving fast
+    const dx = px - lastPx, dy = py - lastPy;
+    const steps = Math.max(Math.abs(dx), Math.abs(dy));
+    for (let i = 0; i <= steps; i++) {
+      const ix = Math.round(lastPx + dx * i / steps);
+      const iy = Math.round(lastPy + dy * i / steps);
+      paintPixel(ix, iy);
+    }
+    lastPx = px; lastPy = py;
+  }
+});
+
+window.addEventListener('mouseup', e => {
+  state.painting = false;
+  state.panStart  = null;
+});
+
+skinCanvas.addEventListener('mouseleave', () => {
+  document.getElementById('pixel-pos').textContent = '';
+});
+
+// Zoom on scroll
+skinCanvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (e.deltaY < 0) zoomIn();
+  else zoomOut();
+}, { passive: false });
+
+// ─── Toolbar actions ─────────────────────────────────────────────────────────
+
+function setTool(t) {
+  state.tool = t;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
+  skinCanvas.style.cursor = t === 'eraser' ? 'cell' : 'crosshair';
+}
+document.querySelectorAll('.tool-btn').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+function zoomIn()  { state.zoom = Math.min(state.zoom + (state.zoom < 4 ? 1 : state.zoom < 8 ? 2 : 4), 32); updateZoom(); }
+function zoomOut() { state.zoom = Math.max(state.zoom - (state.zoom <= 4 ? 1 : state.zoom <= 8 ? 2 : 4), 1); updateZoom(); }
+function updateZoom() {
+  document.getElementById('zoom-val').textContent = state.zoom + '×';
+  resizeCanvases();
+}
+
+document.getElementById('btn-zoom-in').addEventListener('click', zoomIn);
+document.getElementById('btn-zoom-out').addEventListener('click', zoomOut);
+document.getElementById('btn-undo').addEventListener('click', undo);
+document.getElementById('btn-redo').addEventListener('click', redo);
+
+document.getElementById('btn-uvgrid').addEventListener('click', function() {
+  state.uvGrid = !state.uvGrid;
+  this.classList.toggle('active', state.uvGrid);
+  redrawOverlay();
+});
+
+// Brush size
+document.getElementById('btn-brush-inc').addEventListener('click', () => {
+  state.brushSize = Math.min(state.brushSize + 1, 16);
+  document.getElementById('brush-val').textContent = state.brushSize;
+});
+document.getElementById('btn-brush-dec').addEventListener('click', () => {
+  state.brushSize = Math.max(state.brushSize - 1, 1);
+  document.getElementById('brush-val').textContent = state.brushSize;
+});
+
+// Color inputs
+document.getElementById('color-preview').addEventListener('click', () => {
+  document.getElementById('color-native').click();
+});
+document.getElementById('color-native').addEventListener('input', e => setColor(e.target.value));
+document.getElementById('color-hex').addEventListener('change', e => {
+  setColor(e.target.value);
+});
+
+// File open
+document.getElementById('file-input').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = () => {
+    pushUndo();
+    pixelCtx.clearRect(0, 0, SKIN_W, SKIN_H);
+    // If 64×64, take top half; if 64×32, use as-is
+    if (img.width === 64 && (img.height === 32 || img.height === 64)) {
+      pixelCtx.drawImage(img, 0, 0, 64, 32, 0, 0, SKIN_W, SKIN_H);
+    } else {
+      // Scale to fit
+      pixelCtx.drawImage(img, 0, 0, SKIN_W, SKIN_H);
+    }
+    redrawSkin();
+    update3dTexture();
+    document.getElementById('status').textContent = `Loaded: ${f.name} (${img.width}×${img.height})`;
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
+  e.target.value = '';
+});
+
+// Export
+document.getElementById('btn-export').addEventListener('click', () => {
+  pixelCanvas.toBlob(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'skin.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+});
+
+// Keyboard
+window.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
+  if (e.ctrlKey && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) { e.preventDefault(); redo(); }
+  if (e.key === 'p' || e.key === 'P') setTool('pencil');
+  if (e.key === 'e' || e.key === 'E') setTool('eraser');
+  if (e.key === '[') { state.brushSize = Math.max(1, state.brushSize - 1); document.getElementById('brush-val').textContent = state.brushSize; }
+  if (e.key === ']') { state.brushSize = Math.min(16, state.brushSize + 1); document.getElementById('brush-val').textContent = state.brushSize; }
+});
+
+// ─── 3D Preview ───────────────────────────────────────────────────────────────
+
+const previewCanvas = document.getElementById('preview-canvas');
+const prevRenderer  = new THREE.WebGLRenderer({ canvas: previewCanvas, antialias: false, alpha: true });
+prevRenderer.setClearColor(0x0e0e1a, 1);
+prevRenderer.setPixelRatio(window.devicePixelRatio);
+
+const prevScene  = new THREE.Scene();
+const prevCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+prevCamera.position.set(0, 1.2, 3.5);
+prevCamera.lookAt(0, 1.2, 0);
+
+prevScene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const sun2 = new THREE.DirectionalLight(0xffffff, 0.8);
+sun2.position.set(2, 5, 3);
+prevScene.add(sun2);
+
+const orbitPrev = new OrbitControls(prevCamera, previewCanvas);
+orbitPrev.target.set(0, 1.2, 0);
+orbitPrev.enableDamping = true;
+orbitPrev.dampingFactor = 0.08;
+orbitPrev.enablePan = false;
+
+// The live texture (updated on every paint stroke)
+const liveTexture = new THREE.CanvasTexture(pixelCanvas);
+liveTexture.magFilter = THREE.NearestFilter;
+liveTexture.minFilter = THREE.NearestFilter;
+
+function update3dTexture() {
+  liveTexture.needsUpdate = true;
+}
+
+// Build a Minecraft-style character using BoxGeometry with per-face UV offsets.
+// Minecraft classic 64×32 UV map:
+//   Head:      x=0-32, y=0-16  (faces: right, front, left, back, top, bottom each 8×8)
+//   Hat:       x=32-64, y=0-16 (same face order)
+//   Body:      x=16-40, y=16-32
+//   Right arm: x=40-56, y=16-32
+//   Right leg: x=0-16, y=16-32
+// CNR mirrors R arm/leg for L arm/leg — same UVs.
+
+const TW = 64, TH = 32; // texture dims
+
+function uv(x, y, w, h) {
+  // returns [u0,v1, u1,v1, u0,v0, u1,v0] — BoxGeometry face UV order (CCW from bottom-left)
+  const u0 = x / TW, u1 = (x + w) / TW;
+  const v0 = 1 - (y + h) / TH, v1 = 1 - y / TH;
+  // BoxGeometry expects 4 UVs per face: [BL, BR, TL, TR]
+  return [u0, v0,  u1, v0,  u0, v1,  u1, v1];
+}
+
+function setFaceUVs(geo, faceIndex, uvArr) {
+  // faceIndex: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z
+  const uvAttr = geo.attributes.uv;
+  // Each face = 2 triangles = 6 vertices; but BoxGeometry uses 4 verts per face (non-indexed)
+  // Actually BoxGeometry with no index has 6 verts per face
+  const base = faceIndex * 6;
+  // triangle 1: verts 0,1,2 = BL,BR,TL → uvs [0,1,2] 
+  // triangle 2: verts 3,4,5 = BR,TR,TL → uvs [1,3,2]
+  const [u0v0, u1v0, u0v1, u1v1] = [
+    [uvArr[0], uvArr[1]],
+    [uvArr[2], uvArr[3]],
+    [uvArr[4], uvArr[5]],
+    [uvArr[6], uvArr[7]],
+  ];
+  const verts = [u0v0, u1v0, u0v1, u1v0, u1v1, u0v1];
+  for (let i = 0; i < 6; i++) {
+    uvAttr.setXY(base + i, verts[i][0], verts[i][1]);
+  }
+  uvAttr.needsUpdate = true;
+}
+
+// Face indices for BoxGeometry: +X(right)=0, -X(left)=1, +Y(top)=2, -Y(bot)=3, +Z(front)=4, -Z(back)=5
+// Minecraft head face layout (within 0-32,0-16):
+//   right:  x=0,  y=8, w=8, h=8
+//   front:  x=8,  y=8, w=8, h=8
+//   left:   x=16, y=8, w=8, h=8
+//   back:   x=24, y=8, w=8, h=8
+//   top:    x=8,  y=0, w=8, h=8
+//   bottom: x=16, y=0, w=8, h=8
+
+function buildPart(sw, sh, sd, faceUVs, mat) {
+  // faceUVs: array of 6 entries (for each BoxGeometry face in order +X,-X,+Y,-Y,+Z,-Z)
+  const geo = new THREE.BoxGeometry(sw, sh, sd);
+  for (let f = 0; f < 6; f++) {
+    setFaceUVs(geo, f, faceUVs[f]);
+  }
+  return new THREE.Mesh(geo, mat);
+}
+
+const skinMat = new THREE.MeshLambertMaterial({
+  map: liveTexture,
+  transparent: true,
+  alphaTest: 0.1,
+  side: THREE.FrontSide,
+});
+
+// head
+const headUVs = [
+  uv(0,  8, 8, 8),   // +X right
+  uv(16, 8, 8, 8),   // -X left
+  uv(8,  0, 8, 8),   // +Y top
+  uv(16, 0, 8, 8),   // -Y bottom
+  uv(8,  8, 8, 8),   // +Z front
+  uv(24, 8, 8, 8),   // -Z back
+];
+const head = buildPart(8, 8, 8, headUVs, skinMat);
+head.position.set(0, 20, 0);
+
+// hat (slightly larger, same face order but x+32)
+const hatUVs = [
+  uv(32, 8, 8, 8),
+  uv(48, 8, 8, 8),
+  uv(40, 0, 8, 8),
+  uv(48, 0, 8, 8),
+  uv(40, 8, 8, 8),
+  uv(56, 8, 8, 8),
+];
+const hatMat = new THREE.MeshLambertMaterial({ map: liveTexture, transparent: true, alphaTest: 0.05, depthWrite: false });
+const hat = buildPart(8.5, 8.5, 8.5, hatUVs, hatMat);
+hat.position.set(0, 20, 0);
+
+// body: x=16-40, y=16-32  (24w, 16h section)
+// faces: right x=28,y=20 w=4,h=12  left x=20,y=20 w=4,h=12  top x=20,y=16 w=8,h=4
+//        bot x=28,y=16 w=8,h=4  front x=20,y=20 w=8,h=12  back x=32,y=20 w=8,h=12
+const bodyUVs = [
+  uv(28, 20, 4, 12),  // +X right
+  uv(16, 20, 4, 12),  // -X left
+  uv(20, 16, 8,  4),  // +Y top
+  uv(28, 16, 8,  4),  // -Y bottom
+  uv(20, 20, 8, 12),  // +Z front
+  uv(32, 20, 8, 12),  // -Z back
+];
+const body = buildPart(8, 12, 4, bodyUVs, skinMat);
+body.position.set(0, 12, 0);
+
+// right arm: x=40-56, y=16-32
+const rArmUVs = [
+  uv(44, 20, 4, 12),  // +X
+  uv(40, 20, 4, 12),  // -X
+  uv(44, 16, 4,  4),  // +Y top
+  uv(48, 16, 4,  4),  // -Y bot
+  uv(44, 20, 4, 12),  // +Z front  (same as +X for classic)
+  uv(52, 20, 4, 12),  // -Z back
+];
+// Actually standard layout: right=40,top=44,front=44,left=48,bot=52,back=52
+const rArmUVs2 = [
+  uv(44, 20, 4, 12),  // +X right side
+  uv(40, 20, 4, 12),  // -X left side (inner)
+  uv(44, 16, 4,  4),  // +Y top
+  uv(48, 16, 4,  4),  // -Y bottom
+  uv(44, 20, 4, 12),  // +Z front
+  uv(52, 20, 4, 12),  // -Z back
+];
+const rArm = buildPart(4, 12, 4, rArmUVs2, skinMat);
+rArm.position.set(-6, 12, 0);
+
+// left arm (mirror of right arm, same UVs — CNR mirrors)
+const lArm = buildPart(4, 12, 4, rArmUVs2, skinMat);
+lArm.position.set(6, 12, 0);
+
+// right leg: x=0-16, y=16-32
+const rLegUVs = [
+  uv(4,  20, 4, 12),  // +X
+  uv(0,  20, 4, 12),  // -X
+  uv(4,  16, 4,  4),  // +Y top
+  uv(8,  16, 4,  4),  // -Y bot
+  uv(4,  20, 4, 12),  // +Z front
+  uv(12, 20, 4, 12),  // -Z back
+];
+const rLeg = buildPart(4, 12, 4, rLegUVs, skinMat);
+rLeg.position.set(-2, 0, 0);
+
+// left leg (mirror, same UVs)
+const lLeg = buildPart(4, 12, 4, rLegUVs, skinMat);
+lLeg.position.set(2, 0, 0);
+
+// Scale everything from Minecraft pixel units to world units
+const SCALE = 0.125; // 1 pixel = 0.125 units
+const playerGroup = new THREE.Group();
+[head, hat, body, rArm, lArm, rLeg, lLeg].forEach(m => {
+  m.scale.setScalar(SCALE);
+  m.position.multiplyScalar(SCALE);
+  playerGroup.add(m);
+});
+
+prevScene.add(playerGroup);
+
+// ─── Preview resize ───────────────────────────────────────────────────────────
+
+function resizePreview() {
+  const panel = document.getElementById('right-panel');
+  const h3    = panel.querySelector('h3');
+  const w = panel.clientWidth;
+  const h = panel.clientHeight - h3.offsetHeight;
+  prevRenderer.setSize(w, h);
+  prevCamera.aspect = w / h;
+  prevCamera.updateProjectionMatrix();
+}
+
+new ResizeObserver(resizePreview).observe(document.getElementById('right-panel'));
+resizePreview();
+
+// ─── Animation loop ───────────────────────────────────────────────────────────
+
+function animate() {
+  requestAnimationFrame(animate);
+  orbitPrev.update();
+  prevRenderer.render(prevScene, prevCamera);
+}
+animate();
+
+// ─── Initial canvas size ─────────────────────────────────────────────────────
+
+window.addEventListener('resize', resizeCanvases);
+resizeCanvases();
+
+// Position overlay canvas over skin canvas
+function positionOverlay() {
+  const sc  = skinCanvas;
+  const ov  = overlayCanvas;
+  const wrap = document.getElementById('canvas-wrap');
+  ov.style.position = 'absolute';
+  ov.style.left = sc.offsetLeft + 'px';
+  ov.style.top  = sc.offsetTop  + 'px';
+}
+new ResizeObserver(() => { resizeCanvases(); positionOverlay(); }).observe(document.getElementById('canvas-wrap'));
+
+</script>
+</body>
+</html>
