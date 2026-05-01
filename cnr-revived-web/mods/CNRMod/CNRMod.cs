@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.1.32";
+        public const  string Version = "3.1.37";
 
         // -- Mod version registry ? every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -418,6 +418,9 @@ namespace CNRMods
         public static bool NeedMapBroadcast = false;
         // Set when a new joiner is detected; non-master players re-announce their version+skin.
         public static bool NeedSelfAnnounce = false;
+        // Active pack positions (replaces SetCustomProperties reads).
+        // Key = "cnr_hp_N" or "cnr_pk_N", val = "x,y,z". Entry removed when pack is gone.
+        public static Dictionary<string, string> PackState = new Dictionary<string, string>();
 
         // Called by PhotonNetwork.OnEventCall delegate ? fires on Unity main thread.
         // Signature matches PUN v1: delegate void EventCallback(byte, object, int)
@@ -459,6 +462,18 @@ namespace CNRMods
                     CtfMode.UnpackState(ctfState);
                 }
             }
+            // Pack spawn/despawn updates (keys starting with cnr_hp_ or cnr_pk_)
+            foreach (object rawKey in ht.Keys)
+            {
+                string pk = rawKey as string;
+                if (pk == null) continue;
+                if (pk.StartsWith("cnr_hp_") || pk.StartsWith("cnr_pk_"))
+                {
+                    string pv = ht[rawKey] as string;
+                    if (string.IsNullOrEmpty(pv)) PackState.Remove(pk);
+                    else PackState[pk] = pv;
+                }
+            }
             ModEntry.Log("CnrEvent[" + senderId + "]:"
                 + (ht.ContainsKey("mapUrl")  ? " mapUrl="  + ht["mapUrl"]  : "")
                 + (ht.ContainsKey("skin")    ? " skin="    + ht["skin"]    : "")
@@ -475,6 +490,7 @@ namespace CNRMods
             PlayerVersions.Clear();
             NeedMapBroadcast = false;
             NeedSelfAnnounce = false;
+            PackState.Clear();
             CtfMode.OnLeftRoom();
         }
     }
@@ -647,6 +663,9 @@ namespace CNRMods
                     ht["ctf"]   = "1";
                     ht["ctf_s"] = CtfMode.PackState(); // send full state so new joiners don't see flag at Vector3.zero
                 }
+                // Include all active pack positions so new joiners see existing packs
+                foreach (var pkv in CnrEventBus.PackState)
+                    ht[pkv.Key] = pkv.Value;
                 ModEntry.RaiseCnrEvent(ht);
                 ModEntry.Log("Master: re-broadcast to new joiner (mapUrl=" + (string.IsNullOrEmpty(url) ? "(none)" : url) + " v" + ModEntry.Version + (CtfMode.IsCtfRoom ? " ctf=1" : "") + ")");
             }
@@ -11397,40 +11416,29 @@ namespace CNRMods
 
         private void HealthPackSync()
         {
-            Hashtable props = PhotonNetwork.room.customProperties;
-            if (props == null) return;
-
-            var keys = new System.Collections.Generic.List<string>();
-            foreach (object key in props.Keys)
+            var state = CnrEventBus.PackState;
+            // Despawn any local packs no longer in shared state
+            var localIds = new System.Collections.Generic.List<int>(_hpDict.Keys);
+            foreach (int lid in localIds)
+                if (!state.ContainsKey(HP_PRE + lid)) DespawnHealthPackLocal(lid);
+            // Spawn any active packs we don't have locally yet
+            foreach (var kv in state)
             {
-                string k = key as string;
-                if (k != null && k.StartsWith(HP_PRE)) keys.Add(k);
-            }
-
-            foreach (string k in keys)
-            {
+                if (!kv.Key.StartsWith(HP_PRE)) continue;
                 int id;
-                if (!int.TryParse(k.Substring(HP_PRE.Length), out id)) continue;
-                string val = props[k] as string;
-
-                if (string.IsNullOrEmpty(val))
+                if (!int.TryParse(kv.Key.Substring(HP_PRE.Length), out id)) continue;
+                if (_hpDict.ContainsKey(id)) continue;
+                string[] p = kv.Value.Split(',');
+                if (p.Length >= 3)
                 {
-                    DespawnHealthPackLocal(id);
-                }
-                else if (!_hpDict.ContainsKey(id))
-                {
-                    string[] p = val.Split(',');
-                    if (p.Length >= 3)
-                    {
-                        float x = 0f, y = 0f, z = 0f;
-                        bool ok = float.TryParse(p[0], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out x)
-                               && float.TryParse(p[1], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out y)
-                               && float.TryParse(p[2], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out z);
-                        if (ok) SpawnHealthPackLocal(id, new Vector3(x, y, z));
-                    }
+                    float x = 0f, y = 0f, z = 0f;
+                    bool ok = float.TryParse(p[0], System.Globalization.NumberStyles.Float,
+                                             System.Globalization.CultureInfo.InvariantCulture, out x)
+                           && float.TryParse(p[1], System.Globalization.NumberStyles.Float,
+                                             System.Globalization.CultureInfo.InvariantCulture, out y)
+                           && float.TryParse(p[2], System.Globalization.NumberStyles.Float,
+                                             System.Globalization.CultureInfo.InvariantCulture, out z);
+                    if (ok) SpawnHealthPackLocal(id, new Vector3(x, y, z));
                 }
             }
         }
@@ -11446,7 +11454,8 @@ namespace CNRMods
                 DespawnHealthPackLocal(oldest);
                 var htEvict = new Hashtable();
                 htEvict[HP_PRE + oldest] = "";
-                PhotonNetwork.room.SetCustomProperties(htEvict);
+                CnrEventBus.PackState.Remove(HP_PRE + oldest);
+                ModEntry.RaiseCnrEvent(htEvict);
             }
 
             Vector3 origin = PickRandomPlayerOrigin();
@@ -11471,7 +11480,8 @@ namespace CNRMods
 
             var ht = new Hashtable();
             ht[HP_PRE + id] = val;
-            PhotonNetwork.room.SetCustomProperties(ht);
+            CnrEventBus.PackState[HP_PRE + id] = val;
+            ModEntry.RaiseCnrEvent(ht);
             ModEntry.Log("HealthPackMaster spawned id=" + id + " pos=" + pos);
         }
 
@@ -11516,7 +11526,8 @@ namespace CNRMods
             {
                 var ht = new Hashtable();
                 ht[HP_PRE + id] = "";
-                PhotonNetwork.room.SetCustomProperties(ht);
+                CnrEventBus.PackState.Remove(HP_PRE + id);
+                ModEntry.RaiseCnrEvent(ht);
             }
 
             if (PlayerLogic.mInstance != null && !PlayerLogic.mInstance.bDied)
@@ -11529,13 +11540,16 @@ namespace CNRMods
 
         private void AmmoPackSync()
         {
-            Hashtable props = PhotonNetwork.room.customProperties;
-            if (props == null) return;
-
+            var state = CnrEventBus.PackState;
+            // Despawn any local packs no longer in shared state
+            var localIds = new System.Collections.Generic.List<int>(_apDict.Keys);
+            foreach (int lid in localIds)
+                if (!state.ContainsKey(AP_PRE + lid)) DespawnPackLocal(lid);
+            // Spawn any active packs we don't have locally yet
             var keys = new System.Collections.Generic.List<string>();
-            foreach (object key in props.Keys)
+            foreach (var kv in state)
             {
-                string k = key as string;
+                string k = kv.Key;
                 if (k != null && k.StartsWith(AP_PRE)) keys.Add(k);
             }
 
@@ -11543,26 +11557,19 @@ namespace CNRMods
             {
                 int id;
                 if (!int.TryParse(k.Substring(AP_PRE.Length), out id)) continue;
-                string val = props[k] as string;
-
-                if (string.IsNullOrEmpty(val))
+                if (_apDict.ContainsKey(id)) continue;
+                string val = state[k];
+                string[] p = val.Split(',');
+                if (p.Length >= 3)
                 {
-                    DespawnPackLocal(id);
-                }
-                else if (!_apDict.ContainsKey(id))
-                {
-                    string[] p = val.Split(',');
-                    if (p.Length >= 3)
-                    {
-                        float x = 0f, y = 0f, z = 0f;
-                        bool ok = float.TryParse(p[0], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out x)
-                               && float.TryParse(p[1], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out y)
-                               && float.TryParse(p[2], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out z);
-                        if (ok) SpawnPackLocal(id, new Vector3(x, y, z));
-                    }
+                    float x = 0f, y = 0f, z = 0f;
+                    bool ok = float.TryParse(p[0], System.Globalization.NumberStyles.Float,
+                                             System.Globalization.CultureInfo.InvariantCulture, out x)
+                           && float.TryParse(p[1], System.Globalization.NumberStyles.Float,
+                                             System.Globalization.CultureInfo.InvariantCulture, out y)
+                           && float.TryParse(p[2], System.Globalization.NumberStyles.Float,
+                                             System.Globalization.CultureInfo.InvariantCulture, out z);
+                    if (ok) SpawnPackLocal(id, new Vector3(x, y, z));
                 }
             }
         }
@@ -11593,7 +11600,8 @@ namespace CNRMods
                 DespawnPackLocal(oldest);
                 var htEvict = new Hashtable();
                 htEvict[AP_PRE + oldest] = "";
-                PhotonNetwork.room.SetCustomProperties(htEvict);
+                CnrEventBus.PackState.Remove(AP_PRE + oldest);
+                ModEntry.RaiseCnrEvent(htEvict);
             }
 
             Vector3 origin = PickRandomPlayerOrigin();
@@ -11618,7 +11626,8 @@ namespace CNRMods
 
             var ht = new Hashtable();
             ht[AP_PRE + id] = val;
-            PhotonNetwork.room.SetCustomProperties(ht);
+            CnrEventBus.PackState[AP_PRE + id] = val;
+            ModEntry.RaiseCnrEvent(ht);
             ModEntry.Log("AmmoPackMaster spawned id=" + id + " pos=" + pos);
         }
 
@@ -11663,7 +11672,8 @@ namespace CNRMods
             {
                 var ht = new Hashtable();
                 ht[AP_PRE + id] = "";
-                PhotonNetwork.room.SetCustomProperties(ht);
+                CnrEventBus.PackState.Remove(AP_PRE + id);
+                ModEntry.RaiseCnrEvent(ht);
             }
 
             bool ammoAdded = false;

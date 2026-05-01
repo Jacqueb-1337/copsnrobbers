@@ -512,22 +512,41 @@ public class MainMenuDirector : MonoBehaviour
 		}
 		if (!File.Exists(cnrModPath))
 		{
-			string assetUrl = Application.streamingAssetsPath + "/" + modFile;
-			Debug.Log("[CNRModLoader] Extracting bundled DLL from: " + assetUrl);
-			MainMenuDirector.ShowToast("Installing CNRModManager...");
-			WWW www = new WWW(assetUrl);
-			yield return www;
-			if (!string.IsNullOrEmpty(www.error))
+			Debug.Log("[CNRModLoader] Extracting bundled DLL via AssetManager...");
+			byte[] dllBytes = null;
+			string extractError = null;
+			try
 			{
-				Debug.LogWarning("[CNRModLoader] Bundled extract failed (" + www.error + "), falling back to download");
+				using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+				using (AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+				using (AndroidJavaObject assets = activity.Call<AndroidJavaObject>("getAssets"))
+				using (AndroidJavaObject stream = assets.Call<AndroidJavaObject>("open", modFile))
+				{
+					MemoryStream ms = new MemoryStream(65536);
+					int b;
+					while ((b = stream.Call<int>("read")) != -1)
+					{
+						ms.WriteByte((byte)b);
+					}
+					dllBytes = ms.ToArray();
+				}
+			}
+			catch (Exception ex)
+			{
+				extractError = ex.Message;
+				Debug.LogWarning("[CNRModLoader] AssetManager extract failed: " + ex.Message);
+			}
+			if (dllBytes == null || dllBytes.Length < 1000)
+			{
+				Debug.LogWarning("[CNRModLoader] Bundled extract failed (" + (extractError ?? "empty") + "), falling back to download");
 				yield return MainMenuDirector.mInstance.StartCoroutine(MainMenuDirector.DownloadAndLoad("https://play.jacqueb.me/mods/CNRModManager.dll", cnrModPath, modsDir));
 				yield break;
 			}
 			bool writeFailed = false;
 			try
 			{
-				File.WriteAllBytes(cnrModPath, www.bytes);
-				Debug.Log("[CNRModLoader] Bundled DLL extracted OK (" + www.bytes.Length.ToString() + " bytes)");
+				File.WriteAllBytes(cnrModPath, dllBytes);
+				Debug.Log("[CNRModLoader] Bundled DLL extracted OK (" + dllBytes.Length.ToString() + " bytes)");
 			}
 			catch (Exception ex)
 			{
