@@ -76,7 +76,7 @@
             "type": "PowerShell",
             "request": "launch",
             "script": "${workspaceFolder}/build_and_release.ps1",
-            "args": ["-ModName", "CNRMod", "-Bump", "patch", "-UpdateRepo", "-Deploy", "-Commit"],
+            "args": ["-ModName", "CNRMod", "-Bump", "patch", "-UpdateRepo", "-NoDeploy", "-Commit"],
             "cwd": "${workspaceFolder}",
             "createTemporaryIntegratedConsole": true
         },
