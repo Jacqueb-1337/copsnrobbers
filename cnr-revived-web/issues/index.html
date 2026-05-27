@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Issue Tracker — CNR Revival</title>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="page">
+
+  <header class="site-header">
+    <div class="logo">CNR</div>
+    <div>
+      <h1>Issue Tracker</h1>
+      <div class="sub">Cops n Robbers Revival &mdash; <a href="https://play.jacqueb.me">play.jacqueb.me</a></div>
+    </div>
+    <div class="header-back">
+      <button class="btn btn-ghost btn-sm" id="btn-admin-toggle">Admin</button>
+    </div>
+  </header>
+
+  <!-- Filter bar -->
+  <div class="filter-bar">
+    <input type="search" id="q" placeholder="Search issues…" autocomplete="off"/>
+    <select id="filter-status">
+      <option value="open">Open</option>
+      <option value="confirmed">Confirmed Bug</option>
+      <option value="wip">In Progress</option>
+      <option value="resolved">Resolved</option>
+      <option value="wontfix">Won't Fix</option>
+      <option value="closed">Closed</option>
+      <option value="all">All</option>
+    </select>
+    <select id="filter-mod">
+      <option value="">All mods</option>
+    </select>
+    <select id="filter-tag">
+      <option value="">All tags</option>
+    </select>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="list-toolbar">
+    <h2 id="list-count">Loading…</h2>
+    <button class="btn btn-primary" id="btn-new">+ New Issue</button>
+  </div>
+
+  <!-- Issue list -->
+  <div id="issue-list" class="issue-list">
+    <div class="loading-center"><span class="loader"></span></div>
+  </div>
+
+</div>
+
+<!-- ── Admin Login Modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="modal-admin">
+  <div class="modal" style="max-width:360px">
+    <button class="modal-close" id="modal-close-admin">&times;</button>
+    <h2>Admin Login</h2>
+    <div class="field">
+      <label for="al-user">Username</label>
+      <input type="text" id="al-user" autocomplete="username"/>
+    </div>
+    <div class="field">
+      <label for="al-pass">Password</label>
+      <input type="password" id="al-pass" autocomplete="current-password"/>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+      <button class="btn btn-ghost" id="btn-cancel-admin">Cancel</button>
+      <button class="btn btn-primary" id="btn-submit-admin">Login</button>
+    </div>
+    <div id="al-error" style="color:var(--danger);font-size:13px;display:none"></div>
+  </div>
+</div>
+
+<!-- ── New Issue Modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="modal-new">
+  <div class="modal">
+    <button class="modal-close" id="modal-close-new" title="Close">&times;</button>
+    <h2>New Issue</h2>
+
+    <div class="field">
+      <label for="ni-title">Title <span style="color:var(--danger)">*</span></label>
+      <input type="text" id="ni-title" placeholder="Short, descriptive title" maxlength="200"/>
+    </div>
+
+    <div class="field">
+      <label for="ni-body">Description <span style="color:var(--danger)">*</span></label>
+      <textarea id="ni-body" placeholder="Describe the issue in detail…" rows="6"></textarea>
+    </div>
+
+    <div class="form-row">
+      <div class="field">
+        <label for="ni-mod">Related mod</label>
+        <select id="ni-mod">
+          <option value="">None</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="ni-ver">Version</label>
+        <select id="ni-ver" disabled>
+          <option value="">Select mod first</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Tags <span style="color:var(--muted);font-size:12px">(press Enter or comma to add)</span></label>
+      <div class="tag-input-wrap" id="ni-tag-wrap">
+        <input type="text" id="ni-tag-input" placeholder="e.g. crash, ui, network" maxlength="32"/>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="ni-email">Your email <span style="color:var(--muted);font-size:12px">(optional — to receive updates)</span></label>
+      <input type="email" id="ni-email" placeholder="you@example.com"/>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+      <button class="btn btn-ghost" id="btn-cancel-new">Cancel</button>
+      <button class="btn btn-primary" id="btn-submit-new">Submit Issue</button>
+    </div>
+
+    <div id="ni-error" style="color:var(--danger);font-size:13px;display:none"></div>
+  </div>
+</div>
+
+<!-- ── Toast ─────────────────────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────
+const API = 'api.php';
+let mods = [];
+let niTags = [];
+let isAdmin = false;
+
+async function checkAdminStatus() {
+  try {
+    const d = await fetch('login.php?action=status').then(r => r.json());
+    isAdmin = d.admin === true;
+  } catch { isAdmin = false; }
+  const btn = document.getElementById('btn-admin-toggle');
+  if (!btn) return;
+  if (isAdmin) {
+    btn.textContent = 'Logout';
+    btn.style.color = 'var(--accent)';
+    btn.style.borderColor = 'rgba(74,222,128,0.3)';
+  } else {
+    btn.textContent = 'Admin';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+  }
+}
+
+// ── Token storage (localStorage) ────────────────────────────────────────
+function getTokens() {
+  try { return JSON.parse(localStorage.getItem('cnr_issue_tokens') || '{}'); } catch { return {}; }
+}
+function saveToken(id, token) {
+  const t = getTokens(); t[id] = token;
+  localStorage.setItem('cnr_issue_tokens', JSON.stringify(t));
+}
+function getToken(id) { return getTokens()[id] || null; }
+
+// ── API calls ────────────────────────────────────────────────────────────
+async function apiFetch(action, params = {}) {
+  const url = API + '?action=' + encodeURIComponent(action) +
+    Object.entries(params).map(([k,v]) => v ? '&' + k + '=' + encodeURIComponent(v) : '').join('');
+  const r = await fetch(url);
+  return r.json();
+}
+async function apiPost(action, data) {
+  const r = await fetch(API + '?action=' + encodeURIComponent(action), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  return r.json();
+}
+
+// ── Toast ────────────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (isError ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 3200);
+}
+
+// ── Format date ─────────────────────────────────────────────────────────
+function fmtDate(ts) {
+  const d = new Date(ts * 1000);
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1)   return 'just now';
+  if (mins < 60)  return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24)   return hrs + 'h ago';
+  const days = Math.floor(hrs / 24);
+  if (days < 30)  return days + 'd ago';
+  return d.toLocaleDateString();
+}
+
+function statusBadge(s) {
+  const labels = { open: 'open', confirmed: 'confirmed bug', wip: 'in progress', resolved: 'resolved', wontfix: "won't fix", closed: 'closed' };
+  return `<span class="status-dot ${esc(s)}">${labels[s] || s}</span>`;
+}
+
+// ── Load mods into selects ────────────────────────────────────────────
+async function loadMods() {
+  const data = await apiFetch('get_mods');
+  mods = data.mods || [];
+
+  const filterMod = document.getElementById('filter-mod');
+  const niMod     = document.getElementById('ni-mod');
+  mods.forEach(m => {
+    filterMod.insertAdjacentHTML('beforeend', `<option value="${esc(m.id)}">${esc(m.name)}</option>`);
+    niMod.insertAdjacentHTML('beforeend',     `<option value="${esc(m.id)}">${esc(m.name)}</option>`);
+  });
+}
+
+// ── Version cascade in new-issue form ────────────────────────────────
+document.getElementById('ni-mod').addEventListener('change', function() {
+  const niVer = document.getElementById('ni-ver');
+  const modId = this.value;
+  niVer.innerHTML = '';
+  if (!modId) {
+    niVer.innerHTML = '<option value="">Select mod first</option>';
+    niVer.disabled = true;
+    return;
+  }
+  const mod = mods.find(m => m.id === modId);
+  niVer.disabled = false;
+  niVer.innerHTML = '<option value="">Any version</option>';
+  (mod?.versions || []).forEach(v => {
+    niVer.insertAdjacentHTML('beforeend', `<option value="${esc(v)}">${esc(v)}</option>`);
+  });
+});
+
+// ── Load issue list ────────────────────────────────────────────────────
+async function loadIssues() {
+  const status = document.getElementById('filter-status').value;
+  const mod    = document.getElementById('filter-mod').value;
+  const tag    = document.getElementById('filter-tag').value;
+  const q      = document.getElementById('q').value.trim();
+
+  const data = await apiFetch('list_issues', { status, mod, tag, q });
+  const issues  = data.issues  || [];
+  const allTags = data.all_tags || [];
+
+  // Update count
+  document.getElementById('list-count').textContent =
+    issues.length === 0 ? 'No issues' :
+    issues.length === 1 ? '1 issue' : issues.length + ' issues';
+
+  // Update tag filter
+  const tf = document.getElementById('filter-tag');
+  const currentTag = tf.value;
+  tf.innerHTML = '<option value="">All tags</option>';
+  allTags.forEach(t => {
+    tf.insertAdjacentHTML('beforeend', `<option value="${esc(t)}"${t===currentTag?' selected':''}>${esc(t)}</option>`);
+  });
+
+  // Render list
+  const container = document.getElementById('issue-list');
+  if (issues.length === 0) {
+    container.innerHTML = `<div class="empty"><p>No issues found.</p><p>Try adjusting your filters.</p></div>`;
+    return;
+  }
+  container.innerHTML = issues.map(issue => {
+    const tags = (issue.tags || []).map(t =>
+      `<span class="tag-pill">${esc(t)}</span>`).join('');
+    const mod  = issue.related_mod
+      ? `<span class="issue-mod-badge">${esc(issue.related_mod)}${issue.related_version ? ' v'+esc(issue.related_version) : ''}</span>` : '';
+    const cmts = issue.comment_count > 0
+      ? `<span class="issue-comment-count">${issue.comment_count} comment${issue.comment_count !== 1 ? 's' : ''}</span>` : '';
+    return `<a class="issue-row" href="view.php?id=${esc(issue.id)}">
+      <span class="issue-num">#${issue.number}</span>
+      <span class="issue-main">
+        <span class="issue-title">${esc(issue.title)}</span>
+        <span class="issue-meta">
+          ${statusBadge(issue.status)}
+          ${tags}
+          ${mod}
+          <span>${fmtDate(issue.created_at)}</span>
+        </span>
+      </span>
+      ${cmts}
+    </a>`;
+  }).join('');
+}
+
+// ── Tag input widget ──────────────────────────────────────────────────
+function renderNiTags() {
+  const wrap = document.getElementById('ni-tag-wrap');
+  const input = document.getElementById('ni-tag-input');
+  Array.from(wrap.querySelectorAll('.tag-chip')).forEach(e => e.remove());
+  niTags.forEach((t, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+    chip.innerHTML = `${esc(t)}<button type="button" data-i="${i}">&times;</button>`;
+    wrap.insertBefore(chip, input);
+  });
+}
+
+function addNiTag(raw) {
+  const t = raw.toLowerCase().replace(/[^a-z0-9 _\-]/g,'').trim();
+  if (t && !niTags.includes(t) && niTags.length < 10) niTags.push(t);
+  renderNiTags();
+}
+
+document.getElementById('ni-tag-wrap').addEventListener('click', e => {
+  if (e.target.dataset.i !== undefined) {
+    niTags.splice(+e.target.dataset.i, 1);
+    renderNiTags();
+  } else {
+    document.getElementById('ni-tag-input').focus();
+  }
+});
+
+document.getElementById('ni-tag-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    addNiTag(e.target.value);
+    e.target.value = '';
+  } else if (e.key === 'Backspace' && e.target.value === '' && niTags.length) {
+    niTags.pop();
+    renderNiTags();
+  }
+});
+document.getElementById('ni-tag-input').addEventListener('blur', e => {
+  if (e.target.value.trim()) { addNiTag(e.target.value); e.target.value = ''; }
+});
+
+// ── New issue modal ───────────────────────────────────────────────────
+function openModal() {
+  document.getElementById('modal-new').classList.remove('hidden');
+  document.getElementById('ni-title').focus();
+}
+function closeModal() {
+  document.getElementById('modal-new').classList.add('hidden');
+}
+
+document.getElementById('btn-new').addEventListener('click', openModal);
+document.getElementById('btn-cancel-new').addEventListener('click', closeModal);
+document.getElementById('modal-close-new').addEventListener('click', closeModal);
+document.getElementById('modal-new').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-new')) closeModal();
+});
+
+document.getElementById('btn-submit-new').addEventListener('click', async () => {
+  const title = document.getElementById('ni-title').value.trim();
+  const body  = document.getElementById('ni-body').value.trim();
+  const email = document.getElementById('ni-email').value.trim();
+  const mod   = document.getElementById('ni-mod').value;
+  const ver   = document.getElementById('ni-ver').value;
+  const errEl = document.getElementById('ni-error');
+
+  errEl.style.display = 'none';
+  if (!title) { errEl.textContent = 'Title is required.'; errEl.style.display = 'block'; return; }
+  if (!body)  { errEl.textContent = 'Description is required.'; errEl.style.display = 'block'; return; }
+
+  const btn = document.getElementById('btn-submit-new');
+  btn.disabled = true; btn.textContent = 'Submitting…';
+
+  const res = await apiPost('create_issue', {
+    title, body, email,
+    related_mod: mod, related_version: ver,
+    tags: niTags
+  });
+
+  btn.disabled = false; btn.textContent = 'Submit Issue';
+
+  if (res.error) { errEl.textContent = res.error; errEl.style.display = 'block'; return; }
+
+  saveToken(res.id, res.token);
+  closeModal();
+  // Reset form
+  document.getElementById('ni-title').value = '';
+  document.getElementById('ni-body').value  = '';
+  document.getElementById('ni-email').value = '';
+  document.getElementById('ni-mod').value   = '';
+  document.getElementById('ni-ver').innerHTML = '<option value="">Select mod first</option>';
+  document.getElementById('ni-ver').disabled = true;
+  niTags = []; renderNiTags();
+  errEl.style.display = 'none';
+
+  toast('Issue #' + res.number + ' created!');
+  loadIssues();
+});
+
+// ── Filter listeners ──────────────────────────────────────────────────
+let debounceTimer;
+['filter-status','filter-mod','filter-tag'].forEach(id =>
+  document.getElementById(id).addEventListener('change', loadIssues));
+document.getElementById('q').addEventListener('input', () => {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(loadIssues, 300);
+});
+
+// ── Escape HTML ────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ── Init ───────────────────────────────────────────────────────────────
+document.getElementById('btn-admin-toggle').addEventListener('click', () => {
+  if (isAdmin) {
+    fetch('login.php?action=logout').then(() => location.reload());
+  } else {
+    document.getElementById('modal-admin').classList.remove('hidden');
+    setTimeout(() => document.getElementById('al-user').focus(), 50);
+  }
+});
+document.getElementById('modal-close-admin').addEventListener('click', () =>
+  document.getElementById('modal-admin').classList.add('hidden'));
+document.getElementById('btn-cancel-admin').addEventListener('click', () =>
+  document.getElementById('modal-admin').classList.add('hidden'));
+document.getElementById('modal-admin').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-admin'))
+    document.getElementById('modal-admin').classList.add('hidden');
+});
+document.getElementById('al-pass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('btn-submit-admin').click();
+});
+document.getElementById('btn-submit-admin').addEventListener('click', async () => {
+  const user  = document.getElementById('al-user').value.trim();
+  const pass  = document.getElementById('al-pass').value;
+  const errEl = document.getElementById('al-error');
+  errEl.style.display = 'none';
+  if (!user || !pass) { errEl.textContent = 'Enter username and password.'; errEl.style.display = 'block'; return; }
+  const submitBtn = document.getElementById('btn-submit-admin');
+  submitBtn.disabled = true; submitBtn.textContent = 'Logging in…';
+  const res = await fetch('login.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: user, password: pass })
+  }).then(r => r.json()).catch(() => ({ error: 'Network error.' }));
+  submitBtn.disabled = false; submitBtn.textContent = 'Login';
+  if (res.error) { errEl.textContent = res.error; errEl.style.display = 'block'; return; }
+  location.reload();
+});
+
+loadMods();
+checkAdminStatus().then(() => loadIssues());
+</script>
+</body>
+</html>

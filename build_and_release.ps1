@@ -56,7 +56,9 @@ function Write-Err  { param($msg) Write-Host "   ERROR: $msg" -ForegroundColor R
 
 # -- 1. Discover mod CS files -------------------------------------------------
 Write-Step "Discovering mods in cnr-revived-web/mods/"
-$csFiles = Get-ChildItem -Path $ModsDir -Recurse -Filter "*.cs" | Sort-Object FullName
+$csFiles = Get-ChildItem -Path $ModsDir -Recurse -Filter "*.cs" | 
+    Where-Object { $_.Name -notmatch '-\d+\.\d+\.\d+\.cs$' } |
+    Sort-Object FullName
 
 if ($csFiles.Count -eq 0) {
     Write-Err "No .cs files found under $ModsDir"
@@ -174,6 +176,11 @@ Write-Ok "-> $OutDll"
 $versionedDll = Join-Path $ModCsDir "$ModBase-$newVer.dll"
 Copy-Item $builtDll $versionedDll -Force
 Write-Ok "-> $versionedDll"
+
+# Also save versioned source .cs for issue tracker diff feature
+$versionedCs = Join-Path $ModCsDir "$ModBase-$newVer.cs"
+Copy-Item $selectedCs.FullName $versionedCs -Force
+Write-Ok "-> $versionedCs"
 
 # -- 7. Update repo.json ------------------------------------------------------
 Write-Step "repo.json update"
@@ -306,8 +313,9 @@ if ($doCommit) {
         $relCs   = $selectedCs.FullName.Substring((Join-Path $RootDir "cnr-revived-web\").Length)
         $relDll  = "mods/$ModBase/$ModBase.dll"
         $relVDll = "mods/$ModBase/$ModBase-$newVer.dll"
+        $relVCs  = "mods/$ModBase/$ModBase-$newVer.cs"
 
-        git add $relCs $relDll $relVDll "mods/repo.json" 2>&1 | Out-Null
+        git add $relCs $relDll $relVDll $relVCs "mods/repo.json" 2>&1 | Out-Null
         $commitMsg = "$ModBase $newVer"
         if ($Changelog -ne "") { $commitMsg += " -- $Changelog" }
         git commit -m $commitMsg

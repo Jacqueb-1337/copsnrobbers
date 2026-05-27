@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("CopsNRobbersLanServer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+06066568377c2ebd48dc732f46416b6b00fe2534")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b144fc1a13d4d87f3b00818e989d3be2f70cf94e")]
 [assembly: System.Reflection.AssemblyProductAttribute("CopsNRobbersLanServer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("CopsNRobbersLanServer")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
