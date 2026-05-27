@@ -725,6 +725,11 @@
         {
           "version": "3.1.59",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.59.dll",
+          "changelog": "false bump for new source code history feature"
+        },
+        {
+          "version": "3.1.59",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.59.dll",
           "changelog": "Fix swipe: use GUI.enabled=false during scroll to disable all controls; remove hotControl/event hacks"
         },
         {
