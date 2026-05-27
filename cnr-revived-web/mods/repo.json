@@ -1342,6 +1342,11 @@
         {
           "version": "1.4.6",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.6.dll",
+          "changelog": "false bump for new source code history feature"
+        },
+        {
+          "version": "1.4.6",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.6.dll",
           "changelog": "Fix multiplayer button intercept: correct buttonName from 49 to 12 (actual Multiplayer button value)."
         },
         {
