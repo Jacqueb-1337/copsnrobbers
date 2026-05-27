@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "QLlg9C2yvoE=",
+  "success": true,
+  "projectFilePath": "D:\\Projects\\copsnrobbers\\APK_Build_Active\\decompiled_2025\\CNRMod-2.0.25.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Jacqueb\\.nuget\\packages\\microsoft.netframework.referenceassemblies\\1.0.3\\microsoft.netframework.referenceassemblies.1.0.3.nupkg.sha512",
+    "C:\\Users\\Jacqueb\\.nuget\\packages\\microsoft.netframework.referenceassemblies.net20\\1.0.3\\microsoft.netframework.referenceassemblies.net20.1.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}
