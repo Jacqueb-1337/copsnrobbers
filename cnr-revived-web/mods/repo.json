@@ -13,6 +13,11 @@
         {
           "version": "1.39.0",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.39.0.dll",
+          "changelog": "false bump for new source code history feature"
+        },
+        {
+          "version": "1.39.0",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.39.0.dll",
           "changelog": "Fix grey recording: exclude kamcordPreCamera and kamcordPostCamera from the RT redirect. kamcordPostCamera runs last (depth=MaxValue) and its Kamcord native callback overwrites the bound RT with grey. Only redirect real game cameras to captureRT."
         },
         {
