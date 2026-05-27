@@ -229,6 +229,11 @@
         {
           "version": "3.1.37",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.1.37.dll",
+          "changelog": "just adding source code"
+        },
+        {
+          "version": "3.1.37",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.1.37.dll",
           "changelog": "Fix crash on join: replaced SetCustomProperties with RaiseCnrEvent for health/ammo pack sync"
         },
         {
