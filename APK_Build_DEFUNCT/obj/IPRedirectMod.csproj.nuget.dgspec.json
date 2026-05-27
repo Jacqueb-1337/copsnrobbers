@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "D:\\Projects\\copsnrobbers\\APK_Build_Active\\IPRedirectMod.csproj": {}
+    "D:\\Projects\\copsnrobbers\\APK_Build_DEFUNCT\\IPRedirectMod.csproj": {}
   },
   "projects": {
-    "D:\\Projects\\copsnrobbers\\APK_Build_Active\\IPRedirectMod.csproj": {
+    "D:\\Projects\\copsnrobbers\\APK_Build_DEFUNCT\\IPRedirectMod.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\Projects\\copsnrobbers\\APK_Build_Active\\IPRedirectMod.csproj",
+        "projectUniqueName": "D:\\Projects\\copsnrobbers\\APK_Build_DEFUNCT\\IPRedirectMod.csproj",
         "projectName": "IPRedirectMod",
-        "projectPath": "D:\\Projects\\copsnrobbers\\APK_Build_Active\\IPRedirectMod.csproj",
+        "projectPath": "D:\\Projects\\copsnrobbers\\APK_Build_DEFUNCT\\IPRedirectMod.csproj",
         "packagesPath": "C:\\Users\\Jacqueb\\.nuget\\packages\\",
-        "outputPath": "D:\\Projects\\copsnrobbers\\APK_Build_Active\\obj\\",
+        "outputPath": "D:\\Projects\\copsnrobbers\\APK_Build_DEFUNCT\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Jacqueb\\AppData\\Roaming\\NuGet\\NuGet.Config"
