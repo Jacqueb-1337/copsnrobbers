@@ -359,6 +359,19 @@ function csFileDiff(oldText, newText) {
   return html || '<div class="diff-skip" style="text-align:center">No differences</div>';
 }
 
+async function fetchCsText(mod, ver, filename, attachId) {
+  // ver set  → server-side API (avoids 500 from PHP executing .cs directly)
+  // filename → uploaded attachment download link
+  if (ver) {
+    const d = await apiFetch('get_cs_file', { mod, ver });
+    if (d.error) throw new Error(d.error);
+    return d.text;
+  }
+  const res = await fetch(`api.php?action=download_attachment&id=${encodeURIComponent(attachId)}`);
+  if (!res.ok) throw new Error(`Attachment download failed: ${res.status}`);
+  return res.text();
+}
+
 async function renderCsDiff(commentId, newFilename, refVersion) {
   const container = document.getElementById('cs-diff-' + commentId);
   if (!container) return;
@@ -370,15 +383,12 @@ async function renderCsDiff(commentId, newFilename, refVersion) {
     }
     const mod    = issue.related_mod;
     const oldVer = issue.related_version;
-    const oldPath = `../mods/${encodeURIComponent(mod)}/${encodeURIComponent(mod)}-${encodeURIComponent(oldVer)}.cs`;
-    const newPath = refVersion
-      ? `../mods/${encodeURIComponent(mod)}/${encodeURIComponent(mod)}-${encodeURIComponent(refVersion)}.cs`
-      : `uploads/${encodeURIComponent(newFilename)}`;
     const newLabel = refVersion ? `${esc(mod)}-${esc(refVersion)}.cs` : esc(newFilename);
-    const [oldRes, newRes] = await Promise.all([fetch(oldPath), fetch(newPath)]);
-    if (!oldRes.ok) throw new Error(`Old file not found: ${esc(mod)}-${esc(oldVer)}.cs`);
-    if (!newRes.ok) throw new Error(`New file not found: ${newLabel}`);
-    const [oldText, newText] = await Promise.all([oldRes.text(), newRes.text()]);
+    const csAtt = refVersion ? null : (currentComments.find(c => c.id === commentId)?.attachments || []).find(a => a.filename === newFilename);
+    const [oldText, newText] = await Promise.all([
+      fetchCsText(mod, oldVer, null, null),
+      refVersion ? fetchCsText(mod, refVersion, null, null) : fetchCsText(null, null, newFilename, csAtt?.id)
+    ]);
     const diffHtml = csFileDiff(oldText, newText);
     container.style.display = 'block';
     container.style.padding  = '0';
