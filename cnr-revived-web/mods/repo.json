@@ -5,11 +5,16 @@
       "id": "CNRRecordingMod",
       "name": "CNR Recording Mod",
       "description": "Restores the in-game Record button and main-menu Recordings viewer. Replaces the defunct Kamcord SDK with hardware-encoded H.264 MP4 recording via Android MediaCodec + MediaMuxer. Press the in-game Record button to start/stop; tap Recordings on the main menu to browse sessions.",
-      "latestVersion": "1.39.25",
+      "latestVersion": "1.39.26",
       "filename": "CNRRecordingMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "1.39.26",
+          "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.39.26.dll",
+          "changelog": "Fix recordings button doing nothing on main menu: add direct NGUI hook for ShowVideoBtn, bypassing the unreliable Kamcord injection chain entirely"
+        },
         {
           "version": "1.39.25",
           "url": "https://play.jacqueb.me/mods/CNRRecordingMod/CNRRecordingMod-1.39.25.dll",
@@ -296,11 +301,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.1.37",
+      "latestVersion": "3.1.38",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.38",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.1.38.dll",
+          "changelog": "Fix skin/resource re-download every restart: DownloadItems now skips files already cached with valid hash; AnyContentMissing() detects deleted files and triggers re-download without clearing the version pref"
+        },
         {
           "version": "3.1.37",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.1.37.dll",
@@ -787,11 +797,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.60",
+      "latestVersion": "3.1.61",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.61",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.61.dll",
+          "changelog": "Fix settings panel controls unresponsive: removed invisible fullscreen GUI.Button that was eating all touch events before the settings window could process them (UICamera is already disabled in OpenSettings so the button was redundant)"
+        },
         {
           "version": "3.1.60",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.60.dll",
