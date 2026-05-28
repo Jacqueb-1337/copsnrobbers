@@ -807,11 +807,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.62",
+      "latestVersion": "3.1.63",
       "filename": "CNRSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.63",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.63.dll",
+          "changelog": "Fix settings modal z-order: replace GUI.Window with GUI.Box+GUILayout.BeginArea so the panel renders above the dim overlay (GUI.Window deferred pass conflicts with ScaleAroundPivot)"
+        },
         {
           "version": "3.1.62",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.62.dll",
