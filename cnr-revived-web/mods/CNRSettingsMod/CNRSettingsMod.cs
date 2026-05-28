@@ -3165,7 +3165,10 @@ namespace CNRSettingsMod
                        : _scrollAccount;
             // Use invisible scrollbar styles -- we handle scrolling via swipe in Update().
             // Hiding the interactive bar removes the second input path that could fight our swipe.
-            sv = GUILayout.BeginScrollView(sv, false, false, GUIStyle.none, GUIStyle.none,
+            // GUIStyle.none background: prevents the default scrollView skin from rendering its
+            // active.background (a dark opaque texture in Unity's mobile skin) during touch,
+            // which caused a dark overlay flash for the duration of the scroll gesture.
+            sv = GUILayout.BeginScrollView(sv, false, false, GUIStyle.none, GUIStyle.none, GUIStyle.none,
                 GUILayout.Width(_winRect.width - 4f),
                 GUILayout.Height(_winRect.height - 104f));
             if (_activeTab == 0) _scroll = sv;
