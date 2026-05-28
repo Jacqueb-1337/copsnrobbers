@@ -93,6 +93,12 @@ try {
             echo json_encode(api_delete_comment($body));
             break;
 
+        case 'mark_answer':
+            require_post();
+            if (!is_admin()) json_error('Admin required', 403);
+            echo json_encode(api_mark_answer($body));
+            break;
+
         case 'subscribe':
             require_post();
             echo json_encode(api_subscribe($body));
@@ -231,7 +237,7 @@ function api_get_issue(string $id): array {
 
     // Comments
     $stmt = $db->prepare(
-        'SELECT id, body, created_at, updated_at FROM comments WHERE issue_id=:id ORDER BY created_at ASC');
+        'SELECT id, body, is_answer, is_diff, created_at, updated_at FROM comments WHERE issue_id=:id ORDER BY created_at ASC');
     $stmt->bindValue(':id', $id);
     $res  = $stmt->execute();
     $comments = [];
@@ -440,9 +446,13 @@ function api_set_status(array $body): array {
 
 function api_add_comment(array $body): array {
     $issue_id = require_field($body, 'issue_id');
-    $text     = require_field($body, 'body', 20000);
+    $text     = trim($body['body'] ?? '');
     $email    = trim($body['email'] ?? '');
+    $is_diff  = !empty($body['is_diff']) ? 1 : 0;
 
+    // body may be empty if comment is diff-only
+    if ($text === '' && !$is_diff) json_error('Missing field: body', 400);
+    if (mb_strlen($text) > 20000) json_error('body too long (max 20000)', 400);
     if ($email && !validate_email($email)) json_error('Invalid email', 400);
 
     $db    = db();
@@ -454,13 +464,14 @@ function api_add_comment(array $body): array {
     $ts    = now();
 
     $stmt = $db->prepare(
-        'INSERT INTO comments (id,issue_id,body,author_token,author_email,created_at,updated_at)
-         VALUES (:id,:iid,:body,:tok,:email,:ts,:ts)');
+        'INSERT INTO comments (id,issue_id,body,author_token,author_email,is_diff,created_at,updated_at)
+         VALUES (:id,:iid,:body,:tok,:email,:diff,:ts,:ts)');
     $stmt->bindValue(':id',    $id);
     $stmt->bindValue(':iid',   $issue_id);
     $stmt->bindValue(':body',  $text);
     $stmt->bindValue(':tok',   $token);
     $stmt->bindValue(':email', $email ?: null);
+    $stmt->bindValue(':diff',  $is_diff, SQLITE3_INTEGER);
     $stmt->bindValue(':ts',    $ts);
     $stmt->execute();
 
@@ -477,6 +488,29 @@ function api_add_comment(array $body): array {
     notify_subscribers($issue_id, "New comment on Issue #$issue[number]", $html, $email ?: null);
 
     return ok(['id' => $id, 'token' => $token]);
+}
+
+function api_mark_answer(array $body): array {
+    $comment_id = require_field($body, 'comment_id');
+    $db = db();
+
+    $stmt = $db->prepare('SELECT issue_id FROM comments WHERE id=:id');
+    $stmt->bindValue(':id', $comment_id);
+    $row = $stmt->execute()->fetchArray(SQLITE3_ASSOC);
+    if (!$row) json_error('Comment not found', 404);
+    $issue_id = $row['issue_id'];
+
+    // Clear any existing answer on this issue
+    $unmark = $db->prepare('UPDATE comments SET is_answer=0 WHERE issue_id=:iid');
+    $unmark->bindValue(':iid', $issue_id);
+    $unmark->execute();
+
+    // Mark this comment as the answer
+    $mark = $db->prepare('UPDATE comments SET is_answer=1 WHERE id=:id');
+    $mark->bindValue(':id', $comment_id);
+    $mark->execute();
+
+    return ok();
 }
 
 function api_edit_comment(array $body): array {
@@ -693,22 +727,32 @@ function api_upload_attachment(): array {
         json_error('Upload failed or no file provided', 400);
     }
 
-    $file = $_FILES['file'];
+    $file     = $_FILES['file'];
+    $origExt  = strtolower(pathinfo($file['name'] ?? '', PATHINFO_EXTENSION));
 
     // Validate MIME via magic bytes (not just Content-Type header)
-    $finfo   = new finfo(FILEINFO_MIME_TYPE);
-    $mime    = $finfo->file($file['tmp_name']);
-    $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
-    if (!array_key_exists($mime, $allowed)) json_error('Only JPEG, PNG, GIF, and WebP images are allowed', 400);
+    $finfo    = new finfo(FILEINFO_MIME_TYPE);
+    $mime     = $finfo->file($file['tmp_name']);
 
-    // 10 MB server-side hard cap (client compresses to <5 MB)
-    if ($file['size'] > 10 * 1024 * 1024) json_error('File too large (max 10 MB)', 400);
-
-    $ext       = $allowed[$mime];
     $id        = gen_id();
-    $filename  = $id . '.' . $ext;
     $uploadDir = __DIR__ . '/uploads/';
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
+
+    if ($origExt === 'cs') {
+        // C# source file — must be plain text, max 2 MB
+        $csTextMimes = ['text/plain', 'text/x-csrc', 'text/x-csharp', 'application/octet-stream'];
+        if (!in_array($mime, $csTextMimes)) json_error('C# file must be a plain-text source file', 400);
+        if ($file['size'] > 2 * 1024 * 1024) json_error('Source file too large (max 2 MB)', 400);
+        $filename  = $id . '.cs';
+        $storeMime = 'text/plain';
+    } else {
+        // Image
+        $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+        if (!array_key_exists($mime, $allowed)) json_error('Only JPEG, PNG, GIF, WebP images and .cs source files are allowed', 400);
+        if ($file['size'] > 10 * 1024 * 1024) json_error('File too large (max 10 MB)', 400);
+        $filename  = $id . '.' . $allowed[$mime];
+        $storeMime = $mime;
+    }
 
     if (!move_uploaded_file($file['tmp_name'], $uploadDir . $filename)) {
         json_error('Failed to save file', 500);
@@ -721,12 +765,12 @@ function api_upload_attachment(): array {
     if ($issue_id)   $stmt->bindValue(':iid', $issue_id);   else $stmt->bindValue(':iid', null, SQLITE3_NULL);
     if ($comment_id) $stmt->bindValue(':cid', $comment_id); else $stmt->bindValue(':cid', null, SQLITE3_NULL);
     $stmt->bindValue(':fn',   $filename);
-    $stmt->bindValue(':mime', $mime);
+    $stmt->bindValue(':mime', $storeMime);
     $stmt->bindValue(':size', $file['size']);
     $stmt->bindValue(':ts',   now());
     $stmt->execute();
 
-    return ok(['attachment' => ['id' => $id, 'filename' => $filename, 'mime' => $mime, 'size' => $file['size']]]);
+    return ok(['attachment' => ['id' => $id, 'filename' => $filename, 'mime' => $storeMime, 'size' => $file['size']]]);
 }
 
 function api_delete_attachment(array $body): array {
