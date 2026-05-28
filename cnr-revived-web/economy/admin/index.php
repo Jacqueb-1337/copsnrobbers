@@ -451,7 +451,7 @@ tr:hover td{background:rgba(255,255,255,.025)}
 <body>
 
 <div class="topbar">
-  <div class="topbar-title">⚡ CNR Economy Admin</div>
+  <div class="topbar-title">CNR Economy Admin</div>
   <a href="?act=logout">Sign out</a>
 </div>
 
@@ -459,10 +459,10 @@ tr:hover td{background:rgba(255,255,255,.025)}
 
 <nav class="sidebar">
   <div class="nav">
-    <button class="nav-btn active" id="nav-content"      onclick="showTab('content')">      📦 Content      <span class="badge"><?= $total_content ?></span></button>
-    <button class="nav-btn"        id="nav-players"      onclick="showTab('players')">      👥 Players      <span class="badge"><?= $total_players ?></span></button>
-    <button class="nav-btn"        id="nav-mail"         onclick="showTab('mail')">         ✉️ Mail         <span class="badge"><?= $total_mail ?></span></button>
-    <button class="nav-btn"        id="nav-transactions" onclick="showTab('transactions')"> 💸 Transactions <span class="badge"><?= $total_tx ?></span></button>
+    <button class="nav-btn active" id="nav-content"      onclick="showTab('content')">Content      <span class="badge"><?= $total_content ?></span></button>
+    <button class="nav-btn"        id="nav-players"      onclick="showTab('players')">Players      <span class="badge"><?= $total_players ?></span></button>
+    <button class="nav-btn"        id="nav-mail"         onclick="showTab('mail')">Mail         <span class="badge"><?= $total_mail ?></span></button>
+    <button class="nav-btn"        id="nav-transactions" onclick="showTab('transactions')">Transactions <span class="badge"><?= $total_tx ?></span></button>
   </div>
 </nav>
 
@@ -516,9 +516,9 @@ tr:hover td{background:rgba(255,255,255,.025)}
       <!-- thumbnail -->
       <div class="ci-thumb">
         <?php if ($preview): ?>
-          <img src="<?= htmlspecialchars($preview) ?>" loading="lazy" onerror="this.parentNode.textContent='<?= $st==='skin'?'🧍':'🗺️' ?>'">
+          <img src="<?= htmlspecialchars($preview) ?>" loading="lazy" onerror="this.parentNode.textContent='?'">
         <?php else: ?>
-          <?= ['texture'=>'🎨','data'=>'📄','gun'=>'🔫','map'=>'🗺️','skin'=>'🧍'][$st] ?? '📁' ?>
+          <?= strtoupper(substr($st,0,1)) ?>
         <?php endif; ?>
       </div>
 
@@ -690,7 +690,7 @@ tr:hover td{background:rgba(255,255,255,.025)}
         <label>Player</label>
         <select name="player_id" id="mail-player" required>
           <option value="">— select —</option>
-          <option value="*" style="color:var(--red);font-weight:bold">★ ALL PLAYERS (broadcast)</option>
+          <option value="*" style="color:var(--red);font-weight:bold">ALL PLAYERS (broadcast)</option>
           <?php foreach ($players as $p): ?>
           <option value="<?= htmlspecialchars($p['id'],ENT_QUOTES) ?>"><?= htmlspecialchars($p['display_name']) ?> (<?= substr(htmlspecialchars($p['id']),0,8) ?>…)</option>
           <?php endforeach; ?>
@@ -721,7 +721,7 @@ tr:hover td{background:rgba(255,255,255,.025)}
       <td class="<?= (int)$m['m_coins']>0?'pos':'' ?>"><?= (int)$m['m_coins'] ?></td>
       <td class="<?= (int)$m['m_gems'] >0?'pos':'' ?>"><?= (int)$m['m_gems'] ?></td>
       <td class="<?= (int)($m['m_spins']??0)>0?'pos':'' ?>"><?= (int)($m['m_spins']??0) ?></td>
-      <td class="<?= $m['claimed']?'claimed':'unclaimed' ?>"><?= $m['claimed']?'✓ claimed':'pending' ?></td>
+      <td class="<?= $m['claimed']?'claimed':'unclaimed' ?>"><?= $m['claimed']?'claimed':'pending' ?></td>
     </tr>
     <?php endforeach; ?>
   </table>
@@ -787,7 +787,7 @@ function syncHash(cid, url, field, btn) {
           var pill = row.querySelector('.hash-pill');
           if (pill) { pill.textContent=d.hash.slice(0,8)+'…'; pill.title=d.hash; pill.className='hash-pill ok'; }
         }
-        btn.textContent='✓'; btn.classList.replace('btn-blue','btn-green');
+        btn.textContent='ok'; btn.classList.replace('btn-blue','btn-green');
         setTimeout(()=>{ btn.textContent='Sync'; btn.disabled=false; btn.classList.replace('btn-green','btn-blue'); }, 2000);
       } else {
         btn.textContent=orig; btn.disabled=false;
@@ -806,7 +806,7 @@ function calcIntoField(url, inp, btn) {
     .then(r=>r.json())
     .then(d=>{
       btn.disabled=false;
-      if (d.hash) { inp.value=d.hash; btn.textContent='✓'; }
+      if (d.hash) { inp.value=d.hash; btn.textContent='ok'; }
       else { btn.textContent=orig; alert('Error: '+(d.error||'unknown')); }
     })
     .catch(e=>{ btn.textContent=orig; btn.disabled=false; alert(''+e); });
