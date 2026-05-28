@@ -240,6 +240,108 @@ function lineDiff(oldText, newText) {
   return html;
 }
 
+// ── CS source diff (LCS-based, context-collapsed) ────────────────────────
+function csFileDiff(oldText, newText) {
+  const CONTEXT  = 4;
+  const oldLines = (oldText  || '').split('\n');
+  const newLines = (newText || '').split('\n');
+  const m = oldLines.length, n = newLines.length;
+
+  // Build LCS DP table (capped to avoid OOM on very large files)
+  function computeOps() {
+    if (m * n > 3000000) {
+      // Fallback: show new file as all-added
+      return newLines.map(l => ({ t: '+', v: l }));
+    }
+    const dp = [];
+    for (let i = 0; i <= m; i++) dp[i] = new Int32Array(n + 1);
+    for (let i = 1; i <= m; i++)
+      for (let j = 1; j <= n; j++)
+        dp[i][j] = oldLines[i-1] === newLines[j-1]
+          ? dp[i-1][j-1] + 1
+          : Math.max(dp[i-1][j], dp[i][j-1]);
+    const ops = [];
+    let i = m, j = n;
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && oldLines[i-1] === newLines[j-1]) {
+        ops.push({ t: '=', v: oldLines[i-1] }); i--; j--;
+      } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+        ops.push({ t: '+', v: newLines[j-1] }); j--;
+      } else {
+        ops.push({ t: '-', v: oldLines[i-1] }); i--;
+      }
+    }
+    return ops.reverse();
+  }
+
+  const ops = computeOps();
+
+  // Mark context lines to show (within CONTEXT of a change)
+  const show = new Array(ops.length).fill(false);
+  for (let i = 0; i < ops.length; i++) {
+    if (ops[i].t !== '=') {
+      for (let j = Math.max(0, i - CONTEXT); j <= Math.min(ops.length - 1, i + CONTEXT); j++)
+        show[j] = true;
+    }
+  }
+  // Always show first/last few lines
+  for (let i = 0; i < Math.min(CONTEXT, ops.length); i++) show[i] = true;
+  for (let i = Math.max(0, ops.length - CONTEXT); i < ops.length; i++) show[i] = true;
+
+  let html = '', skipCount = 0;
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    if (op.t === '=' && !show[i]) {
+      skipCount++;
+    } else {
+      if (skipCount > 0) {
+        html += `<div class="diff-skip">\u22ef ${skipCount} unchanged line${skipCount !== 1 ? 's' : ''} \u22ef</div>`;
+        skipCount = 0;
+      }
+      if      (op.t === '+') html += `<div class="diff-add">+&nbsp;${esc(op.v)}</div>`;
+      else if (op.t === '-') html += `<div class="diff-del">-&nbsp;${esc(op.v)}</div>`;
+      else                   html += `<div class="diff-ctx">&nbsp;&nbsp;${esc(op.v)}</div>`;
+    }
+  }
+  if (skipCount > 0)
+    html += `<div class="diff-skip">\u22ef ${skipCount} unchanged line${skipCount !== 1 ? 's' : ''} \u22ef</div>`;
+  return html;
+}
+
+async function renderCsDiff(commentId, newFilename) {
+  const container = document.getElementById('cs-diff-' + commentId);
+  if (!container) return;
+  try {
+    const issue = currentIssue;
+    if (!issue || !issue.related_mod || !issue.related_version) {
+      container.innerHTML = '<p style="color:var(--muted);font-size:12px">No related mod/version set on this issue — cannot compute diff.</p>';
+      return;
+    }
+    const mod     = issue.related_mod;
+    const ver     = issue.related_version;
+    const oldPath = `../mods/${encodeURIComponent(mod)}/${encodeURIComponent(mod)}-${encodeURIComponent(ver)}.cs`;
+    const newPath = `uploads/${encodeURIComponent(newFilename)}`;
+    const [oldRes, newRes] = await Promise.all([fetch(oldPath), fetch(newPath)]);
+    if (!oldRes.ok) throw new Error(`Old file not found: ${esc(mod)}-${esc(ver)}.cs`);
+    if (!newRes.ok) throw new Error(`New file not found`);
+    const [oldText, newText] = await Promise.all([oldRes.text(), newRes.text()]);
+    const diffHtml = csFileDiff(oldText, newText);
+    container.innerHTML =
+      `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">` +
+      `Diff: <code>${esc(mod)}-${esc(ver)}.cs</code> &rarr; <code>${esc(newFilename)}</code></div>` +
+      `<div class="diff-block cs-diff-block">${diffHtml}</div>`;
+  } catch (e) {
+    container.innerHTML = `<span style="color:var(--danger);font-size:12px">Diff error: ${esc(e.message)}</span>`;
+  }
+}
+
+async function uploadCsFile(file, commentId) {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('comment_id', commentId);
+  return fetch('api.php?action=upload_attachment', { method: 'POST', body: fd }).then(r => r.json());
+}
+
 // ── Image compression + upload ────────────────────────────────────────────
 async function compressIfNeeded(file, maxMB = 5) {
   if (file.size <= maxMB * 1024 * 1024 || !file.type.startsWith('image/')) return file;
@@ -446,8 +548,8 @@ function renderIssue() {
   }
 
   // Comments
+  // Render comment list and schedule async diff renders
   const commentsHTML = currentComments.map(c => renderComment(c)).join('');
-
   const root = document.getElementById('view-root');
   root.innerHTML = `
     <div class="card issue-body-card">
@@ -486,8 +588,13 @@ function renderIssue() {
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" type="button" id="btn-comment-attach">+ Screenshot</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="btn-comment-cs">+ .cs Source</button>
           <input type="file" id="comment-file-input" accept="image/*" multiple style="display:none"/>
+          <input type="file" id="comment-cs-input" accept=".cs" style="display:none"/>
           <span id="comment-attach-names" style="font-size:12px;color:var(--muted)"></span>
+          <label id="label-show-diff" style="font-size:12px;color:var(--muted);display:none;align-items:center;gap:4px">
+            <input type="checkbox" id="chk-show-diff"/> Show as source diff
+          </label>
           <button class="btn btn-primary btn-sm" id="btn-add-comment" style="margin-left:auto">Post Comment</button>
         </div>
       </div>
@@ -502,6 +609,14 @@ function renderIssue() {
     </div>`;
 
   attachViewHandlers(issue, token);
+
+  // Schedule async CS diff rendering for any diff comments
+  currentComments.forEach(c => {
+    if (c.is_diff) {
+      const csAtt = (c.attachments || []).find(a => a.filename.endsWith('.cs'));
+      if (csAtt) setTimeout(() => renderCsDiff(c.id, csAtt.filename), 0);
+    }
+  });
 }
 
 let data_subscriber_count = 0;
@@ -531,8 +646,11 @@ function renderComment(c) {
   const token      = getCommentToken(c.id);
   const isOwner    = !!token;
   const canModify  = isAdmin || isOwner;
-  const edited   = c.updated_at !== c.created_at
+  const edited     = c.updated_at !== c.created_at
     ? `<span class="comment-edited-badge">(edited)</span>` : '';
+  const answerBadge = c.is_answer
+    ? `<span class="answer-badge">&#10003; Answer</span>` : '';
+
   const history  = currentCommentHistory[c.id] || [];
   let histHTML   = '';
   if (history.length > 0) {
@@ -546,16 +664,34 @@ function renderComment(c) {
       <div style="margin-top:8px">${entries}</div>
     </details>`;
   }
+
+  // Diff block: rendered async after mount
+  let diffBlock = '';
+  if (c.is_diff) {
+    const csAtt = (c.attachments || []).find(a => a.filename.endsWith('.cs'));
+    diffBlock = csAtt
+      ? `<div class="diff-loading" id="cs-diff-${esc(c.id)}"><span class="loader"></span> Computing diff&hellip;</div>`
+      : `<div style="color:var(--muted);font-size:12px;margin-top:8px">No .cs attachment found for diff.</div>`;
+  }
+
+  const markAnswerBtn = isAdmin && !c.is_answer
+    ? `<button class="btn btn-ghost btn-sm" data-cid="${esc(c.id)}" data-action="mark-answer">&#10003; Mark as Answer</button>` : '';
+
   const actions = canModify ? `<div class="comment-actions">
+    ${markAnswerBtn}
     <button class="btn btn-ghost btn-sm" data-cid="${esc(c.id)}" data-action="edit-comment">Edit</button>
     <button class="btn btn-danger btn-sm" data-cid="${esc(c.id)}" data-action="delete-comment">Delete</button>
   </div>` : '';
-  return `<div class="comment-card" id="comment-${esc(c.id)}">
+
+  const cardClass = c.is_answer ? 'comment-card answer-comment' : 'comment-card';
+  return `<div class="${cardClass}" id="comment-${esc(c.id)}">
     <div class="comment-header">
       <span>${fmtDate(c.created_at)} ${edited}</span>
+      ${answerBadge}
     </div>
-    <div class="comment-body">${esc(c.body)}</div>
-    ${renderAttachments(c.attachments || [])}
+    ${c.body ? `<div class="comment-body">${esc(c.body)}</div>` : ''}
+    ${diffBlock}
+    ${c.is_diff ? '' : renderAttachments(c.attachments || [])}
     ${histHTML}
     ${actions}
   </div>`;
@@ -621,6 +757,18 @@ function attachViewHandlers(issue, token) {
     document.getElementById('comment-attach-names').textContent = names;
   });
 
+  // Comment .cs source button
+  document.getElementById('btn-comment-cs').addEventListener('click', () =>
+    document.getElementById('comment-cs-input').click());
+  document.getElementById('comment-cs-input').addEventListener('change', function() {
+    const f = this.files[0];
+    if (!f) return;
+    document.getElementById('comment-attach-names').textContent = f.name;
+    const lbl = document.getElementById('label-show-diff');
+    lbl.style.display = 'flex';
+    document.getElementById('chk-show-diff').checked = true;
+  });
+
   // Delete issue
   document.getElementById('btn-delete-issue')?.addEventListener('click', async () => {
     if (!confirm('Delete this issue? This cannot be undone.')) return;
@@ -632,22 +780,29 @@ function attachViewHandlers(issue, token) {
 
   // Add comment
   document.getElementById('btn-add-comment').addEventListener('click', async () => {
-    const body  = document.getElementById('add-comment-body').value.trim();
-    const email = document.getElementById('add-comment-email').value.trim();
-    if (!body) { toast('Comment cannot be empty.', true); return; }
-    const res = await apiPost('add_comment', { issue_id: issue.id, body, email });
+    const body     = document.getElementById('add-comment-body').value.trim();
+    const email    = document.getElementById('add-comment-email').value.trim();
+    const imgFiles = Array.from(document.getElementById('comment-file-input').files);
+    const csFiles  = Array.from(document.getElementById('comment-cs-input').files);
+    const showDiff = document.getElementById('chk-show-diff').checked && csFiles.length > 0;
+    if (!body && !csFiles.length) { toast('Comment cannot be empty.', true); return; }
+    const res = await apiPost('add_comment', { issue_id: issue.id, body, email, is_diff: showDiff ? 1 : 0 });
     if (res.error) { toast(res.error, true); return; }
     saveCommentToken(res.id, res.token);
-    // Upload any selected screenshots
-    const files = Array.from(document.getElementById('comment-file-input').files);
-    for (const f of files) {
+    for (const f of imgFiles) {
       const ar = await uploadAttachment(f, '', res.id);
       if (ar.error) toast('Attachment: ' + ar.error, true);
     }
-    document.getElementById('add-comment-body').value  = '';
-    document.getElementById('add-comment-email').value = '';
+    for (const f of csFiles) {
+      const ar = await uploadCsFile(f, res.id);
+      if (ar.error) toast('Source upload: ' + ar.error, true);
+    }
+    document.getElementById('add-comment-body').value   = '';
+    document.getElementById('add-comment-email').value  = '';
     document.getElementById('comment-file-input').value = '';
+    document.getElementById('comment-cs-input').value   = '';
     document.getElementById('comment-attach-names').textContent = '';
+    document.getElementById('label-show-diff').style.display = 'none';
     toast('Comment posted.');
     loadIssueAndRender();
   });
@@ -672,8 +827,15 @@ function attachViewHandlers(issue, token) {
       const card = document.getElementById('comment-' + cid);
       const bodyEl = card.querySelector('.comment-body');
       editingCommentId = cid;
-      document.getElementById('ec-body').value = bodyEl.textContent;
+      document.getElementById('ec-body').value = bodyEl ? bodyEl.textContent : '';
       document.getElementById('modal-edit-comment').classList.remove('hidden');
+    } else if (action === 'mark-answer') {
+      if (!isAdmin) return;
+      apiPost('mark_answer', { comment_id: cid }).then(res => {
+        if (res.error) { toast(res.error, true); return; }
+        toast('Marked as answer.');
+        loadIssueAndRender();
+      });
     }
   });
 
