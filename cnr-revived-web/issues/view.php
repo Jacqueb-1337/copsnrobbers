@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Issue — CNR Revival</title>
-<link rel="stylesheet" href="style.css"/>
+<link rel="stylesheet" href="style.css?v=<?= filemtime(__DIR__.'/style.css') ?>"/>
 </head>
 <body>
 <div class="page">
@@ -243,40 +243,55 @@ function lineDiff(oldText, newText) {
 // ── CS source diff (LCS-based, context-collapsed) ────────────────────────
 function csFileDiff(oldText, newText) {
   const CONTEXT  = 4;
-  const oldLines = (oldText  || '').split('\n');
-  const newLines = (newText || '').split('\n');
+  const oldLines = (oldText  || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const newLines = (newText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   const m = oldLines.length, n = newLines.length;
 
-  // Build LCS DP table (capped to avoid OOM on very large files)
+  // Build diff ops using a greedy shortest-edit approach.
+  // For each mismatch, searches a small lookahead window for the cheapest re-sync point.
+  // O(n + d·W²) — handles large files with few isolated changes without a big DP table.
   function computeOps() {
-    if (m * n > 3000000) {
-      // Fallback: show new file as all-added
-      return newLines.map(l => ({ t: '+', v: l }));
-    }
-    const dp = [];
-    for (let i = 0; i <= m; i++) dp[i] = new Int32Array(n + 1);
-    for (let i = 1; i <= m; i++)
-      for (let j = 1; j <= n; j++)
-        dp[i][j] = oldLines[i-1] === newLines[j-1]
-          ? dp[i-1][j-1] + 1
-          : Math.max(dp[i-1][j], dp[i][j-1]);
+    const WINDOW = 200;
     const ops = [];
-    let i = m, j = n;
-    while (i > 0 || j > 0) {
-      if (i > 0 && j > 0 && oldLines[i-1] === newLines[j-1]) {
-        ops.push({ t: '=', v: oldLines[i-1] }); i--; j--;
-      } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
-        ops.push({ t: '+', v: newLines[j-1] }); j--;
-      } else {
-        ops.push({ t: '-', v: oldLines[i-1] }); i--;
+    let i = 0, j = 0;
+
+    while (i < m || j < n) {
+      // Fast path: equal lines
+      if (i < m && j < n && oldLines[i] === newLines[j]) {
+        ops.push({ t: '=', v: oldLines[i] }); i++; j++;
+        continue;
       }
+      if (i >= m) { ops.push({ t: '+', v: newLines[j++] }); continue; }
+      if (j >= n) { ops.push({ t: '-', v: oldLines[i++] }); continue; }
+
+      // Find shortest (di+dj > 0) where old[i+di] === new[j+dj]
+      let bestDi = -1, bestDj = -1, bestCost = Infinity;
+      const maxDi = Math.min(WINDOW, m - i);
+      const maxDj = Math.min(WINDOW, n - j);
+      for (let di = 0; di <= maxDi; di++) {
+        if (di >= bestCost) break;
+        for (let dj = (di === 0 ? 1 : 0); dj <= maxDj && di + dj < bestCost; dj++) {
+          if (oldLines[i + di] === newLines[j + dj]) {
+            bestCost = di + dj; bestDi = di; bestDj = dj;
+            break;
+          }
+        }
+      }
+
+      if (bestDi < 0) {
+        while (i < m) ops.push({ t: '-', v: oldLines[i++] });
+        while (j < n) ops.push({ t: '+', v: newLines[j++] });
+        break;
+      }
+      for (let k = 0; k < bestDi; k++) ops.push({ t: '-', v: oldLines[i++] });
+      for (let k = 0; k < bestDj; k++) ops.push({ t: '+', v: newLines[j++] });
     }
-    return ops.reverse();
+    return ops;
   }
 
   const ops = computeOps();
 
-  // Mark context lines to show (within CONTEXT of a change)
+  // Mark context lines to show (within CONTEXT lines of any change)
   const show = new Array(ops.length).fill(false);
   for (let i = 0; i < ops.length; i++) {
     if (ops[i].t !== '=') {
@@ -284,31 +299,67 @@ function csFileDiff(oldText, newText) {
         show[j] = true;
     }
   }
-  // Always show first/last few lines
-  for (let i = 0; i < Math.min(CONTEXT, ops.length); i++) show[i] = true;
-  for (let i = Math.max(0, ops.length - CONTEXT); i < ops.length; i++) show[i] = true;
 
-  let html = '', skipCount = 0;
+  // Group ops into alternating skip / hunk segments
+  const segments = [];
+  let cur = null;
   for (let i = 0; i < ops.length; i++) {
-    const op = ops[i];
-    if (op.t === '=' && !show[i]) {
-      skipCount++;
-    } else {
-      if (skipCount > 0) {
-        html += `<div class="diff-skip">\u22ef ${skipCount} unchanged line${skipCount !== 1 ? 's' : ''} \u22ef</div>`;
-        skipCount = 0;
-      }
-      if      (op.t === '+') html += `<div class="diff-add">+&nbsp;${esc(op.v)}</div>`;
-      else if (op.t === '-') html += `<div class="diff-del">-&nbsp;${esc(op.v)}</div>`;
-      else                   html += `<div class="diff-ctx">&nbsp;&nbsp;${esc(op.v)}</div>`;
+    const type = show[i] ? 'hunk' : 'skip';
+    if (!cur || cur.type !== type) { cur = { type, ops: [], oldStart: 0, newStart: 0 }; segments.push(cur); }
+    cur.ops.push(ops[i]);
+  }
+
+  // Assign old/new start line numbers to each segment
+  let oldLine = 1, newLine = 1;
+  for (const seg of segments) {
+    seg.oldStart = oldLine;
+    seg.newStart = newLine;
+    for (const op of seg.ops) {
+      if (op.t !== '+') oldLine++;
+      if (op.t !== '-') newLine++;
     }
   }
-  if (skipCount > 0)
-    html += `<div class="diff-skip">\u22ef ${skipCount} unchanged line${skipCount !== 1 ? 's' : ''} \u22ef</div>`;
-  return html;
+
+  let html = '';
+  let hunkIdx = 0;
+  for (const seg of segments) {
+    if (seg.type === 'skip') {
+      const count = seg.ops.length;
+      html += `<div class="diff-skip">\u22ef ${count} unchanged line${count !== 1 ? 's' : ''} \u22ef</div>`;
+    } else {
+      let adds = 0, dels = 0, oldCount = 0, newCount = 0;
+      for (const op of seg.ops) {
+        if (op.t === '+') adds++; else if (op.t === '-') dels++;
+        if (op.t !== '+') oldCount++;
+        if (op.t !== '-') newCount++;
+      }
+      // Only wrap in collapsible if there are actual changes
+      const hasChanges = adds > 0 || dels;
+      const label = `@@ -${seg.oldStart},${oldCount} +${seg.newStart},${newCount} @@`
+        + (hasChanges ? ` &nbsp;<span class="diff-hunk-stat"><span class="diff-add-stat">+${adds}</span> <span class="diff-del-stat">\u2212${dels}</span></span>` : '');
+      let inner = '';
+      let ol = seg.oldStart, nl = seg.newStart;
+      for (const op of seg.ops) {
+        const oln = op.t !== '+' ? String(ol) : '';
+        const nln = op.t !== '-' ? String(nl) : '';
+        if (op.t !== '+') ol++;
+        if (op.t !== '-') nl++;
+        if      (op.t === '+') inner += `<div class="diff-add"><span class="diff-ln diff-ln-old"></span><span class="diff-ln diff-ln-new">${nln}</span><span class="diff-sign">+</span><span class="diff-code">${esc(op.v)}</span></div>`;
+        else if (op.t === '-') inner += `<div class="diff-del"><span class="diff-ln diff-ln-old">${oln}</span><span class="diff-ln diff-ln-new"></span><span class="diff-sign">-</span><span class="diff-code">${esc(op.v)}</span></div>`;
+        else                   inner += `<div class="diff-ctx"><span class="diff-ln diff-ln-old">${oln}</span><span class="diff-ln diff-ln-new">${nln}</span><span class="diff-sign"> </span><span class="diff-code">${esc(op.v)}</span></div>`;
+      }
+      if (hasChanges) {
+        html += `<details class="diff-hunk"><summary>${label}</summary><div class="diff-block">${inner}</div></details>`;
+      } else {
+        html += `<div class="diff-block">${inner}</div>`;
+      }
+      hunkIdx++;
+    }
+  }
+  return html || '<div class="diff-skip" style="text-align:center">No differences</div>';
 }
 
-async function renderCsDiff(commentId, newFilename) {
+async function renderCsDiff(commentId, newFilename, refVersion) {
   const container = document.getElementById('cs-diff-' + commentId);
   if (!container) return;
   try {
@@ -317,19 +368,24 @@ async function renderCsDiff(commentId, newFilename) {
       container.innerHTML = '<p style="color:var(--muted);font-size:12px">No related mod/version set on this issue — cannot compute diff.</p>';
       return;
     }
-    const mod     = issue.related_mod;
-    const ver     = issue.related_version;
-    const oldPath = `../mods/${encodeURIComponent(mod)}/${encodeURIComponent(mod)}-${encodeURIComponent(ver)}.cs`;
-    const newPath = `uploads/${encodeURIComponent(newFilename)}`;
+    const mod    = issue.related_mod;
+    const oldVer = issue.related_version;
+    const oldPath = `../mods/${encodeURIComponent(mod)}/${encodeURIComponent(mod)}-${encodeURIComponent(oldVer)}.cs`;
+    const newPath = refVersion
+      ? `../mods/${encodeURIComponent(mod)}/${encodeURIComponent(mod)}-${encodeURIComponent(refVersion)}.cs`
+      : `uploads/${encodeURIComponent(newFilename)}`;
+    const newLabel = refVersion ? `${esc(mod)}-${esc(refVersion)}.cs` : esc(newFilename);
     const [oldRes, newRes] = await Promise.all([fetch(oldPath), fetch(newPath)]);
-    if (!oldRes.ok) throw new Error(`Old file not found: ${esc(mod)}-${esc(ver)}.cs`);
-    if (!newRes.ok) throw new Error(`New file not found`);
+    if (!oldRes.ok) throw new Error(`Old file not found: ${esc(mod)}-${esc(oldVer)}.cs`);
+    if (!newRes.ok) throw new Error(`New file not found: ${newLabel}`);
     const [oldText, newText] = await Promise.all([oldRes.text(), newRes.text()]);
     const diffHtml = csFileDiff(oldText, newText);
+    container.style.display = 'block';
+    container.style.padding  = '0';
     container.innerHTML =
       `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">` +
-      `Diff: <code>${esc(mod)}-${esc(ver)}.cs</code> &rarr; <code>${esc(newFilename)}</code></div>` +
-      `<div class="diff-block cs-diff-block">${diffHtml}</div>`;
+      `<code>${esc(mod)}-${esc(oldVer)}.cs</code> &rarr; <code>${newLabel}</code></div>` +
+      `<div class="cs-diff-block">${diffHtml}</div>`;
   } catch (e) {
     container.innerHTML = `<span style="color:var(--danger);font-size:12px">Diff error: ${esc(e.message)}</span>`;
   }
@@ -589,12 +645,17 @@ function renderIssue() {
         <div style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" type="button" id="btn-comment-attach">+ Screenshot</button>
           <button class="btn btn-ghost btn-sm" type="button" id="btn-comment-cs">+ .cs Source</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="btn-comment-refver">+ Reference version</button>
           <input type="file" id="comment-file-input" accept="image/*" multiple style="display:none"/>
           <input type="file" id="comment-cs-input" accept=".cs" style="display:none"/>
           <span id="comment-attach-names" style="font-size:12px;color:var(--muted)"></span>
           <label id="label-show-diff" style="font-size:12px;color:var(--muted);display:none;align-items:center;gap:4px">
             <input type="checkbox" id="chk-show-diff"/> Show as source diff
           </label>
+          <div id="refver-picker" style="display:none;align-items:center;gap:6px;font-size:12px;color:var(--muted)">
+            Ref version: <select id="comment-refver-select" style="font-size:12px"></select>
+            <button class="btn btn-ghost btn-sm" type="button" id="btn-refver-clear" style="padding:2px 6px">&times;</button>
+          </div>
           <button class="btn btn-primary btn-sm" id="btn-add-comment" style="margin-left:auto">Post Comment</button>
         </div>
       </div>
@@ -613,8 +674,12 @@ function renderIssue() {
   // Schedule async CS diff rendering for any diff comments
   currentComments.forEach(c => {
     if (c.is_diff) {
-      const csAtt = (c.attachments || []).find(a => a.filename.endsWith('.cs'));
-      if (csAtt) setTimeout(() => renderCsDiff(c.id, csAtt.filename), 0);
+      if (c.ref_version) {
+        setTimeout(() => renderCsDiff(c.id, null, c.ref_version), 0);
+      } else {
+        const csAtt = (c.attachments || []).find(a => a.filename.endsWith('.cs'));
+        if (csAtt) setTimeout(() => renderCsDiff(c.id, csAtt.filename, null), 0);
+      }
     }
   });
 }
@@ -669,8 +734,11 @@ function renderComment(c) {
   let diffBlock = '';
   if (c.is_diff) {
     const csAtt = (c.attachments || []).find(a => a.filename.endsWith('.cs'));
-    diffBlock = csAtt
-      ? `<div class="diff-loading" id="cs-diff-${esc(c.id)}"><span class="loader"></span> Computing diff&hellip;</div>`
+    const hasDiffSource = csAtt || c.ref_version;
+    const dlLink = csAtt
+      ? `<a href="api.php?action=download_attachment&id=${encodeURIComponent(csAtt.id)}" class="btn btn-ghost btn-sm" style="font-size:11px">&#8595; Download .cs</a>` : '';
+    diffBlock = hasDiffSource
+      ? `<div style="margin-top:10px">${dlLink}<div class="diff-loading" id="cs-diff-${esc(c.id)}" style="margin-top:6px"><span class="loader"></span> Computing diff&hellip;</div></div>`
       : `<div style="color:var(--muted);font-size:12px;margin-top:8px">No .cs attachment found for diff.</div>`;
   }
 
@@ -721,34 +789,6 @@ function attachViewHandlers(issue, token) {
     loadIssueAndRender();
   });
 
-  // Issue attachment — add button
-  document.getElementById('btn-add-attach')?.addEventListener('click', () =>
-    document.getElementById('attach-file-input').click());
-  document.getElementById('attach-file-input')?.addEventListener('change', async function() {
-    const files = Array.from(this.files);
-    if (!files.length) return;
-    this.disabled = true;
-    for (const f of files) {
-      const res = await uploadAttachment(f, issue.id, '');
-      if (res.error) toast('Upload error: ' + res.error, true);
-    }
-    this.value = ''; this.disabled = false;
-    toast('Screenshot uploaded.');
-    loadIssueAndRender();
-  });
-
-  // Attachment delete (delegated)
-  document.getElementById('view-root').addEventListener('click', async e => {
-    const btn = e.target.closest('.attachment-delete');
-    if (!btn || !isAdmin) return;
-    e.preventDefault();
-    if (!confirm('Delete this attachment?')) return;
-    const res = await apiPost('delete_attachment', { id: btn.dataset.attid });
-    if (res.error) { toast(res.error, true); return; }
-    toast('Attachment deleted.');
-    loadIssueAndRender();
-  });
-
   // Comment screenshot button
   document.getElementById('btn-comment-attach').addEventListener('click', () =>
     document.getElementById('comment-file-input').click());
@@ -760,6 +800,26 @@ function attachViewHandlers(issue, token) {
   // Comment .cs source button
   document.getElementById('btn-comment-cs').addEventListener('click', () =>
     document.getElementById('comment-cs-input').click());
+
+  // Comment reference version button
+  document.getElementById('btn-comment-refver').addEventListener('click', () => {
+    const picker = document.getElementById('refver-picker');
+    const sel    = document.getElementById('comment-refver-select');
+    if (picker.style.display !== 'none') { picker.style.display = 'none'; sel.value = ''; return; }
+    // Populate versions for the issue's related mod
+    sel.innerHTML = '<option value="">Pick a version…</option>';
+    const mod = mods.find(m => m.id === (currentIssue?.related_mod || ''));
+    (mod?.versions || []).forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v; opt.textContent = v;
+      sel.appendChild(opt);
+    });
+    picker.style.display = 'flex';
+  });
+  document.getElementById('btn-refver-clear').addEventListener('click', () => {
+    document.getElementById('refver-picker').style.display = 'none';
+    document.getElementById('comment-refver-select').value = '';
+  });
   document.getElementById('comment-cs-input').addEventListener('change', function() {
     const f = this.files[0];
     if (!f) return;
@@ -780,13 +840,16 @@ function attachViewHandlers(issue, token) {
 
   // Add comment
   document.getElementById('btn-add-comment').addEventListener('click', async () => {
-    const body     = document.getElementById('add-comment-body').value.trim();
-    const email    = document.getElementById('add-comment-email').value.trim();
-    const imgFiles = Array.from(document.getElementById('comment-file-input').files);
-    const csFiles  = Array.from(document.getElementById('comment-cs-input').files);
-    const showDiff = document.getElementById('chk-show-diff').checked && csFiles.length > 0;
-    if (!body && !csFiles.length) { toast('Comment cannot be empty.', true); return; }
-    const res = await apiPost('add_comment', { issue_id: issue.id, body, email, is_diff: showDiff ? 1 : 0 });
+    const body      = document.getElementById('add-comment-body').value.trim();
+    const email     = document.getElementById('add-comment-email').value.trim();
+    const imgFiles  = Array.from(document.getElementById('comment-file-input').files);
+    const csFiles   = Array.from(document.getElementById('comment-cs-input').files);
+    const showDiff  = document.getElementById('chk-show-diff').checked && csFiles.length > 0;
+    const refVerSel = document.getElementById('comment-refver-select');
+    const refVer    = document.getElementById('refver-picker').style.display !== 'none' && refVerSel.value ? refVerSel.value : '';
+    const isDiff    = showDiff || !!refVer;
+    if (!body && !csFiles.length && !refVer) { toast('Comment cannot be empty.', true); return; }
+    const res = await apiPost('add_comment', { issue_id: issue.id, body, email, is_diff: isDiff ? 1 : 0, ref_version: refVer || undefined });
     if (res.error) { toast(res.error, true); return; }
     saveCommentToken(res.id, res.token);
     for (const f of imgFiles) {
@@ -803,6 +866,8 @@ function attachViewHandlers(issue, token) {
     document.getElementById('comment-cs-input').value   = '';
     document.getElementById('comment-attach-names').textContent = '';
     document.getElementById('label-show-diff').style.display = 'none';
+    document.getElementById('refver-picker').style.display = 'none';
+    document.getElementById('comment-refver-select').value = '';
     toast('Comment posted.');
     loadIssueAndRender();
   });
