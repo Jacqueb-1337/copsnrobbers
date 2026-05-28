@@ -294,6 +294,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// ── AJAX: sync hash (fetch + save in one request) ─────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['act'] ?? '') === 'sync_hash') {
+    header('Content-Type: application/json');
+    $cid   = trim($_POST['content_id'] ?? '');
+    $url   = trim($_POST['url'] ?? '');
+    $field = in_array($_POST['field'] ?? '', ['file_hash','thumbnail_hash']) ? $_POST['field'] : 'file_hash';
+    if (!$cid || !filter_var($url, FILTER_VALIDATE_URL)) { echo json_encode(['error'=>'Bad params']); exit; }
+    $data = false;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>15,CURLOPT_FOLLOWLOCATION=>true,CURLOPT_SSL_VERIFYPEER=>false,CURLOPT_ENCODING=>'identity']);
+        $data = curl_exec($ch); if ($data===false) $data=null; curl_close($ch);
+    }
+    if (!$data) {
+        $ctx = stream_context_create(['http'=>['timeout'=>15,'header'=>"Accept-Encoding: identity\r\n"],'https'=>['timeout'=>15,'header'=>"Accept-Encoding: identity\r\n"]]);
+        $data = @file_get_contents($url, false, $ctx);
+    }
+    if (!$data) { echo json_encode(['error'=>'Could not fetch URL']); exit; }
+    $hash = md5($data);
+    require_once __DIR__ . '/../_db.php';
+    $pdo2 = db();
+    $pdo2->prepare("UPDATE content_items SET {$field} = ? WHERE id = ?")->execute([$hash, $cid]);
+    echo json_encode(['hash'=>$hash]);
+    exit;
+}
+
 // ── Query data ────────────────────────────────────────────────────────────────
 $total_players = (int)$pdo->query("SELECT COUNT(*) FROM accounts")->fetchColumn();
 $total_tx      = (int)$pdo->query("SELECT COUNT(*) FROM transactions")->fetchColumn();
@@ -332,591 +358,495 @@ header('Content-Type: text/html; charset=utf-8');
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CNR Economy Admin</title>
 <style>
+/* ── Reset & vars ─────────────────────────────────────────── */
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:monospace;background:#0d1117;color:#c9d1d9;padding:16px;font-size:13px}
-h1{color:#58a6ff;margin-bottom:12px;font-size:18px}
-h2{color:#3fb950;margin:18px 0 8px;font-size:14px;border-bottom:1px solid #21262d;padding-bottom:4px}
-.stats{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px}
-.stat{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 14px;min-width:120px}
-.stat span{display:block;color:#8b949e;font-size:11px}
-.stat strong{color:#e6edf3;font-size:16px}
-.flash{padding:8px 14px;border-radius:6px;margin-bottom:12px;font-weight:bold}
-.flash.ok{background:#0d2a14;border:1px solid #3fb950;color:#3fb950}
-.flash.err{background:#2d0d0d;border:1px solid #f85149;color:#f85149}
-details{background:#161b22;border:1px solid #30363d;border-radius:6px;margin-bottom:16px}
-details summary{padding:10px 14px;cursor:pointer;color:#58a6ff;font-weight:bold;user-select:none;list-style:none}
-details summary::-webkit-details-marker{display:none}
-details summary::before{content:'▶ ';font-size:10px}
-details[open] summary::before{content:'▼ '}
-.form-body{padding:12px 14px;border-top:1px solid #30363d}
-.form-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
-.form-row label{color:#8b949e;min-width:90px;flex-shrink:0}
-.form-row input,.form-row select,.form-row textarea{
-  background:#0d1117;border:1px solid #30363d;border-radius:4px;
-  color:#e6edf3;padding:5px 8px;flex:1;min-width:160px}
-.form-row textarea{resize:vertical;min-height:60px}
-button[type=submit]{background:#238636;border:1px solid #2ea043;border-radius:4px;
-  color:#fff;padding:6px 18px;cursor:pointer;font-weight:bold}
-button[type=submit]:hover{background:#2ea043}
-.tabs{display:flex;gap:0;border-bottom:1px solid #30363d;margin-bottom:14px}
-.tab{padding:8px 16px;cursor:pointer;color:#8b949e;border-bottom:2px solid transparent}
-.tab.active{color:#58a6ff;border-color:#58a6ff}
+:root{
+  --bg:#0d1117;--surface:#161b22;--border:#30363d;--border2:#21262d;
+  --text:#c9d1d9;--text2:#8b949e;--hi:#e6edf3;
+  --blue:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#e3a53a;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:13px;min-height:100vh}
+/* ── Layout ────────────────────────────────────────────────── */
+.topbar{display:flex;align-items:center;gap:12px;background:var(--surface);border-bottom:1px solid var(--border);padding:0 20px;height:46px;position:sticky;top:0;z-index:200}
+.topbar-title{font-weight:700;font-size:14px;color:var(--blue);flex:1}
+.topbar a{color:var(--text2);font-size:12px;text-decoration:none}
+.topbar a:hover{color:var(--text)}
+.layout{display:flex;height:calc(100vh - 46px)}
+.sidebar{width:172px;flex-shrink:0;border-right:1px solid var(--border);padding:10px 0;overflow-y:auto;background:var(--bg)}
+.nav{display:flex;flex-direction:column;gap:2px;padding:0 8px}
+.nav-btn{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;color:var(--text2);font-size:13px;user-select:none;transition:all .1s;border:none;background:none;width:100%;text-align:left}
+.nav-btn:hover{background:var(--surface);color:var(--text)}
+.nav-btn.active{background:rgba(88,166,255,.1);color:var(--blue);font-weight:600}
+.nav-btn .badge{background:rgba(255,255,255,.06);border-radius:20px;padding:1px 7px;font-size:10px;margin-left:auto;color:var(--text2)}
+.nav-btn.active .badge{background:rgba(88,166,255,.15);color:var(--blue)}
+.main{flex:1;overflow-y:auto;padding:20px 24px}
+/* ── Panes ─────────────────────────────────────────────────── */
 .pane{display:none}.pane.active{display:block}
-table{border-collapse:collapse;width:100%;margin-bottom:16px}
-th,td{padding:5px 8px;text-align:left;border-bottom:1px solid #21262d}
-th{color:#58a6ff;background:#161b22}
-tr:hover{background:#161b22}
-.pos{color:#3fb950}.neg{color:#f85149}
-.claimed{color:#3fb950}.unclaimed{color:#e3a53a}
-.action-btn{background:#21262d;border:1px solid #30363d;border-radius:4px;
-  color:#c9d1d9;padding:3px 8px;cursor:pointer;font-size:11px}
-.action-btn:hover{background:#30363d}
-input[type=search]{background:#161b22;border:1px solid #30363d;border-radius:4px;
-  color:#c9d1d9;padding:4px 8px;margin-bottom:8px;width:260px}
+/* ── Stats ─────────────────────────────────────────────────── */
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;min-width:100px}
+.stat span{display:block;color:var(--text2);font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+.stat strong{color:var(--hi);font-size:20px;font-weight:700}
+/* ── Flash ─────────────────────────────────────────────────── */
+.flash{padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:13px;font-weight:500}
+.flash.ok{background:#0d2a14;border:1px solid var(--green);color:var(--green)}
+.flash.err{background:#2d0d0d;border:1px solid var(--red);color:var(--red)}
+/* ── Panel (form containers) ───────────────────────────────── */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:18px}
+.panel-title{font-size:13px;font-weight:600;color:var(--hi);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border2)}
+/* ── Form grid ─────────────────────────────────────────────── */
+.fg{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;align-items:center;max-width:600px}
+.fg label{color:var(--text2);font-size:12px;text-align:right;line-height:1.3}
+.fg .full{grid-column:1/-1}
+.fg .actions{grid-column:2}
+input[type=text],input[type=url],input[type=number],input[type=email],input[type=search],select,textarea{
+  background:var(--bg);border:1px solid var(--border);border-radius:5px;
+  color:var(--hi);padding:6px 10px;font-size:13px;font-family:inherit;width:100%}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--blue)}
+textarea{resize:vertical;min-height:60px}
+/* ── Buttons ───────────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:5px;border-radius:5px;padding:5px 12px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:#21262d;color:var(--text);transition:background .1s;font-family:inherit;white-space:nowrap}
+.btn:hover{background:var(--border)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn-green{background:#0d2a14;border-color:var(--green);color:var(--green)}.btn-green:hover{background:#163b1e}
+.btn-red  {background:#2d0d0d;border-color:var(--red);  color:var(--red)  }.btn-red:hover  {background:#3d1515}
+.btn-blue {background:rgba(88,166,255,.08);border-color:var(--blue);color:var(--blue)}.btn-blue:hover{background:rgba(88,166,255,.18)}
+.btn-sm{padding:3px 8px;font-size:11px}
+/* ── Tables ────────────────────────────────────────────────── */
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--border2)}
+th{color:var(--text2);background:var(--surface);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0;z-index:2}
+tr:hover td{background:rgba(255,255,255,.025)}
+.pos{color:var(--green)}.neg{color:var(--red)}.dim{color:var(--text2)}
+.claimed{color:var(--green)}.unclaimed{color:var(--yellow)}
+/* ── Content item rows ─────────────────────────────────────── */
+.ci-list{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
+.ci-item{background:var(--surface);border:1px solid var(--border);border-radius:7px;display:flex;align-items:stretch;overflow:hidden}
+.ci-thumb{width:52px;flex-shrink:0;background:var(--bg);display:flex;align-items:center;justify-content:center;border-right:1px solid var(--border2);font-size:22px}
+.ci-thumb img{width:52px;height:52px;object-fit:cover}
+.ci-body{flex:1;padding:8px 12px;display:grid;grid-template-columns:140px 1fr 1fr;gap:4px 12px;align-items:center}
+.ci-id{font-family:monospace;color:var(--blue);font-size:12px;font-weight:600}
+.ci-name{color:var(--text);font-size:12px}
+.ci-meta{color:var(--text2);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ci-url a{color:var(--text2);font-size:11px;text-decoration:none;word-break:break-all}
+.ci-url a:hover{color:var(--text)}
+.ci-actions{flex-shrink:0;padding:6px 10px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;border-left:1px solid var(--border2);background:var(--bg);min-width:180px;justify-content:flex-end}
+.hash-pill{font-family:monospace;font-size:10px;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:2px 6px;color:var(--text2);display:inline-block;cursor:help}
+.hash-pill.ok{border-color:var(--green);color:var(--green)}
+.hash-pill.miss{border-color:var(--yellow);color:var(--yellow)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
+.dot.on{background:var(--green)}.dot.off{background:var(--red)}
+/* ── Type filter pills ─────────────────────────────────────── */
+.pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.pill{padding:4px 13px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text2);transition:all .1s;font-family:inherit}
+.pill:hover{border-color:var(--blue);color:var(--text)}
+.pill.active{background:rgba(88,166,255,.1);border-color:var(--blue);color:var(--blue);font-weight:600}
+/* ── Section label ─────────────────────────────────────────── */
+.sec-label{color:var(--text2);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin:16px 0 6px;padding-left:2px}
+/* ── Inline hash row ───────────────────────────────────────── */
+.hr{display:flex;align-items:center;gap:5px;flex-wrap:nowrap}
+.hr input{width:96px;font-size:11px;padding:3px 6px;font-family:monospace}
 </style>
 </head>
 <body>
-<h1>CNR Economy Admin &nbsp;<a href="?act=logout" style="font-size:12px;color:#8b949e;text-decoration:none;float:right;margin-top:4px">Sign out</a></h1>
+
+<div class="topbar">
+  <div class="topbar-title">⚡ CNR Economy Admin</div>
+  <a href="?act=logout">Sign out</a>
+</div>
+
+<div class="layout">
+
+<nav class="sidebar">
+  <div class="nav">
+    <button class="nav-btn active" id="nav-content"      onclick="showTab('content')">      📦 Content      <span class="badge"><?= $total_content ?></span></button>
+    <button class="nav-btn"        id="nav-players"      onclick="showTab('players')">      👥 Players      <span class="badge"><?= $total_players ?></span></button>
+    <button class="nav-btn"        id="nav-mail"         onclick="showTab('mail')">         ✉️ Mail         <span class="badge"><?= $total_mail ?></span></button>
+    <button class="nav-btn"        id="nav-transactions" onclick="showTab('transactions')"> 💸 Transactions <span class="badge"><?= $total_tx ?></span></button>
+  </div>
+</nav>
+
+<div class="main">
 
 <?php if ($flash): ?>
-<div class="flash <?= $flash_ok ? 'ok' : 'err' ?>"><?= $flash ?></div>
+<div class="flash <?= $flash_ok ? 'ok' : 'err' ?>"><?= htmlspecialchars($flash) ?></div>
 <?php endif; ?>
 
 <div class="stats">
   <div class="stat"><span>Players</span><strong><?= $total_players ?></strong></div>
   <div class="stat"><span>Transactions</span><strong><?= $total_tx ?></strong></div>
   <div class="stat"><span>Mail sent</span><strong><?= $total_mail ?></strong></div>
-  <div class="stat"><span>Unclaimed mail</span><strong><?= $unread_mail ?></strong></div>
-  <div class="stat"><span>Content items</span><strong><?= $total_content ?></strong></div>
+  <div class="stat"><span>Unclaimed</span><strong style="color:var(--yellow)"><?= $unread_mail ?></strong></div>
+  <div class="stat"><span>Content</span><strong><?= $total_content ?></strong></div>
 </div>
 
-<!-- ── Send Mail ─────────────────────────────────────────────────────────── -->
-<details id="send-mail-box">
-  <summary>Send Mail to Player</summary>
-  <div class="form-body">
-    <form method="POST">
-      <input type="hidden" name="act" value="send_mail">
-      <div class="form-row">
-        <label>Player</label>
-        <select name="player_id" id="mail-player" required style="max-width:300px">
-          <option value="">— select a player —</option>
-          <option value="*" style="color:#f85149;font-weight:bold">★ ALL PLAYERS (global broadcast)</option>
-          <?php foreach ($players as $p): ?>
-          <option value="<?= htmlspecialchars($p['id']) ?>">
-            <?= htmlspecialchars($p['display_name']) ?> (<?= htmlspecialchars(substr($p['id'],0,8)) ?>…)
-          </option>
-          <?php endforeach; ?>
+<!-- ══════════════════════════════════════════════════════
+     CONTENT
+══════════════════════════════════════════════════════ -->
+<div class="pane active" id="pane-content">
+
+  <div class="pills">
+    <button class="pill active" onclick="filterContent('all',this)">All (<?= $total_content ?>)</button>
+    <?php
+    $tc = []; foreach ($content_items as $c) $tc[$c['type']] = ($tc[$c['type']] ?? 0) + 1;
+    $tl = ['map'=>'Maps','texture'=>'Textures','data'=>'Data','skin'=>'Skins','gun'=>'Guns'];
+    foreach ($tl as $k => $v): ?>
+    <button class="pill" onclick="filterContent('<?= $k ?>',this)"><?= $v ?> (<?= $tc[$k] ?? 0 ?>)</button>
+    <?php endforeach; ?>
+  </div>
+
+  <?php foreach (['map','texture','data','skin','gun'] as $st):
+    $items = array_values(array_filter($content_items, fn($c) => $c['type'] === $st));
+    if (!$items) continue; ?>
+  <div class="content-section" data-type="<?= $st ?>">
+    <div class="sec-label"><?= $tl[$st] ?></div>
+    <div class="ci-list">
+    <?php foreach ($items as $c):
+      $eid  = htmlspecialchars($c['id'], ENT_QUOTES);
+      $eurl = htmlspecialchars($c['url'], ENT_QUOTES);
+      $efh  = htmlspecialchars($c['file_hash'] ?? '', ENT_QUOTES);
+      $eth  = htmlspecialchars($c['thumbnail_hash'] ?? '', ENT_QUOTES);
+      // pick preview image
+      $preview = '';
+      if ($st === 'skin')  $preview = $c['url'];
+      if ($st === 'map' && !empty($c['thumbnail_url'])) $preview = $c['thumbnail_url'];
+    ?>
+    <div class="ci-item">
+
+      <!-- thumbnail -->
+      <div class="ci-thumb">
+        <?php if ($preview): ?>
+          <img src="<?= htmlspecialchars($preview) ?>" loading="lazy" onerror="this.parentNode.textContent='<?= $st==='skin'?'🧍':'🗺️' ?>'">
+        <?php else: ?>
+          <?= ['texture'=>'🎨','data'=>'📄','gun'=>'🔫','map'=>'🗺️','skin'=>'🧍'][$st] ?? '📁' ?>
+        <?php endif; ?>
+      </div>
+
+      <!-- info -->
+      <div class="ci-body">
+        <div>
+          <div class="ci-id"><?= htmlspecialchars($c['id']) ?></div>
+          <?php if ($c['name']): ?><div class="ci-name"><?= htmlspecialchars($c['name']) ?></div><?php endif; ?>
+        </div>
+        <div>
+          <?php if ($st === 'texture'): ?><div class="ci-meta">mat: <?= htmlspecialchars($c['material_name']) ?></div><?php endif; ?>
+          <?php if ($st === 'data'):    ?><div class="ci-meta">key: <?= htmlspecialchars($c['data_key']) ?></div><?php endif; ?>
+          <?php if ($st === 'skin'):    ?><div class="ci-meta"><?= htmlspecialchars($c['material_name']) ?> / <?= htmlspecialchars($c['data_key']) ?></div><?php endif; ?>
+          <?php if ($st === 'gun'):     ?><div class="ci-meta"><?= htmlspecialchars($c['data_key']) ?> / <?= htmlspecialchars($c['material_name']) ?></div><?php endif; ?>
+          <div class="ci-url"><a href="<?= htmlspecialchars($c['url']) ?>" target="_blank" title="<?= htmlspecialchars($c['url']) ?>"><?= htmlspecialchars(substr(preg_replace('#^https?://[^/]+#','', $c['url']), 0, 60)) ?></a></div>
+        </div>
+        <div>
+          <!-- file hash -->
+          <div class="hr" style="margin-bottom:4px">
+            <span class="hash-pill <?= $c['file_hash']?'ok':'miss' ?>" title="<?= $efh ?>"><?= $c['file_hash'] ? substr($c['file_hash'],0,8).'…' : 'no hash' ?></span>
+            <button type="button" class="btn btn-sm btn-blue" onclick="syncHash('<?= $eid ?>','<?= $eurl ?>','file_hash',this)">Sync</button>
+          </div>
+          <?php if ($st === 'map' && !empty($c['thumbnail_url'])): ?>
+          <!-- thumbnail hash -->
+          <div class="hr">
+            <span style="font-size:10px;color:var(--text2)">thumb:</span>
+            <span class="hash-pill <?= $c['thumbnail_hash']?'ok':'miss' ?>" title="<?= $eth ?>"><?= $c['thumbnail_hash'] ? substr($c['thumbnail_hash'],0,8).'…' : 'no hash' ?></span>
+            <button type="button" class="btn btn-sm btn-blue" onclick="syncHash('<?= $eid ?>','<?= htmlspecialchars($c['thumbnail_url'],ENT_QUOTES) ?>','thumbnail_hash',this)">Sync</button>
+          </div>
+          <?php elseif ($st === 'map'): ?>
+          <form method="POST" enctype="multipart/form-data" style="display:flex;align-items:center;gap:4px;margin-top:4px">
+            <input type="hidden" name="act" value="upload_thumbnail">
+            <input type="hidden" name="content_id" value="<?= $eid ?>">
+            <input type="file" name="thumb_file" accept="image/*" id="tf-<?= $eid ?>" style="display:none" onchange="this.form.submit()">
+            <button type="button" class="btn btn-sm" onclick="document.getElementById('tf-<?= $eid ?>').click()">Upload thumb</button>
+          </form>
+          <?php endif; ?>
+        </div>
+      </div>
+
+      <!-- actions -->
+      <div class="ci-actions">
+        <span class="dot <?= $c['enabled']?'on':'off' ?>"></span>
+        <form method="POST" style="display:inline">
+          <input type="hidden" name="act" value="toggle_content">
+          <input type="hidden" name="content_id" value="<?= $eid ?>">
+          <button class="btn btn-sm" type="submit"><?= $c['enabled']?'Disable':'Enable' ?></button>
+        </form>
+        <?php if ($st === 'skin' || $st === 'gun'): ?>
+        <form method="POST" style="display:flex;align-items:center;gap:4px">
+          <input type="hidden" name="act" value="reorder_content">
+          <input type="hidden" name="content_id" value="<?= $eid ?>">
+          <input type="number" name="sort_order" value="<?= (int)$c['sort_order'] ?>" min="0" title="Price in coins" style="width:62px;font-size:11px;padding:3px 5px">
+          <button class="btn btn-sm btn-green" type="submit">Set $</button>
+        </form>
+        <?php endif; ?>
+        <form method="POST" onsubmit="return confirm('Delete <?= $eid ?>?')" style="display:inline">
+          <input type="hidden" name="act" value="delete_content">
+          <input type="hidden" name="content_id" value="<?= $eid ?>">
+          <button class="btn btn-sm btn-red" type="submit">Del</button>
+        </form>
+      </div>
+
+    </div>
+    <?php endforeach; ?>
+    </div>
+  </div>
+  <?php endforeach; ?>
+
+  <!-- Add content -->
+  <div class="panel" style="margin-top:24px">
+    <div class="panel-title">+ Add Content Item</div>
+    <form method="POST" enctype="multipart/form-data">
+      <input type="hidden" name="act" value="add_content">
+      <div class="fg">
+        <label>Type</label>
+        <select name="ctype" id="ctype-sel" onchange="updateAddForm()" style="max-width:140px;width:auto">
+          <option value="map">map</option><option value="texture">texture</option>
+          <option value="data">data</option><option value="skin">skin</option><option value="gun">gun</option>
         </select>
+        <label>ID</label>
+        <input type="text" name="content_id" placeholder="official_map_1" pattern="[a-zA-Z0-9_\-]+" required>
+        <label>Display name</label>
+        <input type="text" name="cname" placeholder="Snow Reimagined" maxlength="80">
+        <label>URL</label>
+        <div style="display:flex;gap:6px">
+          <input type="url" name="curl" id="add-curl" placeholder="https://…" required>
+        </div>
+        <label>MD5 hash</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" name="file_hash" id="add-fhash" placeholder="auto-fill" maxlength="32" pattern="[a-fA-F0-9]{0,32}" style="font-family:monospace;flex:1">
+          <button type="button" class="btn btn-blue btn-sm" onclick="calcIntoField(document.getElementById('add-curl').value,document.getElementById('add-fhash'),this)">Calc</button>
+        </div>
+        <label id="add-thumb-lbl">Thumbnail</label>
+        <div id="add-thumb-row">
+          <input type="file" name="thumb_file" accept="image/jpeg,image/png,image/gif,image/webp" style="width:auto">
+        </div>
+        <label id="add-mat-lbl" style="display:none">Material name</label>
+        <input type="text" name="material_name" id="add-mat" placeholder="Skin_34_2" style="display:none">
+        <label id="add-key-lbl" style="display:none">Data / slot key</label>
+        <input type="text" name="data_key" id="add-key" placeholder="Skin_34" style="display:none">
+        <label id="add-sort-lbl">Sort order</label>
+        <input type="number" name="sort_order" value="0" style="max-width:100px;width:100px">
+        <div></div>
+        <div class="actions"><button type="submit" class="btn btn-green">Add Item</button></div>
       </div>
-      <div class="form-row">
-        <label>Subject</label>
-        <input type="text" name="subject" maxlength="100" placeholder="You earned a reward!" required>
-      </div>
-      <div class="form-row">
-        <label>Body</label>
-        <textarea name="body" maxlength="500" placeholder="Thanks for participating in the event…"></textarea>
-      </div>
-      <div class="form-row">
-        <label>Coins</label>
-        <input type="number" name="coins" value="0" min="0" max="99999" style="max-width:100px">
-        <label style="min-width:60px">Gems</label>
-        <input type="number" name="gems"  value="0" min="0" max="9999"  style="max-width:100px">
-        <label style="min-width:70px">Spins</label>
-        <input type="number" name="spins" value="0" min="0" max="99"    style="max-width:80px">
-      </div>
-      <button type="submit">Send Mail</button>
     </form>
   </div>
-</details>
+</div><!-- /pane-content -->
 
-<!-- ── Grant Currency ─────────────────────────────────────────────────────── -->
-<details>
-  <summary>Grant / Set Currency</summary>
-  <div class="form-body">
+<!-- ══════════════════════════════════════════════════════
+     PLAYERS
+══════════════════════════════════════════════════════ -->
+<div class="pane" id="pane-players">
+  <div class="panel">
+    <div class="panel-title">Grant / Set Currency</div>
     <form method="POST">
       <input type="hidden" name="act" value="grant">
-      <div class="form-row">
+      <div class="fg">
         <label>Player</label>
-        <select name="player_id" required style="max-width:300px">
-          <option value="">— select a player —</option>
+        <select name="player_id" id="grant-player" required>
+          <option value="">— select —</option>
           <?php foreach ($players as $p): ?>
-          <option value="<?= htmlspecialchars($p['id']) ?>">
-            <?= htmlspecialchars($p['display_name']) ?> (<?= htmlspecialchars(substr($p['id'],0,8)) ?>…)
-          </option>
+          <option value="<?= htmlspecialchars($p['id'],ENT_QUOTES) ?>"><?= htmlspecialchars($p['display_name']) ?> (<?= substr(htmlspecialchars($p['id']),0,8) ?>…)</option>
           <?php endforeach; ?>
         </select>
-      </div>
-      <div class="form-row">
-        <label>Coins</label>
-        <input type="number" name="coins" value="0" min="-99999" max="99999" style="max-width:100px">
-        <label style="min-width:60px">Gems</label>
-        <input type="number" name="gems"  value="0" min="-9999"  max="9999"  style="max-width:100px">
-      </div>
-      <div class="form-row">
+        <label>Coins</label><input type="number" name="coins" value="0" min="-99999" max="99999" style="max-width:120px;width:120px">
+        <label>Gems</label> <input type="number" name="gems"  value="0" min="-9999"  max="9999"  style="max-width:120px;width:120px">
         <label>Mode</label>
-        <select name="mode" style="max-width:120px">
+        <select name="mode" style="max-width:180px;width:auto">
           <option value="add">Add to balance</option>
           <option value="set">Set balance to</option>
         </select>
+        <div></div><div class="actions"><button type="submit" class="btn btn-green">Apply</button></div>
       </div>
-      <button type="submit">Apply</button>
     </form>
   </div>
-</details>
-
-<!-- ── Tabs ──────────────────────────────────────────────────────────────── -->
-<div class="tabs">
-  <div class="tab active" onclick="showTab('players')">Players (<?= $total_players ?>)</div>
-  <div class="tab" onclick="showTab('mail')">Mail Log (<?= $total_mail ?>)</div>
-  <div class="tab" onclick="showTab('transactions')">Transactions</div>
-  <div class="tab" onclick="showTab('content')">Content (<?= $total_content ?>)</div>
-</div>
-
-<!-- Players tab -->
-<div class="pane active" id="pane-players">
-  <input type="search" id="player-search" placeholder="Search by name or ID…" oninput="filterTable('player-tbl',this.value)">
-  <table id="player-tbl">
-    <tr><th>Name</th><th>ID (first 8)</th><th>Coins</th><th>Gems</th><th>Last seen</th><th>Actions</th></tr>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <input type="search" id="player-search" placeholder="Search players…" oninput="filterTable('ptbl',this.value)" style="width:220px">
+  </div>
+  <table id="ptbl">
+    <tr><th>Name</th><th>ID</th><th>Coins</th><th>Gems</th><th>Last seen</th><th>Actions</th></tr>
     <?php foreach ($players as $p): ?>
     <tr>
       <td><?= htmlspecialchars($p['display_name']) ?></td>
-      <td title="<?= htmlspecialchars($p['id']) ?>"><?= htmlspecialchars(substr($p['id'],0,8)) ?>…</td>
-      <td><?= (int)$p['coins'] ?></td>
-      <td><?= (int)$p['gems'] ?></td>
-      <td><?= date('m-d H:i', (int)$p['last_seen']) ?></td>
-      <td>
-        <button class="action-btn" onclick="prefillMail('<?= htmlspecialchars($p['id'],ENT_QUOTES) ?>')">Mail</button>
-        <button class="action-btn" onclick="copyId('<?= htmlspecialchars($p['id'],ENT_QUOTES) ?>')">Copy ID</button>
+      <td><code style="font-size:11px;color:var(--blue)" title="<?= htmlspecialchars($p['id']) ?>"><?= substr(htmlspecialchars($p['id']),0,10) ?>…</code></td>
+      <td class="pos"><?= number_format((int)$p['coins']) ?></td>
+      <td class="pos"><?= number_format((int)$p['gems']) ?></td>
+      <td class="dim"><?= date('M d H:i', (int)$p['last_seen']) ?></td>
+      <td style="white-space:nowrap;display:flex;gap:4px;padding:4px 10px">
+        <button class="btn btn-sm" onclick="prefillMail('<?= htmlspecialchars($p['id'],ENT_QUOTES) ?>')">Mail</button>
+        <button class="btn btn-sm" onclick="prefillGrant('<?= htmlspecialchars($p['id'],ENT_QUOTES) ?>')">Grant</button>
+        <button class="btn btn-sm" onclick="copyText('<?= htmlspecialchars($p['id'],ENT_QUOTES) ?>',this)">Copy ID</button>
       </td>
     </tr>
     <?php endforeach; ?>
   </table>
-</div>
+</div><!-- /pane-players -->
 
-<!-- Mail log tab -->
+<!-- ══════════════════════════════════════════════════════
+     MAIL
+══════════════════════════════════════════════════════ -->
 <div class="pane" id="pane-mail">
+  <div class="panel">
+    <div class="panel-title">Send Mail</div>
+    <form method="POST" id="mail-form">
+      <input type="hidden" name="act" value="send_mail">
+      <div class="fg">
+        <label>Player</label>
+        <select name="player_id" id="mail-player" required>
+          <option value="">— select —</option>
+          <option value="*" style="color:var(--red);font-weight:bold">★ ALL PLAYERS (broadcast)</option>
+          <?php foreach ($players as $p): ?>
+          <option value="<?= htmlspecialchars($p['id'],ENT_QUOTES) ?>"><?= htmlspecialchars($p['display_name']) ?> (<?= substr(htmlspecialchars($p['id']),0,8) ?>…)</option>
+          <?php endforeach; ?>
+        </select>
+        <label>Subject</label>
+        <input type="text" name="subject" maxlength="100" placeholder="You earned a reward!">
+        <label>Body</label>
+        <textarea name="body" maxlength="500" placeholder="Message text…"></textarea>
+        <label>Coins / Gems / Spins</label>
+        <div style="display:flex;gap:8px">
+          <input type="number" name="coins" value="0" min="0" max="99999" style="width:90px" placeholder="Coins">
+          <input type="number" name="gems"  value="0" min="0" max="9999"  style="width:90px" placeholder="Gems">
+          <input type="number" name="spins" value="0" min="0" max="99"    style="width:70px" placeholder="Spins">
+        </div>
+        <div></div><div class="actions"><button type="submit" class="btn btn-green">Send Mail</button></div>
+      </div>
+    </form>
+  </div>
+  <div class="sec-label">Mail Log</div>
   <table>
     <tr><th>#</th><th>Sent</th><th>To</th><th>Subject</th><th>Coins</th><th>Gems</th><th>Spins</th><th>Status</th></tr>
     <?php foreach ($recent_mail as $m): ?>
     <tr>
-      <td><?= (int)$m['id'] ?></td>
-      <td><?= date('m-d H:i', (int)$m['sent_at']) ?></td>
+      <td class="dim"><?= (int)$m['id'] ?></td>
+      <td class="dim"><?= date('M d H:i', (int)$m['sent_at']) ?></td>
       <td><?= htmlspecialchars($m['display_name']) ?></td>
       <td><?= htmlspecialchars($m['subject']) ?></td>
-      <td class="<?= $m['m_coins'] > 0 ? 'pos' : '' ?>"><?= (int)$m['m_coins'] ?></td>
-      <td class="<?= $m['m_gems']  > 0 ? 'pos' : '' ?>"><?= (int)$m['m_gems'] ?></td>
-      <td class="<?= (int)($m['m_spins'] ?? 0) > 0 ? 'pos' : '' ?>"><?= (int)($m['m_spins'] ?? 0) ?></td>
-      <td class="<?= $m['claimed'] ? 'claimed' : 'unclaimed' ?>"><?= $m['claimed'] ? '✓ claimed' : 'pending' ?></td>
+      <td class="<?= (int)$m['m_coins']>0?'pos':'' ?>"><?= (int)$m['m_coins'] ?></td>
+      <td class="<?= (int)$m['m_gems'] >0?'pos':'' ?>"><?= (int)$m['m_gems'] ?></td>
+      <td class="<?= (int)($m['m_spins']??0)>0?'pos':'' ?>"><?= (int)($m['m_spins']??0) ?></td>
+      <td class="<?= $m['claimed']?'claimed':'unclaimed' ?>"><?= $m['claimed']?'✓ claimed':'pending' ?></td>
     </tr>
     <?php endforeach; ?>
   </table>
-</div>
+</div><!-- /pane-mail -->
 
-<!-- Transactions tab -->
+<!-- ══════════════════════════════════════════════════════
+     TRANSACTIONS
+══════════════════════════════════════════════════════ -->
 <div class="pane" id="pane-transactions">
+  <div class="sec-label" style="margin-top:0">Recent Transactions</div>
   <table>
     <tr><th>Time</th><th>Player</th><th>Coins</th><th>Gems</th><th>Reason</th></tr>
     <?php foreach ($recent_tx as $r): ?>
     <tr>
-      <td><?= date('m-d H:i', (int)$r['created_at']) ?></td>
+      <td class="dim"><?= date('M d H:i', (int)$r['created_at']) ?></td>
       <td><?= htmlspecialchars($r['display_name']) ?></td>
-      <td class="<?= $r['delta_coins'] >= 0 ? 'pos' : 'neg' ?>"><?= (int)$r['delta_coins'] ?></td>
-      <td class="<?= $r['delta_gems']  >= 0 ? 'pos' : 'neg' ?>"><?= (int)$r['delta_gems']  ?></td>
-      <td><?= htmlspecialchars($r['reason']) ?></td>
+      <td class="<?= (int)$r['delta_coins']>=0?'pos':'neg' ?>"><?= (int)$r['delta_coins']>=0?'+':'' ?><?= (int)$r['delta_coins'] ?></td>
+      <td class="<?= (int)$r['delta_gems'] >=0?'pos':'neg' ?>"><?= (int)$r['delta_gems'] >=0?'+':'' ?><?= (int)$r['delta_gems'] ?></td>
+      <td class="dim"><?= htmlspecialchars($r['reason']) ?></td>
     </tr>
     <?php endforeach; ?>
   </table>
-</div>
+</div><!-- /pane-transactions -->
 
-<!-- Content tab -->
-<div class="pane" id="pane-content">
-  <h2>Official Maps</h2>
-  <table id="content-map-tbl">
-    <tr><th>Sort</th><th>ID</th><th>Name</th><th>URL</th><th>Thumbnail</th><th>Hash</th><th>Status</th><th>Actions</th></tr>
-    <?php foreach ($content_items as $c): if ($c['type'] !== 'map') continue; ?>
-    <tr>
-      <td><?= (int)$c['sort_order'] ?></td>
-      <td><code><?= htmlspecialchars($c['id']) ?></code></td>
-      <td><?= htmlspecialchars($c['name']) ?></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($c['url']) ?>"><?= htmlspecialchars($c['url']) ?></td>
-      <td>
-        <?php if (!empty($c['thumbnail_url'])): ?>
-          <img src="<?= htmlspecialchars($c['thumbnail_url']) ?>" style="max-width:64px;max-height:40px;border-radius:4px" loading="lazy">
-          <?php if (!empty($c['thumbnail_hash'])): ?><br><small style="color:#8b949e" title="thumbnail MD5"><?= substr(htmlspecialchars($c['thumbnail_hash']),0,8) ?>…</small><?php endif; ?>
-        <?php else: ?>
-          <span style="color:#8b949e">none</span>
-        <?php endif; ?>
-        <form method="POST" enctype="multipart/form-data" style="display:inline;margin-left:4px">
-          <input type="hidden" name="act" value="upload_thumbnail">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <input type="file" name="thumb_file" accept="image/*" style="display:none" id="tf-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>" onchange="this.form.submit()">
-          <button type="button" class="action-btn" onclick="document.getElementById('tf-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>').click()">Upload</button>
-        </form>
-      </td>
-      <td style="white-space:nowrap">
-        <?php if (!empty($c['file_hash'])): ?>
-          <code title="<?= htmlspecialchars($c['file_hash']) ?>" style="color:#58a6ff"><?= substr(htmlspecialchars($c['file_hash']),0,8) ?>…</code>
-        <?php else: ?>
-          <span style="color:#8b949e">none</span>
-        <?php endif; ?>
-        <form method="POST" style="display:inline;margin-left:4px">
-          <input type="hidden" name="act" value="update_hash">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <input type="text" name="file_hash" id="fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>" placeholder="md5 hex" maxlength="32"
-                 style="width:90px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"
-                 value="<?= htmlspecialchars($c['file_hash'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit" style="font-size:11px">Set</button>
-          <button type="button" class="action-btn" style="font-size:11px;margin-left:2px"
-            onclick="calcHash('<?= htmlspecialchars($c['url'],ENT_QUOTES) ?>',document.getElementById('fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>'),this,true)">Calc</button>
-        </form>
-      </td>
-      <td class="<?= $c['enabled'] ? 'pos' : 'neg' ?>"><?= $c['enabled'] ? 'enabled' : 'disabled' ?></td>
-      <td>
-        <form method="POST" style="display:inline">
-          <input type="hidden" name="act" value="toggle_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit"><?= $c['enabled'] ? 'Disable' : 'Enable' ?></button>
-        </form>
-        <form method="POST" style="display:inline" onsubmit="return confirm('Delete this item?')">
-          <input type="hidden" name="act" value="delete_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit" style="color:#f85149">Delete</button>
-        </form>
-      </td>
-    </tr>
-    <?php endforeach; ?>
-  </table>
-
-  <h2>Texture Packs</h2>
-  <table id="content-tex-tbl">
-    <tr><th>Sort</th><th>ID</th><th>Material name</th><th>URL</th><th>Hash</th><th>Status</th><th>Actions</th></tr>
-    <?php foreach ($content_items as $c): if ($c['type'] !== 'texture') continue; ?>
-    <tr>
-      <td><?= (int)$c['sort_order'] ?></td>
-      <td><code><?= htmlspecialchars($c['id']) ?></code></td>
-      <td><?= htmlspecialchars($c['material_name']) ?></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($c['url']) ?>"><?= htmlspecialchars($c['url']) ?></td>
-      <td style="white-space:nowrap">
-        <?php if (!empty($c['file_hash'])): ?>
-          <code title="<?= htmlspecialchars($c['file_hash']) ?>" style="color:#58a6ff"><?= substr(htmlspecialchars($c['file_hash']),0,8) ?>…</code>
-        <?php else: ?>
-          <span style="color:#8b949e">none</span>
-        <?php endif; ?>
-        <form method="POST" style="display:inline;margin-left:4px">
-          <input type="hidden" name="act" value="update_hash">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <input type="text" name="file_hash" id="fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>" placeholder="md5 hex" maxlength="32"
-                 style="width:90px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"
-                 value="<?= htmlspecialchars($c['file_hash'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit" style="font-size:11px">Set</button>
-          <button type="button" class="action-btn" style="font-size:11px;margin-left:2px"
-            onclick="calcHash('<?= htmlspecialchars($c['url'],ENT_QUOTES) ?>',document.getElementById('fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>'),this,true)">Calc</button>
-        </form>
-      </td>
-      <td class="<?= $c['enabled'] ? 'pos' : 'neg' ?>"><?= $c['enabled'] ? 'enabled' : 'disabled' ?></td>
-      <td>
-        <form method="POST" style="display:inline">
-          <input type="hidden" name="act" value="toggle_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit"><?= $c['enabled'] ? 'Disable' : 'Enable' ?></button>
-        </form>
-        <form method="POST" style="display:inline" onsubmit="return confirm('Delete this item?')">
-          <input type="hidden" name="act" value="delete_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit" style="color:#f85149">Delete</button>
-        </form>
-      </td>
-    </tr>
-    <?php endforeach; ?>
-  </table>
-
-  <h2>Data Files</h2>
-  <table id="content-data-tbl">
-    <tr><th>Sort</th><th>ID</th><th>Data key</th><th>URL</th><th>Hash</th><th>Status</th><th>Actions</th></tr>
-    <?php foreach ($content_items as $c): if ($c['type'] !== 'data') continue; ?>
-    <tr>
-      <td><?= (int)$c['sort_order'] ?></td>
-      <td><code><?= htmlspecialchars($c['id']) ?></code></td>
-      <td><?= htmlspecialchars($c['data_key']) ?></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($c['url']) ?>"><?= htmlspecialchars($c['url']) ?></td>
-      <td style="white-space:nowrap">
-        <?php if (!empty($c['file_hash'])): ?>
-          <code title="<?= htmlspecialchars($c['file_hash']) ?>" style="color:#58a6ff"><?= substr(htmlspecialchars($c['file_hash']),0,8) ?>…</code>
-        <?php else: ?>
-          <span style="color:#8b949e">none</span>
-        <?php endif; ?>
-        <form method="POST" style="display:inline;margin-left:4px">
-          <input type="hidden" name="act" value="update_hash">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <input type="text" name="file_hash" id="fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>" placeholder="md5 hex" maxlength="32"
-                 style="width:90px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"
-                 value="<?= htmlspecialchars($c['file_hash'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit" style="font-size:11px">Set</button>
-          <button type="button" class="action-btn" style="font-size:11px;margin-left:2px"
-            onclick="calcHash('<?= htmlspecialchars($c['url'],ENT_QUOTES) ?>',document.getElementById('fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>'),this,true)">Calc</button>
-        </form>
-      </td>
-      <td class="<?= $c['enabled'] ? 'pos' : 'neg' ?>"><?= $c['enabled'] ? 'enabled' : 'disabled' ?></td>
-      <td>
-        <form method="POST" style="display:inline">
-          <input type="hidden" name="act" value="toggle_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit"><?= $c['enabled'] ? 'Disable' : 'Enable' ?></button>
-        </form>
-        <form method="POST" style="display:inline" onsubmit="return confirm('Delete this item?')">
-          <input type="hidden" name="act" value="delete_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit" style="color:#f85149">Delete</button>
-        </form>
-      </td>
-    </tr>
-    <?php endforeach; ?>
-  </table>
-
-  <h2>Custom Skins</h2>
-  <table id="content-skin-tbl">
-    <tr><th>Price</th><th>ID</th><th>Slot key</th><th>Display name</th><th>Body material</th><th>Texture URL</th><th>Hash</th><th>Status</th><th>Actions</th></tr>
-    <?php foreach ($content_items as $c): if ($c['type'] !== 'skin') continue; ?>
-    <tr>
-      <td><?= (int)$c['sort_order'] ?> coins</td>
-      <td><code><?= htmlspecialchars($c['id']) ?></code></td>
-      <td><?= htmlspecialchars($c['data_key']) ?></td>
-      <td><?= htmlspecialchars($c['name']) ?></td>
-      <td><?= htmlspecialchars($c['material_name']) ?></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($c['url']) ?>"><?= htmlspecialchars($c['url']) ?></td>
-      <td style="white-space:nowrap">
-        <?php if (!empty($c['file_hash'])): ?>
-          <code title="<?= htmlspecialchars($c['file_hash']) ?>" style="color:#58a6ff"><?= substr(htmlspecialchars($c['file_hash']),0,8) ?>…</code>
-        <?php else: ?>
-          <span style="color:#8b949e">none</span>
-        <?php endif; ?>
-        <form method="POST" style="display:inline;margin-left:4px">
-          <input type="hidden" name="act" value="update_hash">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <input type="text" name="file_hash" id="fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>" placeholder="md5 hex" maxlength="32"
-                 style="width:90px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"
-                 value="<?= htmlspecialchars($c['file_hash'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit" style="font-size:11px">Set</button>
-          <button type="button" class="action-btn" style="font-size:11px;margin-left:2px"
-            onclick="calcHash('<?= htmlspecialchars($c['url'],ENT_QUOTES) ?>',document.getElementById('fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>'),this,true)">Calc</button>
-        </form>
-      </td>
-      <td class="<?= $c['enabled'] ? 'pos' : 'neg' ?>"><?= $c['enabled'] ? 'enabled' : 'disabled' ?></td>
-      <td>
-        <form method="POST" style="display:inline">
-          <input type="hidden" name="act" value="toggle_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit"><?= $c['enabled'] ? 'Disable' : 'Enable' ?></button>
-        </form>
-        <form method="POST" style="display:inline;margin-left:4px">
-          <input type="hidden" name="act" value="reorder_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <input type="number" name="sort_order" value="<?= (int)$c['sort_order'] ?>" min="0" style="width:70px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px">
-          <button class="action-btn" type="submit" style="font-size:11px">Set Price</button>
-        </form>
-        <form method="POST" style="display:inline" onsubmit="return confirm('Delete this item?')">
-          <input type="hidden" name="act" value="delete_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit" style="color:#f85149">Delete</button>
-        </form>
-      </td>
-    </tr>
-    <?php endforeach; ?>
-  </table>
-
-  <h2>Custom Guns</h2>
-  <table id="content-gun-tbl">
-    <tr><th>Price</th><th>ID</th><th>Gun key</th><th>Display name</th><th>Material</th><th>Data URL</th><th>Hash</th><th>Status</th><th>Actions</th></tr>
-    <?php foreach ($content_items as $c): if ($c['type'] !== 'gun') continue; ?>
-    <tr>
-      <td><?= (int)$c['sort_order'] ?> coins</td>
-      <td><code><?= htmlspecialchars($c['id']) ?></code></td>
-      <td><?= htmlspecialchars($c['data_key']) ?></td>
-      <td><?= htmlspecialchars($c['name']) ?></td>
-      <td><?= htmlspecialchars($c['material_name']) ?></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($c['url']) ?>"><?= htmlspecialchars($c['url']) ?></td>
-      <td style="white-space:nowrap">
-        <?php if (!empty($c['file_hash'])): ?>
-          <code title="<?= htmlspecialchars($c['file_hash']) ?>" style="color:#58a6ff"><?= substr(htmlspecialchars($c['file_hash']),0,8) ?>…</code>
-        <?php else: ?>
-          <span style="color:#8b949e">none</span>
-        <?php endif; ?>
-        <form method="POST" style="display:inline;margin-left:4px">
-          <input type="hidden" name="act" value="update_hash">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <input type="text" name="file_hash" id="fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>" placeholder="md5 hex" maxlength="32"
-                 style="width:90px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px"
-                 value="<?= htmlspecialchars($c['file_hash'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit" style="font-size:11px">Set</button>
-          <button type="button" class="action-btn" style="font-size:11px;margin-left:2px"
-            onclick="calcHash('<?= htmlspecialchars($c['url'],ENT_QUOTES) ?>',document.getElementById('fh-<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>'),this,true)">Calc</button>
-        </form>
-      </td>
-      <td class="<?= $c['enabled'] ? 'pos' : 'neg' ?>"><?= $c['enabled'] ? 'enabled' : 'disabled' ?></td>
-      <td>
-        <form method="POST" style="display:inline">
-          <input type="hidden" name="act" value="toggle_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit"><?= $c['enabled'] ? 'Disable' : 'Enable' ?></button>
-        </form>
-        <form method="POST" style="display:inline;margin-left:4px">
-          <input type="hidden" name="act" value="reorder_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <input type="number" name="sort_order" value="<?= (int)$c['sort_order'] ?>" min="0" style="width:70px;font-size:11px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px">
-          <button class="action-btn" type="submit" style="font-size:11px">Set Price</button>
-        </form>
-        <form method="POST" style="display:inline" onsubmit="return confirm('Delete this item?')">
-          <input type="hidden" name="act" value="delete_content">
-          <input type="hidden" name="content_id" value="<?= htmlspecialchars($c['id'],ENT_QUOTES) ?>">
-          <button class="action-btn" type="submit" style="color:#f85149">Delete</button>
-        </form>
-      </td>
-    </tr>
-    <?php endforeach; ?>
-  </table>
-
-  <h2>Add Content Item</h2>
-  <details id="add-content-box">
-    <summary>Add new item</summary>
-    <div class="form-body">
-      <form method="POST" enctype="multipart/form-data">
-        <input type="hidden" name="act" value="add_content">
-        <div class="form-row">
-          <label>Type</label>
-          <select name="ctype" id="ctype-sel" onchange="updateContentForm()" style="max-width:130px">
-            <option value="map">map</option>
-            <option value="texture">texture</option>
-            <option value="data">data</option>
-            <option value="skin">skin</option>
-            <option value="gun">gun</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label>ID</label>
-          <input type="text" name="content_id" placeholder="official_map_1" pattern="[a-zA-Z0-9_\-]+" required>
-        </div>
-        <div class="form-row">
-          <label>Name / label</label>
-          <input type="text" name="cname" placeholder="[Official] Rooftop Arena" maxlength="80">
-        </div>
-        <div class="form-row">
-          <label>URL</label>
-          <input type="url" name="curl" id="add-curl" placeholder="https://cdn.example.com/maps/rooftop.json" required>
-        </div>
-        <div id="cf-thumb" class="form-row">
-          <label>Thumbnail</label>
-          <input type="file" name="thumb_file" accept="image/jpeg,image/png,image/gif,image/webp">
-          <small style="color:#8b949e;margin-left:8px">Optional (jpg/png, max 512 KB) — hash auto-computed</small>
-        </div>
-        <div id="cf-hash" class="form-row">
-          <label>MD5 hash</label>
-          <input type="text" name="file_hash" id="add-fhash" placeholder="auto-filled by Calc" maxlength="32" pattern="[a-fA-F0-9]{0,32}">
-          <button type="button" class="action-btn" style="margin-left:6px"
-            onclick="calcHash(document.getElementById('add-curl').value,document.getElementById('add-fhash'),this,false)">Calc from URL</button>
-        </div>
-        <div id="cf-mat" class="form-row" style="display:none">
-          <label id="cf-mat-label">Material name</label>
-          <input type="text" name="material_name" id="cf-mat-input" placeholder="pistol_body">
-        </div>
-        <div id="cf-key" class="form-row" style="display:none">
-          <label id="cf-key-label">Data key</label>
-          <input type="text" name="data_key" id="cf-key-input" placeholder="weapons_config">
-        </div>
-        <div class="form-row">
-          <label id="sort-order-label">Sort order</label>
-          <input type="number" name="sort_order" value="0" style="max-width:80px">
-        </div>
-        <button type="submit">Add</button>
-      </form>
-    </div>
-  </details>
-</div>
+</div><!-- /.main -->
+</div><!-- /.layout -->
 
 <script>
-var _tabParam = new URLSearchParams(location.search).get('tab') || 'players';
+// ── Tabs ───────────────────────────────────────────────────────────────────
+var _tab = new URLSearchParams(location.search).get('tab') || 'content';
 function showTab(name) {
-  document.querySelectorAll('.tab').forEach((t,i)=>{
-    t.classList.toggle('active', ['players','mail','transactions','content'][i]===name);
-  });
-  document.querySelectorAll('.pane').forEach(p=>{
-    p.classList.toggle('active', p.id==='pane-'+name);
-  });
-  history.replaceState(null,'', '?tab='+name);
+  document.querySelectorAll('.pane').forEach(p    => p.classList.toggle('active', p.id==='pane-'+name));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.id==='nav-'+name));
+  history.replaceState(null,'','?tab='+name);
+  _tab = name;
 }
-// Open to the tab from ?tab= param (set by PRG redirects)
-(function(){ showTab(_tabParam); })();
-function calcHash(url, inputEl, btn, autoSubmit) {
-  if (!url) { alert('Enter a URL first.'); return; }
+(function(){ showTab(_tab); })();
+
+// ── Content filter ─────────────────────────────────────────────────────────
+function filterContent(type, pill) {
+  document.querySelectorAll('.pills .pill').forEach(p => p.classList.remove('active'));
+  pill.classList.add('active');
+  document.querySelectorAll('.content-section').forEach(s => {
+    s.style.display = (type==='all' || s.dataset.type===type) ? '' : 'none';
+  });
+}
+
+// ── Sync hash (fetch + DB save, no page reload) ────────────────────────────
+function syncHash(cid, url, field, btn) {
+  if (!url) { alert('No URL on this item.'); return; }
   var orig = btn.textContent;
   btn.disabled = true; btn.textContent = '…';
   var fd = new FormData();
-  fd.append('act', 'fetch_hash'); fd.append('url', url);
-  fetch('', {method:'POST', body:fd})
-    .then(function(r){return r.json();})
-    .then(function(d){
+  fd.append('act','sync_hash'); fd.append('content_id',cid);
+  fd.append('url',url); fd.append('field',field);
+  fetch('',{method:'POST',body:fd})
+    .then(r=>r.json())
+    .then(d=>{
       if (d.hash) {
-        inputEl.value = d.hash;
-        if (autoSubmit) { inputEl.closest('form').submit(); }
-        else { btn.textContent = '✓'; btn.disabled = false; }
+        // update the pill to the right of this button
+        var row = btn.closest('.hr');
+        if (row) {
+          var pill = row.querySelector('.hash-pill');
+          if (pill) { pill.textContent=d.hash.slice(0,8)+'…'; pill.title=d.hash; pill.className='hash-pill ok'; }
+        }
+        btn.textContent='✓'; btn.classList.replace('btn-blue','btn-green');
+        setTimeout(()=>{ btn.textContent='Sync'; btn.disabled=false; btn.classList.replace('btn-green','btn-blue'); }, 2000);
       } else {
-        btn.textContent = orig; btn.disabled = false;
-        alert('Hash error: ' + (d.error || 'unknown'));
+        btn.textContent=orig; btn.disabled=false;
+        alert('Error: '+(d.error||'unknown'));
       }
     })
-    .catch(function(e){ btn.textContent = orig; btn.disabled = false; alert('Fetch failed: '+e); });
+    .catch(e=>{ btn.textContent=orig; btn.disabled=false; alert('Fetch failed: '+e); });
 }
-function updateContentForm() {
-  var t = document.getElementById('ctype-sel').value;
-  document.getElementById('cf-thumb').style.display = t==='map'     ? '' : 'none';
-  document.getElementById('cf-hash' ).style.display = '';  // always show; Calc works for all types
-  document.getElementById('cf-mat' ).style.display = (t==='texture'||t==='skin'||t==='gun') ? '' : 'none';
-  document.getElementById('cf-key' ).style.display = (t==='data'   ||t==='skin'||t==='gun') ? '' : 'none';
 
-  var matLabel  = document.getElementById('cf-mat-label');
-  var keyLabel  = document.getElementById('cf-key-label');
-  var keyInput  = document.getElementById('cf-key-input');
-  var matInput  = document.getElementById('cf-mat-input');
-  var sortLabel = document.getElementById('sort-order-label');
-
-  if (t === 'skin') {
-    matLabel.textContent  = 'Body material (e.g. Skin_34_2)';
-    matInput.placeholder  = 'Skin_34_2';
-    keyLabel.textContent  = 'Slot key (e.g. Skin_34)';
-    keyInput.placeholder  = 'Skin_34';
-    sortLabel.textContent = 'Price (coins)';
-  } else if (t === 'gun') {
-    matLabel.textContent  = 'Material name';
-    matInput.placeholder  = 'gun_body';
-    keyLabel.textContent  = 'Gun key (e.g. AK)';
-    keyInput.placeholder  = 'AK';
-    sortLabel.textContent = 'Price (coins)';
-  } else {
-    matLabel.textContent  = 'Material name';
-    matInput.placeholder  = 'pistol_body';
-    keyLabel.textContent  = 'Data key';
-    keyInput.placeholder  = 'weapons_config';
-    sortLabel.textContent = 'Sort order';
-  }
+// ── Calc hash into add-form field ──────────────────────────────────────────
+function calcIntoField(url, inp, btn) {
+  if (!url) { alert('Enter a URL first.'); return; }
+  var orig = btn.textContent; btn.disabled=true; btn.textContent='…';
+  var fd = new FormData(); fd.append('act','fetch_hash'); fd.append('url',url);
+  fetch('',{method:'POST',body:fd})
+    .then(r=>r.json())
+    .then(d=>{
+      btn.disabled=false;
+      if (d.hash) { inp.value=d.hash; btn.textContent='✓'; }
+      else { btn.textContent=orig; alert('Error: '+(d.error||'unknown')); }
+    })
+    .catch(e=>{ btn.textContent=orig; btn.disabled=false; alert(''+e); });
 }
+
+// ── Table search ───────────────────────────────────────────────────────────
 function filterTable(id, q) {
   q = q.toLowerCase();
-  document.querySelectorAll('#'+id+' tr:not(:first-child)').forEach(row=>{
-    row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+  document.querySelectorAll('#'+id+' tr:not(:first-child)').forEach(r=>{
+    r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
   });
 }
+
+// ── Prefill helpers ────────────────────────────────────────────────────────
 function prefillMail(pid) {
-  document.getElementById('mail-player').value = pid;
-  document.getElementById('send-mail-box').open = true;
-  document.getElementById('send-mail-box').scrollIntoView({behavior:'smooth'});
+  showTab('mail');
+  setTimeout(()=>{ var e=document.getElementById('mail-player'); if(e){e.value=pid;e.scrollIntoView({behavior:'smooth',block:'center'});} }, 60);
 }
-function copyId(id) {
-  navigator.clipboard.writeText(id).then(()=>alert('Copied: '+id));
+function prefillGrant(pid) {
+  showTab('players');
+  setTimeout(()=>{ var e=document.getElementById('grant-player'); if(e){e.value=pid;e.scrollIntoView({behavior:'smooth',block:'center'});} }, 60);
 }
-// Open send-mail section when arriving on mail tab after a mail action
-if (_tabParam === 'mail') {
-  var smb = document.getElementById('send-mail-box');
-  if (smb) smb.open = true;
+function copyText(t, btn) {
+  navigator.clipboard.writeText(t).then(()=>{ var o=btn.textContent; btn.textContent='Copied!'; setTimeout(()=>btn.textContent=o,1400); });
 }
+
+// ── Add form dynamic fields ────────────────────────────────────────────────
+function updateAddForm() {
+  var t = document.getElementById('ctype-sel').value;
+  var show = (id,v)=>{ var el=document.getElementById(id); if(el) el.style.display=v?'':'none'; };
+  show('add-thumb-lbl', t==='map'); show('add-thumb-row', t==='map');
+  var mat = t==='texture'||t==='skin'||t==='gun';
+  var key = t==='data'||t==='skin'||t==='gun';
+  show('add-mat-lbl',mat); show('add-mat',mat);
+  show('add-key-lbl',key); show('add-key',key);
+  document.getElementById('add-mat').placeholder = t==='skin'?'Skin_34_2':(t==='gun'?'gun_body':'mat_name');
+  document.getElementById('add-key').placeholder = t==='skin'?'Skin_34':(t==='gun'?'AK':'data_key');
+  document.getElementById('add-sort-lbl').textContent = (t==='skin'||t==='gun') ? 'Price (coins)' : 'Sort order';
+}
+updateAddForm();
 </script>
 </body>
 </html>
