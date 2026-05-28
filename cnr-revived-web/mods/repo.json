@@ -301,11 +301,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.1.38",
+      "latestVersion": "3.1.39",
       "filename": "CNRMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.39",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.1.39.dll",
+          "changelog": "Fix #4: move ModManagerOpen check in EcoHook.OnGUI before all overlay checks so EcoHook fully yields when settings panel is open"
+        },
         {
           "version": "3.1.38",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.1.38.dll",
