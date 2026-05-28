@@ -78,6 +78,18 @@ try {
             echo json_encode(api_delete_attachment($body));
             break;
 
+        case 'download_attachment':
+            api_download_attachment();
+            exit;
+
+        case 'get_diff':
+            echo json_encode(api_get_diff());
+            break;
+
+        case 'get_cs_file':
+            echo json_encode(api_get_cs_file());
+            break;
+
         case 'add_comment':
             require_post();
             echo json_encode(api_add_comment($body));
@@ -237,7 +249,7 @@ function api_get_issue(string $id): array {
 
     // Comments
     $stmt = $db->prepare(
-        'SELECT id, body, is_answer, is_diff, created_at, updated_at FROM comments WHERE issue_id=:id ORDER BY created_at ASC');
+        'SELECT id, body, is_answer, is_diff, ref_version, created_at, updated_at FROM comments WHERE issue_id=:id ORDER BY created_at ASC');
     $stmt->bindValue(':id', $id);
     $res  = $stmt->execute();
     $comments = [];
@@ -446,9 +458,11 @@ function api_set_status(array $body): array {
 
 function api_add_comment(array $body): array {
     $issue_id = require_field($body, 'issue_id');
-    $text     = trim($body['body'] ?? '');
-    $email    = trim($body['email'] ?? '');
-    $is_diff  = !empty($body['is_diff']) ? 1 : 0;
+    $text        = trim($body['body'] ?? '');
+    $email       = trim($body['email'] ?? '');
+    $is_diff     = !empty($body['is_diff']) ? 1 : 0;
+    $ref_version = trim($body['ref_version'] ?? '');
+    if ($ref_version && !preg_match('/^[\w.\-]{1,30}$/', $ref_version)) json_error('Invalid ref_version', 400);
 
     // body may be empty if comment is diff-only
     if ($text === '' && !$is_diff) json_error('Missing field: body', 400);
@@ -464,15 +478,16 @@ function api_add_comment(array $body): array {
     $ts    = now();
 
     $stmt = $db->prepare(
-        'INSERT INTO comments (id,issue_id,body,author_token,author_email,is_diff,created_at,updated_at)
-         VALUES (:id,:iid,:body,:tok,:email,:diff,:ts,:ts)');
-    $stmt->bindValue(':id',    $id);
-    $stmt->bindValue(':iid',   $issue_id);
-    $stmt->bindValue(':body',  $text);
-    $stmt->bindValue(':tok',   $token);
-    $stmt->bindValue(':email', $email ?: null);
-    $stmt->bindValue(':diff',  $is_diff, SQLITE3_INTEGER);
-    $stmt->bindValue(':ts',    $ts);
+        'INSERT INTO comments (id,issue_id,body,author_token,author_email,is_diff,ref_version,created_at,updated_at)
+         VALUES (:id,:iid,:body,:tok,:email,:diff,:refver,:ts,:ts)');
+    $stmt->bindValue(':id',     $id);
+    $stmt->bindValue(':iid',    $issue_id);
+    $stmt->bindValue(':body',   $text);
+    $stmt->bindValue(':tok',    $token);
+    $stmt->bindValue(':email',  $email ?: null);
+    $stmt->bindValue(':diff',   $is_diff, SQLITE3_INTEGER);
+    $stmt->bindValue(':refver', $ref_version ?: null);
+    $stmt->bindValue(':ts',     $ts);
     $stmt->execute();
 
     // Auto-subscribe commenter
@@ -739,9 +754,7 @@ function api_upload_attachment(): array {
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
 
     if ($origExt === 'cs') {
-        // C# source file — must be plain text, max 2 MB
-        $csTextMimes = ['text/plain', 'text/x-csrc', 'text/x-csharp', 'application/octet-stream'];
-        if (!in_array($mime, $csTextMimes)) json_error('C# file must be a plain-text source file', 400);
+        // C# source file — trust the .cs extension, just cap size
         if ($file['size'] > 2 * 1024 * 1024) json_error('Source file too large (max 2 MB)', 400);
         $filename  = $id . '.cs';
         $storeMime = 'text/plain';
@@ -771,6 +784,142 @@ function api_upload_attachment(): array {
     $stmt->execute();
 
     return ok(['attachment' => ['id' => $id, 'filename' => $filename, 'mime' => $storeMime, 'size' => $file['size']]]);
+}
+
+function api_download_attachment(): void {
+    $id = trim($_GET['id'] ?? '');
+    if (!$id) json_error('Missing id', 400);
+    $db   = db();
+    $stmt = $db->prepare('SELECT filename, mime FROM attachments WHERE id=:id');
+    $stmt->bindValue(':id', $id);
+    $row  = $stmt->execute()->fetchArray(SQLITE3_ASSOC);
+    if (!$row) json_error('Not found', 404);
+    $path = __DIR__ . '/uploads/' . basename($row['filename']);
+    if (!file_exists($path)) json_error('File missing', 404);
+    $name = $row['filename']; // e.g. abc123.cs
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="' . addslashes($name) . '"');
+    header('Content-Length: ' . filesize($path));
+    header('Cache-Control: no-cache');
+    readfile($path);
+}
+
+function api_get_cs_file(): array {
+    $mod = trim($_GET['mod'] ?? '');
+    $ver = trim($_GET['ver'] ?? '');
+    if (!$mod || !$ver) json_error('Missing mod or ver', 400);
+    if (!preg_match('/^[\w.\-]{1,60}$/', $mod)) json_error('Invalid mod', 400);
+    if (!preg_match('/^[\w.\-]{1,30}$/', $ver)) json_error('Invalid ver', 400);
+    $path = __DIR__ . '/../mods/' . $mod . '/' . $mod . '-' . $ver . '.cs';
+    if (!file_exists($path)) json_error('File not found', 404);
+    return ok(['text' => file_get_contents($path)]);
+}
+
+function api_get_diff(): array {
+    $comment_id = trim($_GET['comment_id'] ?? '');
+    if (!$comment_id) json_error('Missing comment_id', 400);
+
+    $db = db();
+
+    // Get comment + issue
+    $stmt = $db->prepare('SELECT c.issue_id, c.is_diff, c.ref_version, i.related_mod, i.related_version
+                          FROM comments c JOIN issues i ON i.id = c.issue_id
+                          WHERE c.id = :id');
+    $stmt->bindValue(':id', $comment_id);
+    $row = $stmt->execute()->fetchArray(SQLITE3_ASSOC);
+    if (!$row) json_error('Comment not found', 404);
+    if (!$row['is_diff']) json_error('Comment is not a diff comment', 400);
+
+    $mod     = $row['related_mod'];
+    $oldVer  = $row['related_version'];
+    $refVer  = $row['ref_version'];
+
+    // Read old file (always the issue's related_version)
+    $oldPath = __DIR__ . '/../mods/' . $mod . '/' . $mod . '-' . $oldVer . '.cs';
+    if (!file_exists($oldPath)) json_error('Old file not found: ' . basename($oldPath), 404);
+    $oldRaw = file_get_contents($oldPath);
+
+    // Read new file — either ref_version .cs or uploaded attachment
+    if ($refVer) {
+        $newPath    = __DIR__ . '/../mods/' . $mod . '/' . $mod . '-' . $refVer . '.cs';
+        $newLabel   = $mod . '-' . $refVer . '.cs';
+        if (!file_exists($newPath)) json_error('Ref version file not found: ' . $newLabel, 404);
+    } else {
+        $atts = get_attachments_for_comment($comment_id);
+        $att  = null;
+        foreach ($atts as $a) {
+            if (substr($a['filename'], -3) === '.cs') { $att = $a; break; }
+        }
+        if (!$att) json_error('No .cs attachment or ref_version on this comment', 404);
+        $newPath  = __DIR__ . '/uploads/' . basename($att['filename']);
+        $newLabel = $att['filename'];
+        if (!file_exists($newPath)) json_error('New file not found', 404);
+    }
+    $newRaw = file_get_contents($newPath);
+
+    // Normalize line endings
+    $oldNorm = str_replace(["\r\n", "\r"], "\n", $oldRaw);
+    $newNorm = str_replace(["\r\n", "\r"], "\n", $newRaw);
+
+    $oldLines = explode("\n", $oldNorm);
+    $newLines = explode("\n", $newNorm);
+    $mo = count($oldLines);
+    $mn = count($newLines);
+
+    // Find first differing line
+    $firstDiff = null;
+    $maxScan   = max($mo, $mn);
+    for ($i = 0; $i < $maxScan; $i++) {
+        $ol = $oldLines[$i] ?? null;
+        $nl = $newLines[$i] ?? null;
+        if ($ol !== $nl) { $firstDiff = $i; break; }
+    }
+
+    // Count common prefix / suffix
+    $pfx = 0;
+    $minLen = min($mo, $mn);
+    while ($pfx < $minLen && $oldLines[$pfx] === $newLines[$pfx]) $pfx++;
+    $sfx = 0;
+    while ($sfx < $mo - $pfx && $sfx < $mn - $pfx &&
+           $oldLines[$mo - 1 - $sfx] === $newLines[$mn - 1 - $sfx]) $sfx++;
+
+    $midOld = array_slice($oldLines, $pfx, $sfx ? $mo - $pfx - $sfx : null);
+    $midNew = array_slice($newLines, $pfx, $sfx ? $mn - $pfx - $sfx : null);
+
+    // Sample lines around first diff
+    $sample = [];
+    if ($firstDiff !== null) {
+        $from = max(0, $firstDiff - 2);
+        $to   = min(max($mo, $mn) - 1, $firstDiff + 4);
+        for ($i = $from; $i <= $to; $i++) {
+            $sample[] = [
+                'line'    => $i + 1,
+                'old'     => $oldLines[$i] ?? '(EOF)',
+                'new'     => $newLines[$i] ?? '(EOF)',
+                'same'    => ($oldLines[$i] ?? null) === ($newLines[$i] ?? null),
+            ];
+        }
+    }
+
+    return ok([
+        'comment_id'    => $comment_id,
+        'mod'           => $mod,
+        'old_version'   => $oldVer,
+        'ref_version'   => $refVer ?: null,
+        'old_file'      => basename($oldPath),
+        'new_file'      => $newLabel,
+        'old_lines'     => $mo,
+        'new_lines'     => $mn,
+        'old_has_crlf'  => strpos($oldRaw, "\r\n") !== false,
+        'new_has_crlf'  => strpos($newRaw, "\r\n") !== false,
+        'common_prefix' => $pfx,
+        'common_suffix' => $sfx,
+        'mid_old_lines' => count($midOld),
+        'mid_new_lines' => count($midNew),
+        'mid_product'   => count($midOld) * count($midNew),
+        'first_diff_at' => $firstDiff !== null ? $firstDiff + 1 : null,
+        'sample'        => $sample,
+    ]);
 }
 
 function api_delete_attachment(array $body): array {
