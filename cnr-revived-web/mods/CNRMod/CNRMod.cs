@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.2.3";
+        public const  string Version = "3.2.4";
 
         // -- Mod version registry ? every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -4843,10 +4843,12 @@ namespace CNRMods
         Dictionary<int, string> _applied = new Dictionary<int, string>();
         float _nextPoll = 2f;   // first poll after 2s so characters have spawned
 
-        // Cached PhotonView type + ownerId property so ApplyToActor doesn't scan
+        // Cached PhotonView type + owner/ID properties so ApplyToActor doesn't scan
         // every MonoBehaviour in the scene (which causes multi-second freezes).
-        static Type         _pvType       = null;
-        static PropertyInfo _pvOwnerIdProp = null;
+        // PhotonView has no ownerId; access is: PhotonView.owner (PhotonPlayer) -> PhotonPlayer.ID (int).
+        static Type         _pvType        = null;
+        static PropertyInfo _pvOwnerProp   = null;  // PhotonView.owner -> PhotonPlayer
+        static PropertyInfo _pvOwnerIdProp = null;  // PhotonPlayer.ID -> int
         static Type GetPhotonViewType()
         {
             if (_pvType != null) return _pvType;
@@ -4854,8 +4856,12 @@ namespace CNRMods
             {
                 Type t = asm.GetType("PhotonView");
                 if (t == null) continue;
-                _pvType        = t;
-                _pvOwnerIdProp = t.GetProperty("ownerId", BindingFlags.Instance | BindingFlags.Public);
+                _pvType      = t;
+                _pvOwnerProp = t.GetProperty("owner", BindingFlags.Instance | BindingFlags.Public);
+                if (_pvOwnerProp != null)
+                    _pvOwnerIdProp = _pvOwnerProp.PropertyType.GetProperty("ID", BindingFlags.Instance | BindingFlags.Public);
+                ModEntry.Log("GetPhotonViewType: owner=" + (_pvOwnerProp != null ? "ok" : "null")
+                    + " ID=" + (_pvOwnerIdProp != null ? "ok" : "null"));
                 return _pvType;
             }
             return null;
@@ -4911,13 +4917,19 @@ namespace CNRMods
             // Scan only PhotonView components (a handful per scene) instead of every
             // MonoBehaviour, which caused multi-second ANR freezes on WSA/slow devices.
             Type pvType = GetPhotonViewType();
-            if (pvType == null || _pvOwnerIdProp == null) return false;
+            if (pvType == null || _pvOwnerProp == null || _pvOwnerIdProp == null) return false;
             var views = FindObjectsOfType(pvType);
             foreach (var viewObj in views)
             {
                 if (viewObj == null) continue;
                 int oid;
-                try { oid = (int)_pvOwnerIdProp.GetValue(viewObj, null); } catch { continue; }
+                try
+                {
+                    object playerObj = _pvOwnerProp.GetValue(viewObj, null);
+                    if (playerObj == null) continue; // scene view or unowned
+                    oid = (int)_pvOwnerIdProp.GetValue(playerObj, null);
+                }
+                catch { continue; }
                 if (oid != actorId) continue;
                 Component view = viewObj as Component;
                 if (view == null) continue;
