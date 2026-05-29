@@ -180,11 +180,23 @@ namespace CNRRecordingMod
         private string    _encodeError;
 
         // Viewer
+        private const int    PageSize     = 10;
         private bool         _viewerOpen;
-        private Rect         _viewerRect;
-        private List<string> _recordings = new List<string>();
-        private Vector2      _listScroll;
+        private int          _viewerPage;
+        private string       _selectedPath;
+        private List<string> _recordings  = new List<string>();
+        private List<long>   _recBytes    = new List<long>();
+        private List<float>  _recDuration = new List<float>();
         private string       _statusMsg;
+
+        // UI style cache (static: allocated once, shared across scenes)
+        private static bool      _vrStylesOk;
+        private static Font      _vrFont;
+        private static Texture2D _vrPanelBg, _vrBtnTex, _vrHoverTex, _vrActiveTex;
+        private static GUIStyle  _gsVrStatus, _gsVrTitle;
+        private static GUIStyle  _gsVrTimeLabel, _gsVrTimeBig, _gsVrDateLabel;
+        private static GUIStyle  _gsVrDetailLabel, _gsVrDetailRight, _gsVrDetailCenter;
+        private static GUIStyle  _gsVrBtn, _gsVrGhost, _gsVrPlayBtn;
 
         // Game scenes that have the in-game HUD (and the record button).
         private static readonly string[] GameScenes = new string[]
@@ -363,13 +375,10 @@ namespace CNRRecordingMod
 
         public void OpenViewer()
         {
-            _viewerRect = new Rect(
-                Screen.width  * 0.05f,
-                Screen.height * 0.05f,
-                Screen.width  * 0.70f,
-                Screen.height * 0.75f);
             RefreshRecordings();
-            _viewerOpen = true;
+            _viewerPage   = 0;
+            _selectedPath = null;
+            _viewerOpen   = true;
         }
 
         private void Update()
@@ -795,62 +804,462 @@ namespace CNRRecordingMod
         private void RefreshRecordings()
         {
             _recordings.Clear();
+            _recBytes.Clear();
+            _recDuration.Clear();
             _statusMsg = null;
             try
             {
                 if (!Directory.Exists(RecordingsDir)) return;
-                _recordings.AddRange(Directory.GetFiles(RecordingsDir, "*.mp4"));
-                _recordings.Sort((a, b) => string.Compare(b, a, StringComparison.Ordinal));
+                string[] files = Directory.GetFiles(RecordingsDir, "*.mp4");
+                System.Array.Sort(files, (a, b) => string.Compare(b, a, StringComparison.Ordinal));
+                foreach (string f in files)
+                {
+                    _recordings.Add(f);
+                    long sz = 0;
+                    try { sz = new FileInfo(f).Length; } catch { }
+                    _recBytes.Add(sz);
+                    float dur = -1f;
+                    string rawDir = Path.Combine(RecordingsDir,
+                        "raw_" + Path.GetFileNameWithoutExtension(f));
+                    if (Directory.Exists(rawDir))
+                        try
+                        {
+                            int n = Directory.GetFiles(rawDir, "*.nv12").Length;
+                            if (n > 0) dur = n / (float)VideoFps;
+                        }
+                        catch { }
+                    if (dur < 0f && sz > 0)
+                        dur = sz * 8f / (float)VideoBitrate;
+                    _recDuration.Add(dur);
+                }
             }
             catch (Exception ex) { _statusMsg = "Error: " + ex.Message; }
         }
 
         private void OnGUI()
         {
-            // Status indicator (top-right). Read-only — start/stop come from the
-            // existing Kamcord "Start Recording" / "Stop Recording" OnGUI buttons.
+            float vw = Screen.width;
+            float vh = Screen.height;
+
+            // REC / Encoding indicator (always visible, top-right)
             if (IsCapturing || IsEncoding)
             {
-                float bw = Screen.width  * 0.09f;
-                float bh = Screen.height * 0.06f;
-                GUI.Label(new Rect(Screen.width - bw - 8f, 8f, bw, bh),
-                    IsEncoding ? "[Encoding]" : "\u25cf REC");
+                VrEnsureStyles();
+                string badge = IsEncoding ? "[Encoding]" : "\u25cf REC";
+                GUI.Label(new Rect(vw - 112f, 6f, 106f, 32f), badge, _gsVrStatus ?? GUI.skin.label);
             }
 
-            // Recordings viewer overlay
-            if (_viewerOpen)
-                _viewerRect = GUI.Window(0xCEC0, _viewerRect, DrawViewerWindow, "CNR Recordings");
+            if (!_viewerOpen) return;
+
+            // Heavy dim overlay — blocks all NGUI interaction
+            GUI.color = new Color(0f, 0f, 0f, 0.88f);
+            GUI.DrawTexture(new Rect(0, 0, vw, vh), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            GUI.Button(new Rect(0, 0, vw, vh), GUIContent.none, GUIStyle.none);
+
+            VrEnsureStyles();
+
+            float pw = Mathf.Min(vw * 0.96f, 420f);
+            float ph = Mathf.Min(vh * 0.92f, 540f);
+            float px = Mathf.Round((vw - pw) * 0.5f);
+            float py = Mathf.Round((vh - ph) * 0.5f);
+
+            // Panel background
+            if (_vrPanelBg != null)
+                GUI.DrawTexture(new Rect(px, py, pw, ph), _vrPanelBg, ScaleMode.StretchToFill);
+            else
+            {
+                GUI.color = new Color(0.10f, 0.10f, 0.12f, 0.97f);
+                GUI.DrawTexture(new Rect(px, py, pw, ph), Texture2D.whiteTexture);
+                GUI.color = Color.white;
+            }
+
+            if (_selectedPath == null)
+                DrawListView(px, py, pw, ph);
+            else
+                DrawDetailView(px, py, pw, ph);
+
+            if (Event.current.type != EventType.Repaint && Event.current.type != EventType.Layout)
+                Event.current.Use();
         }
 
-        private void DrawViewerWindow(int id)
+        // ---- List view -------------------------------------------------------
+        private void DrawListView(float px, float py, float pw, float ph)
         {
-            float w    = _viewerRect.width;
-            float h    = _viewerRect.height;
-            float btnH = 22f;
-            GUI.DragWindow(new Rect(0, 0, w - 28, 18));
-            if (GUI.Button(new Rect(w - 26, 1, 24, 16), "X")) { _viewerOpen = false; return; }
+            const float hTop  = 44f;
+            const float hBot  = 46f;
+            const float hItem = 58f;
+            const float padX  = 10f;
 
-            string encState = IsEncoding ? "  [Encoding...]" : (_encodeError != null ? "  [Encode ERR: " + _encodeError + "]" : "");
-            GUI.Label(new Rect(4, 22, w - 8, 20), "MP4 recordings" + encState);
+            // Title bar
+            GUI.Label(new Rect(px + padX, py + 8f, pw - 60f, 30f),
+                "  [CNR]  Recordings", _gsVrTitle);
+            string encBadge = IsEncoding ? "Encoding..." : (_encodeError != null ? "Err!" : null);
+            if (encBadge != null)
+                GUI.Label(new Rect(px + pw - 138f, py + 12f, 88f, 22f), encBadge, _gsVrStatus);
+            if (GUI.Button(new Rect(px + pw - 46f, py + 9f, 36f, 28f), "X", _gsVrBtn))
+            { _viewerOpen = false; return; }
 
-            float innerH = h - 44f;
-            _listScroll = GUI.BeginScrollView(
-                new Rect(2, 44, w - 4, innerH - btnH - 4),
-                _listScroll,
-                new Rect(0, 0, w - 24, Mathf.Max(innerH, _recordings.Count * 28)));
-            for (int i = 0; i < _recordings.Count; i++)
+            // Separator under title bar
+            float ty = py + hTop;
+            GUI.color = new Color(0.35f, 0.35f, 0.45f, 1f);
+            GUI.DrawTexture(new Rect(px + padX, ty, pw - padX * 2f, 1f), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            ty += 5f;
+
+            // Recordings list
+            int total = _recordings.Count;
+            int pages = total > 0 ? (total + PageSize - 1) / PageSize : 1;
+            if (_viewerPage >= pages) _viewerPage = Mathf.Max(0, pages - 1);
+            int start = _viewerPage * PageSize;
+            int end   = Mathf.Min(start + PageSize, total);
+
+            if (total == 0)
             {
-                string name = Path.GetFileName(_recordings[i]);
-                long   sz   = 0;
-                try { sz = new FileInfo(_recordings[i]).Length; } catch { }
-                GUI.Label(new Rect(0, i * 28, w - 24, 26), name + "  (" + (sz / 1024) + " KB)");
+                GUI.Label(new Rect(px + padX, py + ph * 0.42f, pw - padX * 2f, 30f),
+                    _statusMsg ?? "No recordings found.", _gsVrDetailCenter);
             }
-            GUI.EndScrollView();
+            else
+            {
+                for (int i = start; i < end; i++)
+                {
+                    Rect ir = new Rect(px + padX, ty, pw - padX * 2f, hItem);
 
-            if (GUI.Button(new Rect(2, h - btnH - 4, 100, btnH), "Refresh"))
-                RefreshRecordings();
+                    // Subtle item background tint
+                    GUI.color = new Color(1f, 1f, 1f, 0.04f);
+                    GUI.DrawTexture(ir, Texture2D.whiteTexture);
+                    GUI.color = Color.white;
+
+                    // Parse metadata
+                    string name = Path.GetFileNameWithoutExtension(_recordings[i]);
+                    long   sz   = _recBytes[i];
+                    float  dur  = _recDuration[i];
+                    string tStr = "??:??:??", dStr = "?? ??? ????";
+                    if (name.Length >= 15)
+                        try
+                        {
+                            var dt = DateTime.ParseExact(name, "yyyyMMdd_HHmmss", null);
+                            tStr = dt.ToString("HH:mm:ss");
+                            dStr = dt.ToString("MMM dd  yyyy");
+                        }
+                        catch { }
+
+                    // TOP-LEFT: play icon + time (game font, white, 20 pt)
+                    GUI.Label(new Rect(ir.x + 8f, ir.y + 3f, ir.width * 0.62f, 28f),
+                        "\u25b6  " + tStr, _gsVrTimeLabel);
+                    // TOP-RIGHT: date (game font, grey, 13 pt, right-aligned)
+                    GUI.Label(new Rect(ir.x, ir.y + 7f, ir.width - 8f, 22f),
+                        dStr, _gsVrDateLabel);
+                    // BOTTOM-LEFT: duration (system font, light grey, 11 pt)
+                    GUI.Label(new Rect(ir.x + 8f, ir.yMax - 22f, ir.width * 0.5f, 20f),
+                        dur >= 0f ? VrFmtDur(dur) : "? s", _gsVrDetailLabel);
+                    // BOTTOM-RIGHT: file size (system font, light grey, 11 pt, right-aligned)
+                    GUI.Label(new Rect(ir.x, ir.yMax - 22f, ir.width - 8f, 20f),
+                        sz > 0 ? VrFmtBytes(sz) : "? B", _gsVrDetailRight);
+
+                    // Invisible click zone covering the whole item
+                    if (GUI.Button(ir, GUIContent.none, _gsVrGhost))
+                        _selectedPath = _recordings[i];
+
+                    // Separator between items
+                    if (i < end - 1)
+                    {
+                        GUI.color = new Color(0.25f, 0.25f, 0.35f, 1f);
+                        GUI.DrawTexture(new Rect(ir.x + 8f, ir.yMax, ir.width - 16f, 1f),
+                            Texture2D.whiteTexture);
+                        GUI.color = Color.white;
+                    }
+                    ty += hItem + 1f;
+                }
+            }
+
+            // Bottom bar
+            float by = py + ph - hBot + 4f;
+            GUI.color = new Color(0.35f, 0.35f, 0.45f, 1f);
+            GUI.DrawTexture(new Rect(px + padX, by - 6f, pw - padX * 2f, 1f), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            if (GUI.Button(new Rect(px + padX, by, 72f, 32f), "Refresh", _gsVrBtn))
+            { RefreshRecordings(); _viewerPage = 0; }
+
+            // Page controls — centred
+            float cx   = px + pw * 0.5f;
+            float bW   = 32f;
+            float lblW = 54f;
+            GUI.enabled = _viewerPage > 0;
+            if (GUI.Button(new Rect(cx - lblW * 0.5f - bW - 4f, by, bW, 32f), "<", _gsVrBtn))
+                _viewerPage--;
+            GUI.enabled = true;
+            string pStr = total > 0 ? (_viewerPage + 1) + " / " + pages : "\u2013";
+            GUI.Label(new Rect(cx - lblW * 0.5f, by + 4f, lblW, 24f), pStr, _gsVrDetailCenter);
+            GUI.enabled = _viewerPage < pages - 1;
+            if (GUI.Button(new Rect(cx + lblW * 0.5f + 4f, by, bW, 32f), ">", _gsVrBtn))
+                _viewerPage++;
+            GUI.enabled = true;
+        }
+
+        // ---- Detail / player view --------------------------------------------
+        private void DrawDetailView(float px, float py, float pw, float ph)
+        {
+            const float padX = 12f;
+            const float hTop = 44f;
+
+            // ← Back
+            if (GUI.Button(new Rect(px + padX, py + 8f, 80f, 28f), "\u2190  Back", _gsVrBtn))
+            { _selectedPath = null; return; }
+
+            // X close
+            if (GUI.Button(new Rect(px + pw - 46f, py + 8f, 36f, 28f), "X", _gsVrBtn))
+            { _viewerOpen = false; _selectedPath = null; return; }
+
+            float ty = py + hTop;
+            GUI.color = new Color(0.35f, 0.35f, 0.45f, 1f);
+            GUI.DrawTexture(new Rect(px + padX, ty, pw - padX * 2f, 1f), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            ty += 12f;
+
+            // Parse metadata
+            string name = Path.GetFileNameWithoutExtension(_selectedPath);
+            int    idx  = _recordings.IndexOf(_selectedPath);
+            long   sz   = idx >= 0 ? _recBytes[idx]    : 0;
+            float  dur  = idx >= 0 ? _recDuration[idx] : -1f;
+            string tStr = "??:??:??", dStr = "?? ??? ????";
+            if (name.Length >= 15)
+                try
+                {
+                    var dt = DateTime.ParseExact(name, "yyyyMMdd_HHmmss", null);
+                    tStr = dt.ToString("HH:mm:ss");
+                    dStr = dt.ToString("MMM dd  yyyy");
+                }
+                catch { }
+
+            // Big time (game font, gold, 26 pt)
+            GUI.Label(new Rect(px + padX, ty, pw - padX * 2f, 38f), tStr, _gsVrTimeBig);
+            ty += 40f;
+            // Date (game font, grey, 13 pt)
+            GUI.Label(new Rect(px + padX, ty, pw - padX * 2f, 26f), dStr, _gsVrDateLabel);
+            ty += 34f;
+
+            // Details box
+            GUI.color = new Color(0.08f, 0.08f, 0.12f, 0.70f);
+            GUI.DrawTexture(new Rect(px + padX, ty, pw - padX * 2f, 84f), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            float lx = px + padX + 10f;
+            float lw = pw - (padX + 10f) * 2f;
+            GUI.Label(new Rect(lx, ty + 7f,  lw, 20f),
+                "Duration:   " + (dur >= 0f ? VrFmtDur(dur) : "unknown"), _gsVrDetailLabel);
+            GUI.Label(new Rect(lx, ty + 27f, lw, 20f),
+                "File size:  " + (sz > 0 ? VrFmtBytes(sz) : "unknown"), _gsVrDetailLabel);
+            GUI.Label(new Rect(lx, ty + 47f, lw, 20f),
+                "Resolution: " + VideoWidth + " \u00d7 " + VideoHeight + "  H.264  MP4",
+                _gsVrDetailLabel);
+            ty += 98f;
+
+            // ▶ Play button — launches system video player
+            if (GUI.Button(new Rect(px + padX, ty, pw - padX * 2f, 50f),
+                "\u25b6   Play Recording", _gsVrPlayBtn))
+                VrPlayVideo(_selectedPath);
+            ty += 60f;
+
+            // Error / status
             if (_statusMsg != null)
-                GUI.Label(new Rect(110, h - btnH - 4, w - 114, btnH), _statusMsg);
+                GUI.Label(new Rect(px + padX, ty, pw - padX * 2f, 22f), _statusMsg, _gsVrStatus);
+        }
+
+        // Launches the recording in the device's default video player via an Intent.
+        // On WSA / Android: opens the system media player with full seek + play/pause.
+        private void VrPlayVideo(string path)
+        {
+            _statusMsg = null;
+            try
+            {
+                using (var up = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                using (var ac = up.GetStatic<AndroidJavaObject>("currentActivity"))
+                {
+                    var intent  = new AndroidJavaObject("android.content.Intent",
+                        "android.intent.action.VIEW");
+                    var fileObj = new AndroidJavaObject("java.io.File", path);
+                    var uri     = new AndroidJavaClass("android.net.Uri")
+                        .CallStatic<AndroidJavaObject>("fromFile", fileObj);
+                    intent.Call<AndroidJavaObject>("setDataAndType", uri, "video/mp4");
+                    intent.Call<AndroidJavaObject>("addFlags", 0x10000000); // FLAG_ACTIVITY_NEW_TASK
+                    ac.Call("startActivity", intent);
+                }
+            }
+            catch (Exception ex)
+            {
+                _statusMsg = "Play error: " + ex.Message;
+                RecordingModEntry.Log("VrPlayVideo error: " + ex.Message);
+            }
+        }
+
+        // ---- Style initialisation --------------------------------------------
+        // Called on first OnGUI; borrows textures + font from CNRSettingsMod when
+        // available so the viewer shares the exact same visual assets.
+        private void VrEnsureStyles()
+        {
+            if (_vrStylesOk) return;
+            _vrStylesOk = true;
+
+            _vrPanelBg   = VrBorrowTex("_spPanelBack")
+                        ?? VrMakeTex(new Color(0.10f, 0.10f, 0.12f, 0.97f));
+            _vrBtnTex    = VrBorrowTex("_spButtonNull");
+            _vrHoverTex  = VrMakeTex(new Color(1f, 1f, 1f, 0.09f));
+            _vrActiveTex = VrMakeTex(new Color(1f, 1f, 1f, 0.18f));
+
+            if (_vrFont == null) _vrFont = VrFindFont();
+
+            // REC / error badge
+            _gsVrStatus = new GUIStyle(GUI.skin.label);
+            _gsVrStatus.fontSize = 13;
+            _gsVrStatus.fontStyle = FontStyle.Bold;
+            _gsVrStatus.normal.textColor = new Color(1f, 0.30f, 0.30f);
+            _gsVrStatus.alignment = TextAnchor.MiddleRight;
+            if (_vrFont != null) _gsVrStatus.font = _vrFont;
+
+            // Window title
+            _gsVrTitle = new GUIStyle(GUI.skin.label);
+            _gsVrTitle.fontSize = 18;
+            _gsVrTitle.fontStyle = FontStyle.Bold;
+            _gsVrTitle.normal.textColor = new Color(1f, 0.85f, 0.28f);
+            _gsVrTitle.alignment = TextAnchor.MiddleLeft;
+            if (_vrFont != null) _gsVrTitle.font = _vrFont;
+
+            // Item time (game font, white, 20 pt, left)
+            _gsVrTimeLabel = new GUIStyle(GUI.skin.label);
+            _gsVrTimeLabel.fontSize = 20;
+            _gsVrTimeLabel.fontStyle = FontStyle.Bold;
+            _gsVrTimeLabel.normal.textColor = Color.white;
+            _gsVrTimeLabel.alignment = TextAnchor.MiddleLeft;
+            if (_vrFont != null) _gsVrTimeLabel.font = _vrFont;
+
+            // Detail view big time (game font, gold, 26 pt)
+            _gsVrTimeBig = new GUIStyle(GUI.skin.label);
+            _gsVrTimeBig.fontSize = 26;
+            _gsVrTimeBig.fontStyle = FontStyle.Bold;
+            _gsVrTimeBig.normal.textColor = new Color(1f, 0.85f, 0.25f);
+            _gsVrTimeBig.alignment = TextAnchor.MiddleLeft;
+            if (_vrFont != null) _gsVrTimeBig.font = _vrFont;
+
+            // Date (game font, grey, 13 pt, right-aligned in list / left in detail)
+            _gsVrDateLabel = new GUIStyle(GUI.skin.label);
+            _gsVrDateLabel.fontSize = 13;
+            _gsVrDateLabel.normal.textColor = new Color(0.55f, 0.55f, 0.65f);
+            _gsVrDateLabel.alignment = TextAnchor.MiddleRight;
+            if (_vrFont != null) _gsVrDateLabel.font = _vrFont;
+
+            // Small detail text (system/default font, 11 pt light grey, left)
+            _gsVrDetailLabel = new GUIStyle(GUI.skin.label);
+            _gsVrDetailLabel.fontSize = 11;
+            _gsVrDetailLabel.normal.textColor = new Color(0.62f, 0.62f, 0.70f);
+            _gsVrDetailLabel.alignment = TextAnchor.MiddleLeft;
+            // font deliberately not set → Unity default sans-serif for small text
+
+            _gsVrDetailRight = new GUIStyle(_gsVrDetailLabel);
+            _gsVrDetailRight.alignment = TextAnchor.MiddleRight;
+
+            _gsVrDetailCenter = new GUIStyle(_gsVrDetailLabel);
+            _gsVrDetailCenter.alignment = TextAnchor.MiddleCenter;
+
+            // Action button (reuses _vrBtnTex for the menu-button look)
+            _gsVrBtn = new GUIStyle(GUI.skin.button);
+            _gsVrBtn.fontSize    = 16;
+            _gsVrBtn.fixedHeight = 0f;
+            _gsVrBtn.normal.textColor  = Color.white;
+            _gsVrBtn.hover.textColor   = new Color(0.30f, 0.85f, 1f);
+            _gsVrBtn.active.textColor  = Color.white;
+            if (_vrFont != null) _gsVrBtn.font = _vrFont;
+            if (_vrBtnTex != null)
+            {
+                _gsVrBtn.normal.background  = _vrBtnTex;
+                _gsVrBtn.hover.background   = _vrBtnTex;
+                _gsVrBtn.active.background  = _vrBtnTex;
+            }
+
+            // Ghost button: invisible background, subtle hover/active highlight
+            _gsVrGhost = new GUIStyle();
+            _gsVrGhost.normal.background = null;
+            _gsVrGhost.hover.background  = _vrHoverTex;
+            _gsVrGhost.active.background = _vrActiveTex;
+
+            // Big play button (inherits _gsVrBtn, green tint)
+            _gsVrPlayBtn = new GUIStyle(_gsVrBtn);
+            _gsVrPlayBtn.fontSize = 22;
+            _gsVrPlayBtn.normal.textColor = new Color(0.25f, 1f, 0.55f);
+            _gsVrPlayBtn.hover.textColor  = Color.white;
+        }
+
+        // ---- Style utilities -------------------------------------------------
+        // Tries to borrow Font from CNRSettingsMod._gameFont; falls back to UILabel scan.
+        private Font VrFindFont()
+        {
+            try
+            {
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    var t = asm.GetType("CNRSettingsMod.SettingsModHook");
+                    if (t == null) continue;
+                    var fi = t.GetField("_gameFont",
+                        BindingFlags.Static | BindingFlags.NonPublic);
+                    if (fi != null) { Font f = fi.GetValue(null) as Font; if (f != null) return f; }
+                    break;
+                }
+            }
+            catch { }
+            try
+            {
+                var lbls = (UILabel[])UnityEngine.Object.FindObjectsOfType(typeof(UILabel));
+                foreach (var l in lbls)
+                    if (l.font != null && l.font.dynamicFont != null)
+                        return l.font.dynamicFont;
+            }
+            catch { }
+            return null;
+        }
+
+        // Borrows a Texture2D from CNRSettingsMod's static cache by reflection.
+        private static Texture2D VrBorrowTex(string fieldName)
+        {
+            try
+            {
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    var t = asm.GetType("CNRSettingsMod.SettingsModHook");
+                    if (t == null) continue;
+                    var fi = t.GetField(fieldName,
+                        BindingFlags.Static | BindingFlags.NonPublic);
+                    if (fi != null) return fi.GetValue(null) as Texture2D;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static Texture2D VrMakeTex(Color col)
+        {
+            Texture2D t = new Texture2D(2, 2);
+            Color[] p = { col, col, col, col };
+            t.SetPixels(p); t.Apply();
+            return t;
+        }
+
+        private static string VrFmtDur(float sec)
+        {
+            if (sec < 0f) return "? s";
+            int s = (int)sec;
+            int h = s / 3600; s -= h * 3600;
+            int m = s / 60;   s -= m * 60;
+            if (h > 0) return h + ":" + m.ToString("D2") + ":" + s.ToString("D2");
+            if (m > 0) return m + ":" + s.ToString("D2");
+            return s + " s";
+        }
+
+        private static string VrFmtBytes(long b)
+        {
+            if (b <= 0)          return "0 B";
+            if (b < 1024)        return b + " B";
+            if (b < 1024 * 1024) return (b / 1024f).ToString("F1") + " KB";
+            return (b / (1024f * 1024f)).ToString("F1") + " MB";
         }
     }
 

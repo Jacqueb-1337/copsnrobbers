@@ -1,0 +1,129 @@
+[14:19:46.730] === CNRRecordingMod v1.39.2 loading ===
+[14:19:46.732] Time: 2026-05-27 14:19:46
+[14:19:46.736] Unity: 4.6.1f1  platform=Android
+[14:19:46.738] Android SDK_INT=33
+[14:19:46.741] RecordingHook.Awake()
+[14:19:46.743]   recordings dir OK
+[14:19:46.744] Load OK
+[14:19:46.759] already loaded, skipping
+[14:19:48.096] AutoRecord: starting 5s diagnostic capture (scene=MainMenu)
+[14:19:48.098] StartCapture BEGIN
+[14:19:48.105] AttachCaptureDisplay: Camera d=0
+[14:19:48.106] StartCapture: session=20260527_141948 scrn=979x548 enc=854x480@30 captureStride=854 captureSliceH=480 mode=OnRenderImage/lastCam
+[14:19:48.142] CaptureFrame 0 (screen=979x548)
+[14:19:48.173]   diag PNG -> /storage/emulated/0/CNRMods/recordings/raw_20260527_141948/frame0_screen.png
+[14:19:48.175]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:19:48.198]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_141948/frame_00000.nv12
+[14:19:48.218] CaptureFrame 1 (screen=979x548)
+[14:19:48.221]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:19:48.242]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_141948/frame_00001.nv12
+[14:19:48.260] CaptureFrame 2 (screen=979x548)
+[14:19:48.263]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:19:48.290]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_141948/frame_00002.nv12
+[14:19:48.312] CaptureFrame 3 (screen=979x548)
+[14:19:48.315]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:19:48.339]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_141948/frame_00003.nv12
+[14:19:48.359] CaptureFrame 4 (screen=979x548)
+[14:19:48.362]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:19:48.385]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_141948/frame_00004.nv12
+[14:19:50.631] AttachCaptureDisplay: Camera d=0
+[14:19:50.844] CaptureFrame 60 (screen=979x548)
+[14:19:50.846]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:19:50.869]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_141948/frame_00060.nv12
+[14:19:52.979] CaptureFrame 120 (screen=979x548)
+[14:19:52.982]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:19:53.003]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_141948/frame_00120.nv12
+[14:19:53.378] AutoRecord: stopping
+[14:19:53.380] StopCapture: 132 frames captured -> starting encode thread
+[14:19:53.385] EncodeThread START: 132 frames -> /storage/emulated/0/CNRMods/recordings/20260527_141948.mp4
+[14:19:53.411]   codec.start OK
+[14:19:53.420]   stride=854 sliceH=480 colorFmt=21
+[14:19:53.439]   encoding frame 0 captureLen=614880 feedLen=614880 Y[0]=192 UV=(128,128)
+[14:19:53.445] EncodeThread EXCEPTION: UnityEngine.AndroidJavaException: java.lang.NoSuchMethodError: no non-static method "Ljava/nio/DirectByteBuffer;.clear()V"
+  at UnityEngine.AndroidJNISafe.CheckException () [0x00000] in <filename unknown>:0 
+  at UnityEngine.AndroidJNISafe.GetMethodID (IntPtr obj, System.String name, System.String sig) [0x00000] in <filename unknown>:0 
+  at UnityEngine._AndroidJNIHelper.GetMethodID (IntPtr jclass, System.String methodName, System.String signature, Boolean isStatic) [0x00000] in <filename unknown>:0 
+  at UnityEngine.AndroidJNIHelper.GetMethodID (IntPtr javaClass, System.String methodName, System.String signature, Boolean isStatic) [0x00000] in <filename unknown>:0 
+  at UnityEngine._AndroidJNIHelper.GetMethodID (IntPtr jclass, System.String methodName, System.Object[] args, Boolean isStatic) [0x00000] in <filename unknown>:0 
+  at UnityEngine.AndroidJNIHelper.GetMethodID (IntPtr jclass, System.String methodName, System.Object[] args, Boolean isStatic) [0x00000] in <filename unknown>:0 
+  at UnityEngine.AndroidJavaObject._Call (System.String methodName, System.Object[] args) [0x00000] in <filename unknown>:0 
+  at UnityEngine.AndroidJavaObject.Call (System.String methodName, System.Object[] args) [0x00000] in <filename unknown>:0 
+  at CNRRecordingMod.RecordingHook.EncodeThread () [0x00000] in <filename unknown>:0 
+[14:19:56.972]   btn: InnerLeaderboardBack go=Image Button(Back)
+[14:19:56.973]   btn: Jump go=Image Button(Jump)
+[14:19:56.974]   btn: MultiplayerLocalBtn go=Image Button(NewGame)
+[14:19:56.974]   btn: NewRound go=Image Button(NewRound)
+[14:19:56.975]   btn: InnerLeaderboard go=Image Button(InnerLeaderboard)
+[14:19:56.975]   btn: BottomUp go=Image Button(BottomUp)
+[14:19:56.976]   btn: GotoHall go=Image Button(GotoHall)
+[14:19:56.976]   btn: AddBullet go=Image Button(AddBullet)
+[14:19:56.977]   btn: Aim go=Image Button(Aim)
+[14:19:56.977]   btn: SwitchLeft go=Image Button(LeftSwitch)
+[14:19:56.978]   btn: TopDown go=Image Button(TopDown)
+[14:19:56.979]   btn: SwitchRight go=Image Button(RightSwitch)
+[14:19:56.979]   btn: Resume go=Image Button(Resume)
+[14:19:56.980]   btn: Mainmenu go=Image Button(MainMenu)
+[14:19:56.980]   btn: Restart go=Image Button(Restart)
+[14:19:56.981]   btn: PushChatText go=Image Button(PushChatText)
+[14:19:56.981]   btn: RecordBtnInGame go=Image Button(Record)
+[14:19:56.982]   btn: Chat go=Image Button(Chat)
+[14:19:56.982]   btn: Mainmenu go=Image Button(MainMenu)
+[14:19:56.983]   btn: TopUp go=Image Button(TopUp)
+[14:19:56.984]   btn: BottomDown go=Image Button(BottomDown)
+[14:19:56.984]   btn: FpsFire go=FireButton
+[14:19:56.985]   btn: Reload go=Image Button(Reload)
+[14:19:56.985]   btn: Mainmenu go=Image Button(MainMenu)
+[14:19:56.986]   btn: Pause go=Image Button(Pause)
+[14:19:56.987] HookRecordButton: hooked Image Button(Record)
+[14:20:01.459] StartCapture BEGIN
+[14:20:01.461] AttachCaptureDisplay: FireCamera d=3
+[14:20:01.462] StartCapture: session=20260527_142001 scrn=979x548 enc=854x480@30 captureStride=854 captureSliceH=480 mode=OnRenderImage/lastCam
+[14:20:01.502] CaptureFrame 0 (screen=979x548)
+[14:20:01.529]   diag PNG -> /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame0_screen.png
+[14:20:01.531]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:01.554]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00000.nv12
+[14:20:01.570] CaptureFrame 1 (screen=979x548)
+[14:20:01.573]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:01.599]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00001.nv12
+[14:20:01.614] CaptureFrame 2 (screen=979x548)
+[14:20:01.617]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:01.639]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00002.nv12
+[14:20:01.652] CaptureFrame 3 (screen=979x548)
+[14:20:01.655]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:01.677]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00003.nv12
+[14:20:01.691] CaptureFrame 4 (screen=979x548)
+[14:20:01.694]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:01.718]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00004.nv12
+[14:20:03.848] CaptureFrame 60 (screen=979x548)
+[14:20:03.853]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:03.872]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00060.nv12
+[14:20:06.181] CaptureFrame 120 (screen=979x548)
+[14:20:06.185]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:06.207]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00120.nv12
+[14:20:08.515] CaptureFrame 180 (screen=979x548)
+[14:20:08.520]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:08.548]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00180.nv12
+[14:20:10.858] CaptureFrame 240 (screen=979x548)
+[14:20:10.862]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:10.881]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00240.nv12
+[14:20:13.187] CaptureFrame 300 (screen=979x548)
+[14:20:13.192]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:13.217]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00300.nv12
+[14:20:15.543] CaptureFrame 360 (screen=979x548)
+[14:20:15.548]   pC=(205,205,205) pTL=(205,205,205) pBR=(205,205,205)
+[14:20:15.568]   wrote /storage/emulated/0/CNRMods/recordings/raw_20260527_142001/frame_00360.nv12
+[14:20:16.360] StopCapture: 381 frames captured -> starting encode thread
+[14:20:16.361] EncodeThread START: 381 frames -> /storage/emulated/0/CNRMods/recordings/20260527_142001.mp4
+[14:20:16.373]   codec.start OK
+[14:20:16.374]   stride=854 sliceH=480 colorFmt=21
+[14:20:16.398]   encoding frame 0 captureLen=614880 feedLen=614880 Y[0]=192 UV=(128,128)
+[14:20:16.400] EncodeThread EXCEPTION: UnityEngine.AndroidJavaException: java.lang.NoSuchMethodError: no non-static method "Ljava/nio/DirectByteBuffer;.clear()V"
+  at UnityEngine.AndroidJNISafe.CheckException () [0x00000] in <filename unknown>:0 
+  at UnityEngine.AndroidJNISafe.GetMethodID (IntPtr obj, System.String name, System.String sig) [0x00000] in <filename unknown>:0 
+  at UnityEngine._AndroidJNIHelper.GetMethodID (IntPtr jclass, System.String methodName, System.String signature, Boolean isStatic) [0x00000] in <filename unknown>:0 
+  at UnityEngine.AndroidJNIHelper.GetMethodID (IntPtr javaClass, System.String methodName, System.String signature, Boolean isStatic) [0x00000] in <filename unknown>:0 
+  at UnityEngine._AndroidJNIHelper.GetMethodID (IntPtr jclass, System.String methodName, System.Object[] args, Boolean isStatic) [0x00000] in <filename unknown>:0 
+  at UnityEngine.AndroidJNIHelper.GetMethodID (IntPtr jclass, System.String methodName, System.Object[] args, Boolean isStatic) [0x00000] in <filename unknown>:0 
+  at UnityEngine.AndroidJavaObject._Call (System.String methodName, System.Object[] args) [0x00000] in <filename unknown>:0 
+  at UnityEngine.AndroidJavaObject.Call (System.String methodName, System.Object[] args) [0x00000] in <filename unknown>:0 
+  at CNRRecordingMod.RecordingHook.EncodeThread () [0x00000] in <filename unknown>:0 
