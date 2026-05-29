@@ -233,6 +233,12 @@ if ($doRepo) {
             $vBumped = $true
         }
 
+        # Update latestUrl to point to the new versioned DLL (avoids browser caching of unversioned URL)
+        if ($inTargetMod -and $line -match '"latestUrl"\s*:\s*"[^"]*"') {
+            $newLatestUrl = $BaseUrl + '/' + $ModBase + '/' + $ModBase + '-' + $newVer + '.dll'
+            $line = $line -replace '"latestUrl"\s*:\s*"[^"]*"', ('"latestUrl": "' + $newLatestUrl + '"')
+        }
+
         # Insert new version entry at top of versions array
         if ($inTargetMod -and -not $vInserted -and $line -match '"versions"\s*:\s*\[') {
             $outLines.Add($line)

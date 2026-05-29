@@ -94,8 +94,9 @@ function _init_schema(SQLite3 $db): void {
     );
     SQL);
     // Migrations: add columns to existing tables if they don't exist yet.
-    try { $db->exec('ALTER TABLE comments ADD COLUMN is_answer INTEGER NOT NULL DEFAULT 0'); } catch (Throwable $e) {}
-    try { $db->exec('ALTER TABLE comments ADD COLUMN is_diff   INTEGER NOT NULL DEFAULT 0'); } catch (Throwable $e) {}
+    try { $db->exec('ALTER TABLE comments ADD COLUMN is_answer   INTEGER NOT NULL DEFAULT 0'); } catch (Throwable $e) {}
+    try { $db->exec('ALTER TABLE comments ADD COLUMN is_diff     INTEGER NOT NULL DEFAULT 0'); } catch (Throwable $e) {}
+    try { $db->exec('ALTER TABLE comments ADD COLUMN ref_version TEXT');                      } catch (Throwable $e) {}
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

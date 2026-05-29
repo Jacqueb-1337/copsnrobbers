@@ -180,7 +180,7 @@ namespace CNRRecordingMod
         private string    _encodeError;
 
         // Viewer
-        private const int    PageSize     = 10;
+        // PageSize is dynamic — computed per-frame from available panel height in DrawListView.
         private bool         _viewerOpen;
         private int          _viewerPage;
         private string       _selectedPath;
@@ -197,6 +197,13 @@ namespace CNRRecordingMod
         private static GUIStyle  _gsVrTimeLabel, _gsVrTimeBig, _gsVrDateLabel;
         private static GUIStyle  _gsVrDetailLabel, _gsVrDetailRight, _gsVrDetailCenter;
         private static GUIStyle  _gsVrBtn, _gsVrGhost, _gsVrPlayBtn;
+        private UICamera[]       _blockedUiCams;
+        // In-app video player (VideoView Android overlay)
+        private AndroidJavaObject _videoView;
+        private bool   _mpPlaying;
+        private int    _mpDurMs;
+        private int    _mpCurMs;
+        private string _loadedVideoPath;
 
         // Game scenes that have the in-game HUD (and the record button).
         private static readonly string[] GameScenes = new string[]
@@ -210,6 +217,7 @@ namespace CNRRecordingMod
         private void Awake()
         {
             RecordingModEntry.Log("RecordingHook.Awake()");
+
             try { Directory.CreateDirectory(RecordingsDir); RecordingModEntry.Log("  recordings dir OK"); }
             catch (Exception ex) { RecordingModEntry.Log("  CreateDirectory error: " + ex.Message); }
             // Clean up stale screenshot files left by a previous crashed session.
@@ -239,28 +247,14 @@ namespace CNRRecordingMod
                 else RecordingModEntry.Log("  WARN: Kamcord type not found");
             }
             catch (Exception ex) { RecordingModEntry.Log("  Kamcord inject err: " + ex.Message); }
-            // Auto-record 5 seconds immediately on load for diagnostics:
-            // if pixels are grey here (main menu, no Kamcord active) then the problem
-            // is not Kamcord at all and we need a different approach.
-            StartCoroutine(AutoRecordDiagnostic());
-        }
-
-        private IEnumerator AutoRecordDiagnostic()
-        {
-            yield return new WaitForSeconds(1f); // let scene finish initialising
-            RecordingModEntry.Log("AutoRecord: starting 5s diagnostic capture (scene=" + Application.loadedLevelName + ")");
-            StartCapture();
-            yield return new WaitForSeconds(5f);
-            if (IsCapturing)
-            {
-                RecordingModEntry.Log("AutoRecord: stopping");
-                StopCapture();
-            }
         }
 
         private void OnLevelWasLoaded(int level)
         {
             _btnHooked = false;
+            // Scene change destroys UICamera instances; clear our stale refs and close viewer.
+            if (_viewerOpen) VrCloseViewer();
+            _blockedUiCams = null;
             if (System.Array.IndexOf(GameScenes, Application.loadedLevelName) >= 0)
                 StartCoroutine(HookRecordButton());
             // Scene load destroys cameras, but null-RT ReadPixels needs no camera setup.
@@ -330,7 +324,7 @@ namespace CNRRecordingMod
             _sessionDir     = Path.Combine(RecordingsDir, "raw_" + timestamp);
             _capturedFrames = 0;
             _encodingFrame  = false;
-            _encodeOutputPath = Path.Combine(RecordingsDir, timestamp + ".mp4");
+            _encodeOutputPath = Path.Combine(RecordingsDir, timestamp + ".webm");
 
             try { Directory.CreateDirectory(_sessionDir); }
             catch (Exception ex) { RecordingModEntry.Log("StartCapture: mkdir failed: " + ex.Message); return; }
@@ -403,10 +397,41 @@ namespace CNRRecordingMod
             _viewerPage   = 0;
             _selectedPath = null;
             _viewerOpen   = true;
+            // Disable NGUI's UICamera (input) so touches don't fall through to the game UI.
+            try
+            {
+                _blockedUiCams = (UICamera[])FindObjectsOfType(typeof(UICamera));
+                foreach (var c in _blockedUiCams) c.enabled = false;
+            }
+            catch { _blockedUiCams = null; }
+        }
+
+        private void VrCloseViewer()
+        {
+            VrStopVideo();
+            _viewerOpen   = false;
+            _selectedPath = null;
+            if (_blockedUiCams != null)
+            {
+                foreach (var c in _blockedUiCams) if (c != null) c.enabled = true;
+                _blockedUiCams = null;
+            }
         }
 
         private void Update()
         {
+            // Poll VideoView state for seekbar / play-pause button
+            if (_videoView != null)
+            {
+                try
+                {
+                    int dur = _videoView.Call<int>("getDuration");
+                    if (dur > 0) _mpDurMs = dur;
+                    _mpCurMs   = _videoView.Call<int>("getCurrentPosition");
+                    _mpPlaying = _videoView.Call<bool>("isPlaying");
+                }
+                catch { }
+            }
             if (!IsCapturing || _encodingFrame) return;
             _encodingFrame = true;
             StartCoroutine(CaptureFrameCoroutine());
@@ -572,55 +597,93 @@ namespace CNRRecordingMod
 
                 var fmtClass = new AndroidJavaClass("android.media.MediaFormat");
                 var mediaFmt = fmtClass.CallStatic<AndroidJavaObject>("createVideoFormat",
-                    "video/avc", VideoWidth, VideoHeight);
+                    "video/x-vnd.on2.vp8", VideoWidth, VideoHeight);
                 mediaFmt.Call("setInteger", "bitrate",          VideoBitrate);
                 mediaFmt.Call("setInteger", "frame-rate",       VideoFps);
-                mediaFmt.Call("setInteger", "i-frame-interval", 2);
-                mediaFmt.Call("setInteger", "color-format",     COLOR_FMT_YUV420);
+                mediaFmt.Call("setInteger", "i-frame-interval", 1);
+                // VP8 does not produce a CODEC_CONFIG output buffer (no SPS/PPS concept),
+                // so the H.264-specific deadlock (releasing CODEC_CONFIG kills the encoder
+                // on WSA Android 13 x86_64) does not apply.
 
-                var codec = new AndroidJavaClass("android.media.MediaCodec")
-                    .CallStatic<AndroidJavaObject>("createEncoderByType", "video/avc");
-                codec.Call("configure", mediaFmt, null, null, 1);
-                codec.Call("start");
-                RecordingModEntry.Log("  codec.start OK");
-                // Query which color formats this device's AVC encoder supports.
-                // API 21+ uses new MediaCodecList(int).getCodecInfos(); the old static
-                // getCodecs() was removed in later Android releases.
+                // Try named VP8 encoders first, fall back to system default.
+                AndroidJavaObject codec = null;
+                string chosenCodecName = null;
+                var mcClass = new AndroidJavaClass("android.media.MediaCodec");
+                foreach (string tryName in new string[] { "OMX.google.vp8.encoder", "c2.android.vp8.encoder", null })
+                {
+                    try
+                    {
+                        codec = tryName != null
+                            ? mcClass.CallStatic<AndroidJavaObject>("createByCodecName", tryName)
+                            : mcClass.CallStatic<AndroidJavaObject>("createEncoderByType", "video/x-vnd.on2.vp8");
+                        chosenCodecName = tryName ?? "default VP8";
+                        RecordingModEntry.Log("  using codec: " + chosenCodecName);
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        RecordingModEntry.Log("  codec " + (tryName ?? "default VP8") + " unavailable: " + ex.Message.Split('\n')[0]);
+                        codec = null;
+                    }
+                }
+                if (codec == null) { RecordingModEntry.Log("EncodeThread: no VP8 encoder found"); return; }
+
+                // Query supported color formats so we know what to request in configure().
+                int colorFmtToUse = -1;
                 try
                 {
-                    var mcList = new AndroidJavaObject("android.media.MediaCodecList", 0 /*REGULAR_CODECS*/);
+                    var mcList = new AndroidJavaObject("android.media.MediaCodecList", 0);
                     var infos  = mcList.Call<AndroidJavaObject[]>("getCodecInfos");
                     foreach (var info in infos)
                     {
                         if (!info.Call<bool>("isEncoder")) continue;
-                        string name = info.Call<string>("getName");
-                        if (!name.ToLower().Contains("avc")) continue;
-                        var caps  = info.Call<AndroidJavaObject>("getCapabilitiesForType", "video/avc");
+                        string nm = info.Call<string>("getName");
+                        if (!nm.ToLower().Contains("vp8")) continue;
+                        var caps = info.Call<AndroidJavaObject>("getCapabilitiesForType", "video/x-vnd.on2.vp8");
                         int[] fmts = caps.Get<int[]>("colorFormats");
-                        string s = "";
-                        foreach (int f in fmts) s += f + " ";
-                        RecordingModEntry.Log("  encoder " + name + " colorFormats: " + s.Trim());
+                        string s = ""; foreach (int fmt2 in fmts) s += fmt2 + " ";
+                        RecordingModEntry.Log("  " + nm + " colorFormats: " + s.Trim());
+                        // Prefer 19 (I420) then 21 (NV12) then first available
+                        foreach (int fmt2 in fmts) { if (fmt2 == 19) { colorFmtToUse = 19; break; } }
+                        if (colorFmtToUse < 0) foreach (int fmt2 in fmts) { if (fmt2 == 21) { colorFmtToUse = 21; break; } }
+                        if (colorFmtToUse < 0 && fmts.Length > 0) colorFmtToUse = fmts[0];
                         break;
                     }
                 }
-                catch (Exception ex) { RecordingModEntry.Log("  colorFormat query: " + ex.Message); }
+                catch (Exception ex) { RecordingModEntry.Log("  colorFormat query: " + ex.Message.Split('\n')[0]); }
+
+                if (colorFmtToUse > 0)
+                {
+                    mediaFmt.Call("setInteger", "color-format", colorFmtToUse);
+                    RecordingModEntry.Log("  configuring with color-format=" + colorFmtToUse);
+                }
+                else
+                {
+                    RecordingModEntry.Log("  configuring WITHOUT color-format (let encoder pick)");
+                }
+
+                try { codec.Call("configure", mediaFmt, null, null, 1); RecordingModEntry.Log("  configure OK"); }
+                catch (Exception ex) { RecordingModEntry.Log("  configure threw: " + ex.Message.Split('\n')[0]); return; }
+                try { codec.Call("start"); RecordingModEntry.Log("  codec.start OK"); }
+                catch (Exception ex) { RecordingModEntry.Log("  start threw: " + ex.Message.Split('\n')[0]); return; }
 
                 int stride = CaptureStride, sliceH = CaptureSliceH;
+                int actualColorFmt = colorFmtToUse; // fallback to what we configured
                 try
                 {
                     var inFmt = codec.Call<AndroidJavaObject>("getInputFormat");
-                    stride = inFmt.Call<int>("getInteger", "stride");
-                    sliceH = inFmt.Call<int>("getInteger", "slice-height");
-                    int actualColorFmt = -1;
+                    try { stride = inFmt.Call<int>("getInteger", "stride"); } catch { }
+                    try { sliceH = inFmt.Call<int>("getInteger", "slice-height"); } catch { }
                     try { actualColorFmt = inFmt.Call<int>("getInteger", "color-format"); } catch { }
                     RecordingModEntry.Log("  stride=" + stride + " sliceH=" + sliceH + " colorFmt=" + actualColorFmt);
                 }
-                catch (Exception ex) { RecordingModEntry.Log("  getInputFormat: " + ex.Message); }
+                catch (Exception ex) { RecordingModEntry.Log("  getInputFormat: " + ex.Message.Split('\n')[0]); }
 
-                var muxer      = new AndroidJavaObject("android.media.MediaMuxer", _encodeOutputPath, 0);
+                var muxer      = new AndroidJavaObject("android.media.MediaMuxer", _encodeOutputPath, 1); // 1 = MUXER_OUTPUT_WEBM
                 var bufferInfo = new AndroidJavaObject("android.media.MediaCodec$BufferInfo");
                 bool muxerStarted  = false;
                 int  videoTrackIdx = -1;
+                AndroidJavaObject pendingFmt = null;
                 long ptsUsec       = 0;
 
                 int encBufSize = stride * sliceH * 3 / 2;
@@ -670,6 +733,31 @@ namespace CNRRecordingMod
                     else
                     {
                         feedBuf = nv12;
+                    }
+
+                    // Convert NV12 (interleaved UV) → I420 (separate U/V planes) for VP8 encoder.
+                    // NV12 layout: Y[stride*sliceH] + UV[stride*sliceH/2] (UVUV...)
+                    // I420 layout: Y[stride*sliceH] + U[(stride/2)*(sliceH/2)] + V[(stride/2)*(sliceH/2)]
+                    if (actualColorFmt == 19)
+                    {
+                        int yBytes = stride * sliceH;
+                        int uvCols = stride / 2;
+                        int uvRows = sliceH / 2;
+                        int uBytes = uvCols * uvRows;
+                        var i420 = new byte[yBytes + uBytes * 2];
+                        Buffer.BlockCopy(feedBuf, 0, i420, 0, yBytes);
+                        for (int row = 0; row < uvRows; row++)
+                        {
+                            int nvRow = yBytes + row * stride;
+                            int uRow  = yBytes + row * uvCols;
+                            int vRow  = yBytes + uBytes + row * uvCols;
+                            for (int col = 0; col < uvCols; col++)
+                            {
+                                i420[uRow + col] = feedBuf[nvRow + col * 2];
+                                i420[vRow + col] = feedBuf[nvRow + col * 2 + 1];
+                            }
+                        }
+                        feedBuf = i420;
                     }
 
                     if (f < 3) RecordingModEntry.Log("  encoding frame " + f
@@ -728,22 +816,40 @@ namespace CNRRecordingMod
                         if (outIdx == INFO_TRY_AGAIN_LATER) break;
                         if (outIdx == INFO_OUTPUT_FORMAT_CHANGED)
                         {
-                            if (!muxerStarted)
+                            if (pendingFmt == null)
                             {
-                                var fmt = codec.Call<AndroidJavaObject>("getOutputFormat");
-                                videoTrackIdx = muxer.Call<int>("addTrack", fmt);
-                                muxer.Call("start");
-                                muxerStarted = true;
-                                RecordingModEntry.Log("  muxer started track=" + videoTrackIdx);
-                                // On SDK 33, dequeueOutputBuffer throws IllegalStateException
-                                // for ~200ms after muxer.start(). Sleep to let it stabilize.
-                                System.Threading.Thread.Sleep(200);
+                                pendingFmt = codec.Call<AndroidJavaObject>("getOutputFormat");
+                                RecordingModEntry.Log("  FORMAT_CHANGED: saved pendingFmt (muxer NOT yet started)");
+                                // Do NOT call muxer.start() here.
+                                // Theory: muxer.start() corrupts the codec's internal state so that
+                                // releaseOutputBuffer(CODEC_CONFIG) permanently kills the encoder.
+                                // Instead, defer muxer.start() until the first real (non-config) sample
+                                // arrives, by which time CODEC_CONFIG has already been safely released.
                             }
-                            continue;  // keep draining — don't skip pending output buffers
+                            continue;
                         }
                         if (outIdx < 0) break;
                         int flags = bufferInfo.Get<int>("flags");
                         int size  = bufferInfo.Get<int>("size");
+                        if ((flags & 2) != 0)
+                        {
+                            // CODEC_CONFIG: release WITHOUT muxer.start() having been called.
+                            // This tests whether muxer.start() was causing the permanent error state.
+                            if (f < 3) RecordingModEntry.Log("  [drain f" + f + " d" + d + "] CODEC_CONFIG releasing (no muxer.start yet)");
+                            try { codec.Call("releaseOutputBuffer", outIdx, false); }
+                            catch (Exception ex) { if (f < 3) RecordingModEntry.Log("  CODEC_CONFIG release threw: " + ex.Message.Split('\n')[0]); }
+                            if (f < 3) RecordingModEntry.Log("  CODEC_CONFIG released");
+                            continue;
+                        }
+                        // First real sample: start muxer now, before writeSampleData.
+                        if (!muxerStarted && pendingFmt != null && size > 0)
+                        {
+                            videoTrackIdx = muxer.Call<int>("addTrack", pendingFmt);
+                            muxer.Call("start");
+                            muxerStarted = true;
+                            RecordingModEntry.Log("  muxer started (deferred) track=" + videoTrackIdx);
+                            System.Threading.Thread.Sleep(200);
+                        }
                         if ((flags & 2) == 0 && size > 0 && muxerStarted)
                         {
                             var outBuf = codec.Call<AndroidJavaObject>("getOutputBuffer", outIdx);
@@ -751,18 +857,9 @@ namespace CNRRecordingMod
                             muxer.Call("writeSampleData", videoTrackIdx, outBuf, bufferInfo);
                             if (f < 3) RecordingModEntry.Log("  [drain f" + f + " d" + d + "] writeSampleData OK");
                         }
-                        // Do NOT release CODEC_CONFIG buffer on c2.android.avc.encoder (Android 13).
-                        // Calling releaseOutputBuffer(CODEC_CONFIG) causes IllegalStateException on
-                        // all subsequent MediaCodec calls. The buffer slot is surrendered permanently
-                        // but CODEC_CONFIG only appears once so the pool is not exhausted.
-                        if ((flags & 2) != 0)
-                        {
-                            if (f < 3) RecordingModEntry.Log("  [drain f" + f + " d" + d + "] CODEC_CONFIG skipped release");
-                            continue;
-                        }
-                        if (f < 3) RecordingModEntry.Log("  [drain f" + f + " d" + d + "] releaseOutputBuffer");
+                        if (f < 3) RecordingModEntry.Log("  [drain f" + f + " d" + d + "] release flags=" + flags);
                         codec.Call("releaseOutputBuffer", outIdx, false);
-                        if (f < 3) RecordingModEntry.Log("  [drain f" + f + " d" + d + "] released OK flags=" + flags);
+                        if (f < 3) RecordingModEntry.Log("  [drain f" + f + " d" + d + "] released OK");
                         if ((flags & 4) != 0) break;
                     }
                 }
@@ -790,7 +887,6 @@ namespace CNRRecordingMod
                         var outBuf = codec.Call<AndroidJavaObject>("getOutputBuffer", outIdx);
                         muxer.Call("writeSampleData", videoTrackIdx, outBuf, bufferInfo);
                     }
-                    if ((flags & 2) != 0) continue; // CODEC_CONFIG: skip release (same C2 bug)
                     codec.Call("releaseOutputBuffer", outIdx, false);
                     if ((flags & 4) != 0) { RecordingModEntry.Log("  final drain: EOS flag seen"); break; }
                 }
@@ -834,7 +930,10 @@ namespace CNRRecordingMod
             try
             {
                 if (!Directory.Exists(RecordingsDir)) return;
-                string[] files = Directory.GetFiles(RecordingsDir, "*.mp4");
+                var fileList = new System.Collections.Generic.List<string>();
+                fileList.AddRange(Directory.GetFiles(RecordingsDir, "*.webm"));
+                fileList.AddRange(Directory.GetFiles(RecordingsDir, "*.mp4"));
+                string[] files = fileList.ToArray();
                 System.Array.Sort(files, (a, b) => string.Compare(b, a, StringComparison.Ordinal));
                 foreach (string f in files)
                 {
@@ -862,6 +961,10 @@ namespace CNRRecordingMod
 
         private void OnGUI()
         {
+            // Render this MonoBehaviour's OnGUI last (on top of all others, including CNRMod's
+            // EcoHook which draws the mod buttons). Lower GUI.depth = drawn later = on top.
+            GUI.depth = -100;
+
             float vw = Screen.width;
             float vh = Screen.height;
 
@@ -875,16 +978,16 @@ namespace CNRRecordingMod
 
             if (!_viewerOpen) return;
 
-            // Heavy dim overlay — blocks all NGUI interaction
+            // Dim overlay (visual only — no GUI.Button here; that would eat all sub-button clicks).
+            // NGUI click-through is blocked by disabling UICamera instances in OpenViewer().
             GUI.color = new Color(0f, 0f, 0f, 0.88f);
             GUI.DrawTexture(new Rect(0, 0, vw, vh), Texture2D.whiteTexture);
             GUI.color = Color.white;
-            GUI.Button(new Rect(0, 0, vw, vh), GUIContent.none, GUIStyle.none);
 
             VrEnsureStyles();
 
-            float pw = Mathf.Min(vw * 0.96f, 420f);
-            float ph = Mathf.Min(vh * 0.92f, 540f);
+            float pw = vw * 0.94f;
+            float ph = vh * 0.90f;
             float px = Mathf.Round((vw - pw) * 0.5f);
             float py = Mathf.Round((vh - ph) * 0.5f);
 
@@ -915,6 +1018,9 @@ namespace CNRRecordingMod
             const float hItem = 58f;
             const float padX  = 10f;
 
+            // How many items fit in the available vertical space between header and footer.
+            int pageSize = Mathf.Max(1, (int)((ph - hTop - 6f - hBot) / (hItem + 1f)));
+
             // Title bar
             GUI.Label(new Rect(px + padX, py + 8f, pw - 60f, 30f),
                 "  [CNR]  Recordings", _gsVrTitle);
@@ -922,7 +1028,7 @@ namespace CNRRecordingMod
             if (encBadge != null)
                 GUI.Label(new Rect(px + pw - 138f, py + 12f, 88f, 22f), encBadge, _gsVrStatus);
             if (GUI.Button(new Rect(px + pw - 46f, py + 9f, 36f, 28f), "X", _gsVrBtn))
-            { _viewerOpen = false; return; }
+            { VrCloseViewer(); return; }
 
             // Separator under title bar
             float ty = py + hTop;
@@ -933,10 +1039,10 @@ namespace CNRRecordingMod
 
             // Recordings list
             int total = _recordings.Count;
-            int pages = total > 0 ? (total + PageSize - 1) / PageSize : 1;
+            int pages = total > 0 ? (total + pageSize - 1) / pageSize : 1;
             if (_viewerPage >= pages) _viewerPage = Mathf.Max(0, pages - 1);
-            int start = _viewerPage * PageSize;
-            int end   = Mathf.Min(start + PageSize, total);
+            int start = _viewerPage * pageSize;
+            int end   = Mathf.Min(start + pageSize, total);
 
             if (total == 0)
             {
@@ -1027,94 +1133,165 @@ namespace CNRRecordingMod
         {
             const float padX = 12f;
             const float hTop = 44f;
+            const float hBot = 90f;
+
+            // Start video when a new recording is selected
+            if (_selectedPath != _loadedVideoPath)
+                VrStartVideo(_selectedPath);
 
             // ← Back
             if (GUI.Button(new Rect(px + padX, py + 8f, 80f, 28f), "\u2190  Back", _gsVrBtn))
-            { _selectedPath = null; return; }
+            { VrStopVideo(); _selectedPath = null; return; }
 
-            // X close
-            if (GUI.Button(new Rect(px + pw - 46f, py + 8f, 36f, 28f), "X", _gsVrBtn))
-            { _viewerOpen = false; _selectedPath = null; return; }
-
-            float ty = py + hTop;
-            GUI.color = new Color(0.35f, 0.35f, 0.45f, 1f);
-            GUI.DrawTexture(new Rect(px + padX, ty, pw - padX * 2f, 1f), Texture2D.whiteTexture);
-            GUI.color = Color.white;
-            ty += 12f;
-
-            // Parse metadata
-            string name = Path.GetFileNameWithoutExtension(_selectedPath);
-            int    idx  = _recordings.IndexOf(_selectedPath);
-            long   sz   = idx >= 0 ? _recBytes[idx]    : 0;
-            float  dur  = idx >= 0 ? _recDuration[idx] : -1f;
-            string tStr = "??:??:??", dStr = "?? ??? ????";
+            // Title: time + date from filename
+            string name = Path.GetFileNameWithoutExtension(_selectedPath ?? "");
+            string tStr = name, dStr = "";
             if (name.Length >= 15)
                 try
                 {
                     var dt = DateTime.ParseExact(name, "yyyyMMdd_HHmmss", null);
                     tStr = dt.ToString("HH:mm:ss");
-                    dStr = dt.ToString("MMM dd  yyyy");
+                    dStr = "  " + dt.ToString("MMM dd  yyyy");
                 }
                 catch { }
+            GUI.Label(new Rect(px + padX + 88f, py + 10f, pw - padX * 2f - 134f, 26f),
+                tStr + dStr, _gsVrDateLabel);
 
-            // Big time (game font, gold, 26 pt)
-            GUI.Label(new Rect(px + padX, ty, pw - padX * 2f, 38f), tStr, _gsVrTimeBig);
-            ty += 40f;
-            // Date (game font, grey, 13 pt)
-            GUI.Label(new Rect(px + padX, ty, pw - padX * 2f, 26f), dStr, _gsVrDateLabel);
-            ty += 34f;
+            // X close
+            if (GUI.Button(new Rect(px + pw - 46f, py + 8f, 36f, 28f), "X", _gsVrBtn))
+            { VrCloseViewer(); return; }
 
-            // Details box
-            GUI.color = new Color(0.08f, 0.08f, 0.12f, 0.70f);
-            GUI.DrawTexture(new Rect(px + padX, ty, pw - padX * 2f, 84f), Texture2D.whiteTexture);
+            // Header separator
+            GUI.color = new Color(0.35f, 0.35f, 0.45f, 1f);
+            GUI.DrawTexture(new Rect(px + padX, py + hTop, pw - padX * 2f, 1f), Texture2D.whiteTexture);
             GUI.color = Color.white;
-            float lx = px + padX + 10f;
-            float lw = pw - (padX + 10f) * 2f;
-            GUI.Label(new Rect(lx, ty + 7f,  lw, 20f),
-                "Duration:   " + (dur >= 0f ? VrFmtDur(dur) : "unknown"), _gsVrDetailLabel);
-            GUI.Label(new Rect(lx, ty + 27f, lw, 20f),
-                "File size:  " + (sz > 0 ? VrFmtBytes(sz) : "unknown"), _gsVrDetailLabel);
-            GUI.Label(new Rect(lx, ty + 47f, lw, 20f),
-                "Resolution: " + VideoWidth + " \u00d7 " + VideoHeight + "  H.264  MP4",
-                _gsVrDetailLabel);
-            ty += 98f;
 
-            // ▶ Play button — launches system video player
-            if (GUI.Button(new Rect(px + padX, ty, pw - padX * 2f, 50f),
-                "\u25b6   Play Recording", _gsVrPlayBtn))
-                VrPlayVideo(_selectedPath);
-            ty += 60f;
+            // Black background for the video area (VideoView overlay renders on top)
+            float vidY = py + hTop + 1f;
+            float vidH = ph - hTop - hBot - 1f;
+            GUI.color = Color.black;
+            GUI.DrawTexture(new Rect(px, vidY, pw, vidH), Texture2D.whiteTexture);
+            GUI.color = Color.white;
 
-            // Error / status
+            // ---- Bottom controls bar ----
+            float by = py + ph - hBot;
+            GUI.color = new Color(0.35f, 0.35f, 0.45f, 1f);
+            GUI.DrawTexture(new Rect(px + padX, by, pw - padX * 2f, 1f), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            by += 6f;
+
+            // Play / Pause
+            if (GUI.Button(new Rect(px + padX, by + 6f, 52f, 38f),
+                _mpPlaying ? "| |" : " > ", _gsVrBtn))
+            {
+                var vv = _videoView;
+                if (vv != null)
+                {
+                    bool wasPlaying = _mpPlaying;
+                    VrMpOnUi(() => { if (wasPlaying) vv.Call("pause"); else vv.Call("start"); });
+                    _mpPlaying = !_mpPlaying;
+                }
+            }
+
+            // Time label
+            float durSec = _mpDurMs > 0 ? _mpDurMs / 1000f : 0f;
+            float curSec = _mpCurMs / 1000f;
+            string timeStr = VrFmtDur(curSec) + " / " + VrFmtDur(durSec);
+            float timeLblW = 110f;
+            GUI.Label(new Rect(px + pw - padX - timeLblW, by + 14f, timeLblW, 22f),
+                timeStr, _gsVrDetailRight);
+
+            // Seekbar
+            float sbX = px + padX + 62f;
+            float sbW = pw - padX * 2f - 62f - timeLblW - 8f;
+            float newSec = GUI.HorizontalSlider(
+                new Rect(sbX, by + 16f, sbW, 22f), curSec, 0f, Mathf.Max(1f, durSec));
+            if (Mathf.Abs(newSec - curSec) > 0.3f)
+            {
+                int ms = (int)(newSec * 1000f);
+                _mpCurMs = ms;
+                var vv = _videoView;
+                if (vv != null) VrMpOnUi(() => vv.Call("seekTo", ms));
+            }
+
+            // Status / error
             if (_statusMsg != null)
-                GUI.Label(new Rect(px + padX, ty, pw - padX * 2f, 22f), _statusMsg, _gsVrStatus);
+                GUI.Label(new Rect(px + padX, by + 52f, pw - padX * 2f, 22f),
+                    _statusMsg, _gsVrStatus);
         }
 
-        // Launches the recording in the device's default video player via an Intent.
-        // On WSA / Android: opens the system media player with full seek + play/pause.
-        private void VrPlayVideo(string path)
+        // ---- In-app video player (Android VideoView overlay) -----------------
+        private void VrMpOnUi(AndroidJavaRunnable action)
         {
-            _statusMsg = null;
             try
             {
                 using (var up = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
                 using (var ac = up.GetStatic<AndroidJavaObject>("currentActivity"))
-                {
-                    var intent  = new AndroidJavaObject("android.content.Intent",
-                        "android.intent.action.VIEW");
-                    var fileObj = new AndroidJavaObject("java.io.File", path);
-                    var uri     = new AndroidJavaClass("android.net.Uri")
-                        .CallStatic<AndroidJavaObject>("fromFile", fileObj);
-                    intent.Call<AndroidJavaObject>("setDataAndType", uri, "video/mp4");
-                    intent.Call<AndroidJavaObject>("addFlags", 0x10000000); // FLAG_ACTIVITY_NEW_TASK
-                    ac.Call("startActivity", intent);
-                }
+                    ac.Call("runOnUiThread", action);
             }
-            catch (Exception ex)
+            catch { }
+        }
+
+        private void VrStartVideo(string path)
+        {
+            VrStopVideo();
+            _loadedVideoPath = path;
+            _statusMsg = null;
+            _mpDurMs = 0; _mpCurMs = 0; _mpPlaying = false;
+
+            float vw = Screen.width, vh = Screen.height;
+            float pw = vw * 0.94f, ph = vh * 0.90f;
+            float px = Mathf.Round((vw - pw) * 0.5f);
+            float py = Mathf.Round((vh - ph) * 0.5f);
+            int vidX = (int)px,    vidY = (int)(py + 44f + 1f);
+            int vidW = (int)pw,    vidH = (int)(ph - 44f - 90f - 1f);
+
+            string pathCopy = path;
+            var mod = this;
+            VrMpOnUi(() =>
             {
-                _statusMsg = "Play error: " + ex.Message;
-                RecordingModEntry.Log("VrPlayVideo error: " + ex.Message);
-            }
+                try
+                {
+                    using (var up = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                    using (var ac = up.GetStatic<AndroidJavaObject>("currentActivity"))
+                    {
+                        var vv = new AndroidJavaObject("android.widget.VideoView", ac);
+                        var lp = new AndroidJavaObject("android.view.ViewGroup$LayoutParams", vidW, vidH);
+                        vv.Call("setX", (float)vidX);
+                        vv.Call("setY", (float)vidY);
+                        vv.Call("setVideoPath", pathCopy);
+                        ac.Call("addContentView", vv, lp);
+                        vv.Call("start");
+                        mod._videoView = vv;
+                        mod._mpPlaying = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    mod._statusMsg = "Video error: " + ex.Message;
+                    RecordingModEntry.Log("VrStartVideo: " + ex.Message);
+                }
+            });
+        }
+
+        private void VrStopVideo()
+        {
+            var vv = _videoView;
+            _videoView       = null;
+            _loadedVideoPath = null;
+            _mpPlaying       = false;
+            if (vv == null) return;
+            VrMpOnUi(() =>
+            {
+                try
+                {
+                    vv.Call("stopPlayback");
+                    var parent = vv.Call<AndroidJavaObject>("getParent");
+                    if (parent != null) parent.Call("removeView", vv);
+                    vv.Dispose();
+                }
+                catch { }
+            });
         }
 
         // ---- Style initialisation --------------------------------------------
