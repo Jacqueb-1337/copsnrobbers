@@ -306,11 +306,51 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.2.4",
+      "latestVersion": "3.2.12",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.4.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.12.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.2.12",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.12.dll",
+          "changelog": "Revert: remove RemoteSmoothFix and sendRate boosts, back to vanilla movement"
+        },
+        {
+          "version": "3.2.11",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.11.dll",
+          "changelog": "Fix: RemoteSmoothFix v2 - replace snapshot-buffer interp with independent _dispPos high-factor lerp (k=25) to eliminate double-lerp and hard-stop oscillation"
+        },
+        {
+          "version": "3.2.10",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.10.dll",
+          "changelog": "Fix: remote player position lag - replace asymptotic lerp with linear interpolation over measured packet interval; boost sendRateOnSerialize to 20/sec"
+        },
+        {
+          "version": "3.2.9",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.9.dll",
+          "changelog": "Apply DLC skin to local player's own character (ExampleCharacter) in-game: game assigns skin materials in Start() after level load, overriding earlier OnLevelWasLoaded swap. Now re-applied every 2s poll until confirmed."
+        },
+        {
+          "version": "3.2.8",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.8.dll",
+          "changelog": "Fix remote skin: use CNRMultiplayerManager.otherPlayerObject[] indexed by mId (Photon actor ID) instead of PhotonView/name lookup. Remote player GOs are copPrefab/robberPrefab instances managed by CNRMultiplayerManager, not Photon-instantiated."
+        },
+        {
+          "version": "3.2.7",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.7.dll",
+          "changelog": "Fix remote skin not applying: game has only one scene PhotonView (CNRMultiplayerManager), not per-player. Switch to PhotonPlayer.name → GameObject.Find to locate remote character root, then apply Skin_ texture swaps from there."
+        },
+        {
+          "version": "3.2.6",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.6.dll",
+          "changelog": "Add verbose diagnostics for remote skin application: log scene PhotonView GO names, Skin_ renderer count/names in scene, throttle to first 5 polls per session"
+        },
+        {
+          "version": "3.2.5",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.5.dll",
+          "changelog": "Fix infinite Photon event rebroadcast loop: NeedMapBroadcast/NeedSelfAnnounce now only set for genuinely new senders (not every version-bearing event). Add diagnostic logging to ApplyToActor/PollRemotePlayers to trace remote skin application failures."
+        },
         {
           "version": "3.2.4",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.4.dll",
@@ -862,11 +902,56 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.68",
+      "latestVersion": "3.1.77",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.68.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.77.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.77",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.77.dll",
+          "changelog": "Fix: fireNow now includes FpsOnFire pref (actual WeaponScript touch-fire trigger); add CachePlayerColliders fallback in ScanForLocalBullets"
+        },
+        {
+          "version": "3.1.76",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.76.dll",
+          "changelog": "Fix: bullet/knife self-hit - temporarily shield player root (layer 2) on fire so Bullet.Update raycast (mask=19) misses local CC"
+        },
+        {
+          "version": "3.1.75",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.75.dll",
+          "changelog": "Fix #8 bullets self-hit (take 3): use CC capsule geometry to distinguish self-bullets from remote bullets. Self-hitting bullets spawn INSIDE the local player's CC capsule (muzzle is inside capsule when firing steeply downward). Remote bullets spawn at the remote player's muzzle -- always outside our CC since two CharacterControllers cannot physically overlap. On detecting a new BulletEnemy whose spawn position is inside our CC capsule (+0.15m tolerance), disable its trigger collider (bc.enabled=false) so OnTriggerEnter never fires. No timer, no fire window, cannot be exploited to dodge incoming damage."
+        },
+        {
+          "version": "3.1.74",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.74.dll",
+          "changelog": "Fix #8 bullets self-hit: Physics.IgnoreCollision has no effect on CharacterController trigger events in old Unity. New approach: during a 0.2s window after firing, newly-seen BulletEnemy instances are local bullets - disable their trigger collider (bc.enabled=false) so BulletEnemy.OnTriggerEnter can never fire. BulletEnemy instances outside the fire window are from remote players and are left untouched so incoming damage still works."
+        },
+        {
+          "version": "3.1.73",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.73.dll",
+          "changelog": "Fix #8 (bullets self-hit, take 2): revert tag change from 3.1.72 (broke weapon pickup/fire). Instead, scan for BulletEnemy instances every frame in LateUpdate and call Physics.IgnoreCollision(bulletCollider, localCC) for each new bullet. All BulletEnemy objects on the local client are the local player's own bullets (remote hits arrive via Photon RPC, not trigger colliders). This prevents BulletEnemy.OnTriggerEnter from ever triggering on the local player's CharacterController without affecting any other game system."
+        },
+        {
+          "version": "3.1.72",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.72.dll",
+          "changelog": "Fix #8 (bullets/knives self-hit): change the local player root's tag from 'Player' to 'Untagged' as soon as the game scene loads. BulletEnemy.OnTriggerEnter and DetonatorForce both gate damage on tag == 'Player' — removing the tag makes all locally-spawned weapon effects pass through the shooter harmlessly. Remote players apply damage via Photon RPC (PlayerDamageOnline) which calls PlayerDamage() directly and never relies on tag checks, so incoming damage from other players is completely unaffected. Hitbox colliders are also disabled (from 3.1.71) for redundant coverage."
+        },
+        {
+          "version": "3.1.71",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.71.dll",
+          "changelog": "Fix #8 (bullets/knives self-hit): disable the local player's hitbox colliders on the local client. Weapon raycasts from this client can no longer hit the shooter's own body. Remote players aim at your remote prefab on their own clients, so incoming damage is completely unaffected."
+        },
+        {
+          "version": "3.1.70",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.70.dll",
+          "changelog": "Fix #8 (snowball / mini cannon physical self-collision): temporarily disable CharacterController.detectCollisions for 0.4 s after each fire event so the locally-spawned projectile cannot be physically blocked by the player's own CharacterController capsule. Also extend the fire-pitch clamp (previously wide-cam only) to all camera modes, preventing raycast weapons (bullets, knives) from self-hitting even when wide-cam is disabled."
+        },
+        {
+          "version": "3.1.69",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.69.dll",
+          "changelog": "Fix #8: prevent projectile self-hits. After any fire event, newly-spawned Rigidbody objects (grenades, RPG rockets) are found and Physics.IgnoreCollision is called between them and the local player's colliders, so the shooter can never be hit by their own projectile in either normal or wide-camera mode."
+        },
         {
           "version": "3.1.68",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.68.dll",
@@ -1538,12 +1623,22 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.4.7",
+      "latestVersion": "1.4.9",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.7.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.9.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.4.9",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.9.dll",
+          "changelog": "Feature: swipe/drag to scroll throughout mod manager (all tabs, version history, config panel)"
+        },
+        {
+          "version": "1.4.8",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.8.dll",
+          "changelog": "Replace 'Quit Game' button with 'Restart Game': uses Android PackageManager launch intent + Process.killProcess to restart the app in-place instead of just quitting"
+        },
         {
           "version": "1.4.7",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.7.dll",
@@ -1653,6 +1748,42 @@
           "version": "1.0.0",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.0.0.dll",
           "changelog": "Initial release. Browse tab with mod list and detail pages. Version history with changelogs. latestOnly flag per mod. Multiple repo support with PlayerPrefs storage."
+        }
+      ]
+    },
+    {
+      "id": "CNRZombieMod",
+      "name": "CNR Zombie Mod",
+      "description": "Multiplayer zombie test mod. Master client spawns real game enemies (SingleEnemyAI + model + animations + pathfinding) and syncs their positions via Photon event 198. All clients see the same NPCs moving in real time.",
+      "latestVersion": "0.5.0",
+      "filename": "CNRZombieMod.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.5.0.dll",
+      "latestOnly": false,
+      "versions": [
+        {
+          "version": "0.5.0",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.5.0.dll",
+          "changelog": "huge updates on zombie pathfinding and added a HUD and other changes"
+        },
+        {
+          "version": "0.4.0",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.4.0.dll",
+          "changelog": "Fallback zombie custom nav grid with stair/ramp links, height-aware targets, stuck recovery, and verbose pathfinding logs"
+        },
+        {
+          "version": "0.3.0",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.3.0.dll",
+          "changelog": "Fix stale prefab ref: Instantiate+DontDestroyOnLoad template GO instead of caching raw UnityEngine.Object (scene refs go null on scene unload); add verbose logging; robust player detection"
+        },
+        {
+          "version": "0.2.0",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.2.0.dll",
+          "changelog": "Rewrite: use real game SingleEnemyAI + enemy model/animations instead of capsule placeholders. Disable SingleEnemyLogic before Start() to avoid singleplayer-only singleton crashes in multiplayer. ZombieDriver drives AIPath target+speed with direct-movement fallback when AstarPath is absent. Non-master clients receive Photon event 198 and lerp the real enemy prefab (AI disabled) to synced positions."
+        },
+        {
+          "version": "0.1.0",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.1.0.dll",
+          "changelog": "Initial release. Master client runs chase/wander AI for 5 green capsule zombies, broadcasts via Photon event 198. All clients display synced proxies with interpolation."
         }
       ]
     }
