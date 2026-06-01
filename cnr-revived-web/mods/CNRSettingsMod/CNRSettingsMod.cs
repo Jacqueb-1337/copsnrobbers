@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using UnityEngine;
@@ -34,7 +35,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.68";
+        public  const string Version = "3.1.77";
 
         public static void Load()
         {
@@ -252,9 +253,23 @@ namespace CNRSettingsMod
         private const float   CAM_MAX_Y_WIDE    =  70f;
         // Below this pitch while firing, ClampFirePitchForSelfHit() redirects camTransform
         // to this angle so weapon raycasts (bullets, knife) skip the player's own colliders.
-        // Grenade/RPG throws use physics after spawn and are unaffected.
+        // Physics projectiles (grenade/RPG) are handled by PollForNewProjectiles() instead.
         private const float   CAM_MIN_Y_SHOT    = -50f;
         private bool          _wideCam          = false;
+        // -- Projectile self-hit prevention -----------------------------------
+        // After any fire event, PollForNewProjectiles scans for newly spawned Rigidbody
+        // objects and calls Physics.IgnoreCollision so the local player can never be hit
+        // by their own projectile (grenade, RPG, etc.).
+        private HashSet<int>         _knownRbIds            = new HashSet<int>();
+        private HashSet<int>         _knownBulletIds        = new HashSet<int>();  // all BulletEnemy instance IDs seen this scene
+        private Collider[]            _localPlayerColliders  = null;
+        private CharacterController   _localCC               = null;   // cached separately: not in GetComponentsInChildren<Collider> on old Unity
+        private GameObject            _localPlayerRoot       = null;   // cached player root reference
+        private float                 _projectileScanTimer   = 0f;
+        private const float           PROJECTILE_SCAN_SECS   = 0.6f;
+        private float                 _ccRestoreTimer        = 0f;     // timer to re-enable CharacterController.detectCollisions
+        private int                   _playerOrigLayer       = 0;      // stored layer before Bullet self-hit suppression
+        private int                   _playerLayerSuppFrames = 0;      // frames remaining to keep player root on layer 2
         private GameObject   _aimBtn          = null;
         private bool         _unscopeOnFire   = true;   // default: game behaviour (unscope after fire)
         private float        _diagTimer       = 0f;    // diagnostics: log every N seconds
@@ -1401,6 +1416,23 @@ namespace CNRSettingsMod
             _prevBDied       = false;
             _weapOnCooldown  = false;
             _wmComp          = null;
+            // Reset projectile self-ignore state: new scene has different physics objects.
+            if (_localCC != null) _localCC.detectCollisions = true; // safety restore
+            if (_localPlayerColliders != null)                       // re-enable hitboxes before releasing reference
+            {
+                foreach (Collider c in _localPlayerColliders)
+                    if (c != null && !(c is CharacterController)) c.enabled = true;
+            }
+            _knownRbIds.Clear();
+            _knownBulletIds.Clear();
+            _localPlayerColliders = null;
+            _localCC              = null;
+            if (_playerLayerSuppFrames > 0 && _localPlayerRoot != null)
+                _localPlayerRoot.layer = _playerOrigLayer;   // safety restore
+            _playerLayerSuppFrames = 0;
+            _localPlayerRoot      = null;
+            _projectileScanTimer  = 0f;
+            _ccRestoreTimer       = 0f;
             LoadPrefs();
             CheckApkVersion(); // re-run on every scene load so new instances (after in-app DLL reload) always have the result
             if (_inGameScene) StartCoroutine(ApplyHUDOnLoad());
@@ -1415,6 +1447,13 @@ namespace CNRSettingsMod
             for (int f = 0; f < 20; f++) yield return null;
             ReCacheHUD();
             CacheNguiCam();
+            // Eagerly disable local player hitboxes and change tag so self-damage
+            // is blocked from the very first shot, without waiting for a fire event.
+            for (int attempt = 0; attempt < 60 && _localPlayerRoot == null; attempt++)
+            {
+                CachePlayerColliders();
+                if (_localPlayerRoot == null) yield return null;
+            }
         }
 
         private void OnApplicationPause(bool paused)
@@ -1933,8 +1972,28 @@ namespace CNRSettingsMod
                 ApplyTouchJoystickDeadzone();
             // Update fire-cooldown state for crosshair coloring.
             if (_inGameScene) UpdateWeaponCooldown();
-            // When wide-cam is active, redirect weapon raycasts away from self when looking steeply down.
-            if (_wideCam && _inGameScene) ClampFirePitchForSelfHit();
+            // Redirect weapon raycasts away from self when looking steeply down.
+            // Runs regardless of camera mode so it also protects in default-cam.
+            if (_inGameScene) ClampFirePitchForSelfHit();
+            // Restore CharacterController.detectCollisions after projectile-clear window.
+            if (_ccRestoreTimer > 0f)
+            {
+                _ccRestoreTimer -= Time.deltaTime;
+                if (_ccRestoreTimer <= 0f && _localCC != null)
+                    _localCC.detectCollisions = true;
+            }
+            // Detect fire and arm the projectile self-ignore scan.
+            // This covers grenade/RPG self-hits in all camera modes (wide or default).
+            if (_inGameScene)
+            {
+                bool fireNow = _kbmFireWasHeld
+                    || ((object)CRInput.mInstance != null && CRInput.mInstance.m_bFire)
+                    || ((object)CRJoyStickController.mInstance != null && CRJoyStickController.mInstance.fireFlag)
+                    || PlayerPrefs.GetInt("FpsOnFire", 0) == 1;  // WeaponScript.LateUpdate fires via this pref
+                if (fireNow) _projectileScanTimer = PROJECTILE_SCAN_SECS;
+                PollForNewProjectiles();
+                ScanForLocalBullets(fireNow);
+            }
         }
 
         // Reads nextFireTime from the selected WeaponScript to know if the gun is still cooling down.
@@ -2527,7 +2586,7 @@ namespace CNRSettingsMod
         // (which performs the actual raycast), so it sees the clamped direction.
         // Sliderotate's internal rotationY tracker is NOT modified, ensuring the view
         // returns to the real pitch (e.g. -70°) on the very next Sliderotate.Update() pass.
-        // Grenades and RPGs use physics projectiles after spawn and are unaffected.
+        // Physics projectiles (grenades, RPG) are handled by PollForNewProjectiles() instead.
         private void ClampFirePitchForSelfHit()
         {
             if (_sliderotate == null || _fiRotationY == null || _fiCamTransform == null) return;
@@ -2551,6 +2610,120 @@ namespace CNRSettingsMod
         // (fire detection now uses FpsOnFire pref polling in ApplySensitivity)
 
         public void ToggleAiming() { _isAiming = !_isAiming; }
+
+        // Cache the local player's Colliders once per scene so PollForNewProjectiles
+        // can call Physics.IgnoreCollision without an expensive per-frame FindWithTag.
+        private void CachePlayerColliders()
+        {
+            if (_localPlayerRoot == null)
+                _localPlayerRoot = GameObject.FindWithTag("Player");
+            if (_localPlayerRoot == null) return;
+            _localPlayerColliders = _localPlayerRoot.GetComponentsInChildren<Collider>(true);
+            // Cache the CharacterController separately: in older Unity builds
+            // GetComponentsInChildren<Collider> does NOT include CharacterController,
+            // so Physics.IgnoreCollision alone cannot prevent it from blocking projectiles.
+            // We use detectCollisions=false as a belt-and-suspenders fix.
+            _localCC = _localPlayerRoot.GetComponent<CharacterController>();
+
+            // Disable all regular (non-CharacterController) colliders on the local player.
+            // Weapon raycasts (bullets, knives) cast from this client cannot hit them,
+            // completely eliminating self-damage from looking steeply downward.
+            // Remote players shoot against their own client's copy of us (copPrefab /
+            // robberPrefab), so disabling these colliders has NO effect on incoming damage.
+            foreach (Collider c in _localPlayerColliders)
+            {
+                if (c is CharacterController) continue;
+                c.enabled = false;
+            }
+
+        }
+
+        // After any fire event, scan for Rigidbody objects not seen before and call
+        // Physics.IgnoreCollision between them and the local player's Colliders.
+        // This prevents locally-spawned projectiles (grenade launcher, RPG) from
+        // registering a hit on the shooter -- mirroring what grenadeLauncherShot() RPC
+        // already does on remote clients.
+        private void PollForNewProjectiles()
+        {
+            if (_projectileScanTimer <= 0f) return;
+            _projectileScanTimer -= Time.deltaTime;
+
+            if (_localPlayerColliders == null) CachePlayerColliders();
+            if (_localPlayerColliders == null || _localPlayerColliders.Length == 0) return;
+
+            Rigidbody[] rbs = UnityEngine.Object.FindObjectsOfType(typeof(Rigidbody)) as Rigidbody[];
+            if (rbs == null) return;
+            foreach (Rigidbody rb in rbs)
+            {
+                int id = rb.gameObject.GetInstanceID();
+                if (_knownRbIds.Contains(id)) continue;
+                _knownRbIds.Add(id);
+
+                // Skip characters / world objects -- only process neutral projectiles.
+                string tag = rb.gameObject.tag;
+                if (tag == "Player"      || tag == "EnemyTag"     ||
+                    tag == "FriendTag"   || tag == "EnemyHeadTag" ||
+                    tag == "City"        || tag == "City2") continue;
+
+                Collider rbCol = rb.GetComponent<Collider>();
+                if (rbCol == null) rbCol = rb.GetComponentInChildren<Collider>();
+                if (rbCol == null) continue;
+
+                foreach (Collider pc in _localPlayerColliders)
+                {
+                    if (pc != null && pc.enabled)
+                        Physics.IgnoreCollision(rbCol, pc, true);
+                }
+
+                // Physics.IgnoreCollision cannot prevent a Rigidbody from being
+                // physically blocked by a CharacterController (Unity limitation).
+                // Temporarily disable CC collision detection so newly-spawned
+                // projectiles (e.g. mini-cannon snowball) fly straight through.
+                if (_localCC != null)
+                {
+                    _localCC.detectCollisions = false;
+                    _ccRestoreTimer = 0.4f;
+                }
+            }
+        }
+
+        // Prevent Bullet-class self-hit (bullets and ballistic knives from WeaponScript in
+        // Assembly-UnityScript.dll).  WeaponScript.machineGunOneShot / shotGunOneShot /
+        // knifeOneShot instantiate Bullet objects that use Physics.Raycast(oldPos, dir,
+        // out hit, mag, layerMask=19).  Layer mask 19 decimal = 0b10011 = layers 0, 1, 4.
+        // The local player's CharacterController lives on the root GameObject (layer 0).
+        // When aiming steeply downward the ray sweeps through the player's own CC and
+        // registers a hit (tag "Player") → PlayerDamage.
+        //
+        // Fix: temporarily move the player root to layer 2 ("Ignore Raycast").
+        // Layer 2 is NOT included in mask 19 (bit 2 = decimal 4 is not set in 19), so
+        // the Bullet.Update() raycast becomes invisible to the local CC for those frames.
+        // The shield is held for 2 frames after each fire event so that any Bullet
+        // instantiated during WeaponScript.Update() at frame N has its first
+        // Bullet.Update() (frame N+1) protected as well.
+        //
+        // BulletEnemy objects (remote players, RPC-spawned via WeaponSync) use
+        // OnTriggerEnter, not raycasts -- layer changes do NOT affect trigger collisions,
+        // so incoming enemy fire still damages us correctly.
+        private void ScanForLocalBullets(bool fireActive)
+        {
+            if (_localPlayerRoot == null) CachePlayerColliders();
+            if (_localPlayerRoot == null) return;
+
+            if (fireActive)
+            {
+                if (_playerLayerSuppFrames == 0)
+                    _playerOrigLayer = _localPlayerRoot.layer;
+                _localPlayerRoot.layer  = 2;   // "Ignore Raycast" -- invisible to Bullet raycast mask 19
+                _playerLayerSuppFrames  = 2;
+            }
+            else if (_playerLayerSuppFrames > 0)
+            {
+                _playerLayerSuppFrames--;
+                if (_playerLayerSuppFrames == 0)
+                    _localPlayerRoot.layer = _playerOrigLayer;
+            }
+        }
 
         // All Sliderotate instances � patch every one of them
         private System.Collections.Generic.List<MonoBehaviour> _allSliderotates

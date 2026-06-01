@@ -189,23 +189,16 @@ namespace CNRZombieMod
         private GameObject  _navDebugRoot;
         private string      _navDebugStatus = "";
 
-        // Freecam is parked for now. Leave the fields/methods below in place so it
-        // can be re-enabled quickly after the nav debug overlay is sorted out.
-        private static readonly bool FREECAM_ENABLED = false;
-        private bool       _freecam;
-        private Camera     _freecamCam;
-        private Transform  _freecamOrigParent;
-        private Vector3    _freecamOrigLocalPos;
-        private Quaternion _freecamOrigLocalRot;
-        private Vector3    _freecamPos;
-        private Vector3    _freecamGuiMove;
-        private Vector2    _freecamGuiLook;
-        private bool       _freecamGuiFast;
-        private float      _freecamYaw;
-        private float      _freecamPitch;
-        private const float FREECAM_SPEED = 12f;
-        private const float FREECAM_FAST_MULT = 4f;
-        private const float FREECAM_LOOK_SENS = 2.0f;
+        // ── Death / anti-respawn ─────────────────────────────────────────────
+        private bool        _localPlayerDowned;
+        private FieldInfo   _fPlMInstance;
+        private FieldInfo   _fPlBlood;
+        private FieldInfo   _fPlBDied;
+        private FieldInfo   _fPlMStatus;
+        private FieldInfo   _fPlGoDied;
+        private List<string> _killFeed      = new List<string>();
+        private float        _killFeedTimer;
+        private const float  KILL_FEED_SECS = 5f;
 
         // ─────────────────────────────────────────────────────────────────────
         // Unity messages
@@ -216,8 +209,6 @@ namespace CNRZombieMod
         void OnLevelWasLoaded(int level)
         {
             string scene = Application.loadedLevelName;
-            if (FREECAM_ENABLED) DisableFreecam();
-
             // Always try to cache the prefab template on any scene load.
             // In singleplayer scenes, SingleEnemyManager.knifeEnemy is available —
             // that prefab has the full AI component set (Seeker + SingleEnemyAI).
@@ -254,8 +245,6 @@ namespace CNRZombieMod
             bool hasTemplate = _templateGO != null;
             GameObject ec = GameObject.Find("ExampleCharacter");  // only name, no tag
 
-            if (FREECAM_ENABLED && Input.GetKeyDown(KeyCode.F6))
-                ToggleFreecam();
             if (Input.GetKeyDown(KeyCode.F12))
                 ToggleNavDebug(ec != null ? ec.transform.position : Vector3.zero);
 
@@ -276,9 +265,9 @@ namespace CNRZombieMod
             if (_modeMessageTimer > 0f) _modeMessageTimer -= Time.deltaTime;
 
             // Persistent diagnostic line; the actual zombies HUD is drawn separately.
-            _hud = string.Format("[ZMod] room={0} master={1} tmpl={2} navdbg={3} {4} {5}",
+            _hud = string.Format("[ZMod] room={0} master={1} tmpl={2} navdbg={3} {4}",
                 inRoom, isMaster, hasTemplate, _navDebugEnabled ? "ON" : "OFF",
-                _navDebugStatus, _freecam ? "freecam=ON" : "");
+                _navDebugStatus);
 
             if (!IsGameScene(scene)) return;
             if (!inRoom)             return;
@@ -298,22 +287,12 @@ namespace CNRZombieMod
             catch (Exception ex) { ZombieModEntry.Log("Update err: " + ex.Message + "\n" + ex.StackTrace); }
         }
 
-        void LateUpdate()
-        {
-            try
-            {
-                if (FREECAM_ENABLED && _freecam) UpdateFreecam();
-            }
-            catch (Exception ex) { ZombieModEntry.Log("Freecam err: " + ex.Message + "\n" + ex.StackTrace); }
-        }
+        void LateUpdate() { }
 
         void OnGUI()
         {
             DrawZombieHud();
             GUI.Label(new Rect(8f, 150f, 760f, 24f), _hud);
-            if (FREECAM_ENABLED && _freecam)
-                GUI.Label(new Rect(8f, 174f, 760f, 24f), "[Freecam] F6 off | WASD move | Q/E down/up | Shift fast | RMB/arrows look");
-            if (FREECAM_ENABLED) DrawFreecamGui();
         }
 
         private void StartZombieMode(Vector3 origin)
@@ -344,6 +323,9 @@ namespace CNRZombieMod
             _spawnQueue = 0;
             _phase = PHASE_WAITING;
             _phaseTimer = ROUND_START_DELAY;
+            _localPlayerDowned = false;
+            _killFeed.Clear();
+            CachePlayerLogicFields();
             ShowModeMessage("ZOMBIES - ROUND 1 IN " + Mathf.CeilToInt(_phaseTimer), 3f);
             ZombieModEntry.Log("ZombieMode: started, first round in " + ROUND_START_DELAY + "s");
         }
@@ -351,6 +333,8 @@ namespace CNRZombieMod
         private void UpdateMasterMode(float dt, GameObject localPlayer)
         {
             if (_phase == PHASE_GAMEOVER) return;
+
+            UpdateDeathTracking(dt);
 
             if (_phase == PHASE_WAITING)
             {
@@ -382,6 +366,7 @@ namespace CNRZombieMod
 
         private void BeginRound(int round)
         {
+            ReviveLocalPlayer();  // un-down the player before each new round
             _round = round;
             _phase = PHASE_ACTIVE;
             _phaseTimer = 0f;
@@ -404,6 +389,136 @@ namespace CNRZombieMod
             ShowModeMessage("ROUND " + _round + " COMPLETE  +" + END_ROUND_BONUS, 4f);
             ZombieModEntry.Log("ZombieMode: end round=" + _round + " points=" + _points);
         }
+
+        // ── Death system helpers ─────────────────────────────────────────────
+
+        private void CachePlayerLogicFields()
+        {
+            if (_fPlBlood != null) return;  // already cached
+            try
+            {
+                Type plType = FindType("PlayerLogic");
+                if (plType == null) { ZombieModEntry.Log("CachePlayerLogicFields: PlayerLogic type not found"); return; }
+                _fPlMInstance = plType.GetField("mInstance", BindingFlags.Public | BindingFlags.Static);
+                _fPlBlood     = plType.GetField("blood",     BindingFlags.Public | BindingFlags.Instance);
+                _fPlBDied     = plType.GetField("bDied",     BindingFlags.Public | BindingFlags.Instance);
+                _fPlMStatus   = plType.GetField("mStatus",   BindingFlags.Public | BindingFlags.Instance);
+                _fPlGoDied    = plType.GetField("goDied",    BindingFlags.Public | BindingFlags.Instance);
+                ZombieModEntry.Log("CachePlayerLogicFields: mInstance=" + (_fPlMInstance != null) +
+                    " blood=" + (_fPlBlood != null) + " bDied=" + (_fPlBDied != null) +
+                    " mStatus=" + (_fPlMStatus != null) + " goDied=" + (_fPlGoDied != null));
+            }
+            catch (Exception ex) { ZombieModEntry.Log("CachePlayerLogicFields err: " + ex.Message); }
+        }
+
+        private void UpdateDeathTracking(float dt)
+        {
+            _killFeedTimer -= dt;
+
+            if (_fPlMInstance == null || _fPlBlood == null || _fPlBDied == null) return;
+            object plInst = _fPlMInstance.GetValue(null);
+            if (plInst == null) return;
+
+            if (!_localPlayerDowned)
+            {
+                // Detect vanilla death: bDied went true AND blood ≤ 0
+                bool bDied = (bool)_fPlBDied.GetValue(plInst);
+                int  blood = (int) _fPlBlood.GetValue(plInst);
+                if (bDied && blood <= 0)
+                {
+                    _localPlayerDowned = true;
+                    ZombieModEntry.Log("ZombieMod: local player DOWNED by zombie");
+                    AddKillFeedEntry("ZOMBIE killed you");
+                    // In solo play there is exactly one human — game over immediately.
+                    // In multi, compare downed count vs room size (simple solo check for now).
+                    int roomSize = 1;
+                    try { roomSize = PhotonNetwork.room.playerCount; } catch { }
+                    if (roomSize <= 1)
+                        TriggerGameOver();
+                }
+            }
+            else
+            {
+                // Keep the player permanently dead until round ends / next round begins.
+                // This overrides the 5-second vanilla waitForGeneratePlayer respawn.
+                _fPlBlood.SetValue(plInst, 0);
+                _fPlBDied.SetValue(plInst, true);
+            }
+        }
+
+        private void ReviveLocalPlayer()
+        {
+            if (!_localPlayerDowned) return;
+            _localPlayerDowned = false;  // clear flag before writes so UpdateDeathTracking won't fight us
+
+            if (_fPlMInstance == null || _fPlBlood == null || _fPlBDied == null) return;
+            object plInst = _fPlMInstance.GetValue(null);
+            if (plInst == null) return;
+
+            try
+            {
+                _fPlBlood.SetValue(plInst, 100);
+                _fPlBDied.SetValue(plInst, false);
+
+                // Set mStatus back to idle (PlayerStatus.idle == 1)
+                if (_fPlMStatus != null) _fPlMStatus.SetValue(plInst, 1);
+
+                // Re-enable CharacterController (disabled on death)
+                Component plComp = plInst as Component;
+                if (plComp != null)
+                {
+                    CharacterController cc = plComp.gameObject.GetComponent<CharacterController>();
+                    if (cc != null) ((Collider)(object)cc).enabled = true;
+                }
+
+                // Hide the death overlay (goDied.renderer.enabled = false)
+                if (_fPlGoDied != null)
+                {
+                    GameObject goDied = _fPlGoDied.GetValue(plInst) as GameObject;
+                    if (goDied != null)
+                    {
+                        Renderer r = goDied.GetComponent<Renderer>();
+                        if (r != null) r.enabled = false;
+                    }
+                }
+
+                ZombieModEntry.Log("ZombieMod: local player revived for next round");
+            }
+            catch (Exception ex) { ZombieModEntry.Log("ReviveLocalPlayer err: " + ex.Message); }
+        }
+
+        private void TriggerGameOver()
+        {
+            _phase = PHASE_GAMEOVER;
+            ShowModeMessage("GAME OVER", 999f);
+            ZombieModEntry.Log("ZombieMod: GAME OVER — all players downed");
+            // Try to show the vanilla game-over / scoreboard screen
+            try
+            {
+                Type t = FindType("UIMenuDirectorExt");
+                if (t != null)
+                {
+                    FieldInfo fi = t.GetField("mInstance", BindingFlags.Public | BindingFlags.Static);
+                    object inst = fi != null ? fi.GetValue(null) : null;
+                    if (inst != null)
+                    {
+                        MethodInfo mi = t.GetMethod("GameOverEvent",
+                            BindingFlags.Public | BindingFlags.Instance);
+                        if (mi != null) { mi.Invoke(inst, null); ZombieModEntry.Log("ZombieMod: GameOverEvent invoked"); }
+                    }
+                }
+            }
+            catch (Exception ex) { ZombieModEntry.Log("TriggerGameOver err: " + ex.Message); }
+        }
+
+        private void AddKillFeedEntry(string msg)
+        {
+            _killFeed.Add(msg);
+            _killFeedTimer = KILL_FEED_SECS;
+            if (_killFeed.Count > 4) _killFeed.RemoveAt(0);
+        }
+
+        // ── End death system helpers ─────────────────────────────────────────
 
         private void UpdateSpawning(float dt, GameObject localPlayer)
         {
@@ -465,67 +580,39 @@ namespace CNRZombieMod
 
             if (_modeMessageTimer > 0f && _modeMessage != null && _modeMessage.Length > 0)
                 GUI.Label(new Rect(Screen.width * 0.5f - 220f * ui, Screen.height * 0.28f, 440f * ui, 42f * ui), _modeMessage, big);
-        }
 
-        private void ToggleFreecam()
-        {
-            if (_freecam) DisableFreecam();
-            else EnableFreecam();
-        }
-
-        private void EnableFreecam()
-        {
-            Camera cam = Camera.main;
-            if (cam == null)
+            // DOWNED overlay
+            if (_localPlayerDowned)
             {
-                ZombieModEntry.Log("Freecam: no Camera.main found");
-                return;
+                GUIStyle downed = new GUIStyle(GUI.skin.label);
+                downed.fontSize  = (int)(28f * ui);
+                downed.fontStyle = FontStyle.Bold;
+                downed.alignment = TextAnchor.MiddleCenter;
+                downed.normal.textColor = new Color(1f, 0.2f, 0.2f, 1f);
+                GUI.Label(new Rect(Screen.width * 0.5f - 200f * ui, Screen.height * 0.5f - 24f * ui,
+                    400f * ui, 50f * ui), "YOU WERE DOWNED", downed);
+                GUIStyle sub = new GUIStyle(GUI.skin.label);
+                sub.fontSize  = (int)(16f * ui);
+                sub.alignment = TextAnchor.MiddleCenter;
+                sub.normal.textColor = Color.white;
+                GUI.Label(new Rect(Screen.width * 0.5f - 200f * ui, Screen.height * 0.5f + 30f * ui,
+                    400f * ui, 28f * ui),
+                    _phase == PHASE_GAMEOVER ? "GAME OVER" : "Waiting for round end...", sub);
             }
 
-            _freecamCam = cam;
-            Transform t = cam.transform;
-            _freecamOrigParent = t.parent;
-            _freecamOrigLocalPos = t.localPosition;
-            _freecamOrigLocalRot = t.localRotation;
-            _freecamPos = t.position;
-
-            Vector3 e = t.eulerAngles;
-            _freecamYaw = e.y;
-            _freecamPitch = e.x;
-            if (_freecamPitch > 180f) _freecamPitch -= 360f;
-
-            t.parent = null;
-            _freecam = true;
-            ZombieModEntry.Log("Freecam enabled at " + _freecamPos);
-        }
-
-        private void DisableFreecam()
-        {
-            if (!_freecam)
+            // Kill feed
+            if (_killFeed.Count > 0 && _killFeedTimer > 0f)
             {
-                _freecamCam = null;
-                return;
-            }
-
-            try
-            {
-                if (_freecamCam != null)
+                GUIStyle feed = new GUIStyle(GUI.skin.label);
+                feed.fontSize  = (int)(13f * ui);
+                feed.normal.textColor = new Color(1f, 0.55f, 0.1f, 1f);
+                float feedY = Screen.height * 0.6f;
+                for (int fi = _killFeed.Count - 1; fi >= 0; fi--)
                 {
-                    Transform t = _freecamCam.transform;
-                    if (_freecamOrigParent != null)
-                    {
-                        t.parent = _freecamOrigParent;
-                        t.localPosition = _freecamOrigLocalPos;
-                        t.localRotation = _freecamOrigLocalRot;
-                    }
+                    GUI.Label(new Rect(20f * ui, feedY, 300f * ui, 22f * ui), _killFeed[fi], feed);
+                    feedY += 22f * ui;
                 }
             }
-            catch (Exception ex) { ZombieModEntry.Log("Freecam restore err: " + ex.Message); }
-
-            _freecam = false;
-            _freecamCam = null;
-            _freecamOrigParent = null;
-            ZombieModEntry.Log("Freecam disabled");
         }
 
         private void ToggleNavDebug(Vector3 center)
@@ -543,82 +630,6 @@ namespace CNRZombieMod
                 ZombieModEntry.Log("NavDebug: F12 disabled");
                 ClearNavDebug();
             }
-        }
-
-        private void UpdateFreecam()
-        {
-            if (_freecamCam == null)
-            {
-                DisableFreecam();
-                return;
-            }
-
-            float lookX = 0f;
-            float lookY = 0f;
-            if (Input.GetMouseButton(1))
-            {
-                lookX += Input.GetAxis("Mouse X");
-                lookY += Input.GetAxis("Mouse Y");
-            }
-            if (Input.GetKey(KeyCode.LeftArrow))  lookX -= 1f;
-            if (Input.GetKey(KeyCode.RightArrow)) lookX += 1f;
-            if (Input.GetKey(KeyCode.UpArrow))    lookY += 1f;
-            if (Input.GetKey(KeyCode.DownArrow))  lookY -= 1f;
-            lookX += _freecamGuiLook.x;
-            lookY += _freecamGuiLook.y;
-
-            _freecamYaw += lookX * FREECAM_LOOK_SENS;
-            _freecamPitch -= lookY * FREECAM_LOOK_SENS;
-            _freecamPitch = Mathf.Clamp(_freecamPitch, -89f, 89f);
-
-            Quaternion rot = Quaternion.Euler(_freecamPitch, _freecamYaw, 0f);
-            Vector3 move = Vector3.zero;
-            if (Input.GetKey(KeyCode.W)) move += Vector3.forward;
-            if (Input.GetKey(KeyCode.S)) move += Vector3.back;
-            if (Input.GetKey(KeyCode.A)) move += Vector3.left;
-            if (Input.GetKey(KeyCode.D)) move += Vector3.right;
-            if (Input.GetKey(KeyCode.E) || Input.GetKey(KeyCode.Space)) move += Vector3.up;
-            if (Input.GetKey(KeyCode.Q) || Input.GetKey(KeyCode.LeftControl)) move += Vector3.down;
-            move += _freecamGuiMove;
-
-            float speed = FREECAM_SPEED;
-            if (_freecamGuiFast || Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
-                speed *= FREECAM_FAST_MULT;
-
-            if (move.sqrMagnitude > 0.001f)
-                _freecamPos += rot * move.normalized * speed * Time.deltaTime;
-
-            Transform t = _freecamCam.transform;
-            t.position = _freecamPos;
-            t.rotation = rot;
-        }
-
-        private void DrawFreecamGui()
-        {
-            if (GUI.Button(new Rect(8f, 198f, 126f, 38f), _freecam ? "Freecam ON" : "Freecam"))
-                ToggleFreecam();
-
-            _freecamGuiMove = Vector3.zero;
-            _freecamGuiLook = Vector2.zero;
-            _freecamGuiFast = false;
-            if (!_freecam) return;
-
-            float x = 8f;
-            float y = 244f;
-            float s = 48f;
-            if (GUI.RepeatButton(new Rect(x + s, y, s, s), "W")) _freecamGuiMove += Vector3.forward;
-            if (GUI.RepeatButton(new Rect(x, y + s, s, s), "A")) _freecamGuiMove += Vector3.left;
-            if (GUI.RepeatButton(new Rect(x + s, y + s, s, s), "S")) _freecamGuiMove += Vector3.back;
-            if (GUI.RepeatButton(new Rect(x + s * 2f, y + s, s, s), "D")) _freecamGuiMove += Vector3.right;
-            if (GUI.RepeatButton(new Rect(x, y + s * 2f, s, s), "Q")) _freecamGuiMove += Vector3.down;
-            if (GUI.RepeatButton(new Rect(x + s, y + s * 2f, s, s), "E")) _freecamGuiMove += Vector3.up;
-            if (GUI.RepeatButton(new Rect(x + s * 2f, y + s * 2f, s, s), "Fast")) _freecamGuiFast = true;
-
-            x = 178f;
-            if (GUI.RepeatButton(new Rect(x, y, s, s), "<")) _freecamGuiLook.x -= 1f;
-            if (GUI.RepeatButton(new Rect(x + s, y, s, s), "^")) _freecamGuiLook.y += 1f;
-            if (GUI.RepeatButton(new Rect(x + s * 2f, y, s, s), ">")) _freecamGuiLook.x += 1f;
-            if (GUI.RepeatButton(new Rect(x + s, y + s, s, s), "v")) _freecamGuiLook.y -= 1f;
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -914,16 +925,7 @@ namespace CNRZombieMod
             int hidden = 0;
             int disabled = 0;
 
-            // Dump all renderer paths so we can see the exact hierarchy for debugging
-            Renderer[] allRenderers = go.GetComponentsInChildren<Renderer>(true);
-            System.Text.StringBuilder rdump = new System.Text.StringBuilder();
-            rdump.Append("PrepareZombieVisuals: renderer paths on " + go.name + ": ");
-            for (int i = 0; i < allRenderers.Length; i++)
-                if (allRenderers[i] != null)
-                    rdump.Append("[" + TransformPath(allRenderers[i].transform) + "] ");
-            ZombieModEntry.Log(rdump.ToString());
-
-            Renderer[] renderers = allRenderers;
+            Renderer[] renderers = go.GetComponentsInChildren<Renderer>(true);
             for (int i = 0; i < renderers.Length; i++)
             {
                 Renderer r = renderers[i];
@@ -973,6 +975,17 @@ namespace CNRZombieMod
                 path.IndexOf("rifle") < 0 && path.IndexOf("pistol") < 0 &&
                 path.IndexOf("knife") < 0)
                 return false;
+
+            // Any GO that is a grandchild+ of an EnemyAnimation/1_X bone is a weapon attachment
+            // e.g. EnemyAnimation/1_3/M87T/Z.  Direct bone children like EnemyAnimation/1_1
+            // have no further slash after the bone segment and are body parts — leave visible.
+            int eai = path.IndexOf("/enemyanimation/1_");
+            if (eai >= 0)
+            {
+                int boneStart = eai + "/enemyanimation/1_".Length;
+                int nextSlash = path.IndexOf('/', boneStart);
+                if (nextSlash >= 0) return true;
+            }
 
             return path.IndexOf("weapon") >= 0 || path.IndexOf("gun") >= 0 ||
                    path.IndexOf("rifle") >= 0 || path.IndexOf("pistol") >= 0 ||
@@ -3302,7 +3315,7 @@ namespace CNRZombieMod
             if (!IsDebugZombie()) return;
             if (_lastMoveDecision == msg) return;
             _lastMoveDecision = msg;
-            ZombieModEntry.Log("ZAI[" + ZombieId + "] Decision: " + msg);
+            // ZombieModEntry.Log("ZAI[" + ZombieId + "] Decision: " + msg);  // silenced — high-frequency spam
         }
 
         private void SetAI(bool on, float speed)
