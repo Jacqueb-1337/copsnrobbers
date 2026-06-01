@@ -1796,6 +1796,27 @@
           "changelog": "Initial release. Master client runs chase/wander AI for 5 green capsule zombies, broadcasts via Photon event 198. All clients display synced proxies with interpolation."
         }
       ]
+    },
+    {
+      "id": "CNRFreecamMod",
+      "name": "CNR Freecam Mod",
+      "description": "Detaches the camera from the player so you can fly freely around the map. Press F6 to toggle. WASD/Q/E to move, right-mouse or arrow keys to look, Shift for fast mode. While in freecam a ghost of your real player body is rendered at your actual server position. Press F to inspect which body-part colliders are currently active.",
+      "latestVersion": "0.2.0",
+      "filename": "CNRFreecamMod.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRFreecamMod/CNRFreecamMod-0.2.0.dll",
+      "latestOnly": false,
+      "versions": [
+        {
+          "version": "0.2.0",
+          "url": "https://play.jacqueb.me/mods/CNRFreecamMod/CNRFreecamMod-0.2.0.dll",
+          "changelog": "test"
+        },
+        {
+          "version": "0.1.0",
+          "url": "https://play.jacqueb.me/mods/CNRFreecamMod/CNRFreecamMod-0.1.0.dll",
+          "changelog": "Initial release. F6 toggle, fly camera, ghost body at real player position, F key collider inspector."
+        }
+      ]
     }
   ]
 }
