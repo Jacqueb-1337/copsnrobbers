@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.2.4";
+        public const  string Version = "3.2.12";
 
         // -- Mod version registry ? every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -152,6 +152,17 @@ namespace CNRMods
                 return p != null ? (int)p.GetValue(photonPlayer, null) : -1;
             }
             catch { return -1; }
+        }
+
+        public static string GetPhotonPlayerName(object photonPlayer)
+        {
+            try
+            {
+                var p = photonPlayer.GetType().GetProperty("name",
+                    BindingFlags.Instance | BindingFlags.Public);
+                return p != null ? (string)p.GetValue(photonPlayer, null) : null;
+            }
+            catch { return null; }
         }
 
         public static void Load()
@@ -444,9 +455,13 @@ namespace CNRMods
                 string ver = ht["version"] as string;
                 if (!string.IsNullOrEmpty(ver))
                 {
+                    bool isNew = !PlayerVersions.ContainsKey(senderId);
                     PlayerVersions[senderId] = ver;
-                    NeedMapBroadcast = true;   // master: re-broadcast mapUrl+version+skin
-                    NeedSelfAnnounce = true;   // non-masters: re-announce to this new joiner
+                    if (isNew)
+                    {
+                        NeedMapBroadcast = true;   // master: re-broadcast mapUrl+version+skin
+                        NeedSelfAnnounce = true;   // non-masters: re-announce to this new joiner
+                    }
                 }
             }
             if (ht.ContainsKey("ctf"))
@@ -4841,6 +4856,7 @@ namespace CNRMods
         // Tracks which photon actor IDs we've already applied a DLC skin to;
         // value is the skinId applied so we can re-apply if they change skin.
         Dictionary<int, string> _applied = new Dictionary<int, string>();
+        string _localApplied = null;  // skinId last applied to local player's ExampleCharacter
         float _nextPoll = 2f;   // first poll after 2s so characters have spawned
 
         // Cached PhotonView type + owner/ID properties so ApplyToActor doesn't scan
@@ -4868,15 +4884,35 @@ namespace CNRMods
         }
 
         int _updateCount = 0;
+        int _diagCount   = 0;   // limit verbose diagnostics to first N polls
         void Update()
         {
             if (Time.time < _nextPoll) return;
             _nextPoll = Time.time + 2f;
+            _updateCount++;
             PollRemotePlayers();
         }
 
         void PollRemotePlayers()
         {
+            // Apply DLC skin to local player's own character (ExampleCharacter).
+            // Must be done in-poll because the game assigns materials in Start() after
+            // the level loads, overwriting any swap done in OnLevelWasLoaded.
+            string localDlcId = PlayerPrefs.GetString("CNR_EquippedDLCSkin", "");
+            if (!string.IsNullOrEmpty(localDlcId) && localDlcId != _localApplied)
+            {
+                Texture2D localTex = ContentManager.GetSkinTexture(localDlcId);
+                if (localTex != null)
+                {
+                    GameObject localChar = GameObject.Find("ExampleCharacter");
+                    if (localChar != null && ApplyToTransform(localChar.transform, localTex))
+                    {
+                        _localApplied = localDlcId;
+                        ModEntry.Log("CNRLocalSkin: applied [" + localDlcId + "] to ExampleCharacter");
+                    }
+                }
+            }
+
             // Build active actor ID set for cleanup.
             object[] others = ModEntry.GetPhotonOtherPlayers();
             var activeIds = new HashSet<int>();
@@ -4897,13 +4933,17 @@ namespace CNRMods
                 if (_applied.TryGetValue(actorId, out prev) && prev == dlcId) continue;
 
                 Texture2D tex = ContentManager.GetSkinTexture(dlcId);
-                if (tex == null) continue;  // skin not yet downloaded
-
-                if (ApplyToActor(actorId, tex))
+                if (tex == null)
                 {
-                    _applied[actorId] = dlcId;
-                    ModEntry.Log("CNRRemoteSkins: applied [" + dlcId + "] to actor " + actorId);
+                    ModEntry.Log("CNRRemoteSkins: tex null for [" + dlcId + "] actor " + actorId);
+                    continue;
                 }
+
+                bool ok = ApplyToActor(actorId, tex, _diagCount < 5);
+                _diagCount++;
+                ModEntry.Log("CNRRemoteSkins: ApplyToActor(" + actorId + ", " + dlcId + ") = " + ok);
+                if (ok)
+                    _applied[actorId] = dlcId;
             }
 
             // Clean up departed actors.
@@ -4912,28 +4952,74 @@ namespace CNRMods
             foreach (int id in gone) _applied.Remove(id);
         }
 
-        bool ApplyToActor(int actorId, Texture2D tex)
+        // Cached reflection state for CNRMultiplayerManager lookup.
+        static Type      _mgrType        = null;
+        static FieldInfo _mgrInstanceFld = null;
+        static FieldInfo _mgrInfoListFld = null;
+        static FieldInfo _mgrObjListFld  = null;
+        static FieldInfo _playerInfoMId  = null;
+
+        static bool EnsureMgrReflection()
         {
-            // Scan only PhotonView components (a handful per scene) instead of every
-            // MonoBehaviour, which caused multi-second ANR freezes on WSA/slow devices.
-            Type pvType = GetPhotonViewType();
-            if (pvType == null || _pvOwnerProp == null || _pvOwnerIdProp == null) return false;
-            var views = FindObjectsOfType(pvType);
-            foreach (var viewObj in views)
+            if (_mgrType != null) return true;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
-                if (viewObj == null) continue;
-                int oid;
-                try
+                Type t = asm.GetType("CNRMultiplayerManager");
+                if (t == null) continue;
+                _mgrType        = t;
+                _mgrInstanceFld = t.GetField("mInstance",           BindingFlags.Public   | BindingFlags.Static);
+                _mgrInfoListFld = t.GetField("otherPlayersInfoList", BindingFlags.Public   | BindingFlags.Instance);
+                _mgrObjListFld  = t.GetField("otherPlayerObject",    BindingFlags.NonPublic| BindingFlags.Instance);
+                break;
+            }
+            return _mgrType != null && _mgrInstanceFld != null && _mgrInfoListFld != null && _mgrObjListFld != null;
+        }
+
+        bool ApplyToActor(int actorId, Texture2D tex, bool verbose = false)
+        {
+            // Remote player characters are managed by CNRMultiplayerManager.otherPlayerObject[].
+            // mId == PhotonNetwork actor ID as string.  Match to find the right GO.
+            try
+            {
+                if (!EnsureMgrReflection())
                 {
-                    object playerObj = _pvOwnerProp.GetValue(viewObj, null);
-                    if (playerObj == null) continue; // scene view or unowned
-                    oid = (int)_pvOwnerIdProp.GetValue(playerObj, null);
+                    if (verbose) ModEntry.Log("  ApplyToActor: CNRMultiplayerManager reflection failed");
+                    return false;
                 }
-                catch { continue; }
-                if (oid != actorId) continue;
-                Component view = viewObj as Component;
-                if (view == null) continue;
-                if (ApplyToTransform(view.transform, tex)) return true;
+
+                object mgr = _mgrInstanceFld.GetValue(null);
+                if (mgr == null) { if (verbose) ModEntry.Log("  mInstance null"); return false; }
+
+                System.Array infoList = _mgrInfoListFld.GetValue(mgr) as System.Array;
+                System.Array objList  = _mgrObjListFld.GetValue(mgr)  as System.Array;
+                if (infoList == null || objList == null) { if (verbose) ModEntry.Log("  arrays null"); return false; }
+
+                string actorIdStr = actorId.ToString();
+                for (int i = 0; i < infoList.Length; i++)
+                {
+                    object info = infoList.GetValue(i);
+                    if (info == null) continue;
+
+                    // Cache PlayerInfo.mId FieldInfo on first use.
+                    if (_playerInfoMId == null)
+                        _playerInfoMId = info.GetType().GetField("mId", BindingFlags.Public | BindingFlags.Instance);
+                    if (_playerInfoMId == null) continue;
+
+                    string mId = _playerInfoMId.GetValue(info) as string;
+                    if (mId != actorIdStr) continue;
+
+                    GameObject go = objList.GetValue(i) as GameObject;
+                    if (go == null) { if (verbose) ModEntry.Log("  actor " + actorId + " slot " + i + " GO null"); return false; }
+
+                    if (verbose) ModEntry.Log("  actor " + actorId + " slot " + i + " GO=" + go.name);
+                    return ApplyToTransform(go.transform, tex);
+                }
+
+                if (verbose) ModEntry.Log("  actor " + actorId + " not found in otherPlayersInfoList (count=" + infoList.Length + ")");
+            }
+            catch (Exception ex)
+            {
+                if (verbose) ModEntry.Log("  ApplyToActor ex: " + ex.Message);
             }
             return false;
         }
