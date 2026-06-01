@@ -1801,11 +1801,16 @@
       "id": "CNRFreecamMod",
       "name": "CNR Freecam Mod",
       "description": "Detaches the camera from the player so you can fly freely around the map. Press F6 to toggle. WASD/Q/E to move, right-mouse or arrow keys to look, Shift for fast mode. While in freecam a ghost of your real player body is rendered at your actual server position. Press F to inspect which body-part colliders are currently active.",
-      "latestVersion": "0.2.1",
+      "latestVersion": "0.2.2",
       "filename": "CNRFreecamMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRFreecamMod/CNRFreecamMod-0.2.1.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRFreecamMod/CNRFreecamMod-0.2.2.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "0.2.2",
+          "url": "https://play.jacqueb.me/mods/CNRFreecamMod/CNRFreecamMod-0.2.2.dll",
+          "changelog": "Fix: use a separate Camera for freecam view instead of moving Camera.main - player fire direction unchanged, no duplicate arms, no capsule (only SkinnedMeshRenderers enabled)"
+        },
         {
           "version": "0.2.1",
           "url": "https://play.jacqueb.me/mods/CNRFreecamMod/CNRFreecamMod-0.2.1.dll",

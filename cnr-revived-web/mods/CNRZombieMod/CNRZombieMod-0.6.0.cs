@@ -437,32 +437,34 @@ namespace CNRZombieMod
         {
             if (!_modeStarted && !IsInRoom()) return;
 
+            float ui = Mathf.Max(1f, Screen.height / 720f);
+
             GUIStyle big = new GUIStyle(GUI.skin.label);
-            big.fontSize = 22;
+            big.fontSize = (int)(22f * ui);
             big.fontStyle = FontStyle.Bold;
             big.alignment = TextAnchor.MiddleCenter;
             big.normal.textColor = Color.white;
 
             GUIStyle small = new GUIStyle(GUI.skin.label);
-            small.fontSize = 14;
+            small.fontSize = (int)(14f * ui);
             small.normal.textColor = Color.white;
 
             string top = "ROUND " + Mathf.Max(1, _round) + "  " + PhaseName();
             if (_phase == PHASE_WAITING || _phase == PHASE_INTER)
                 top += " " + Mathf.CeilToInt(Mathf.Max(0f, _phaseTimer));
-            GUI.Label(new Rect(Screen.width * 0.5f - 170f, 12f, 340f, 32f), top, big);
+            GUI.Label(new Rect(Screen.width * 0.5f - 170f * ui, 12f * ui, 340f * ui, 32f * ui), top, big);
 
-            GUI.Label(new Rect(20f, Screen.height - 92f, 280f, 24f),
+            GUI.Label(new Rect(20f * ui, Screen.height - 92f * ui, 280f * ui, 24f * ui),
                 "ZOMBIE POINTS: " + _points, small);
 
-            GUI.Label(new Rect(Screen.width - 250f, 18f, 230f, 24f),
+            GUI.Label(new Rect(Screen.width - 250f * ui, 18f * ui, 230f * ui, 24f * ui),
                 "ZOMBIES: " + _zombiesRemaining + "  KILLS: " + _zombiesKilled, small);
             if (_spawnQueue > 0)
-                GUI.Label(new Rect(Screen.width - 250f, 42f, 230f, 24f),
+                GUI.Label(new Rect(Screen.width - 250f * ui, 42f * ui, 230f * ui, 24f * ui),
                     "SPAWN QUEUE: " + _spawnQueue, small);
 
             if (_modeMessageTimer > 0f && _modeMessage != null && _modeMessage.Length > 0)
-                GUI.Label(new Rect(Screen.width * 0.5f - 220f, Screen.height * 0.28f, 440f, 42f), _modeMessage, big);
+                GUI.Label(new Rect(Screen.width * 0.5f - 220f * ui, Screen.height * 0.28f, 440f * ui, 42f * ui), _modeMessage, big);
         }
 
         private void ToggleFreecam()
@@ -912,7 +914,16 @@ namespace CNRZombieMod
             int hidden = 0;
             int disabled = 0;
 
-            Renderer[] renderers = go.GetComponentsInChildren<Renderer>(true);
+            // Dump all renderer paths so we can see the exact hierarchy for debugging
+            Renderer[] allRenderers = go.GetComponentsInChildren<Renderer>(true);
+            System.Text.StringBuilder rdump = new System.Text.StringBuilder();
+            rdump.Append("PrepareZombieVisuals: renderer paths on " + go.name + ": ");
+            for (int i = 0; i < allRenderers.Length; i++)
+                if (allRenderers[i] != null)
+                    rdump.Append("[" + TransformPath(allRenderers[i].transform) + "] ");
+            ZombieModEntry.Log(rdump.ToString());
+
+            Renderer[] renderers = allRenderers;
             for (int i = 0; i < renderers.Length; i++)
             {
                 Renderer r = renderers[i];
@@ -2934,6 +2945,14 @@ namespace CNRZombieMod
         private FieldInfo  _fCanSearch;    // AIPath.canSearch  (bool)
         private FieldInfo  _fCanMove;      // AIPath.canMove    (bool)
 
+        // Melee attack
+        private const float ATTACK_RANGE    = 1.5f;
+        private const float ATTACK_COOLDOWN = 1.5f;
+        private const int   ATTACK_DAMAGE   = 8;
+        private float       _attackCd;
+        private static FieldInfo  _sfPlayerLogicInst;
+        private static MethodInfo _smPlayerDamage;
+
         // Body/hand Animation components (for playing walk animation)
         private Animation _bodyAnim;
         private Animation _handAnim;
@@ -3023,6 +3042,24 @@ namespace CNRZombieMod
                 if (_bodyAnim != null) _bodyAnim.Play("walkway");
                 if (_handAnim != null) _handAnim.Play("walkway");
 
+                // Cache PlayerLogic.PlayerDamage for melee attacks (static, only need once)
+                if (_sfPlayerLogicInst == null)
+                {
+                    try
+                    {
+                        Type plType = FindType("PlayerLogic");
+                        if (plType != null)
+                        {
+                            _sfPlayerLogicInst = plType.GetField("mInstance", BindingFlags.Public | BindingFlags.Static);
+                            _smPlayerDamage    = plType.GetMethod("PlayerDamage", BindingFlags.Public | BindingFlags.Instance,
+                                                    null, new Type[] { typeof(int) }, null);
+                            ZombieModEntry.Log("ZombieDriver: PlayerLogic reflection cached inst=" + (_sfPlayerLogicInst != null) +
+                                " dmg=" + (_smPlayerDamage != null));
+                        }
+                    }
+                    catch (Exception ex) { ZombieModEntry.Log("ZombieDriver: PlayerLogic reflect err: " + ex.Message); }
+                }
+
                 _cc = GetComponent<CharacterController>();
                 _lastMovePos = transform.position;
                 if (_cc != null)
@@ -3095,6 +3132,24 @@ namespace CNRZombieMod
                     {
                         // Still apply gravity even when on top of target
                         _cc.Move(new Vector3(0f, -9.8f * Time.deltaTime, 0f));
+                    }
+                }
+
+                // Proximity melee attack — playerTr is guaranteed non-null here
+                _attackCd -= Time.deltaTime;
+                if (_attackCd <= 0f && _sfPlayerLogicInst != null && _smPlayerDamage != null)
+                {
+                    float dist = Vector3.Distance(transform.position, playerTr.position);
+                    if (dist < ATTACK_RANGE)
+                    {
+                        object plInst = _sfPlayerLogicInst.GetValue(null);
+                        if (plInst != null)
+                        {
+                            _smPlayerDamage.Invoke(plInst, new object[] { ATTACK_DAMAGE });
+                            _attackCd = ATTACK_COOLDOWN;
+                            Dbg("Decision: unarmed-attack target=" + playerTr.name +
+                                " damage=" + ATTACK_DAMAGE + " range=" + dist.ToString("F2"));
+                        }
                     }
                 }
             }
@@ -3549,14 +3604,15 @@ namespace CNRZombieMod
             catch { }
 
             // ── render HUD ───────────────────────────────────────────────
-            float gx = sp.x - 80f;
-            float gy = Screen.height - sp.y - 70f;
-            const float W = 160f, LH = 14f;
+            float hudScale = Mathf.Max(1f, Screen.height / 720f);
+            float gx = sp.x - 80f * hudScale;
+            float gy = Screen.height - sp.y - 70f * hudScale;
+            float W = 160f * hudScale, LH = 14f * hudScale;
 
             GUIStyle bg = new GUIStyle(GUI.skin.label);
             bg.normal.background = Texture2D.whiteTexture;
             bg.normal.textColor  = Color.black;
-            bg.fontSize = 10;
+            bg.fontSize = (int)(10f * hudScale);
             bg.padding  = new RectOffset(2, 2, 1, 1);
 
             GUI.color = new Color(0f, 0f, 0f, 0.55f);
@@ -3568,7 +3624,7 @@ namespace CNRZombieMod
             rich.richText = true;
             rich.normal.background = null;
             rich.normal.textColor  = Color.white;
-            rich.fontSize = 10;
+            rich.fontSize = (int)(10f * hudScale);
 
             GUI.Label(new Rect(gx, gy,           W, LH), "surf: " + surfStr + " y=" + surfY.ToString("F2") + " " + walkStr, rich);
             GUI.Label(new Rect(gx, gy + LH,      W, LH), "tgt: " + tgtStr, rich);

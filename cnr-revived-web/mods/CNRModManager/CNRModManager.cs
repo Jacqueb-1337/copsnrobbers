@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.4.7";
+        public  const string Version        = "1.4.9";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -233,6 +233,17 @@ namespace CNRModManager
         private Vector2 _scroll      = Vector2.zero;
         private float   _lastToggle  = 0f;
 
+        // ── Swipe-to-scroll ──────────────────────────────────────────────────
+        // Same pattern as CNRSkinGridUI in CNRMod.  _scroll.y is modified
+        // directly in Update() (screen-space drag converted to GUI units via sc).
+        // DrawWindow() consumes pointer events during a drag so buttons don't
+        // fire accidentally at the end of a swipe.
+        private bool  _swipeActive   = false;
+        private bool  _swipeDragging = false;
+        private float _swipeStartY   = 0f;
+        private float _swipePrevY    = 0f;
+        private const float SWIPE_DEAD_PX = 12f;  // screen-pixels before swipe commits
+
         // Scene
         private string _scene    = "";
         private bool   _patched  = false;
@@ -401,6 +412,36 @@ namespace CNRModManager
             SetNguiBlocking(_showWindow);
             if (_scene == "MainMenu" && _patched && _goMpBtn == null)
                 TryInterceptMpButton();
+
+            // Swipe-to-scroll: track drag in screen space, convert to GUI units
+            if (_showWindow)
+            {
+                float sc = Screen.width / REF_W;
+                if (Input.GetMouseButtonDown(0))
+                {
+                    _swipeActive   = true;
+                    _swipeDragging = false;
+                    _swipeStartY   = Input.mousePosition.y;
+                    _swipePrevY    = Input.mousePosition.y;
+                }
+                else if (Input.GetMouseButton(0) && _swipeActive)
+                {
+                    float dy = Input.mousePosition.y - _swipePrevY;
+                    _swipePrevY = Input.mousePosition.y;
+                    if (!_swipeDragging && Mathf.Abs(Input.mousePosition.y - _swipeStartY) > SWIPE_DEAD_PX)
+                    {
+                        _swipeDragging        = true;
+                        GUIUtility.hotControl = 0;  // cancel any button that captured on MouseDown
+                    }
+                    if (_swipeDragging)
+                        _scroll.y = Mathf.Max(0f, _scroll.y + dy / sc);
+                }
+                else if (Input.GetMouseButtonUp(0))
+                {
+                    _swipeActive = false;
+                    // _swipeDragging cleared in DrawWindow when EventType.MouseUp is consumed
+                }
+            }
         }
 
         private void SetNguiBlocking(bool block)
@@ -453,10 +494,12 @@ namespace CNRModManager
 
         private void OpenWindow()
         {
-            _showWindow = true;
+            _showWindow    = true;
             ModManagerEntry.IsOpen = true;
             ModManagerEntry.SetEcoHookOpen(true);
-            _scroll     = Vector2.zero;
+            _scroll        = Vector2.zero;
+            _swipeActive   = false;
+            _swipeDragging = false;
             _statusMsg  = "";
             RefreshInstalledMods();
             if (_tab == 1 && _browseMods.Count == 0 && !_browseFetching)
@@ -978,11 +1021,20 @@ namespace CNRModManager
                 }
             }
 
+            // Consume pointer events during an active swipe so no button fires at drag-end
+            if (_swipeDragging && (Event.current.type == EventType.MouseDown ||
+                                   Event.current.type == EventType.MouseUp))
+            {
+                if (Event.current.type == EventType.MouseUp) _swipeDragging = false;
+                Event.current.Use();
+            }
+
             // Content area
             float cY = tabY + tabH + 6f;
             float cH = winH - (cY - winY) - 10f;
             GUILayout.BeginArea(new Rect(winX + 6f, cY, winW - 12f, cH));
-            _scroll = GUILayout.BeginScrollView(_scroll);
+            // Invisible scrollbar — swipe is the only scroll mechanism
+            _scroll = GUILayout.BeginScrollView(_scroll, false, false, GUIStyle.none, GUIStyle.none);
 
             if      (_tab == 0) DrawInstalledTab();
             else if (_tab == 1) DrawBrowseTab();
@@ -1051,9 +1103,9 @@ namespace CNRModManager
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("All mods updated!", MakeLabelStyle(13, new Color(0.4f, 1f, 0.5f)));
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Quit Game", MakeBtnStyle(13, new Color(1f, 0.4f, 0.4f)),
-                    GUILayout.Height(26f), GUILayout.Width(80f)))
-                    Application.Quit();
+                if (GUILayout.Button("Restart Game", MakeBtnStyle(13, new Color(1f, 0.4f, 0.4f)),
+                    GUILayout.Height(26f), GUILayout.Width(90f)))
+                    RestartApp();
                 GUILayout.EndHorizontal();
                 GUILayout.Space(4f);
             }
@@ -1500,6 +1552,25 @@ namespace CNRModManager
         // ─────────────────────────────────────────────────────────────────────
         // STYLE HELPERS
         // ─────────────────────────────────────────────────────────────────────
+        // Restart the game process on Android (re-launches via PackageManager intent).
+        // Falls back to Application.Quit() if the JNI call fails (e.g. editor / WSA).
+        private static void RestartApp()
+        {
+            try
+            {
+                var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                var activity    = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
+                string pkg      = activity.Call<string>("getPackageName");
+                var pm          = activity.Call<AndroidJavaObject>("getPackageManager");
+                var intent      = pm.Call<AndroidJavaObject>("getLaunchIntentForPackage", pkg);
+                intent.Call<AndroidJavaObject>("addFlags", unchecked((int)0x08000000)); // FLAG_ACTIVITY_CLEAR_TOP
+                activity.Call("startActivity", intent);
+                var proc = new AndroidJavaClass("android.os.Process");
+                proc.CallStatic("killProcess", proc.CallStatic<int>("myPid"));
+            }
+            catch { Application.Quit(); }
+        }
+
         private GUIStyle MakeBtnStyle(int size, Color col)
         {
             GUIStyle s = new GUIStyle(GUI.skin.button);
@@ -1706,9 +1777,9 @@ namespace CNRModManager
                 GUILayout.Space(4f);
                 GUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Quit Game", MakeBtnStyle(13, new Color(1f, 0.4f, 0.4f)),
-                    GUILayout.Height(28f), GUILayout.Width(90f)))
-                    Application.Quit();
+                if (GUILayout.Button("Restart Game", MakeBtnStyle(13, new Color(1f, 0.4f, 0.4f)),
+                    GUILayout.Height(28f), GUILayout.Width(100f)))
+                    RestartApp();
                 GUILayout.EndHorizontal();
             }
             else

@@ -27,7 +27,7 @@ namespace CNRFreecamMod
     // ─────────────────────────────────────────────────────────────────────────
     public class FreecamModEntry
     {
-        public const  string Version = "0.2.1";
+        public const  string Version = "0.2.2";
         private const string LogPath = "/storage/emulated/0/CNRMods/freecammod.log";
         private static bool  _loaded = false;
 
@@ -77,21 +77,22 @@ namespace CNRFreecamMod
 
         // ── Freecam state ────────────────────────────────────────────────────
         private bool       _freecam;
+        // A dedicated second Camera is created for freecam. Camera.main is NEVER
+        // moved — it stays on the player rig so that all game logic (fire direction,
+        // raycasts, aim) uses the correct player-space origin.
+        private GameObject _freecamGO;
         private Camera     _freecamCam;
-        private Transform  _freecamOrigParent;
-        private Vector3    _freecamOrigLocalPos;
-        private Quaternion _freecamOrigLocalRot;
+        private Camera     _mainCam;
+        private int        _mainOrigCullingMask;
         private Vector3    _freecamPos;
         private float      _freecamYaw;
         private float      _freecamPitch;
-        private int        _origCullingMask;
 
-        // ── Player renderer restore ───────────────────────────────────────────
-        // In first-person mode the game disables local player body renderers so
-        // you don't see your own model. We re-enable them for the duration of
-        // freecam so the character is actually visible when you fly away.
-        private Renderer[] _playerRenderers;
-        private bool[]     _rendererWasEnabled;
+        // ── Player body renderer restore ───────────────────────────────────
+        // Only SkinnedMeshRenderers (actual character mesh) are touched — NOT
+        // MeshRenderers, which would include the capsule collider visual.
+        private SkinnedMeshRenderer[] _playerSMRs;
+        private bool[]                _smrWasEnabled;
 
         // On-screen touch D-pad accumulators (reset each OnGUI frame)
         private Vector3 _guiMove = Vector3.zero;
@@ -159,92 +160,92 @@ namespace CNRFreecamMod
 
         private void EnableFreecam()
         {
-            Camera cam = Camera.main;
-            if (cam == null) { FreecamModEntry.Log("Freecam: no Camera.main"); return; }
+            Camera main = Camera.main;
+            if (main == null) { FreecamModEntry.Log("Freecam: no Camera.main"); return; }
 
-            _freecamCam        = cam;
-            Transform t        = cam.transform;
-            _freecamOrigParent = t.parent;
-            _freecamOrigLocalPos = t.localPosition;
-            _freecamOrigLocalRot = t.localRotation;
-            _freecamPos        = t.position;
+            _mainCam             = main;
+            _mainOrigCullingMask = main.cullingMask;
 
-            Vector3 e = t.eulerAngles;
+            // Start freecam at the current camera world position/rotation
+            _freecamPos   = main.transform.position;
+            Vector3 e     = main.transform.eulerAngles;
             _freecamYaw   = e.y;
             _freecamPitch = e.x > 180f ? e.x - 360f : e.x;
 
-            // Detach camera from the player rig — player stays in place and
-            // remains fully functional (shooting, taking damage, etc.)
-            t.parent = null;
+            // Create a dedicated camera for the freecam view.
+            // Camera.main is NOT moved so game fire/aim logic is unaffected.
+            _freecamGO  = new GameObject("FreecamCamera");
+            _freecamCam = _freecamGO.AddComponent<Camera>();
+            _freecamCam.CopyFrom(main);
+            _freecamCam.depth       = main.depth + 1;
+            _freecamCam.cullingMask = ~0;
+            _freecamGO.transform.position = _freecamPos;
+            _freecamGO.transform.rotation = Quaternion.Euler(_freecamPitch, _freecamYaw, 0f);
+
+            // Suppress Camera.main rendering so the scene isn't drawn twice.
+            // Camera.main stays active so the game's input/raycast code works.
+            main.cullingMask = 0;
+
+            // Enable only SkinnedMeshRenderers (player body) — avoids turning on
+            // capsule/debug MeshRenderers that would show a capsule placeholder.
+            ShowPlayerBody(true);
+
             _freecam = true;
-
-            // Force-enable all player body renderers (hidden in FPS mode) and
-            // expand the culling mask so nothing is excluded.
-            _origCullingMask = cam.cullingMask;
-            cam.cullingMask  = ~0; // all layers
-            ShowPlayerRenderers(true);
-
             FreecamModEntry.Log("Freecam enabled at " + _freecamPos);
         }
 
         private void DisableFreecam()
         {
-            if (!_freecam) { _freecamCam = null; return; }
+            if (!_freecam) return;
 
-            try
-            {
-                if (_freecamCam != null)
-                {
-                    Transform t = _freecamCam.transform;
-                    t.parent        = _freecamOrigParent;
-                    t.localPosition = _freecamOrigLocalPos;
-                    t.localRotation = _freecamOrigLocalRot;
-                }
-            }
-            catch (Exception ex) { FreecamModEntry.Log("Freecam restore err: " + ex.Message); }
+            // Restore Camera.main rendering
+            if (_mainCam != null) _mainCam.cullingMask = _mainOrigCullingMask;
 
-            // Restore renderer visibility and culling mask
-            ShowPlayerRenderers(false);
-            if (_freecamCam != null) _freecamCam.cullingMask = _origCullingMask;
-
-            _freecam    = false;
+            // Destroy the freecam camera
+            if (_freecamGO != null) UnityEngine.Object.Destroy(_freecamGO);
+            _freecamGO  = null;
             _freecamCam = null;
-            _freecamOrigParent = null;
+            _mainCam    = null;
+
+            // Restore player body SkinnedMeshRenderers
+            ShowPlayerBody(false);
+
+            _freecam = false;
             FreecamModEntry.Log("Freecam disabled");
         }
 
         // ─── Freecam movement ─────────────────────────────────────────────────
 
-        // Cache + show (or restore) all renderers on the local player GO.
-        private void ShowPlayerRenderers(bool show)
+        // Enable (or restore) only SkinnedMeshRenderers on the local player.
+        private void ShowPlayerBody(bool show)
         {
             if (show)
             {
                 GameObject player = GameObject.FindWithTag("Player");
                 if (player == null) player = GameObject.Find("ExampleCharacter");
-                if (player == null) { FreecamModEntry.Log("Freecam: player GO not found, body may be invisible"); return; }
+                if (player == null) { FreecamModEntry.Log("Freecam: player GO not found"); return; }
 
-                _playerRenderers    = player.GetComponentsInChildren<Renderer>(true);
-                _rendererWasEnabled = new bool[_playerRenderers.Length];
-                for (int i = 0; i < _playerRenderers.Length; i++)
+                _playerSMRs    = player.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                _smrWasEnabled = new bool[_playerSMRs.Length];
+                for (int i = 0; i < _playerSMRs.Length; i++)
                 {
-                    _rendererWasEnabled[i]      = _playerRenderers[i].enabled;
-                    _playerRenderers[i].enabled = true;
+                    _smrWasEnabled[i]       = _playerSMRs[i].enabled;
+                    _playerSMRs[i].enabled  = true;
                 }
-                FreecamModEntry.Log("Freecam: enabled " + _playerRenderers.Length + " player renderers");
+                FreecamModEntry.Log("Freecam: enabled " + _playerSMRs.Length + " SMRs");
             }
             else
             {
-                if (_playerRenderers != null)
+                if (_playerSMRs != null)
                 {
-                    for (int i = 0; i < _playerRenderers.Length && i < _rendererWasEnabled.Length; i++)
+                    for (int i = 0; i < _playerSMRs.Length; i++)
                     {
-                        if (_playerRenderers[i] != null)
-                            _playerRenderers[i].enabled = _rendererWasEnabled[i];
+                        if (_playerSMRs[i] != null)
+                            _playerSMRs[i].enabled = _smrWasEnabled[i];
                     }
                 }
-                _playerRenderers    = null;
-                _rendererWasEnabled = null;
+                _playerSMRs    = null;
+                _smrWasEnabled = null;
             }
         }
 
@@ -290,10 +291,9 @@ namespace CNRFreecamMod
         // Applied in LateUpdate so it runs after all player movement scripts
         private void ApplyFreecam()
         {
-            if (_freecamCam == null) { DisableFreecam(); return; }
-            Transform t = _freecamCam.transform;
-            t.position = _freecamPos;
-            t.rotation = Quaternion.Euler(_freecamPitch, _freecamYaw, 0f);
+            if (_freecamCam == null || _freecamGO == null) { DisableFreecam(); return; }
+            _freecamGO.transform.position = _freecamPos;
+            _freecamGO.transform.rotation = Quaternion.Euler(_freecamPitch, _freecamYaw, 0f);
         }
 
         // ─── Collider status ──────────────────────────────────────────────────

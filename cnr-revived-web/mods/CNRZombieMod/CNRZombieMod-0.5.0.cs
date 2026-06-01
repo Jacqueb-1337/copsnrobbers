@@ -119,21 +119,13 @@ namespace CNRZombieMod
         private const float BASE_SPAWN_INTERVAL = 2.5f;
         private const float SPAWN_INTERVAL_DECAY = 0.08f;
         private const float MIN_SPAWN_INTERVAL = 0.35f;
-        private const float BASE_ZOMBIE_HP = 100f;
-        private const float ZOMBIE_HP_SCALE = 1.18f;
-        private const float BASE_ZOMBIE_DAMAGE = 8f;
-        private const float ZOMBIE_DAMAGE_SCALE = 1.10f;
-        private const float BASE_PLAYER_HP = 100f;
-        private const float PLAYER_HP_PER_ROUND = 5f;
-        private const float PLAYER_MAX_HP_CAP = 200f;
-        private const float DOWNED_BLEEDOUT_SECS = 15f;
         private const int   POINTS_PER_KILL = 100;
         private const int   POINTS_PER_ROUND_BONUS = 5;
         private const int   END_ROUND_BONUS = 200;
         private const float SPAWN_RADIUS   = 10f;   // metres around local player
         private const float CHASE_SPEED    = 2.8f;
         private const float BROADCAST_SECS = 0.30f; // position sync interval
-        private const int   STRIDE         = 7;     // floats per zombie: id,x,y,z,rotY,hp,maxHp
+        private const int   STRIDE         = 5;     // floats per zombie: id,x,y,z,rotY
         private const int   PHASE_WAITING  = 0;
         private const int   PHASE_ACTIVE   = 1;
         private const int   PHASE_INTER    = 2;
@@ -162,11 +154,6 @@ namespace CNRZombieMod
         private int   _zombiesKilled;
         private int   _zombiesRemaining;
         private int   _points;
-        private float _localPlayerHp = BASE_PLAYER_HP;
-        private float _localPlayerMaxHp = BASE_PLAYER_HP;
-        private bool  _localPlayerDowned;
-        private int   _localDeaths;
-        private float _downedTimer;
         private string _modeMessage = "";
         private float  _modeMessageTimer;
         private readonly Dictionary<byte, ZombieDriver> _drivers
@@ -287,7 +274,6 @@ namespace CNRZombieMod
             }
 
             if (_modeMessageTimer > 0f) _modeMessageTimer -= Time.deltaTime;
-            UpdateDownedLocal(Time.deltaTime);
 
             // Persistent diagnostic line; the actual zombies HUD is drawn separately.
             _hud = string.Format("[ZMod] room={0} master={1} tmpl={2} navdbg={3} {4} {5}",
@@ -356,8 +342,6 @@ namespace CNRZombieMod
             _zombiesKilled = 0;
             _zombiesRemaining = 0;
             _spawnQueue = 0;
-            _localDeaths = 0;
-            ResetLocalPlayerForRound();
             _phase = PHASE_WAITING;
             _phaseTimer = ROUND_START_DELAY;
             ShowModeMessage("ZOMBIES - ROUND 1 IN " + Mathf.CeilToInt(_phaseTimer), 3f);
@@ -376,6 +360,14 @@ namespace CNRZombieMod
             }
             else if (_phase == PHASE_ACTIVE)
             {
+                // Detect vanilla-killed zombies: SingleEnemyLogic.decreaseBlood destroys the
+                // GO after ~3s. When that happens ZombieDriver becomes Unity-null.
+                List<byte> vanillaDead = null;
+                foreach (var kv in _drivers)
+                    if (kv.Value == null) { if (vanillaDead == null) vanillaDead = new List<byte>(); vanillaDead.Add(kv.Key); }
+                if (vanillaDead != null)
+                    for (int vi = 0; vi < vanillaDead.Count; vi++) KillZombie(vanillaDead[vi], null);
+
                 UpdateSpawning(dt, localPlayer);
                 if (_zombiesRemaining <= 0 && _spawnQueue <= 0 && _drivers.Count == 0)
                     EndRound();
@@ -400,10 +392,8 @@ namespace CNRZombieMod
                 MAX_ZOMBIES_PER_ROUND);
             _zombiesRemaining = _zombiesTotal;
             _spawnQueue = _zombiesTotal;
-            ResetLocalPlayerForRound();
             ShowModeMessage("ROUND " + _round, 3f);
-            ZombieModEntry.Log("ZombieMode: begin round=" + _round + " total=" + _zombiesTotal +
-                " hp=" + RoundZombieHp(_round) + " dmg=" + RoundZombieDamage(_round));
+            ZombieModEntry.Log("ZombieMode: begin round=" + _round + " total=" + _zombiesTotal);
         }
 
         private void EndRound()
@@ -411,7 +401,6 @@ namespace CNRZombieMod
             _phase = PHASE_INTER;
             _phaseTimer = INTER_ROUND_DELAY;
             _points += END_ROUND_BONUS;
-            ResetLocalPlayerForRound();
             ShowModeMessage("ROUND " + _round + " COMPLETE  +" + END_ROUND_BONUS, 4f);
             ZombieModEntry.Log("ZombieMode: end round=" + _round + " points=" + _points);
         }
@@ -430,78 +419,10 @@ namespace CNRZombieMod
             _spawnTimer = Mathf.Max(MIN_SPAWN_INTERVAL, interval);
         }
 
-        private void ResetLocalPlayerForRound()
-        {
-            _localPlayerMaxHp = PlayerMaxHpForRound(_round);
-            _localPlayerHp = _localPlayerMaxHp;
-            _localPlayerDowned = false;
-            _downedTimer = 0f;
-        }
-
-        private static float PlayerMaxHpForRound(int round)
-        {
-            return Mathf.Min(PLAYER_MAX_HP_CAP, BASE_PLAYER_HP + Mathf.Max(0, round - 1) * PLAYER_HP_PER_ROUND);
-        }
-
-        internal void ApplyLocalZombieDamage(float damage)
-        {
-            if (!_modeStarted || _phase == PHASE_GAMEOVER || _localPlayerDowned) return;
-            if (damage <= 0f) damage = BASE_ZOMBIE_DAMAGE;
-            _localPlayerHp = Mathf.Max(0f, _localPlayerHp - damage);
-            if (_localPlayerHp <= 0f)
-                DownLocalPlayer();
-        }
-
-        private void DownLocalPlayer()
-        {
-            if (_localPlayerDowned) return;
-            _localPlayerDowned = true;
-            _downedTimer = DOWNED_BLEEDOUT_SECS;
-            _localPlayerHp = 0f;
-            ShowModeMessage("DOWNED", 4f);
-            ZombieModEntry.Log("ZombieMode: local player downed");
-        }
-
-        private void UpdateDownedLocal(float dt)
-        {
-            if (!_localPlayerDowned) return;
-            _downedTimer -= dt;
-            if (_downedTimer > 0f) return;
-
-            _localDeaths++;
-            _localPlayerDowned = false;
-            _localPlayerHp = _localPlayerMaxHp;
-            ShowModeMessage("DEATH " + _localDeaths + " - RESPAWNED", 4f);
-            ZombieModEntry.Log("ZombieMode: local death count=" + _localDeaths);
-
-            if (IsMasterClient() && _drivers.Count == 0 && _spawnQueue <= 0)
-            {
-                _phase = PHASE_GAMEOVER;
-                ShowModeMessage("GAME OVER", 6f);
-            }
-        }
-
         private void ShowModeMessage(string message, float secs)
         {
             _modeMessage = message;
             _modeMessageTimer = secs;
-        }
-
-        private static float RoundZombieHp(int round)
-        {
-            int r = Mathf.Max(1, round);
-            return Mathf.Round(BASE_ZOMBIE_HP * Mathf.Pow(ZOMBIE_HP_SCALE, r - 1));
-        }
-
-        private static float RoundZombieDamage(int round)
-        {
-            int r = Mathf.Max(1, round);
-            return Mathf.Round(BASE_ZOMBIE_DAMAGE * Mathf.Pow(ZOMBIE_DAMAGE_SCALE, r - 1));
-        }
-
-        internal float CurrentZombieDamage
-        {
-            get { return RoundZombieDamage(_round); }
         }
 
         private string PhaseName()
@@ -533,9 +454,6 @@ namespace CNRZombieMod
 
             GUI.Label(new Rect(20f, Screen.height - 92f, 280f, 24f),
                 "ZOMBIE POINTS: " + _points, small);
-            GUI.Label(new Rect(20f, Screen.height - 68f, 320f, 24f),
-                "HP: " + Mathf.CeilToInt(_localPlayerHp) + "/" + Mathf.CeilToInt(_localPlayerMaxHp) +
-                (_localPlayerDowned ? "  DOWNED " + Mathf.CeilToInt(_downedTimer) : ""), small);
 
             GUI.Label(new Rect(Screen.width - 250f, 18f, 230f, 24f),
                 "ZOMBIES: " + _zombiesRemaining + "  KILLS: " + _zombiesKilled, small);
@@ -850,19 +768,10 @@ namespace CNRZombieMod
                 ZombieDriver drv = enemyGO.AddComponent<ZombieDriver>();
                 drv.ZombieId = id;
                 drv.ChaseSpeed = CHASE_SPEED;
-                drv.AttackDamage = RoundZombieDamage(_round);
                 drv.Hook = this;
 
-                ZombieHealth health = enemyGO.AddComponent<ZombieHealth>();
-                health.Hook = this;
-                health.ZombieId = id;
-                health.IsProxy = false;
-                health.SetHealth(RoundZombieHp(_round));
-                AttachDamageRelays(enemyGO, health);
-
                 _drivers[id] = drv;
-                ZombieModEntry.Log("SpawnZombie: id=" + id + " round=" + _round +
-                    " hp=" + health.Hp + "/" + health.MaxHp + " pos=" + pos);
+                ZombieModEntry.Log("SpawnZombie: id=" + id + " round=" + _round + " pos=" + pos);
             }
             catch (Exception ex) { ZombieModEntry.Log("SpawnZombie err: " + ex.Message); }
         }
@@ -972,38 +881,11 @@ namespace CNRZombieMod
             }
         }
 
-        private static void AttachDamageRelays(GameObject root, ZombieHealth health)
+        // Called by ZombieDriver.OnDestroy (vanilla kill) or ClearAll.
+        internal void OnZombieVanillaDeath(byte id)
         {
-            if (root == null || health == null) return;
-            Transform[] trs = root.GetComponentsInChildren<Transform>(true);
-            for (int i = 0; i < trs.Length; i++)
-            {
-                GameObject go = trs[i].gameObject;
-                if (go == null || go == root) continue;
-                if (go.GetComponent<Collider>() == null && go.GetComponent<Renderer>() == null) continue;
-                ZombieDamageRelay relay = go.GetComponent<ZombieDamageRelay>();
-                if (relay == null) relay = go.AddComponent<ZombieDamageRelay>();
-                relay.Owner = health;
-            }
-        }
-
-        internal void OnZombieDamaged(ZombieHealth health, float amount)
-        {
-            if (health == null || health.ZombieId == 0) return;
-            if (amount <= 0f) amount = 25f;
-
-            if (health.IsProxy)
-            {
-                SendZombieHit(health.ZombieId, amount);
-                return;
-            }
-
-            if (!IsMasterClient()) return;
-            health.ApplyAuthoritativeDamage(amount);
-            ZombieModEntry.Log("ZombieHit: id=" + health.ZombieId + " dmg=" + amount +
-                " hp=" + health.Hp + "/" + health.MaxHp);
-            if (health.Hp <= 0f)
-                KillZombie(health.ZombieId, health.gameObject);
+            if (!_drivers.ContainsKey(id)) return;  // already counted
+            KillZombie(id, null);
         }
 
         private void KillZombie(byte id, GameObject go)
@@ -1012,7 +894,7 @@ namespace CNRZombieMod
             if (_drivers.TryGetValue(id, out drv))
                 _drivers.Remove(id);
 
-            if (go == null && drv != null) go = drv.gameObject;
+            // Only destroy if caller passed a live GO (vanilla system already destroys it).
             if (go != null) UnityEngine.Object.Destroy(go);
 
             _zombiesKilled++;
@@ -1022,37 +904,6 @@ namespace CNRZombieMod
             ShowModeMessage("+" + award + " ZOMBIE KILL", 1.5f);
             ZombieModEntry.Log("ZombieKilled: id=" + id + " round=" + _round +
                 " points=" + _points + " remaining=" + _zombiesRemaining);
-        }
-
-        private void SendZombieHit(byte id, float amount)
-        {
-            if (IsMasterClient())
-            {
-                ZombieDriver drv;
-                if (_drivers.TryGetValue(id, out drv) && drv != null)
-                {
-                    ZombieHealth h = drv.GetComponent<ZombieHealth>();
-                    if (h != null) OnZombieDamaged(h, amount);
-                }
-                return;
-            }
-
-            System.Collections.Hashtable ht = new System.Collections.Hashtable();
-            ht["hit"] = new float[] { id, amount };
-            RaiseZombieEvent(ht, true);
-        }
-
-        private void ProcessHitEvent(System.Collections.Hashtable ht)
-        {
-            if (ht == null || !ht.ContainsKey("hit")) return;
-            float[] hit = ht["hit"] as float[];
-            if (hit == null || hit.Length < 2) return;
-            byte id = (byte)Mathf.RoundToInt(hit[0]);
-            float amount = hit[1];
-            ZombieDriver drv;
-            if (!_drivers.TryGetValue(id, out drv) || drv == null) return;
-            ZombieHealth health = drv.GetComponent<ZombieHealth>();
-            if (health != null) OnZombieDamaged(health, amount);
         }
 
         internal static void PrepareZombieVisuals(GameObject go)
@@ -1093,12 +944,24 @@ namespace CNRZombieMod
         private static bool LooksLikeHeldWeapon(Transform t)
         {
             string path = TransformPath(t).ToLowerInvariant();
-            if (path.IndexOf("hand") >= 0 && path.IndexOf("bullet") < 0 &&
-                path.IndexOf("gun") < 0 && path.IndexOf("qiang") < 0)
-                return false;
 
-            if (path.IndexOf("weaponcontrol/1_3") >= 0 && path.IndexOf("hand") < 0)
-                return true;
+            // Match any weapon slot under weaponcontrol (1_0, 1_1, 1_2, 1_3, etc.)
+            // but NOT the hand bones themselves.
+            int wci = path.IndexOf("weaponcontrol/");
+            if (wci >= 0)
+            {
+                string sub = path.Substring(wci + "weaponcontrol/".Length);
+                if (sub.Length >= 2 && sub[0] == '1' && sub[1] == '_' && path.IndexOf("hand") < 0)
+                    return true;
+            }
+
+            // Hand paths are safe UNLESS they also contain weapon-related keywords.
+            if (path.IndexOf("hand") >= 0 &&
+                path.IndexOf("bullet") < 0 && path.IndexOf("gun") < 0 &&
+                path.IndexOf("qiang") < 0 && path.IndexOf("weapon") < 0 &&
+                path.IndexOf("rifle") < 0 && path.IndexOf("pistol") < 0 &&
+                path.IndexOf("knife") < 0)
+                return false;
 
             return path.IndexOf("weapon") >= 0 || path.IndexOf("gun") >= 0 ||
                    path.IndexOf("rifle") >= 0 || path.IndexOf("pistol") >= 0 ||
@@ -1144,15 +1007,12 @@ namespace CNRZombieMod
                 if (drv == null || drv.gameObject == null) continue;
                 Vector3 p  = drv.transform.position;
                 float rotY = drv.transform.eulerAngles.y;
-                ZombieHealth health = drv.GetComponent<ZombieHealth>();
                 int   b    = idx * STRIDE;
                 data[b]     = kv.Key;
                 data[b + 1] = p.x;
                 data[b + 2] = p.y;
                 data[b + 3] = p.z;
                 data[b + 4] = rotY;
-                data[b + 5] = health != null ? health.Hp : 0f;
-                data[b + 6] = health != null ? health.MaxHp : 0f;
                 idx++;
             }
 
@@ -1198,12 +1058,7 @@ namespace CNRZombieMod
             try
             {
                 if (IsMasterClient())
-                {
-                    if (!ev.Parameters.ContainsKey((byte)245)) return;
-                    var mht = ev.Parameters[(byte)245] as System.Collections.Hashtable;
-                    ProcessHitEvent(mht);
-                    return;
-                }
+                    return;  // master has authoritative state; no inbound data needed
 
                 if (!ev.Parameters.ContainsKey((byte)245)) return;
                 var ht = ev.Parameters[(byte)245] as System.Collections.Hashtable;
@@ -1222,9 +1077,7 @@ namespace CNRZombieMod
                     byte id = (byte)(int)data[b];
                     seen.Add(id);
                     ZombieProxy p = GetOrCreateProxy(id);
-                    float hp = data.Length > b + 5 ? data[b + 5] : 0f;
-                    float maxHp = data.Length > b + 6 ? data[b + 6] : 0f;
-                    p.SetTarget(data[b + 1], data[b + 2], data[b + 3], data[b + 4], hp, maxHp);
+                    p.SetTarget(data[b + 1], data[b + 2], data[b + 3], data[b + 4]);
                 }
 
                 RemoveMissingProxies(seen);
@@ -1262,7 +1115,6 @@ namespace CNRZombieMod
             if (state == null || state.Length < 8) return;
             int syncedRound = Mathf.RoundToInt(state[0]);
             int syncedPhase = Mathf.RoundToInt(state[1]);
-            bool resetPlayer = !_modeStarted || syncedRound != _round;
             _modeStarted = true;
             _round = syncedRound;
             _phase = syncedPhase;
@@ -1272,10 +1124,6 @@ namespace CNRZombieMod
             _zombiesKilled = Mathf.RoundToInt(state[5]);
             _zombiesRemaining = Mathf.RoundToInt(state[6]);
             _spawnQueue = Mathf.RoundToInt(state[7]);
-            if (resetPlayer)
-                ResetLocalPlayerForRound();
-            else
-                _localPlayerMaxHp = PlayerMaxHpForRound(_round);
         }
 
         private ZombieProxy GetOrCreateProxy(byte id)
@@ -1311,12 +1159,6 @@ namespace CNRZombieMod
             p = go.AddComponent<ZombieProxy>();
             p.ZombieId = id;
             p.Hook = this;
-            ZombieHealth health = go.GetComponent<ZombieHealth>();
-            if (health == null) health = go.AddComponent<ZombieHealth>();
-            health.Hook = this;
-            health.ZombieId = id;
-            health.IsProxy = true;
-            AttachDamageRelays(go, health);
             _proxies[id] = p;
             return p;
         }
@@ -3065,15 +2907,11 @@ namespace CNRZombieMod
         public byte  ZombieId;
         public float ChaseSpeed = 2.8f;
         public ZombieHook Hook;
-        public float AttackDamage = 8f;
 
         private const float CLIMB_RATE = 3.8f;
         private const float DESCEND_RATE = 7.0f;
         private const float STUCK_MIN_MOVE = 0.04f;
         private const float STUCK_TIME = 1.15f;
-        private const float ATTACK_RANGE = 3.25f;
-        private const float ATTACK_HEIGHT = 2.4f;
-        private const float ATTACK_INTERVAL = 1.15f;
 
         private Component          _singleEnemyAI; // SingleEnemyAI instance (may be null if not on GO)
         private CharacterController _cc;            // for wall-respecting movement when no A* graph
@@ -3088,7 +2926,6 @@ namespace CNRZombieMod
         private string              _lastMoveDecision = "";
         private float               _stuckTimer;
         private Vector3             _lastMovePos;
-        private float               _attackTimer;
         private static int          _debugZombieId = -1;
 
         // Reflected fields/props on SingleEnemyAI / AIPath
@@ -3100,6 +2937,12 @@ namespace CNRZombieMod
         // Body/hand Animation components (for playing walk animation)
         private Animation _bodyAnim;
         private Animation _handAnim;
+
+        void OnDestroy()
+        {
+            try { if (Hook != null) Hook.OnZombieVanillaDeath(ZombieId); }
+            catch (Exception ex) { ZombieModEntry.Log("ZombieDriver.OnDestroy err: " + ex.Message); }
+        }
 
         void Start()
         {
@@ -3217,7 +3060,6 @@ namespace CNRZombieMod
 
                 Transform playerTr = GetNearestPlayer();
                 if (playerTr == null) return;
-                TryUnarmedAttack(playerTr);
 
                 if (_useCustomNav && ZombieNavGrid.Ready)
                 {
@@ -3389,58 +3231,6 @@ namespace CNRZombieMod
             return groundY + 0.1f;
         }
 
-        private void TryUnarmedAttack(Transform playerTr)
-        {
-            _attackTimer -= Time.deltaTime;
-            if (_attackTimer > 0f || playerTr == null) return;
-
-            Vector3 toPlayer = playerTr.position - transform.position;
-            float dy = Mathf.Abs(toPlayer.y);
-            toPlayer.y = 0f;
-            if (toPlayer.sqrMagnitude > ATTACK_RANGE * ATTACK_RANGE || dy > ATTACK_HEIGHT)
-                return;
-
-            if (!HasAttackLine(playerTr))
-                return;
-
-            _attackTimer = ATTACK_INTERVAL;
-            if (toPlayer.sqrMagnitude > 0.01f)
-                transform.rotation = Quaternion.LookRotation(toPlayer.normalized);
-
-            // TODO gun-game bots: replace this simple unarmed interval hit with
-            // weapon-specific line-of-sight, fire-rate, projectile, and Photon
-            // sync behavior so bots can participate correctly in gun modes.
-            if (Hook != null && playerTr.gameObject.name == "ExampleCharacter")
-                Hook.ApplyLocalZombieDamage(AttackDamage);
-            try { playerTr.gameObject.SendMessage("PlayerDamage", AttackDamage, SendMessageOptions.DontRequireReceiver); } catch { }
-            try { playerTr.gameObject.SendMessageUpwards("PlayerDamage", AttackDamage, SendMessageOptions.DontRequireReceiver); } catch { }
-            Dbg("Decision: unarmed-attack target=" + playerTr.name + " damage=" + AttackDamage +
-                " range=" + Mathf.Sqrt(toPlayer.sqrMagnitude).ToString("F2"));
-        }
-
-        private bool HasAttackLine(Transform playerTr)
-        {
-            Vector3 start = transform.position + Vector3.up * 1.15f;
-            Vector3 end = playerTr.position + Vector3.up * 0.9f;
-            Vector3 dir = end - start;
-            float dist = dir.magnitude;
-            if (dist < 0.05f) return true;
-
-            RaycastHit hit;
-            if (!Physics.Raycast(start, dir / dist, out hit, dist, -1))
-                return true;
-            if (hit.transform == playerTr || hit.transform.IsChildOf(playerTr))
-                return true;
-            if (hit.collider != null && hit.collider.gameObject != null)
-            {
-                string n = hit.collider.gameObject.name;
-                if (n != null && (n.IndexOf("ExampleCharacter") >= 0 ||
-                    n.IndexOf("Player") >= 0 || n.IndexOf("NetPlayer") >= 0))
-                    return true;
-            }
-            return false;
-        }
-
         private bool IsDebugZombie()
         {
             return _debugZombieId == ZombieId;
@@ -3515,84 +3305,14 @@ namespace CNRZombieMod
 
     // ─────────────────────────────────────────────────────────────────────────
     // ZOMBIE PROXY — on the enemy GO on non-master clients.
-    // Receives target position from ZombieHook.OnZombieEvent and interpolates.
-    // Also plays the walk animation and shows a Z-label above the enemy.
     // ─────────────────────────────────────────────────────────────────────────
-    public class ZombieHealth : MonoBehaviour
-    {
-        public ZombieHook Hook;
-        public byte ZombieId;
-        public bool IsProxy;
-        public float Hp;
-        public float MaxHp;
-
-        public void SetHealth(float maxHp)
-        {
-            MaxHp = Mathf.Max(1f, maxHp);
-            Hp = MaxHp;
-        }
-
-        public void SetHealth(float maxHp, float hp)
-        {
-            MaxHp = Mathf.Max(1f, maxHp);
-            Hp = Mathf.Clamp(hp, 0f, MaxHp);
-        }
-
-        public void ApplyAuthoritativeDamage(float amount)
-        {
-            Hp = Mathf.Max(0f, Hp - Mathf.Max(0f, amount));
-        }
-
-        public void PlayerDamage(float amount) { ReportDamage(amount); }
-        public void playerDamage(float amount) { ReportDamage(amount); }
-        public void EnemyDamage(float amount) { ReportDamage(amount); }
-        public void TakeDamage(float amount) { ReportDamage(amount); }
-        public void Damage(float amount) { ReportDamage(amount); }
-        public void PlayerDamage(int amount) { ReportDamage((float)amount); }
-        public void playerDamage(int amount) { ReportDamage((float)amount); }
-        public void EnemyDamage(int amount) { ReportDamage((float)amount); }
-        public void TakeDamage(int amount) { ReportDamage((float)amount); }
-        public void Damage(int amount) { ReportDamage((float)amount); }
-        public void PlayerDamage() { ReportDamage(25f); }
-        public void EnemyDamage() { ReportDamage(25f); }
-        public void TakeDamage() { ReportDamage(25f); }
-        public void Damage() { ReportDamage(25f); }
-
-        private void ReportDamage(float amount)
-        {
-            if (Hook != null) Hook.OnZombieDamaged(this, amount);
-        }
-    }
-
-    public class ZombieDamageRelay : MonoBehaviour
-    {
-        public ZombieHealth Owner;
-
-        public void PlayerDamage(float amount) { if (Owner != null) Owner.PlayerDamage(amount); }
-        public void playerDamage(float amount) { if (Owner != null) Owner.playerDamage(amount); }
-        public void EnemyDamage(float amount) { if (Owner != null) Owner.EnemyDamage(amount); }
-        public void TakeDamage(float amount) { if (Owner != null) Owner.TakeDamage(amount); }
-        public void Damage(float amount) { if (Owner != null) Owner.Damage(amount); }
-        public void PlayerDamage(int amount) { if (Owner != null) Owner.PlayerDamage(amount); }
-        public void playerDamage(int amount) { if (Owner != null) Owner.playerDamage(amount); }
-        public void EnemyDamage(int amount) { if (Owner != null) Owner.EnemyDamage(amount); }
-        public void TakeDamage(int amount) { if (Owner != null) Owner.TakeDamage(amount); }
-        public void Damage(int amount) { if (Owner != null) Owner.Damage(amount); }
-        public void PlayerDamage() { if (Owner != null) Owner.PlayerDamage(); }
-        public void EnemyDamage() { if (Owner != null) Owner.EnemyDamage(); }
-        public void TakeDamage() { if (Owner != null) Owner.TakeDamage(); }
-        public void Damage() { if (Owner != null) Owner.Damage(); }
-    }
-
     public class ZombieProxy : MonoBehaviour
     {
         public byte ZombieId;
         public ZombieHook Hook;
 
         private float _tx, _ty, _tz, _tRotY;
-        private float _hp, _maxHp;
         private bool  _hasTarget;
-        private float _attackTimer;
 
         private Animation _bodyAnim;
         private Animation _handAnim;
@@ -3610,7 +3330,7 @@ namespace CNRZombieMod
             if (_handAnim != null) _handAnim.Play("walkway");
         }
 
-        public void SetTarget(float x, float y, float z, float rotY, float hp, float maxHp)
+        public void SetTarget(float x, float y, float z, float rotY)
         {
             if (!_hasTarget)
             {
@@ -3619,9 +3339,6 @@ namespace CNRZombieMod
                 _hasTarget = true;
             }
             _tx = x; _ty = y; _tz = z; _tRotY = rotY;
-            _hp = hp; _maxHp = maxHp;
-            ZombieHealth h = GetComponent<ZombieHealth>();
-            if (h != null) h.SetHealth(maxHp > 0f ? maxHp : h.MaxHp, hp);
         }
 
         void Update()
@@ -3632,23 +3349,6 @@ namespace CNRZombieMod
             transform.position = Vector3.Lerp(p, new Vector3(_tx, _ty, _tz), t);
             transform.rotation = Quaternion.Euler(0f,
                 Mathf.LerpAngle(transform.eulerAngles.y, _tRotY, t), 0f);
-
-            _attackTimer -= Time.deltaTime;
-            if (_attackTimer <= 0f && Hook != null)
-            {
-                GameObject player = GameObject.Find("ExampleCharacter");
-                if (player != null)
-                {
-                    Vector3 d = player.transform.position - transform.position;
-                    float dy = Mathf.Abs(d.y);
-                    d.y = 0f;
-                    if (d.sqrMagnitude <= 3.25f * 3.25f && dy <= 2.4f)
-                    {
-                        _attackTimer = 1.15f;
-                        Hook.ApplyLocalZombieDamage(Hook.CurrentZombieDamage);
-                    }
-                }
-            }
         }
 
         void OnGUI()
@@ -3658,8 +3358,7 @@ namespace CNRZombieMod
             Vector3 sp = cam.WorldToScreenPoint(transform.position + new Vector3(0f, 1.4f, 0f));
             if (sp.z <= 0f) return;
             GUI.color = Color.green;
-            string hp = _maxHp > 0f ? " " + Mathf.CeilToInt(_hp) + "/" + Mathf.CeilToInt(_maxHp) : "";
-            GUI.Label(new Rect(sp.x - 45f, Screen.height - sp.y - 10f, 90f, 20f), "Z" + ZombieId + hp);
+            GUI.Label(new Rect(sp.x - 45f, Screen.height - sp.y - 10f, 90f, 20f), "Z" + ZombieId);
             GUI.color = Color.white;
         }
 
