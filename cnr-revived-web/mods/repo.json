@@ -1755,11 +1755,16 @@
       "id": "CNRZombieMod",
       "name": "CNR Zombie Mod",
       "description": "Multiplayer zombie test mod. Master client spawns real game enemies (SingleEnemyAI + model + animations + pathfinding) and syncs their positions via Photon event 198. All clients see the same NPCs moving in real time.",
-      "latestVersion": "0.7.9",
+      "latestVersion": "0.7.11",
       "filename": "CNRZombieMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.7.9.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.7.11.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "0.7.11",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.7.11.dll",
+          "changelog": "disabled texture smoothing on zombies "
+        },
         {
           "version": "0.7.9",
           "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.7.9.dll",
