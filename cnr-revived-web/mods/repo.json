@@ -1755,11 +1755,111 @@
       "id": "CNRZombieMod",
       "name": "CNR Zombie Mod",
       "description": "Multiplayer zombie test mod. Master client spawns real game enemies (SingleEnemyAI + model + animations + pathfinding) and syncs their positions via Photon event 198. All clients see the same NPCs moving in real time.",
-      "latestVersion": "0.8.2",
+      "latestVersion": "0.8.27",
       "filename": "CNRZombieMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.2.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.27.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "0.8.27",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.27.dll",
+          "changelog": "test"
+        },
+        {
+          "version": "0.8.26",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.26.dll",
+          "changelog": "Remove generic FindObjectsOfType scans that trigger Unity Invalid Type on Android"
+        },
+        {
+          "version": "0.8.25",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.25.dll",
+          "changelog": "Fix remaining invalid type scans in dump/nav paths"
+        },
+        {
+          "version": "0.8.24",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.24.dll",
+          "changelog": "Temporarily disable spectating logic to isolate zombie sync"
+        },
+        {
+          "version": "0.8.23",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.23.dll",
+          "changelog": "Remove invalid type lookup in spectate target selection"
+        },
+        {
+          "version": "0.8.22",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.22.dll",
+          "changelog": "Add explicit zombie kill sync so clients remove dead zombies immediately"
+        },
+        {
+          "version": "0.8.21",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.21.dll",
+          "changelog": "Restore local zombie targeting and fix remote-only spectate selection"
+        },
+        {
+          "version": "0.8.20",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.20.dll",
+          "changelog": "Route zombie damage to the targeted peer and keep dead players out of target selection"
+        },
+        {
+          "version": "0.8.17",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.17.dll",
+          "changelog": "Hide dead players, exclude them from zombie targeting, and spectate on alive players"
+        },
+        {
+          "version": "0.8.14",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.14.dll",
+          "changelog": "Fix zombie damage target, add gameover sync, and stop client respawn fallback"
+        },
+        {
+          "version": "0.8.12",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.12.dll",
+          "changelog": "Fix client-side zombie damage and host-side kill sync."
+        },
+        {
+          "version": "0.8.11",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.11.dll",
+          "changelog": "Normalize wrapped zombie event arrays."
+        },
+        {
+          "version": "0.8.10",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.10.dll",
+          "changelog": "Decode wrapped zombie event payloads."
+        },
+        {
+          "version": "0.8.9",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.9.dll",
+          "changelog": "Log and tolerate zombie event payload envelopes."
+        },
+        {
+          "version": "0.8.8",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.8.dll",
+          "changelog": "Reliable zombie sync and host handoff fixes."
+        },
+        {
+          "version": "0.8.7",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.7.dll",
+          "changelog": "Fix zombie authority to follow CNR serverId and handle host handoff."
+        },
+        {
+          "version": "0.8.6",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.6.dll",
+          "changelog": "Use CNR serverPeerId and server role for zombie authority"
+        },
+        {
+          "version": "0.8.5",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.5.dll",
+          "changelog": "Use app serverId for zombie authority; survive host migration"
+        },
+        {
+          "version": "0.8.4",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.4.dll",
+          "changelog": "Master/client diagnostics for zombie sync and damage"
+        },
+        {
+          "version": "0.8.3",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.3.dll",
+          "changelog": "Master-only zombie melee; downed zombies stop attacking sooner"
+        },
         {
           "version": "0.8.2",
           "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.2.dll",
