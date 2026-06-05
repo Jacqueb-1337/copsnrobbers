@@ -306,11 +306,76 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.2.12",
+      "latestVersion": "3.2.32",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.12.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.32.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.2.32",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.32.dll",
+          "changelog": "Player base skins now crop the top half of 64x64 skins while overlay layers stay separate."
+        },
+        {
+          "version": "3.2.30",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.30.dll",
+          "changelog": "Runtime player skins now pack into the same CNR atlas layout as the editor, including 64x64 source skins."
+        },
+        {
+          "version": "3.2.27",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.27.dll",
+          "changelog": "Applied a legacy-compatible base pass for 64x64 player skins only on the in-game renderer."
+        },
+        {
+          "version": "3.2.26",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.26.dll",
+          "changelog": "Reverted the 64x64-to-64x32 runtime skin collapse; skins now load as provided again."
+        },
+        {
+          "version": "3.2.25",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.25.dll",
+          "changelog": "Runtime now collapses 64x64 player skins to the legacy 64x32 base layout before applying them."
+        },
+        {
+          "version": "3.2.24",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.24.dll",
+          "changelog": "Reverted runtime player skin normalization and overlay clone; runtime now uses the existing skin texture path again."
+        },
+        {
+          "version": "3.2.23",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.23.dll",
+          "changelog": "Player skin runtime now normalizes to 64x64 and adds an overlay clone pass to match the editor preview."
+        },
+        {
+          "version": "3.2.21",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.21.dll",
+          "changelog": "Hook GameKit peerConnected and rewrite join placeholders from the event queue instead of polling message state."
+        },
+        {
+          "version": "3.2.17",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.17.dll",
+          "changelog": "Add verbose join-feed diagnostics for peer-name resolution and message rewrite timing."
+        },
+        {
+          "version": "3.2.16",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.16.dll",
+          "changelog": "Use GameKit displayNameForPeer to replace join-feed placeholder with the real player name."
+        },
+        {
+          "version": "3.2.15",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.15.dll",
+          "changelog": "Fix join feed nickname resolution by checking Photon player names and rewriting placeholder join text later in the frame."
+        },
+        {
+          "version": "3.2.14",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.14.dll",
+          "changelog": "Expand join-feed replacement to both CRMultiplayerManager and CNRMultiplayerManager so placeholder join messages are rewritten when the synced nickname becomes available."
+        },
+        {
+          "version": "3.2.13",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.13.dll",
+          "changelog": "Fix join feed placeholder by replacing 'New Player(id-...) Connected!' with the synced nickname once CRMultiplayerManager has the real CRPlayerInfo.mNickName."
+        },
         {
           "version": "3.2.12",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.12.dll",
@@ -1755,11 +1820,146 @@
       "id": "CNRZombieMod",
       "name": "CNR Zombie Mod",
       "description": "Multiplayer zombie test mod. Master client spawns real game enemies (SingleEnemyAI + model + animations + pathfinding) and syncs their positions via Photon event 198. All clients see the same NPCs moving in real time.",
-      "latestVersion": "0.8.27",
+      "latestVersion": "0.8.51",
       "filename": "CNRZombieMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.27.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.51.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "0.8.51",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.51.dll",
+          "changelog": "test"
+        },
+        {
+          "version": "0.8.50",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.50.dll",
+          "changelog": "Route zombie kill/death feed into the shared multiplayer message list so it appears with the join feed instead of a separate HUD block."
+        },
+        {
+          "version": "0.8.49",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.49.dll",
+          "changelog": "Re-enable weighted zombie1-zombie5 variants by removing the test-skin override; host picks the variant and syncs it to clients for deterministic spawning."
+        },
+        {
+          "version": "0.8.48",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.48.dll",
+          "changelog": "Reduce log spam, clear zombie log on launch, add stuck recovery wander for zombies that stall on reachable blocks, and keep the existing client/host sync fixes."
+        },
+        {
+          "version": "0.8.47",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.47.dll",
+          "changelog": "Trigger game over when all players are down, sync zombie variants so client proxies use the same custom skins/overlays, and chase a point near the player instead of the exact center."
+        },
+        {
+          "version": "0.8.45",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.45.dll",
+          "changelog": "Force local players onto cops team, keep zombie points local-only per client, and preserve client zombie skin/overlay visuals while removing debug HUD text."
+        },
+        {
+          "version": "0.8.44",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.44.dll",
+          "changelog": "Make zombie points local-only per client, remove points from synced round state, trigger game over when all players are down, and disable the zombie debug HUD in normal play."
+        },
+        {
+          "version": "0.8.43",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.43.dll",
+          "changelog": "Fix host zombie health sync by sampling live Enemy3 blood before broadcast so clients receive real damage values."
+        },
+        {
+          "version": "0.8.42",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.42.dll",
+          "changelog": "Test bump for zombie health sync validation"
+        },
+        {
+          "version": "0.8.41",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.41.dll",
+          "changelog": "Fix synced zombie health visuals on host and client; stop proxy melee from reporting fake zombie damage"
+        },
+        {
+          "version": "0.8.40",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.40.dll",
+          "changelog": "Sync zombie blood bars on host and clients; remove proxy melee self-damage reports"
+        },
+        {
+          "version": "0.8.39",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.39.dll",
+          "changelog": "Run local downed-state detection on clients and apply synced zombie HP to proxy blood bars"
+        },
+        {
+          "version": "0.8.38",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.38.dll",
+          "changelog": "Bump after restoring client-local downed sync"
+        },
+        {
+          "version": "0.8.37",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.37.dll",
+          "changelog": "Client local death now forces downed state, suppresses respawn, and reports downed sync to host"
+        },
+        {
+          "version": "0.8.38",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.38.dll",
+          "changelog": "Restore local zombie attack damage on each machine while keeping downed-state sync"
+        },
+        {
+          "version": "0.8.37",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.37.dll",
+          "changelog": "Revert to 0.8.36 baseline and apply local client downed-state suppression"
+        },
+        {
+          "version": "0.8.40",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.40.dll",
+          "changelog": "Remove client proxy melee attacks so only authority-driven zombie damage applies"
+        },
+        {
+          "version": "0.8.39",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.39.dll",
+          "changelog": "Make zombie melee damage local to each machine and keep downed sync separate"
+        },
+        {
+          "version": "0.8.38",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.38.dll",
+          "changelog": "Fix client player damage sync method name so downed state reaches host"
+        },
+        {
+          "version": "0.8.37",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.37.dll",
+          "changelog": "Apply local downed state on clients so they do not vanilla-respawn"
+        },
+        {
+          "version": "0.8.36",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.36.dll",
+          "changelog": "Write shared zombie health back into the enemy logic on host and clients"
+        },
+        {
+          "version": "0.8.34",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.34.dll",
+          "changelog": "Throttle duplicate client zombie damage reports and broadcast health immediately after damage"
+        },
+        {
+          "version": "0.8.33",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.33.dll",
+          "changelog": "Forward client zombie damage through proxy hooks and sync shared zombie health"
+        },
+        {
+          "version": "0.8.32",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.32.dll",
+          "changelog": "Fix stale downed target exclusion and log remote target candidates"
+        },
+        {
+          "version": "0.8.31",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.31.dll",
+          "changelog": "Report client-side zombie proxy deaths to authority"
+        },
+        {
+          "version": "0.8.30",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.30.dll",
+          "changelog": "Restore client zombie targeting using CNR multiplayer player arrays"
+        },
+        {
+          "version": "0.8.29",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.29.dll",
+          "changelog": "Add verbose target, damage, and kill-credit logging for zombie sync debugging"
+        },
         {
           "version": "0.8.27",
           "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.27.dll",
