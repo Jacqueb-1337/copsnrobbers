@@ -306,11 +306,26 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.2.38",
+      "latestVersion": "3.2.39",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.38.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.39.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.2.39",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.39.dll",
+          "changelog": "test"
+        },
+        {
+          "version": "3.2.38",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.38.dll",
+          "changelog": "BackToMenu in skin shop/profile is now nulled on the vanilla component and routed through the mod interceptor, preventing the double-fire while preserving the same button target. Left/right skin selectors remain hidden."
+        },
+        {
+          "version": "3.2.38",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.38.dll",
+          "changelog": "Skin grid now keeps the live model hidden while browsing, and the back button is handled only through the intercepted vanilla button path so it can return to grid in detail view without double-firing."
+        },
         {
           "version": "3.2.38",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.38.dll",
