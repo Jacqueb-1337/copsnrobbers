@@ -306,11 +306,41 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.2.32",
+      "latestVersion": "3.2.37",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.32.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.37.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.2.37",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.37.dll",
+          "changelog": "Skin grid now locks model interaction while browsing, and vanilla left/right skin selectors are hidden so the custom UI owns skin navigation. Back is intercepted once and returns to grid only in detail view."
+        },
+        {
+          "version": "3.2.37",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.37.dll",
+          "changelog": "Skin grid back button now returns to grid only from detail view, and grid input no longer click-throughs to the live model while scrolling."
+        },
+        {
+          "version": "3.2.36",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.36.dll",
+          "changelog": "Apply player skin overlays to shop/profile role models in addition to in-game player models."
+        },
+        {
+          "version": "3.2.35",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.35.dll",
+          "changelog": "Restored player overlay render pass using a separate cropped overlay texture while keeping the base texture cropped correctly."
+        },
+        {
+          "version": "3.2.34",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.34.dll",
+          "changelog": "Fixed 64x64 player base crop to use the visual top half instead of the overlay half."
+        },
+        {
+          "version": "3.2.33",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.33.dll",
+          "changelog": "Player model base materials now use the cropped 64x32 base texture from 64x64 skins while preserving full textures for overlay data."
+        },
         {
           "version": "3.2.32",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.32.dll",
@@ -1820,11 +1850,16 @@
       "id": "CNRZombieMod",
       "name": "CNR Zombie Mod",
       "description": "Multiplayer zombie test mod. Master client spawns real game enemies (SingleEnemyAI + model + animations + pathfinding) and syncs their positions via Photon event 198. All clients see the same NPCs moving in real time.",
-      "latestVersion": "0.8.51",
+      "latestVersion": "0.8.52",
       "filename": "CNRZombieMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.51.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.52.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "0.8.52",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.52.dll",
+          "changelog": "test"
+        },
         {
           "version": "0.8.51",
           "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.51.dll",
