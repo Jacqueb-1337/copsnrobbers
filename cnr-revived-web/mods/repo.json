@@ -306,11 +306,161 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.2.39",
+      "latestVersion": "3.2.73",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.39.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.73.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.2.73",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.73.dll",
+          "changelog": "Revert zombie gun suppression guard experiment"
+        },
+        {
+          "version": "3.2.72",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.72.dll",
+          "changelog": "Disable zombie gun fire without disabling A* movement"
+        },
+        {
+          "version": "3.2.71",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.71.dll",
+          "changelog": "Revert the Enemy3 combat suppression experiment that broke zombie movement and health, restoring the previous A*-driven zombie behavior."
+        },
+        {
+          "version": "3.2.70",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.70.dll",
+          "changelog": "Restore zombie A* pathfinding while keeping vanilla Enemy3 combat and weapon behaviours disabled."
+        },
+        {
+          "version": "3.2.69",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.69.dll",
+          "changelog": "Prevent zombie Enemy3 prefabs from entering vanilla ranged attack AI: keep SingleEnemyAI/enemyLogic disabled and force walk animation during zombie movement."
+        },
+        {
+          "version": "3.2.68",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.68.dll",
+          "changelog": "Hide downed zombie-mode players and disable their colliders on all clients, restoring them on revive or cleanup."
+        },
+        {
+          "version": "3.2.67",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.67.dll",
+          "changelog": "Delay Zombies round countdown until the authoritative host has finished team selection and reached InGame status, while preserving forced Cop team assignment."
+        },
+        {
+          "version": "3.2.66",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.66.dll",
+          "changelog": "Disable local-player overlay cloning to prevent duplicate controller/camera roots while preserving base local skin and remote overlays."
+        },
+        {
+          "version": "3.2.65",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.65.dll",
+          "changelog": "Replace multiplayer mode selection with a fully custom CNR-owned list so vanilla shell modes no longer appear checked alongside CTF or Zombies, and hide zombie HUD outside zombie rooms."
+        },
+        {
+          "version": "3.2.64",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.64.dll",
+          "changelog": "Fix custom room mode radio row ordering by sorting vanilla mode buttons by visual Y position before appending CTF and Zombies."
+        },
+        {
+          "version": "3.2.63",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.63.dll",
+          "changelog": "Fix CTF and Zombies room mode radio buttons appending after the active vanilla mode list without overlapping Stronghold."
+        },
+        {
+          "version": "3.2.62",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.62.dll",
+          "changelog": "Clean stale custom mode rows and remove cloned position tweens so CTF appends after vanilla modes instead of snapping back over Stronghold."
+        },
+        {
+          "version": "3.2.61",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.61.dll",
+          "changelog": "Force CTF and Zombies to sit below the last visible vanilla room-select row using explicit positions instead of sibling-order placement."
+        },
+        {
+          "version": "3.2.60",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.60.dll",
+          "changelog": "Finish the sibling-order placement fix for CTF and Zombies so the custom buttons append after the vanilla list without using hardcoded row offsets."
+        },
+        {
+          "version": "3.2.57",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.57.dll",
+          "changelog": "Make custom room buttons append from the lowest visible vanilla mode row so CTF and Zombies stay below the end of the vanilla list on all maps."
+        },
+        {
+          "version": "3.2.56",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.56.dll",
+          "changelog": "Append custom mode buttons after the last visible vanilla row instead of anchoring them to the hidden Stronghold slot."
+        },
+        {
+          "version": "3.2.55",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.55.dll",
+          "changelog": "Restore CTF to the Stronghold row and place Zombies directly beneath it instead of pushing the stack too low."
+        },
+        {
+          "version": "3.2.54",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.54.dll",
+          "changelog": "Re-anchor custom room buttons to the vanilla mode list so CTF and Zombies stack beneath the visible vanilla rows without adding an extra gap."
+        },
+        {
+          "version": "3.2.53",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.53.dll",
+          "changelog": "Tighten the zombie and CTF room-select spacing so the custom button stack uses the native row gap instead of a doubled offset."
+        },
+        {
+          "version": "3.2.52",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.52.dll",
+          "changelog": "Fix zombie room button placement so it sits below CTF when CTF is visible and reuses the CTF slot only when CTF is absent."
+        },
+        {
+          "version": "3.2.51",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.51.dll",
+          "changelog": "Fix zombie room select to behave like a separate radio option, keep vanilla KC separate, and align the zombie radio button relative to the CTF button."
+        },
+        {
+          "version": "3.2.50",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.50.dll",
+          "changelog": "Integrated zombie mod into CNRMod, added a zombie room option in multiplayer select, and wired the KC-based zombie room flag through the CNR event path."
+        },
+        {
+          "version": "3.2.49",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.49.dll",
+          "changelog": "Sync first-person hand skin material with the equipped player skin so local arms no longer stay on vanilla textures."
+        },
+        {
+          "version": "3.2.46",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.46.dll",
+          "changelog": "Stop truncating skin grid labels and keep DLC preview labels/overlays refreshed across multiple frames so vanilla UI does not wipe them."
+        },
+        {
+          "version": "3.2.45",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.45.dll",
+          "changelog": "Defer DLC preview refresh one frame so vanilla SetSkinData does not overwrite labels or overlay state."
+        },
+        {
+          "version": "3.2.44",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.44.dll",
+          "changelog": "Delay skin preview label and overlay refresh by one frame so vanilla SetSkinData does not overwrite the DLC preview state."
+        },
+        {
+          "version": "3.2.43",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.43.dll",
+          "changelog": "Skin grid now returns to the previously viewed scroll position instead of recentering on equipped skin, and DLC skin preview labels are populated into the vanilla skin name/price/unlock fields."
+        },
+        {
+          "version": "3.2.42",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.42.dll",
+          "changelog": "Skin grid now shows a loading spinner instead of the raw atlas while thumbnails render, and each thumbnail appears immediately as soon as its render completes."
+        },
+        {
+          "version": "3.2.41",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.41.dll",
+          "changelog": "Skin thumbnails now reset the preview model pose and use a fixed front-facing thumbnail camera before each capture, so dragged shop/profile model rotation no longer affects grid thumbnails."
+        },
+        {
+          "version": "3.2.40",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.40.dll",
+          "changelog": "Persistently guards shop/profile skin Back buttons and native left/right selectors while the custom skin grid is active, preventing vanilla Back double-fire and stale native picker controls."
+        },
         {
           "version": "3.2.39",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.39.dll",
@@ -1738,12 +1888,27 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.4.9",
+      "latestVersion": "1.5.0",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.9.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.5.0.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.5.0",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.5.0.dll",
+          "changelog": "added better manifest reading and implemented mod dependencies"
+        },
+        {
+          "version": "1.4.9",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.9.dll",
+          "changelog": "Add repo manifest dependency parsing plus recursive dependency installs with min-version enforcement"
+        },
+        {
+          "version": "1.4.9",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.9.dll",
+          "changelog": "Add repo manifest dependency parsing plus recursive dependency installs with min-version enforcement"
+        },
         {
           "version": "1.4.9",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.4.9.dll",
@@ -2295,6 +2460,154 @@
           "version": "0.1.0",
           "url": "https://play.jacqueb.me/mods/CNRFreecamMod/CNRFreecamMod-0.1.0.dll",
           "changelog": "Initial release. F6 toggle, fly camera, ghost body at real player position, F key collider inspector."
+        }
+      ]
+    },
+    {
+      "id": "VoiceChat",
+      "name": "Voice Chat",
+      "description": "Diagnostic scaffold for future in-game voice chat. Registers with CNRMod and logs microphone devices plus available runtime networking APIs.",
+      "latestVersion": "0.3.0",
+      "filename": "VoiceChat.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.3.0.dll",
+      "latestOnly": false,
+      "dependencies": [
+        {
+          "kind": "file",
+          "filename": "libwebrtc-android-release-144.7559.05.aar",
+          "url": "https://github.com/webrtc-sdk/android/releases/download/v144.7559.05/libwebrtc-android-release.aar"
+        }
+      ],
+      "versions": [
+        {
+          "version": "0.3.0",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.3.0.dll",
+          "changelog": "Expand WebRTC bridge with connect/disconnect and signal plumbing while keeping PCM fallback"
+        },
+        {
+          "version": "0.3.0",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.3.0.dll",
+          "changelog": "Expand WebRTC bridge with connect/disconnect and signal plumbing while keeping PCM fallback"
+        },
+        {
+          "version": "0.3.0",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.3.0.dll",
+          "changelog": "Add WebRTC signaling scaffold over Photon events while preserving PCM fallback"
+        },
+        {
+          "version": "0.3.0",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.3.0.dll",
+          "changelog": "Add WebRTC signaling scaffold over Photon events while preserving PCM fallback"
+        },
+        {
+          "version": "0.2.23",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.23.dll",
+          "changelog": "Hold last sample through short starvation and require a prebuffer before playback"
+        },
+        {
+          "version": "0.2.22",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.22.dll",
+          "changelog": "Lower playback factor further without trimming backlog"
+        },
+        {
+          "version": "0.2.21",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.21.dll",
+          "changelog": "Remove remote queue trimming so playback can run to the end of backlog"
+        },
+        {
+          "version": "0.2.20",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.20.dll",
+          "changelog": "Reduce playout slowdown and remove periodic backlog trimming"
+        },
+        {
+          "version": "0.2.19",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.19.dll",
+          "changelog": "Increase remote playback slowdown substantially to reduce pitch and gaps"
+        },
+        {
+          "version": "0.2.18",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.18.dll",
+          "changelog": "Slow remote playout more and delay backlog trimming to reduce pitch and gaps"
+        },
+        {
+          "version": "0.2.17",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.17.dll",
+          "changelog": "Remove AudioSource pitch tweak, slow resampler 1 percent, and trim backlog once per second"
+        },
+        {
+          "version": "0.2.16",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.16.dll",
+          "changelog": "Lower remote pitch to 8 kHz and enlarge jitter buffer"
+        },
+        {
+          "version": "0.2.15",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.15.dll",
+          "changelog": "Resample remote voice to output rate to remove clicking"
+        },
+        {
+          "version": "0.2.14",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.14.dll",
+          "changelog": "Replace remote clip playback with continuous audio filter jitter buffer"
+        },
+        {
+          "version": "0.2.13",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.13.dll",
+          "changelog": "Increase voice frame rate and remove silence gate to stop rhythmic dropouts"
+        },
+        {
+          "version": "0.2.12",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.12.dll",
+          "changelog": "Loop streamed remote voice clip to remove 1s on/off playback"
+        },
+        {
+          "version": "0.2.11",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.11.dll",
+          "changelog": "Attach remote voice playback to camera to restore audibility"
+        },
+        {
+          "version": "0.2.9",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.9.dll",
+          "changelog": "Switch remote playback to streaming queue and raise mic sensitivity"
+        },
+        {
+          "version": "0.2.7",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.7.dll",
+          "changelog": "Replace remote ring buffer with one-shot packet playback to stop repeats"
+        },
+        {
+          "version": "0.2.6",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.6.dll",
+          "changelog": "Fix remote voice replay looping by disabling looping playback"
+        },
+        {
+          "version": "0.2.5",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.5.dll",
+          "changelog": "Tear down voice chat outside games and reduce remote playback delay"
+        },
+        {
+          "version": "0.2.4",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.4.dll",
+          "changelog": "Add in-game mic and speaker HUD toggles with mute state"
+        },
+        {
+          "version": "0.2.3",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.3.dll",
+          "changelog": "Request Android RECORD_AUDIO permission before microphone capture"
+        },
+        {
+          "version": "0.2.2",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.2.dll",
+          "changelog": "Match zombie Photon event payload extraction and peer id handling"
+        },
+        {
+          "version": "0.2.1",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.2.1.dll",
+          "changelog": "Add Photon custom-event microphone voice chat prototype"
+        },
+        {
+          "version": "0.1.0",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.1.0.dll",
+          "changelog": "Initial diagnostic scaffold. Logs microphone devices and runtime availability of WebRTC, Photon Voice, Photon, sockets, and WebSocket APIs."
         }
       ]
     }
