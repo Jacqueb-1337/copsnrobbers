@@ -235,6 +235,68 @@ catch { }
 
 ---
 
+## Enemy health and damage
+
+The decompiled game code splits enemy combat into two separate systems:
+
+1. The older prefab family in [Assembly-CSharp.dll.decompiled.cs](APK_Build_Active/Assembly-CSharp-decompiled/Assembly-CSharp.dll.decompiled.cs) uses `enemyLogic` and `BulletEnemy`.
+2. The single-mode enemy family in [Assembly-CSharp.dll.decompiled.cs](APK_Build_Active/Assembly-CSharp-decompiled/Assembly-CSharp.dll.decompiled.cs) uses `SingleEnemyLogic` and `WeaponScript`.
+
+### Old prefab family
+
+These prefabs are handled by `enemyLogic`:
+
+- `Enemy1(Clone)`
+- `Enemy2(Clone)`
+- `Enemy3(Clone)`
+- `Enemy4(Clone)`
+- `Friend(Clone)`
+- `Friend2(Clone)`
+
+Their base health is `100`.
+
+Damage is applied by `BulletEnemy`, which chooses a damage band from the shooting prefab name:
+
+- `Enemy1(Clone)` -> `15` to `25`
+- `Enemy2(Clone)` -> `10` to `20`
+- `Enemy3(Clone)` -> `30` to `40`
+- `Enemy4(Clone)` -> `51` to `99`
+- `Friend(Clone)` -> `20` to `50`
+
+`BulletEnemy` then calls `enemyLogic.ReceiveDamage(int)` in team mode, or `enemyLogic.decreaseBlood(int)` in the other hit path. Both methods subtract raw integer damage from the shared `blood` field and destroy the bot at zero HP.
+
+### Single-mode enemy family
+
+These prefabs are handled by `SingleEnemyLogic`:
+
+- `knifeEnemy`
+- `gunEnemy`
+- `snipeEnemy`
+- `grenadeEnemy`
+
+Their base health is `130`, then `SingleEnemyLogic.Start()` scales it by difficulty and enemy tier:
+
+- Difficulty 1: custom `182`, elite `208`, boss `234`
+- Difficulty 2: custom `208`, elite `234`, boss `260`
+- Difficulty 3: custom `234`, elite `260`, boss `286`
+
+`DamageRate` also scales with difficulty, but the actual attack damage is not hard-coded in the enemy prefab itself. Instead, the enemy chooses a weapon ID on spawn and fires through `WeaponScript.FireInSingleMode()`, which assigns `Bullet.bulletDamage` based on the selected weapon and its upgrade level.
+
+Spawn/loadout mapping:
+
+- `knifeEnemy` -> `BallisticKnife` or `GingerbreadKnife`
+- `gunEnemy` -> `Deagle`, `STW-25`, `M87T`, `MP5KA4`, `G36K`, `GLOCK21`, `MP5KA5`, `UZI`, `M249`, `CandyRifle`, `SantaGun`
+- `sniperEnemy` -> `AWP` or `ChristmasSniper`
+- `grenadeEnemy` -> `M67`, `MilkBomb`, or `GingerbreadBomb`
+
+### Practical takeaway
+
+- If you are tuning the old `Enemy1` to `Enemy4` bots, you are adjusting fixed HP plus projectile damage ranges.
+- If you are tuning the single-mode enemies, you are tuning tier-scaled HP and weapon-specific bullet damage, not one universal damage value.
+- `SingleEnemyLogic.DamageRate` is part of the enemy scaling, but the code path that actually sets outgoing bullet damage lives in `WeaponScript`.
+
+---
+
 ## Progress
 
 | Milestone | Status |

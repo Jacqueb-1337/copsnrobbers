@@ -61,18 +61,35 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 # the output compatible with the Mono runtime embedded in the game.
 Write-Host "Building $OutName from $([System.IO.Path]::GetFileName($ModFile)) ..." -ForegroundColor Cyan
 
-& $Csc /nostdlib /noconfig `
-    "/out:$OutDll" `
-    "/target:library" `
-    "/reference:$ManagedDir\mscorlib.dll" `
-    "/reference:$ManagedDir\System.dll" `
-    "/reference:$ManagedDir\System.Core.dll" `
-    "/reference:$ManagedDir\UnityEngine.dll" `
-    "/reference:$ManagedDir\JsonFx.Json.dll" `
-    "/reference:$ManagedDir\Assembly-CSharp-firstpass.dll" `
-    "/reference:$ManagedDir\Assembly-CSharp.dll" `
-    "/reference:$ManagedDir\Photon3Unity3D.dll" `
-    "$ModFile" 2>&1 | Where-Object { $_ -notmatch "go.microsoft.com|only supports language" }
+$ModDir = [System.IO.Path]::GetDirectoryName($ModFile)
+$sourceFiles = Get-ChildItem -Path $ModDir -File -Filter "*.cs" |
+    Where-Object { $_.Name -notmatch '-\d+\.\d+\.\d+\.cs$' } |
+    Sort-Object Name
+
+if ($sourceFiles.Count -eq 0) {
+    Write-Host "ERROR: No source files found in $ModDir" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "Compiling source files:" -ForegroundColor Cyan
+foreach ($sf in $sourceFiles) { Write-Host "  $($sf.Name)" -ForegroundColor Gray }
+
+$compileArgs = @(
+    "/nostdlib", "/noconfig",
+    "/out:$OutDll",
+    "/target:library",
+    "/reference:$ManagedDir\mscorlib.dll",
+    "/reference:$ManagedDir\System.dll",
+    "/reference:$ManagedDir\System.Core.dll",
+    "/reference:$ManagedDir\UnityEngine.dll",
+    "/reference:$ManagedDir\JsonFx.Json.dll",
+    "/reference:$ManagedDir\Assembly-CSharp-firstpass.dll",
+    "/reference:$ManagedDir\Assembly-CSharp.dll",
+    "/reference:$ManagedDir\Photon3Unity3D.dll"
+)
+foreach ($sf in $sourceFiles) { $compileArgs += $sf.FullName }
+
+& $Csc @compileArgs 2>&1 | Where-Object { $_ -notmatch "go.microsoft.com|only supports language" }
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "BUILD FAILED" -ForegroundColor Red

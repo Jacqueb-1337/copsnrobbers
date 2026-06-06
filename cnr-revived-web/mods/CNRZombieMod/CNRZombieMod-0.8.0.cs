@@ -412,6 +412,21 @@ namespace CNRZombieMod
             return TransformPath(t).IndexOf("__EnemyOverlay", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        private static bool IsEnemyBodyPartName(string name)
+        {
+            return string.Equals(name, "1_1", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "1_2", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "1_3", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "1_4", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "1_005", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "1_006", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsEnemySkinPartName(string name)
+        {
+            return IsEnemyBodyPartName(name) || string.Equals(name, "blood", StringComparison.OrdinalIgnoreCase);
+        }
+
         void OnLevelWasLoaded(int level)
         {
             string scene = Application.loadedLevelName;
@@ -1462,10 +1477,12 @@ namespace CNRZombieMod
                 Renderer r = renderers[i];
                 if (r == null || r.transform == null) continue;
                 if (LooksLikeHeldWeapon(r.transform) || LooksLikeEnemyOverlay(r.transform)) continue;
+                string name = r.gameObject != null ? r.gameObject.name : "";
+                if (!IsEnemySkinPartName(name)) continue;
 
                 Mesh mesh = CloneRendererMesh(r);
                 if (mesh == null) continue;
-                RemapMeshUv(mesh, ENEMY_BASE_ATLAS, r.gameObject != null ? r.gameObject.name : "");
+                RemapMeshUv(mesh, ENEMY_BASE_ATLAS, name);
             }
 
             GameObject marker = new GameObject("__EnemyAtlasRemapped");
@@ -1488,13 +1505,15 @@ namespace CNRZombieMod
                 if (LooksLikeHeldWeapon(src.transform) || LooksLikeEnemyHealthBar(src.transform) ||
                     LooksLikeEnemyOverlay(src.transform))
                     continue;
+                string name = src.gameObject != null ? src.gameObject.name : "";
+                if (!IsEnemyBodyPartName(name)) continue;
                 if (src.transform.Find("__EnemyOverlay") != null) continue;
 
                 Mesh srcMesh = GetRendererMesh(src);
                 if (srcMesh == null) continue;
 
                 Mesh overlayMesh = (Mesh)UnityEngine.Object.Instantiate(srcMesh);
-                RemapMeshUv(overlayMesh, ENEMY_LAYER_ATLAS, src.gameObject != null ? src.gameObject.name : "");
+                if (!RemapMeshUv(overlayMesh, ENEMY_LAYER_ATLAS, name)) continue;
 
                 GameObject overlay = new GameObject("__EnemyOverlay");
                 overlay.transform.parent = src.transform;
@@ -1513,14 +1532,20 @@ namespace CNRZombieMod
             }
         }
 
-        private static void RemapMeshUv(Mesh mesh, AtlasRemap[] remaps, string partName)
+        private static bool RemapMeshUv(Mesh mesh, AtlasRemap[] remaps, string partName)
         {
-            if (mesh == null || remaps == null) return;
+            if (mesh == null || remaps == null) return false;
             Vector2[] uv = mesh.uv;
-            if (uv == null || uv.Length == 0) return;
+            if (uv == null || uv.Length == 0) return false;
+            bool changed = false;
             for (int i = 0; i < uv.Length; i++)
-                uv[i] = RemapEnemyUv(uv[i], remaps, partName);
+            {
+                Vector2 next = RemapEnemyUv(uv[i], remaps, partName);
+                if (next != uv[i]) changed = true;
+                uv[i] = next;
+            }
             mesh.uv = uv;
+            return changed;
         }
 
         private static Vector2 RemapEnemyUv(Vector2 uv, AtlasRemap[] remaps, string partName)

@@ -49,9 +49,9 @@ body { background: #12121e; color: #dde; font-family: 'Segoe UI', sans-serif; fo
 #zoom-val { font-size: 12px; color: #aaaacc; min-width: 32px; text-align: center; }
 
 /* ── Center: 2D canvas ── */
-#canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #0e0e1a; display: flex; align-items: center; justify-content: center; }
-#skin-canvas { image-rendering: pixelated; cursor: crosshair; display: block; }
-#overlay-canvas { position: absolute; pointer-events: none; image-rendering: pixelated; }
+#canvas-wrap { flex: 1; position: relative; overflow: hidden; background: #0e0e1a; display: block; }
+#skin-canvas { image-rendering: pixelated; cursor: crosshair; display: block; position: absolute; left: 50%; top: 50%; transform-origin: center center; }
+#overlay-canvas { position: absolute; pointer-events: none; image-rendering: pixelated; left: 50%; top: 50%; transform-origin: center center; }
 
 /* ── Right: 3D preview ── */
 #right-panel { width: 300px; background: #1a1a2e; border-left: 1px solid #252545; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
@@ -104,6 +104,15 @@ body.model-mode .uv-only { display: none !important; }
   <button class="mode-tab active" id="tab-uv">✏ UV Editor</button>
   <button class="mode-tab" id="tab-model">🎲 Model Editor</button>
   <div class="sep"></div>
+  <span style="font-size:11px;color:#666688">Skin:</span>
+  <button class="btn active" id="btn-skin-player">👤 Player</button>
+  <button class="btn" id="btn-skin-enemy">🧟 Enemy</button>
+  <label class="btn file-btn" title="Load an Enemy3 OBJ dump from the game">
+    📦 Enemy OBJ
+    <input type="file" id="enemy-obj-input" accept=".obj,.txt,text/plain">
+  </label>
+  <button class="btn" id="btn-enemy-obj-reset" title="Revert to the built-in placeholder enemy mesh">Reset Enemy OBJ</button>
+  <div class="sep"></div>
   <label class="btn file-btn" title="Open a PNG skin file">
     📂 Open PNG
     <input type="file" id="file-input" accept=".png,image/png">
@@ -112,6 +121,7 @@ body.model-mode .uv-only { display: none !important; }
     🎮 Import MC Skin
     <input type="file" id="mc-import-input" accept=".png,image/png">
   </label>
+  <button class="btn" id="btn-toggle-overlay" title="Toggle preview overlay layers">Overlay: On</button>
   <button class="btn green" id="btn-export" title="Download as PNG">⬇ Save PNG</button>
   <div class="sep"></div>
   <span style="font-size:11px;color:#666688">Zoom:</span>
@@ -132,9 +142,17 @@ body.model-mode .uv-only { display: none !important; }
   <div id="left-panel">
     <div class="panel-section uv-only">
       <h3>Tools</h3>
+      <button class="tool-btn" id="tool-select" data-tool="select">⬚ Select</button>
       <button class="tool-btn active" id="tool-pencil" data-tool="pencil">✏ Pencil</button>
       <button class="tool-btn" id="tool-eraser" data-tool="eraser">◻ Eraser</button>
+      <button class="tool-btn" id="tool-bucket" data-tool="bucket">🪣 Bucket</button>
       <button class="tool-btn" id="tool-picker" data-tool="picker">🔬 Picker</button>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+        <button class="btn" id="btn-copy-sel" title="Copy selected square area">Copy</button>
+        <button class="btn" id="btn-paste-sel" title="Create a movable paste preview">Paste</button>
+        <button class="btn" id="btn-apply-sel" title="Commit the pasted pixels to the skin">Apply</button>
+        <button class="btn" id="btn-cancel-sel" title="Cancel the floating paste preview">Cancel</button>
+      </div>
     </div>
     <div class="panel-section">
       <h3>Color</h3>
@@ -157,7 +175,7 @@ body.model-mode .uv-only { display: none !important; }
     </div>
     <div class="panel-section uv-only">
       <h3>Parts</h3>
-      <div style="font-size:11px;color:#666688;line-height:1.7">
+      <div id="parts-legend" style="font-size:11px;color:#666688;line-height:1.7">
         <div><span style="color:#ff4444">■</span> Head</div>
         <div><span style="color:#ff4444;opacity:.5">■</span> Hat / overlay</div>
         <div><span style="color:#44ff44">■</span> Body</div>
@@ -171,6 +189,7 @@ body.model-mode .uv-only { display: none !important; }
       <h3>Model Tools</h3>
       <button class="tool-btn model-tool-btn active" data-tool="select">⬚ Select</button>
       <button class="tool-btn model-tool-btn" data-tool="paint">✏ Paint</button>
+      <button class="tool-btn model-tool-btn" data-tool="bucket">🪣 Bucket</button>
       <button class="tool-btn model-tool-btn" data-tool="picker">🔬 Picker</button>
     </div>
     <div class="panel-section model-only">
@@ -205,19 +224,182 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const SKIN_W = 64, SKIN_H = 32;  // CNR skin format
+const SKIN_W = 64, SKIN_H = 64;  // player skins now use a 64x64 atlas
 
 // UV regions on a 64×32 texture (pixel coords, y=0 at top)
 // [label, x0, y0, x1, y1, css color]
-const UV_PARTS = [
-  ['Head',     0,  0, 32, 16, 'rgba(255,68,68,0.55)'],
-  ['Hat',     32,  0, 64, 16, 'rgba(255,68,68,0.25)'],
-  ['Body',    16, 16, 40, 32, 'rgba(68,255,68,0.45)'],
-  ['R Arm',   40, 16, 56, 32, 'rgba(68,136,255,0.45)'],
-  ['L Arm',   40, 16, 56, 32, 'rgba(68,255,255,0.35)'],  // same region, mirrored in-game
-  ['R Leg',    0, 16, 16, 32, 'rgba(255,170,0,0.45)'],
-  ['L Leg',    0, 16, 16, 32, 'rgba(255,102,255,0.35)'],  // same region, mirrored in-game
+const PLAYER_BASE_UV_PARTS = [
+  ['head',       0,  0, 32, 16, 'rgba(255,68,68,0.55)'],
+  ['hat',       32,  0, 64, 16, 'rgba(255,68,68,0.25)'],
+  ['trunk',     16, 16, 40, 32, 'rgba(68,255,68,0.45)'],
+  ['hand_right', 40, 16, 56, 32, 'rgba(68,136,255,0.45)'],
+  ['hand_left',  40, 16, 56, 32, 'rgba(68,255,255,0.35)'],
+  ['leg_right',   0, 16, 16, 32, 'rgba(255,170,0,0.45)'],
+  ['leg_left',    0, 16, 16, 32, 'rgba(255,102,255,0.35)'],
 ];
+
+const PLAYER_LAYER_UV_PARTS = [
+  ['layer_head',       0, 32, 32, 48, 'rgba(255,68,68,0.18)'],
+  ['layer_hat',       32, 32, 64, 48, 'rgba(255,68,68,0.18)'],
+  ['layer_trunk',     16, 48, 40, 64, 'rgba(68,255,68,0.20)'],
+  ['layer_hand_right',40, 48, 56, 64, 'rgba(68,136,255,0.20)'],
+  ['layer_hand_left', 40, 48, 56, 64, 'rgba(68,255,255,0.16)'],
+  ['layer_leg_right',  0, 48, 16, 64, 'rgba(255,170,0,0.20)'],
+  ['layer_leg_left',   0, 48, 16, 64, 'rgba(255,102,255,0.16)'],
+];
+
+const PLAYER_UV_PARTS = PLAYER_BASE_UV_PARTS.concat(PLAYER_LAYER_UV_PARTS);
+const PLAYER_BASE_ATLAS = Object.fromEntries(
+  PLAYER_BASE_UV_PARTS.map(([name, x0, y0, x1, y1]) => [name, [x0, y0, x1 - x0, y1 - y0]])
+);
+const PLAYER_LAYER_ATLAS = Object.fromEntries(
+  PLAYER_LAYER_UV_PARTS.map(([name, x0, y0, x1, y1]) => [name.replace(/^layer_/, ''), [x0, y0, x1 - x0, y1 - y0]])
+);
+
+const ENEMY_UV_PARTS = [
+  ['blood',             48,  0, 58,  1, 'rgba(255,0,0,0.65)'],
+  ['head_front',         0,  0,  8,  5, 'rgba(255,102,85,0.55)'],
+  ['head_right',         8,  0, 16,  5, 'rgba(253,59,38,0.55)'],
+  ['head_left',         16,  0, 24,  5, 'rgba(167,123,118,0.55)'],
+  ['head_back',         24,  0, 32,  5, 'rgba(82,44,40,0.55)'],
+  ['head_top',          32,  0, 40,  5, 'rgba(129,48,40,0.55)'],
+  ['head_bottom',       40,  0, 48,  5, 'rgba(167,22,6,0.55)'],
+  ['layer_head_front',   0,  5,  8, 10, 'rgba(255,102,85,0.28)'],
+  ['layer_head_right',   8,  5, 16, 10, 'rgba(253,59,38,0.28)'],
+  ['layer_head_left',   16,  5, 24, 10, 'rgba(167,123,118,0.28)'],
+  ['layer_head_back',   24,  5, 32, 10, 'rgba(82,44,40,0.28)'],
+  ['layer_head_top',    32,  5, 40, 10, 'rgba(129,48,40,0.28)'],
+  ['layer_head_bottom', 40,  5, 48, 10, 'rgba(167,22,6,0.28)'],
+  ['torso_front',        0, 10,  8, 16, 'rgba(118,167,120,0.50)'],
+  ['torso_back',         8, 10, 16, 16, 'rgba(62,163,65,0.50)'],
+  ['torso_left',        16, 10, 20, 16, 'rgba(69,242,75,0.50)'],
+  ['torso_right',       20, 10, 24, 16, 'rgba(53,253,60,0.50)'],
+  ['torso_top',         24, 10, 28, 15, 'rgba(12,237,20,0.50)'],
+  ['torso_bottom',      28, 10, 32, 15, 'rgba(11,152,16,0.50)'],
+  ['layer_torso_front', 32, 10, 40, 16, 'rgba(118,167,120,0.25)'],
+  ['layer_torso_back',  40, 10, 48, 16, 'rgba(62,163,65,0.25)'],
+  ['layer_torso_left',  48, 10, 52, 16, 'rgba(69,242,75,0.25)'],
+  ['layer_torso_right', 52, 10, 56, 16, 'rgba(53,253,60,0.25)'],
+  ['layer_torso_top',   56, 10, 60, 15, 'rgba(12,237,20,0.25)'],
+  ['layer_torso_bottom',60, 10, 64, 15, 'rgba(11,152,16,0.25)'],
+  ['left_arm_front',     0, 16,  4, 23, 'rgba(2,74,242,0.50)'],
+  ['left_arm_right',     4, 16,  8, 23, 'rgba(1,14,45,0.50)'],
+  ['left_arm_left',      8, 16, 12, 23, 'rgba(161,175,211,0.50)'],
+  ['left_arm_back',     12, 16, 16, 23, 'rgba(1,34,111,0.50)'],
+  ['right_arm_front',   16, 16, 20, 23, 'rgba(85,90,22,0.50)'],
+  ['right_arm_right',   20, 16, 24, 23, 'rgba(238,255,0,0.50)'],
+  ['right_arm_left',    24, 16, 28, 23, 'rgba(94,101,1,0.50)'],
+  ['right_arm_back',    28, 16, 32, 23, 'rgba(156,167,2,0.50)'],
+  ['left_leg_front',    32, 16, 36, 23, 'rgba(184,0,235,0.50)'],
+  ['left_leg_right',    36, 16, 40, 23, 'rgba(80,0,102,0.50)'],
+  ['left_leg_left',     40, 16, 44, 23, 'rgba(230,177,247,0.50)'],
+  ['left_leg_back',     44, 16, 48, 23, 'rgba(131,98,141,0.50)'],
+  ['right_leg_front',   48, 16, 52, 23, 'rgba(253,28,84,0.50)'],
+  ['right_leg_right',   52, 16, 56, 23, 'rgba(253,63,111,0.50)'],
+  ['right_leg_left',    56, 16, 60, 23, 'rgba(253,139,168,0.50)'],
+  ['right_leg_back',    60, 16, 64, 23, 'rgba(247,177,194,0.50)'],
+  ['layer_left_arm_front',   0, 23,  4, 30, 'rgba(2,74,242,0.25)'],
+  ['layer_left_arm_right',   4, 23,  8, 30, 'rgba(1,14,45,0.25)'],
+  ['layer_left_arm_left',    8, 23, 12, 30, 'rgba(161,175,211,0.25)'],
+  ['layer_left_arm_back',   12, 23, 16, 30, 'rgba(1,34,111,0.25)'],
+  ['layer_right_arm_front', 16, 23, 20, 30, 'rgba(85,90,22,0.25)'],
+  ['layer_right_arm_right', 20, 23, 24, 30, 'rgba(238,255,0,0.25)'],
+  ['layer_right_arm_left',  24, 23, 28, 30, 'rgba(94,101,1,0.25)'],
+  ['layer_right_arm_back',  28, 23, 32, 30, 'rgba(156,167,2,0.25)'],
+  ['layer_left_leg_front', 32, 23, 36, 30, 'rgba(184,0,235,0.25)'],
+  ['layer_left_leg_right', 36, 23, 40, 30, 'rgba(80,0,102,0.25)'],
+  ['layer_left_leg_left',  40, 23, 44, 30, 'rgba(230,177,247,0.25)'],
+  ['layer_left_leg_back',  44, 23, 48, 30, 'rgba(131,98,141,0.25)'],
+  ['layer_right_leg_front',48, 23, 52, 30, 'rgba(253,28,84,0.25)'],
+  ['layer_right_leg_right',52, 23, 56, 30, 'rgba(253,63,111,0.25)'],
+  ['layer_right_leg_left', 56, 23, 60, 30, 'rgba(253,139,168,0.25)'],
+  ['layer_right_leg_back', 60, 23, 64, 30, 'rgba(247,177,194,0.25)'],
+  ['left_arm_top',       0, 30,  4, 32, 'rgba(50,64,98,0.50)'],
+  ['left_arm_bottom',    4, 30,  8, 32, 'rgba(128,164,255,0.50)'],
+  ['right_arm_top',      8, 30, 12, 32, 'rgba(159,164,96,0.50)'],
+  ['right_arm_bottom',  12, 30, 16, 32, 'rgba(110,114,49,0.50)'],
+  ['left_leg_top',      16, 30, 20, 32, 'rgba(81,33,95,0.50)'],
+  ['left_leg_bottom',   20, 30, 24, 32, 'rgba(117,81,129,0.50)'],
+  ['right_leg_top',     24, 30, 28, 32, 'rgba(146,2,38,0.50)'],
+  ['right_leg_bottom',  28, 30, 32, 32, 'rgba(255,92,133,0.50)'],
+  ['layer_left_arm_top',     32, 30, 36, 32, 'rgba(50,64,98,0.25)'],
+  ['layer_left_arm_bottom',  36, 30, 40, 32, 'rgba(128,164,255,0.25)'],
+  ['layer_right_arm_top',    40, 30, 44, 32, 'rgba(159,164,96,0.25)'],
+  ['layer_right_arm_bottom', 44, 30, 48, 32, 'rgba(110,114,49,0.25)'],
+  ['layer_left_leg_top',     48, 30, 52, 32, 'rgba(81,33,95,0.25)'],
+  ['layer_left_leg_bottom',  52, 30, 56, 32, 'rgba(117,81,129,0.25)'],
+  ['layer_right_leg_top',    56, 30, 60, 32, 'rgba(146,2,38,0.25)'],
+  ['layer_right_leg_bottom', 60, 30, 64, 32, 'rgba(255,92,133,0.25)'],
+];
+
+const ENEMY_OLD_ATLAS = {
+  blood:            [ 0,  0,64,32],
+  head_front:       [17, 13, 8, 5],
+  head_right:       [ 7, 13, 8, 5],
+  head_bottom:      [27, 13, 8, 5],
+  head_top:         [37, 13, 8, 5],
+  head_back:        [47, 13, 8, 5],
+  head_left:        [ 1,  7, 8, 5],
+  torso_front:      [47, 19, 8, 6],
+  torso_back:       [37, 19, 8, 6],
+  torso_left:       [ 1, 12, 4, 6],
+  torso_right:      [57, 19, 4, 6],
+  torso_bottom:     [57, 13, 4, 5],
+  torso_top:        [11,  7, 4, 5],
+  left_arm_front:   [ 7, 18, 4, 7],
+  left_arm_back:    [ 7, 25, 4, 7],
+  left_arm_right:   [19, 18, 4, 7],
+  left_arm_top:     [43,  4, 4, 3],
+  left_arm_left:    [19, 25, 4, 7],
+  left_arm_bottom:  [13,  4, 4, 3],
+  left_leg_front:   [37, 25, 4, 7],
+  left_leg_right:   [31, 18, 4, 7],
+  left_leg_top:     [25,  4, 4, 3],
+  left_leg_bottom:  [ 7,  4, 4, 3],
+  left_leg_back:    [13, 25, 4, 7],
+  left_leg_left:    [25, 25, 4, 7],
+  right_leg_back:   [55, 25, 4, 7],
+  right_leg_left:   [31, 25, 4, 7],
+  right_leg_bottom: [19,  4, 4, 3],
+  right_leg_right:  [25, 18, 4, 7],
+  right_leg_front:  [43, 25, 4, 7],
+  right_leg_top:    [31,  4, 4, 3],
+  right_arm_right:  [13, 18, 4, 7],
+  right_arm_back:   [ 1, 18, 4, 7],
+  right_arm_left:   [ 1, 25, 4, 7],
+  right_arm_front:  [49, 25, 4, 7],
+  right_arm_bottom: [ 1,  4, 4, 3],
+  right_arm_top:    [37,  4, 4, 3],
+};
+
+const ENEMY_BASE_ATLAS = Object.fromEntries(
+  ENEMY_UV_PARTS.filter(([name]) => !name.startsWith('layer_'))
+    .map(([name, x0, y0, x1, y1]) => [name, [x0, y0, x1 - x0, y1 - y0]])
+);
+
+const ENEMY_LAYER_ATLAS = Object.fromEntries(
+  ENEMY_UV_PARTS.filter(([name]) => name.startsWith('layer_'))
+    .map(([name, x0, y0, x1, y1]) => [name.slice('layer_'.length), [x0, y0, x1 - x0, y1 - y0]])
+);
+
+const ENEMY_FACE_ORDER = Object.keys(ENEMY_OLD_ATLAS);
+
+function buildLegendHtml(parts) {
+  return parts.map(([label, , , , , col]) => (
+    `<div><span style="color:${col}">■</span> ${label}</div>`
+  )).join('');
+}
+
+let activeUVParts = PLAYER_UV_PARTS;
+let customEnemyObjText = null;
+let activeSkinType = 'player';
+let appMode = 'uv';
+let modelTool = 'select';
+let selectedPart = null;
+
+function getEnemyObjText() {
+  return customEnemyObjText || ENEMY_CHARACTER_OBJ;
+}
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -227,12 +409,18 @@ const state = {
   brushSize: 1,
   zoom:      8,
   uvGrid:    true,
+  overlay:   true,
   painting:  false,
   recentColors: [],
   undoStack: [],
   redoStack: [],
   panOffset: { x: 0, y: 0 },
   panStart:  null,
+  selStart:  null,
+  selRect:   null,
+  selClipboard: null,
+  selFloating: null,
+  selDrag:   null,
 };
 
 // ─── Canvas setup ─────────────────────────────────────────────────────────────
@@ -247,6 +435,11 @@ const pixelCanvas = document.createElement('canvas');
 pixelCanvas.width  = SKIN_W;
 pixelCanvas.height = SKIN_H;
 const pixelCtx = pixelCanvas.getContext('2d');
+
+const compositeCanvas = document.createElement('canvas');
+compositeCanvas.width = SKIN_W;
+compositeCanvas.height = SKIN_H;
+const compositeCtx = compositeCanvas.getContext('2d');
 
 // Initialise to transparent checkerboard-visible state (transparent black)
 pixelCtx.clearRect(0, 0, SKIN_W, SKIN_H);
@@ -265,12 +458,17 @@ function resizeCanvases() {
   overlayCanvas.height = h;
   overlayCanvas.style.width  = w + 'px';
   overlayCanvas.style.height = h + 'px';
-  // Position overlay on top of skin canvas
-  const wrap = document.getElementById('canvas-wrap');
-  const sc   = skinCanvas.getBoundingClientRect();
-  // overlay is absolute — let CSS handle it with transform matching
+  applyCanvasPan();
   redrawSkin();
   redrawOverlay();
+}
+
+function applyCanvasPan() {
+  const tx = state.panOffset.x | 0;
+  const ty = state.panOffset.y | 0;
+  const t = `translate(-50%, -50%) translate(${tx}px, ${ty}px)`;
+  skinCanvas.style.transform = t;
+  overlayCanvas.style.transform = t;
 }
 
 function redrawSkin() {
@@ -299,7 +497,7 @@ function redrawOverlay() {
 
   // Draw UV part regions
   const z = state.zoom;
-  for (const [label, x0, y0, x1, y1, col] of UV_PARTS) {
+  for (const [label, x0, y0, x1, y1, col] of activeUVParts) {
     overlayCtx.strokeStyle = col.replace(/[\d.]+\)$/, '0.85)');
     overlayCtx.lineWidth   = 1;
     overlayCtx.strokeRect(x0 * z + 0.5, y0 * z + 0.5, (x1 - x0) * z - 1, (y1 - y0) * z - 1);
@@ -324,6 +522,98 @@ function redrawOverlay() {
   }
 }
 
+function normalizeRect(x0, y0, x1, y1) {
+  const minX = Math.max(0, Math.min(x0, x1));
+  const minY = Math.max(0, Math.min(y0, y1));
+  const maxX = Math.min(SKIN_W, Math.max(x0, x1) + 1);
+  const maxY = Math.min(SKIN_H, Math.max(y0, y1) + 1);
+  return {
+    x: minX,
+    y: minY,
+    w: Math.max(0, maxX - minX),
+    h: Math.max(0, maxY - minY),
+  };
+}
+
+function rectContains(rect, x, y) {
+  return rect && x >= rect.x && y >= rect.y && x < rect.x + rect.w && y < rect.y + rect.h;
+}
+
+function copySelection(rect) {
+  if (!rect || rect.w <= 0 || rect.h <= 0) return;
+  const img = pixelCtx.getImageData(rect.x, rect.y, rect.w, rect.h);
+  const c = document.createElement('canvas');
+  c.width = rect.w;
+  c.height = rect.h;
+  c.getContext('2d').putImageData(img, 0, 0);
+  state.selClipboard = { w: rect.w, h: rect.h, data: img, canvas: c };
+  state.selRect = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+  state.selFloating = null;
+  drawSelectionOverlay();
+  update3dTexture();
+}
+
+function pasteSelection() {
+  if (!state.selClipboard) return;
+  const src = state.selClipboard;
+  state.selFloating = {
+    x: state.selRect ? state.selRect.x : 0,
+    y: state.selRect ? state.selRect.y : 0,
+    w: src.w,
+    h: src.h,
+    data: src.data,
+    canvas: src.canvas,
+  };
+  state.selDrag = { ox: state.selFloating.x, oy: state.selFloating.y, px: state.selFloating.x, py: state.selFloating.y };
+  drawSelectionOverlay();
+  update3dTexture();
+}
+
+function applySelection() {
+  if (!state.selFloating) return;
+  pushUndo();
+  pixelCtx.putImageData(state.selFloating.data, state.selFloating.x, state.selFloating.y);
+  state.selRect = { x: state.selFloating.x, y: state.selFloating.y, w: state.selFloating.w, h: state.selFloating.h };
+  state.selFloating = null;
+  state.selDrag = null;
+  redrawSkin();
+  drawSelectionOverlay();
+  update3dTexture();
+}
+
+function cancelSelection() {
+  state.selFloating = null;
+  state.selDrag = null;
+  drawSelectionOverlay();
+  update3dTexture();
+}
+
+function drawSelectionOverlay() {
+  redrawOverlay();
+  const { w, h } = getZoomedSize();
+  const z = state.zoom;
+  if (state.selRect && state.selRect.w > 0 && state.selRect.h > 0) {
+    overlayCtx.save();
+    overlayCtx.strokeStyle = 'rgba(255,255,255,0.95)';
+    overlayCtx.setLineDash([4, 2]);
+    overlayCtx.lineWidth = 1;
+    overlayCtx.strokeRect(state.selRect.x * z + 0.5, state.selRect.y * z + 0.5, state.selRect.w * z - 1, state.selRect.h * z - 1);
+    overlayCtx.restore();
+  }
+  if (state.selFloating) {
+    overlayCtx.save();
+    overlayCtx.globalAlpha = 0.45;
+    overlayCtx.drawImage(state.selFloating.canvas, state.selFloating.x * z, state.selFloating.y * z, state.selFloating.w * z, state.selFloating.h * z);
+    overlayCtx.restore();
+    overlayCtx.save();
+    overlayCtx.strokeStyle = 'rgba(255,255,255,0.95)';
+    overlayCtx.setLineDash([4, 2]);
+    overlayCtx.lineWidth = 1;
+    overlayCtx.strokeRect(state.selFloating.x * z + 0.5, state.selFloating.y * z + 0.5, state.selFloating.w * z - 1, state.selFloating.h * z - 1);
+    overlayCtx.restore();
+  }
+}
+
 // ─── Pixel paint ─────────────────────────────────────────────────────────────
 
 function canvasToPixel(cx, cy) {
@@ -337,6 +627,10 @@ function canvasToPixel(cx, cy) {
 }
 
 function paintPixel(px, py) {
+  return paintPixelMode(px, py, state.tool, state.color);
+}
+
+function paintPixelMode(px, py, mode, color) {
   if (px < 0 || py < 0 || px >= SKIN_W || py >= SKIN_H) return;
   const b = state.brushSize;
   const half = Math.floor(b / 2);
@@ -344,14 +638,79 @@ function paintPixel(px, py) {
     for (let dx = -half; dx < b - half; dx++) {
       const nx = px + dx, ny = py + dy;
       if (nx < 0 || ny < 0 || nx >= SKIN_W || ny >= SKIN_H) continue;
-      if (state.tool === 'eraser') {
+      if (mode === 'eraser') {
         pixelCtx.clearRect(nx, ny, 1, 1);
       } else {
-        pixelCtx.fillStyle = state.color;
+        pixelCtx.fillStyle = color || state.color;
         pixelCtx.fillRect(nx, ny, 1, 1);
       }
     }
   }
+  redrawSkin();
+  update3dTexture();
+}
+
+function rgbaKeyAt(px, py) {
+  if (px < 0 || py < 0 || px >= SKIN_W || py >= SKIN_H) return null;
+  const d = pixelCtx.getImageData(px, py, 1, 1).data;
+  return `${d[0]},${d[1]},${d[2]},${d[3]}`;
+}
+
+function colorToRgba(hex) {
+  if (!hex) return '0,0,0,0';
+  if (!hex.startsWith('#')) hex = '#' + hex;
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `${r},${g},${b},255`;
+}
+
+function floodFillPixels(startX, startY, fillColor) {
+  if (startX < 0 || startY < 0 || startX >= SKIN_W || startY >= SKIN_H) return;
+  const targetKey = rgbaKeyAt(startX, startY);
+  if (!targetKey) return;
+  const fillKey = colorToRgba(fillColor);
+  if (targetKey === fillKey) return;
+
+  const img = pixelCtx.getImageData(0, 0, SKIN_W, SKIN_H);
+  const data = img.data;
+  const startIdx = (startY * SKIN_W + startX) * 4;
+  const startColor = [data[startIdx], data[startIdx + 1], data[startIdx + 2], data[startIdx + 3]];
+  const fillMatch = /^#?[0-9a-fA-F]{6}$/.test(fillColor) ? colorToRgba(fillColor).split(',').map(Number) : null;
+  const seen = new Uint8Array(SKIN_W * SKIN_H);
+  const stack = [[startX, startY]];
+
+  function matchAt(x, y) {
+    const idx = (y * SKIN_W + x) * 4;
+    return data[idx] === startColor[0] &&
+           data[idx + 1] === startColor[1] &&
+           data[idx + 2] === startColor[2] &&
+           data[idx + 3] === startColor[3];
+  }
+
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    const idx1 = y * SKIN_W + x;
+    if (seen[idx1]) continue;
+    seen[idx1] = 1;
+    if (!matchAt(x, y)) continue;
+
+    const idx = idx1 * 4;
+    if (fillMatch) {
+      data[idx] = fillMatch[0];
+      data[idx + 1] = fillMatch[1];
+      data[idx + 2] = fillMatch[2];
+      data[idx + 3] = fillMatch[3];
+    }
+
+    if (x > 0) stack.push([x - 1, y]);
+    if (x + 1 < SKIN_W) stack.push([x + 1, y]);
+    if (y > 0) stack.push([x, y - 1]);
+    if (y + 1 < SKIN_H) stack.push([x, y + 1]);
+  }
+
+  pixelCtx.putImageData(img, 0, 0);
   redrawSkin();
   update3dTexture();
 }
@@ -426,12 +785,33 @@ skinCanvas.addEventListener('mousedown', e => {
   if (e.button === 1) { // Middle button pan
     state.panStart = { mx: e.clientX, my: e.clientY };
     e.preventDefault();
+    skinCanvas.style.cursor = 'grabbing';
     return;
   }
   if (e.button !== 0) return;
   const { px, py } = canvasToPixel(e.clientX, e.clientY);
+  if (state.tool === 'select') {
+    if (state.selFloating && rectContains(state.selFloating, px, py)) {
+      state.selDrag = { ox: state.selFloating.x, oy: state.selFloating.y, dx: px - state.selFloating.x, dy: py - state.selFloating.y, moving: true };
+    } else {
+      state.selStart = { x: px, y: py };
+      state.selRect = normalizeRect(px, py, px, py);
+      state.selFloating = null;
+      state.selDrag = null;
+    }
+    drawSelectionOverlay();
+    update3dTexture();
+    e.preventDefault();
+    return;
+  }
   if (state.tool === 'picker') {
     pickColorFromPixel(px, py);
+    return;
+  }
+  if (state.tool === 'bucket') {
+    pushUndo();
+    addRecentColor(state.color);
+    floodFillPixels(px, py, state.color);
     return;
   }
   pushUndo();
@@ -442,8 +822,32 @@ skinCanvas.addEventListener('mousedown', e => {
 });
 
 skinCanvas.addEventListener('mousemove', e => {
+  if (state.panStart) {
+    const dx = e.clientX - state.panStart.mx;
+    const dy = e.clientY - state.panStart.my;
+    state.panStart = { mx: e.clientX, my: e.clientY };
+    state.panOffset.x += dx;
+    state.panOffset.y += dy;
+    applyCanvasPan();
+    return;
+  }
   const { px, py } = canvasToPixel(e.clientX, e.clientY);
   document.getElementById('pixel-pos').textContent = `(${px}, ${py})`;
+  if (state.tool === 'select') {
+    if (state.selDrag && state.selDrag.moving && state.selFloating) {
+      state.selFloating.x = Math.max(0, Math.min(SKIN_W - state.selFloating.w, px - state.selDrag.dx));
+      state.selFloating.y = Math.max(0, Math.min(SKIN_H - state.selFloating.h, py - state.selDrag.dy));
+      drawSelectionOverlay();
+      update3dTexture();
+      return;
+    }
+    if (state.selStart) {
+      state.selRect = normalizeRect(state.selStart.x, state.selStart.y, px, py);
+      drawSelectionOverlay();
+      update3dTexture();
+    }
+    return;
+  }
   if (state.painting && (px !== lastPx || py !== lastPy)) {
     // Interpolate to avoid gaps when moving fast
     const dx = px - lastPx, dy = py - lastPy;
@@ -460,6 +864,15 @@ skinCanvas.addEventListener('mousemove', e => {
 window.addEventListener('mouseup', e => {
   state.painting = false;
   state.panStart  = null;
+  if (state.tool === 'select') {
+    if (state.selStart) {
+      state.selStart = null;
+    }
+    if (state.selDrag && state.selDrag.moving) {
+      state.selDrag = null;
+    }
+  }
+  skinCanvas.style.cursor = state.tool === 'eraser' ? 'cell' : state.tool === 'picker' ? 'crosshair' : 'crosshair';
 });
 
 skinCanvas.addEventListener('mouseleave', () => {
@@ -478,7 +891,7 @@ skinCanvas.addEventListener('wheel', e => {
 function setTool(t) {
   state.tool = t;
   document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
-  skinCanvas.style.cursor = t === 'eraser' ? 'cell' : t === 'picker' ? 'crosshair' : 'crosshair';
+  skinCanvas.style.cursor = t === 'eraser' ? 'cell' : t === 'picker' ? 'crosshair' : t === 'select' ? 'crosshair' : 'crosshair';
 }
 
 function pickColorFromPixel(px, py) {
@@ -490,6 +903,11 @@ function pickColorFromPixel(px, py) {
   addRecentColor(hex);
 }
 document.querySelectorAll('.tool-btn').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+document.getElementById('tool-select').addEventListener('click', () => setTool('select'));
+document.getElementById('btn-copy-sel').addEventListener('click', () => copySelection(state.selRect));
+document.getElementById('btn-paste-sel').addEventListener('click', () => pasteSelection());
+document.getElementById('btn-apply-sel').addEventListener('click', () => applySelection());
+document.getElementById('btn-cancel-sel').addEventListener('click', () => cancelSelection());
 
 function zoomIn()  { state.zoom = Math.min(state.zoom + (state.zoom < 4 ? 1 : state.zoom < 8 ? 2 : 4), 32); updateZoom(); }
 function zoomOut() { state.zoom = Math.max(state.zoom - (state.zoom <= 4 ? 1 : state.zoom <= 8 ? 2 : 4), 1); updateZoom(); }
@@ -538,8 +956,10 @@ document.getElementById('file-input').addEventListener('change', e => {
     pushUndo();
     pixelCtx.clearRect(0, 0, SKIN_W, SKIN_H);
     // If 64×64, take top half; if 64×32, use as-is
-    if (img.width === 64 && (img.height === 32 || img.height === 64)) {
-      pixelCtx.drawImage(img, 0, 0, 64, 32, 0, 0, SKIN_W, SKIN_H);
+    if (img.width === 64 && img.height === 32) {
+      pixelCtx.drawImage(img, 0, 0, 64, 32, 0, 0, 64, 32);
+    } else if (img.width === 64 && img.height === 64) {
+      pixelCtx.drawImage(img, 0, 0, 64, 64, 0, 0, SKIN_W, SKIN_H);
     } else {
       // Scale to fit
       pixelCtx.drawImage(img, 0, 0, SKIN_W, SKIN_H);
@@ -574,7 +994,7 @@ function convertMinecraftSkin(srcImg) {
   src.getContext('2d').drawImage(srcImg, 0, 0);
 
   const dest = document.createElement('canvas');
-  dest.width = 64; dest.height = 32;
+  dest.width = 64; dest.height = 64;
   const dc = dest.getContext('2d');
 
   // blit(sx,sy,w,h, dx,dy): copy a rect from the MC skin to the CNR canvas
@@ -586,11 +1006,11 @@ function convertMinecraftSkin(srcImg) {
   // MC standard:  front[8,8] right[0,8] left[16,8] back[24,8] top[8,0] bot[16,0]
   // CNR layout:   front[8,0] right[16,0] left[0,0] back[24,0] top[32,0] bot[40,0]
   blit( 8,  8,  8,  8,  8,  0);  // head front
-  blit( 0,  8,  8,  8, 16,  0);  // head right
-  blit(16,  8,  8,  8,  0,  0);  // head left
+  blitFace( 0,  8,  8,  8, 16,  0, 8, 8, 90);  // head right
+  blitFace(16,  8,  8,  8,  0,  0, 8, 8, 270);  // head left
   blit(24,  8,  8,  8, 24,  0);  // head back
   blit( 8,  0,  8,  8, 32,  0);  // head top
-  blit(16,  0,  8,  8, 40,  0);  // head bottom
+  blitFace(16,  0,  8,  8, 40,  0, 8, 8, 180);  // head bottom
 
   // ── BODY (front/back 8×12, sides 4×12, top 8×4) ─────────────────────────
   // MC: front[20,20] left[28,20] right[16,20] back[32,20] top[20,16]
@@ -605,20 +1025,348 @@ function convertMinecraftSkin(srcImg) {
   // ── ARM (front/back 4×12, sides 4×12, caps 4×4) ─────────────────────────
   // MC right arm: right[40,20] front[44,20] left[48,20] back[52,20] top[44,16] bot[48,16]
   // CNR arm:      right[8,20]  front[4,20]  left[0,20]  back[12,20] top[16,20] bot[16,24]
-  blit(44, 20,  4, 12,  4, 20);  // arm front
-  blit(40, 20,  4, 12,  8, 20);  // arm right (outer)
-  blit(48, 20,  4, 12,  0, 20);  // arm left (inner)
-  blit(52, 20,  4, 12, 12, 20);  // arm back
-  blit(44, 16,  4,  4, 16, 20);  // arm top
-  blit(48, 16,  4,  4, 16, 24);  // arm bottom
+  const baseArm = { front:[44,20,4,12], right:[40,20,4,12], left:[48,20,4,12], back:[52,20,4,12], top:[44,16,4,4], bottom:[48,16,4,4] };
+  blit(...baseArm.front,   4, 20);  // arm front
+  blit(...baseArm.left,    8, 20);  // arm right (outer)
+  blit(...baseArm.right,   0, 20);  // arm left (inner)
+  blit(...baseArm.back,   12, 20);  // arm back
+  blit(...baseArm.top,    16, 20);  // arm top
+  blit(...baseArm.bottom, 16, 24);  // arm bottom
 
   // ── LEGS (shaft only — feet must be painted manually) ────────────────────
   // MC right leg: right[0,20] front[4,20] left[8,20] back[12,20]  (x=0-16)
   // CNR leg shaft (x+20 offset): right[20,20] front[24,20] left[28,20] back[32,20]
-  blit( 0, 20,  4, 12, 20, 20);  // leg right (outer)
-  blit( 4, 20,  4, 12, 24, 20);  // leg front
-  blit( 8, 20,  4, 12, 28, 20);  // leg left (inner)
-  blit(12, 20,  4, 12, 32, 20);  // leg back
+  const baseLeg = srcImg.height >= 64
+    ? { right:[16,52,4,12], front:[20,52,4,12], left:[24,52,4,12], back:[28,52,4,12] }
+    : { right:[0,20,4,12], front:[4,20,4,12], left:[8,20,4,12], back:[12,20,4,12] };
+  blit(...baseLeg.right, 20, 20);  // leg right (outer)
+  blit(...baseLeg.front, 24, 20);  // leg front
+  blit(...baseLeg.left,  28, 20);  // leg left (inner)
+  blit(...baseLeg.back,  32, 20);  // leg back
+
+  function blitFace(sx, sy, sw, sh, dx, dy, dw, dh, rot = 0, flipX = false, flipY = false) {
+    if (!rot && !flipX && !flipY) {
+      dc.drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh);
+      return;
+    }
+    const tmp = document.createElement('canvas');
+    tmp.width = (rot === 90 || rot === 270) ? sh : sw;
+    tmp.height = (rot === 90 || rot === 270) ? sw : sh;
+    const tc = tmp.getContext('2d');
+    tc.save();
+    if (rot === 90) {
+      tc.translate(tmp.width, 0);
+      tc.rotate(Math.PI / 2);
+    } else if (rot === 180) {
+      tc.translate(tmp.width, tmp.height);
+      tc.rotate(Math.PI);
+    } else if (rot === 270) {
+      tc.translate(0, tmp.height);
+      tc.rotate(-Math.PI / 2);
+    }
+    if (flipX || flipY) {
+      tc.translate(flipX ? sw : 0, flipY ? sh : 0);
+      tc.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+    }
+    tc.drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
+    tc.restore();
+    dc.drawImage(tmp, dx, dy, dw, dh);
+  }
+
+  if (srcImg.height >= 64) {
+    const overlayFace = {
+      head_front:       [40,  8, 8,  8],
+      head_right:       [32,  8, 8,  8],
+      head_left:        [48,  8, 8,  8],
+      head_back:        [56,  8, 8,  8],
+      head_top:         [40,  0, 8,  8],
+      head_bottom:      [48,  0, 8,  8],
+      trunk_front:      [20, 36, 8, 12],
+      trunk_right:      [16, 36, 4, 12],
+      trunk_left:       [28, 36, 4, 12],
+      trunk_back:       [32, 36, 8, 12],
+      trunk_top:        [20, 32, 8,  4],
+      trunk_bottom:     [28, 32, 8,  4],
+      hand_right_front: [44, 36, 4, 12],
+      hand_right_right: [40, 36, 4, 12],
+      hand_right_left:  [48, 36, 4, 12],
+      hand_right_back:  [52, 36, 4, 12],
+      hand_right_top:   [44, 32, 4,  4],
+      hand_right_bottom:[48, 32, 4,  4],
+      hand_left_front:  [52, 52, 4, 12],
+      hand_left_right:  [48, 52, 4, 12],
+      hand_left_left:   [56, 52, 4, 12],
+      hand_left_back:   [60, 52, 4, 12],
+      hand_left_top:    [52, 48, 4,  4],
+      hand_left_bottom: [56, 48, 4,  4],
+      leg_right_front:  [ 4, 36, 4, 12],
+      leg_right_right:  [ 0, 36, 4, 12],
+      leg_right_left:   [ 8, 36, 4, 12],
+      leg_right_back:   [12, 36, 4, 12],
+      leg_right_top:    [ 4, 32, 4,  4],
+      leg_right_bottom: [ 8, 32, 4,  4],
+      leg_left_front:   [ 4, 52, 4, 12],
+      leg_left_right:   [ 0, 52, 4, 12],
+      leg_left_left:    [ 8, 52, 4, 12],
+      leg_left_back:    [12, 52, 4, 12],
+      leg_left_top:     [ 4, 48, 4,  4],
+      leg_left_bottom:  [ 8, 48, 4,  4],
+    };
+    const overlayDst = {
+      head_front: [ 0, 32,  8, 40],
+      head_right: [ 8, 32, 16, 40],
+      head_left:  [16, 32, 24, 40],
+      head_back:  [24, 32, 32, 40],
+      head_top:   [32, 32, 40, 40],
+      head_bottom:[40, 32, 48, 40],
+      trunk_front:[ 0, 48,  8, 60],
+      trunk_right:[ 8, 48, 12, 60],
+      trunk_left: [12, 48, 16, 60],
+      trunk_back: [16, 48, 24, 60],
+      trunk_top:  [24, 48, 32, 52],
+      trunk_bottom:[24, 52, 32, 56],
+      hand_right_front:[ 0, 48,  4, 60],
+      hand_right_right:[ 4, 48,  8, 60],
+      hand_right_left: [ 8, 48, 12, 60],
+      hand_right_back: [12, 48, 16, 60],
+      hand_right_top:  [16, 48, 20, 52],
+      hand_right_bottom:[16, 52, 20, 56],
+      hand_left_front:  [20, 48, 24, 60],
+      hand_left_right:  [24, 48, 28, 60],
+      hand_left_left:   [28, 48, 32, 60],
+      hand_left_back:   [32, 48, 36, 60],
+      hand_left_top:    [36, 48, 40, 52],
+      hand_left_bottom: [36, 52, 40, 56],
+      leg_right_front:  [40, 48, 44, 60],
+      leg_right_right:  [44, 48, 48, 60],
+      leg_right_left:   [48, 48, 52, 60],
+      leg_right_back:   [52, 48, 56, 60],
+      leg_right_top:    [56, 48, 60, 52],
+      leg_right_bottom: [56, 52, 60, 56],
+      leg_left_front:   [40, 32, 44, 44],
+      leg_left_right:   [44, 32, 48, 44],
+      leg_left_left:    [48, 32, 52, 44],
+      leg_left_back:    [52, 32, 56, 44],
+      leg_left_top:     [56, 32, 60, 36],
+      leg_left_bottom:  [56, 36, 60, 40],
+    };
+    const rotation = {
+      head_front: 180,
+      head_right: 180,
+      head_left: 180,
+      head_bottom: 180,
+      head_top: 270,
+      trunk_front: 180,
+      trunk_top: 270,
+      hand_right_front: 180,
+      hand_right_right: 180,
+      hand_right_top: 270,
+      hand_right_bottom: 180,
+      hand_left_front: 180,
+      hand_left_right: 180,
+      hand_left_top: 270,
+      hand_left_bottom: 180,
+      leg_right_front: 180,
+      leg_right_top: 90,
+      leg_right_bottom: 90,
+      leg_left_front: 180,
+      leg_left_top: 90,
+      leg_left_bottom: 90,
+    };
+    const playerOverlayDst = {
+      head_front:       [ 8, 32, 8,  8],
+      head_right:       [16, 32, 8,  8],
+      head_left:        [ 0, 32, 8,  8],
+      head_back:        [24, 32, 8,  8],
+      head_top:         [32, 32, 8,  8],
+      head_bottom:      [40, 32, 8,  8],
+      trunk_front:      [ 4, 40, 8, 12],
+      trunk_right:      [12, 40, 4, 12],
+      trunk_left:       [ 0, 40, 4, 12],
+      trunk_back:       [16, 40, 8, 12],
+      trunk_top:        [24, 40, 8,  4],
+      trunk_bottom:     [24, 44, 8,  4],
+      hand_right_front: [ 4, 52, 4, 12],
+      hand_right_right: [ 0, 52, 4, 12],
+      hand_right_left:  [ 8, 52, 4, 12],
+      hand_right_back:  [12, 52, 4, 12],
+      hand_right_top:   [16, 52, 4,  4],
+      hand_right_bottom:[16, 56, 4,  4],
+      hand_left_front:  [ 4, 52, 4, 12],
+      hand_left_right:  [ 0, 52, 4, 12],
+      hand_left_left:   [ 8, 52, 4, 12],
+      hand_left_back:   [12, 52, 4, 12],
+      hand_left_top:    [16, 52, 4,  4],
+      hand_left_bottom: [16, 56, 4,  4],
+      leg_right_front:  [24, 52, 4, 12],
+      leg_right_right:  [20, 52, 4, 12],
+      leg_right_left:   [28, 52, 4, 12],
+      leg_right_back:   [32, 52, 4, 12],
+      leg_right_top:    [36, 52, 4,  4],
+      leg_right_bottom: [36, 56, 4,  4],
+      leg_left_front:   [24, 52, 4, 12],
+      leg_left_right:   [20, 52, 4, 12],
+      leg_left_left:    [28, 52, 4, 12],
+      leg_left_back:    [32, 52, 4, 12],
+      leg_left_top:     [36, 52, 4,  4],
+      leg_left_bottom:  [36, 56, 4,  4],
+    };
+    const parts = [
+      ['head_front', 'head'], ['head_right', 'head'], ['head_left', 'head'], ['head_back', 'head'], ['head_top', 'head'], ['head_bottom', 'head'],
+      ['trunk_front', 'trunk'], ['trunk_right', 'trunk'], ['trunk_left', 'trunk'], ['trunk_back', 'trunk'], ['trunk_top', 'trunk'], ['trunk_bottom', 'trunk'],
+      ['hand_right_front', 'hand_right'], ['hand_right_right', 'hand_right'], ['hand_right_left', 'hand_right'], ['hand_right_back', 'hand_right'], ['hand_right_top', 'hand_right'], ['hand_right_bottom', 'hand_right'],
+      ['leg_right_front', 'leg_right'], ['leg_right_right', 'leg_right'], ['leg_right_left', 'leg_right'], ['leg_right_back', 'leg_right'], ['leg_right_top', 'leg_right'], ['leg_right_bottom', 'leg_right'],
+      ['leg_left_front', 'leg_left'], ['leg_left_right', 'leg_left'], ['leg_left_left', 'leg_left'], ['leg_left_back', 'leg_left'], ['leg_left_top', 'leg_left'], ['leg_left_bottom', 'leg_left'],
+    ];
+    for (const [name, part] of parts) {
+      const srcFace = overlayFace[name];
+      const dst = playerOverlayDst[name];
+      if (!srcFace || !dst) continue;
+      const flipX = (name === 'head_left' || name === 'head_right');
+      blitFace(srcFace[0], srcFace[1], srcFace[2], srcFace[3], dst[0], dst[1], dst[2], dst[3], 0, flipX, false);
+    }
+  }
+
+  return dest;
+}
+
+function convertMinecraftSkinEnemy(srcImg) {
+  const src = document.createElement('canvas');
+  src.width = srcImg.width; src.height = srcImg.height;
+  src.getContext('2d').drawImage(srcImg, 0, 0);
+
+  const dest = document.createElement('canvas');
+  dest.width = 64; dest.height = 32;
+  const dc = dest.getContext('2d');
+
+  function blitFace(sx, sy, sw, sh, dx, dy, dw, dh, rot = 0) {
+    if (!rot) {
+      dc.drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh);
+      return;
+    }
+    const tmp = document.createElement('canvas');
+    tmp.width = (rot === 90 || rot === 270) ? sh : sw;
+    tmp.height = (rot === 90 || rot === 270) ? sw : sh;
+    const tc = tmp.getContext('2d');
+    if (rot === 90) {
+      tc.translate(tmp.width, 0);
+      tc.rotate(Math.PI / 2);
+    } else if (rot === 180) {
+      tc.translate(tmp.width, tmp.height);
+      tc.rotate(Math.PI);
+    } else if (rot === 270) {
+      tc.translate(0, tmp.height);
+      tc.rotate(-Math.PI / 2);
+    }
+    tc.drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
+    dc.drawImage(tmp, dx, dy, dw, dh);
+  }
+
+  const is64 = srcImg.height >= 64;
+  const face = {
+    head_front:       [ 8,  8, 8,  8],
+    head_right:       [ 0,  8, 8,  8],
+    head_left:        [16,  8, 8,  8],
+    head_back:        [24,  8, 8,  8],
+    head_top:         [ 8,  0, 8,  8],
+    head_bottom:      [16,  0, 8,  8],
+    torso_front:      [20, 20, 8, 12],
+    torso_right:      [16, 20, 4, 12],
+    torso_left:       [28, 20, 4, 12],
+    torso_back:       [32, 20, 8, 12],
+    torso_top:        [20, 16, 8,  4],
+    torso_bottom:     [28, 16, 8,  4],
+    right_arm_front:  [44, 20, 4, 12],
+    right_arm_right:  [40, 20, 4, 12],
+    right_arm_left:   [48, 20, 4, 12],
+    right_arm_back:   [52, 20, 4, 12],
+    right_arm_top:    [44, 16, 4,  4],
+    right_arm_bottom: [48, 16, 4,  4],
+    right_leg_front:  [ 4, 20, 4, 12],
+    right_leg_right:  [ 0, 20, 4, 12],
+    right_leg_left:   [ 8, 20, 4, 12],
+    right_leg_back:   [12, 20, 4, 12],
+    right_leg_top:    [ 4, 16, 4,  4],
+    right_leg_bottom: [ 8, 16, 4,  4],
+  };
+  face.left_arm_front  = is64 ? [36, 52, 4, 12] : face.right_arm_front;
+  face.left_arm_right  = is64 ? [32, 52, 4, 12] : face.right_arm_right;
+  face.left_arm_left   = is64 ? [40, 52, 4, 12] : face.right_arm_left;
+  face.left_arm_back   = is64 ? [44, 52, 4, 12] : face.right_arm_back;
+  face.left_arm_top    = is64 ? [36, 48, 4,  4] : face.right_arm_top;
+  face.left_arm_bottom = is64 ? [40, 48, 4,  4] : face.right_arm_bottom;
+  face.left_leg_front  = is64 ? [20, 52, 4, 12] : face.right_leg_front;
+  face.left_leg_right  = is64 ? [16, 52, 4, 12] : face.right_leg_right;
+  face.left_leg_left   = is64 ? [24, 52, 4, 12] : face.right_leg_left;
+  face.left_leg_back   = is64 ? [28, 52, 4, 12] : face.right_leg_back;
+  face.left_leg_top    = is64 ? [20, 48, 4,  4] : face.right_leg_top;
+  face.left_leg_bottom = is64 ? [24, 48, 4,  4] : face.right_leg_bottom;
+
+  const overlayFace = is64 ? {
+    head_front:       [40,  8, 8,  8],
+    head_right:       [32,  8, 8,  8],
+    head_left:        [48,  8, 8,  8],
+    head_back:        [56,  8, 8,  8],
+    head_top:         [40,  0, 8,  8],
+    head_bottom:      [48,  0, 8,  8],
+    torso_front:      [20, 36, 8, 12],
+    torso_right:      [16, 36, 4, 12],
+    torso_left:       [28, 36, 4, 12],
+    torso_back:       [32, 36, 8, 12],
+    torso_top:        [20, 32, 8,  4],
+    torso_bottom:     [28, 32, 8,  4],
+    right_arm_front:  [44, 36, 4, 12],
+    right_arm_right:  [40, 36, 4, 12],
+    right_arm_left:   [48, 36, 4, 12],
+    right_arm_back:   [52, 36, 4, 12],
+    right_arm_top:    [44, 32, 4,  4],
+    right_arm_bottom: [48, 32, 4,  4],
+    right_leg_front:  [ 4, 36, 4, 12],
+    right_leg_right:  [ 0, 36, 4, 12],
+    right_leg_left:   [ 8, 36, 4, 12],
+    right_leg_back:   [12, 36, 4, 12],
+    right_leg_top:    [ 4, 32, 4,  4],
+    right_leg_bottom: [ 8, 32, 4,  4],
+    left_arm_front:   [52, 52, 4, 12],
+    left_arm_right:   [48, 52, 4, 12],
+    left_arm_left:    [56, 52, 4, 12],
+    left_arm_back:    [60, 52, 4, 12],
+    left_arm_top:     [52, 48, 4,  4],
+    left_arm_bottom:  [56, 48, 4,  4],
+    left_leg_front:   [ 4, 52, 4, 12],
+    left_leg_right:   [ 0, 52, 4, 12],
+    left_leg_left:    [ 8, 52, 4, 12],
+    left_leg_back:    [12, 52, 4, 12],
+    left_leg_top:     [ 4, 48, 4,  4],
+    left_leg_bottom:  [ 8, 48, 4,  4],
+  } : null;
+
+  const rotation = {
+    head_front: 180, head_right: 180, head_bottom: 90, head_top: 270,
+    torso_front: 180, torso_bottom: 90, torso_top: 270,
+    left_arm_front: 180, left_arm_right: 180, left_arm_top: 270, left_arm_bottom: 180,
+    left_leg_front: 180, left_leg_top: 90, left_leg_bottom: 90,
+    right_leg_bottom: 90, right_leg_right: 180, right_leg_front: 180, right_leg_top: 90,
+    right_arm_right: 180, right_arm_front: 180, right_arm_bottom: 180, right_arm_top: 270,
+  };
+
+  for (const name of ENEMY_FACE_ORDER) {
+    if (name === 'blood') continue;
+    const srcFace = face[name];
+    const dst = ENEMY_BASE_ATLAS[name];
+    if (!srcFace || !dst) continue;
+    blitFace(srcFace[0], srcFace[1], srcFace[2], srcFace[3], dst[0], dst[1], dst[2], dst[3], rotation[name] || 0);
+  }
+
+  if (overlayFace) {
+    for (const name of ENEMY_FACE_ORDER) {
+      if (name === 'blood') continue;
+      const srcFace = overlayFace[name];
+      const dst = ENEMY_LAYER_ATLAS[name];
+      if (!srcFace || !dst) continue;
+      blitFace(srcFace[0], srcFace[1], srcFace[2], srcFace[3], dst[0], dst[1], dst[2], dst[3], rotation[name] || 0);
+    }
+  }
 
   return dest;
 }
@@ -635,12 +1383,20 @@ document.getElementById('mc-import-input').addEventListener('change', e => {
       return;
     }
     pushUndo();
-    const converted = convertMinecraftSkin(img);
+    const converted = (activeSkinType === 'enemy')
+      ? convertMinecraftSkinEnemy(img)
+      : convertMinecraftSkin(img);
     pixelCtx.clearRect(0, 0, SKIN_W, SKIN_H);
-    pixelCtx.drawImage(converted, 0, 0, 64, 32, 0, 0, SKIN_W, SKIN_H);
+    if (activeSkinType === 'enemy') {
+      pixelCtx.drawImage(converted, 0, 0, 64, 32, 0, 0, 64, 32);
+    } else {
+      pixelCtx.drawImage(converted, 0, 0, 64, 64, 0, 0, 64, 64);
+    }
     redrawSkin();
     update3dTexture();
-    document.getElementById('status').textContent = `Imported MC skin: ${f.name} — feet area is blank, paint manually`;
+    document.getElementById('status').textContent = activeSkinType === 'enemy'
+      ? `Imported MC skin as Enemy3 layout: ${f.name}`
+      : `Imported MC skin: ${f.name} — feet area is blank, paint manually`;
     URL.revokeObjectURL(url);
   };
   img.src = url;
@@ -653,6 +1409,7 @@ window.addEventListener('keydown', e => {
   if (e.ctrlKey && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) { e.preventDefault(); redo(); }
   if (e.key === 'p' || e.key === 'P') setTool('pencil');
   if (e.key === 'e' || e.key === 'E') setTool('eraser');
+  if (e.key === 'b' || e.key === 'B') setTool('bucket');
   if (e.key === 'i' || e.key === 'I') { setTool('picker'); setModelTool('picker'); }
   if (e.key === '[') { state.brushSize = Math.max(1, state.brushSize - 1); document.getElementById('brush-val').textContent = state.brushSize; }
   if (e.key === ']') { state.brushSize = Math.min(16, state.brushSize + 1); document.getElementById('brush-val').textContent = state.brushSize; }
@@ -687,6 +1444,12 @@ liveTexture.magFilter = THREE.NearestFilter;
 liveTexture.minFilter = THREE.NearestFilter;
 
 function update3dTexture() {
+  compositeCtx.clearRect(0, 0, SKIN_W, SKIN_H);
+  compositeCtx.drawImage(pixelCanvas, 0, 0);
+  if (state.selFloating && state.selFloating.canvas) {
+    compositeCtx.drawImage(state.selFloating.canvas, state.selFloating.x, state.selFloating.y);
+  }
+  liveTexture.image = compositeCanvas;
   liveTexture.needsUpdate = true;
 }
 
@@ -694,7 +1457,7 @@ function update3dTexture() {
 
 const skinMat = new THREE.MeshLambertMaterial({
   map: liveTexture,
-  transparent: true,
+  transparent: false,
   alphaTest: 0.1,
   side: THREE.DoubleSide,
 });
@@ -2642,8 +3405,727 @@ f 538/538/538 540/540/540 539/539/539
 f 541/541/541 542/542/542 543/543/543
 f 544/544/544 541/541/541 543/543/543
 `;
-(text => {
-  const lines = text.split('\n');
+const ENEMY_CHARACTER_OBJ = `
+# Enemy3 dump from CNRZombieMod
+# root=ZombieEnemy_1_v3
+g blood
+v 122.616400 7.831382 81.941910
+v 121.616400 7.831382 81.941910
+v 122.616400 7.911782 81.941910
+v 121.616400 7.911782 81.941910
+v 122.616400 7.911782 81.939910
+v 121.616400 7.911782 81.939910
+v 122.616400 7.831382 81.939910
+v 121.616400 7.831382 81.939910
+v 122.616400 7.911782 81.941910
+v 121.616400 7.911782 81.941910
+v 122.616400 7.911782 81.939910
+v 121.616400 7.911782 81.939910
+v 122.616400 7.831382 81.939910
+v 121.616400 7.831382 81.941910
+v 121.616400 7.831382 81.939910
+v 122.616400 7.831382 81.941910
+v 121.616400 7.831382 81.941910
+v 121.616400 7.911782 81.939910
+v 121.616400 7.831382 81.939910
+v 121.616400 7.911782 81.941910
+v 122.616400 7.831382 81.939910
+v 122.616400 7.911782 81.941910
+v 122.616400 7.831382 81.941910
+v 122.616400 7.911782 81.939910
+vt 0.000000 0.000000
+vt 1.000000 0.000000
+vt 0.000000 1.000000
+vt 1.000000 1.000000
+vt 0.000000 1.000000
+vt 1.000000 1.000000
+vt 0.000000 1.000000
+vt 1.000000 1.000000
+vt 0.000000 0.000000
+vt 1.000000 0.000000
+vt 0.000000 0.000000
+vt 1.000000 0.000000
+vt 0.000000 0.000000
+vt 1.000000 1.000000
+vt 1.000000 0.000000
+vt 0.000000 1.000000
+vt 0.000000 0.000000
+vt 1.000000 1.000000
+vt 1.000000 0.000000
+vt 0.000000 1.000000
+vt 0.000000 0.000000
+vt 1.000000 1.000000
+vt 1.000000 0.000000
+vt 0.000000 1.000000
+vn 0.000000 0.000000 1.000000
+vn 0.000000 0.000000 1.000000
+vn 0.000000 0.000000 1.000000
+vn 0.000000 0.000000 1.000000
+vn 0.000000 1.000000 0.000000
+vn 0.000000 1.000000 0.000000
+vn 0.000000 0.000000 -1.000000
+vn 0.000000 0.000000 -1.000000
+vn 0.000000 1.000000 0.000000
+vn 0.000000 1.000000 0.000000
+vn 0.000000 0.000000 -1.000000
+vn 0.000000 0.000000 -1.000000
+vn 0.000000 -1.000000 0.000000
+vn 0.000000 -1.000000 0.000000
+vn 0.000000 -1.000000 0.000000
+vn 0.000000 -1.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+f 1/1/1 4/4/4 2/2/2
+f 1/1/1 3/3/3 4/4/4
+f 9/9/9 6/6/6 10/10/10
+f 9/9/9 5/5/5 6/6/6
+f 11/11/11 8/8/8 12/12/12
+f 11/11/11 7/7/7 8/8/8
+f 13/13/13 14/14/14 15/15/15
+f 13/13/13 16/16/16 14/14/14
+f 17/17/17 18/18/18 19/19/19
+f 17/17/17 20/20/20 18/18/18
+f 21/21/21 22/22/22 23/23/23
+f 21/21/21 24/24/24 22/22/22
+g 1_1
+v 122.383800 7.616408 82.115150
+v 122.370100 7.631238 81.599720
+v 121.854500 7.630849 81.613400
+v 121.868200 7.616019 82.128830
+v 122.317600 7.167055 82.039450
+v 122.307400 7.178177 81.652890
+v 121.920600 7.177886 81.663140
+v 121.930900 7.166764 82.049710
+v 121.868200 7.100410 82.113990
+v 121.854500 7.115240 81.598560
+v 122.370100 7.115629 81.584890
+v 122.383800 7.100799 82.100320
+v 121.930900 7.553470 82.060840
+v 121.920700 7.564593 81.674260
+v 122.307400 7.564884 81.664010
+v 122.317600 7.553761 82.050580
+v 122.383800 7.616408 82.115150
+v 121.868200 7.616019 82.128830
+v 121.868200 7.100410 82.113990
+v 122.383800 7.100799 82.100320
+v 122.307400 7.564884 81.664010
+v 121.920700 7.564593 81.674260
+v 121.920600 7.177886 81.663140
+v 122.307400 7.178177 81.652890
+v 122.370100 7.115629 81.584890
+v 121.854500 7.115240 81.598560
+v 121.854500 7.630849 81.613400
+v 122.370100 7.631238 81.599720
+v 122.317600 7.167055 82.039450
+v 121.930900 7.166764 82.049710
+v 121.930900 7.553470 82.060840
+v 122.317600 7.553761 82.050580
+v 121.930900 7.166764 82.049710
+v 121.920600 7.177886 81.663140
+v 121.920700 7.564593 81.674260
+v 121.930900 7.553470 82.060840
+v 122.383800 7.100799 82.100320
+v 122.370100 7.115629 81.584890
+v 122.370100 7.631238 81.599720
+v 122.383800 7.616408 82.115150
+v 121.868200 7.616019 82.128830
+v 121.854500 7.630849 81.613400
+v 121.854500 7.115240 81.598560
+v 121.868200 7.100410 82.113990
+v 122.317600 7.553761 82.050580
+v 122.307400 7.564884 81.664010
+v 122.307400 7.178177 81.652890
+v 122.317600 7.167055 82.039450
+vt 0.578125 0.453125
+vt 0.703125 0.453125
+vt 0.703125 0.578125
+vt 0.578125 0.578125
+vt 0.390625 0.640625
+vt 0.484375 0.640625
+vt 0.484375 0.734375
+vt 0.390625 0.734375
+vt 0.421875 0.453125
+vt 0.546875 0.453125
+vt 0.546875 0.578125
+vt 0.421875 0.578125
+vt 0.890625 0.640625
+vt 0.984375 0.640625
+vt 0.984375 0.734375
+vt 0.890625 0.734375
+vt 0.265625 0.453125
+vt 0.390625 0.453125
+vt 0.390625 0.578125
+vt 0.265625 0.578125
+vt 0.515625 0.640625
+vt 0.609375 0.640625
+vt 0.609375 0.734375
+vt 0.515625 0.734375
+vt 0.734375 0.453125
+vt 0.859375 0.453125
+vt 0.859375 0.578125
+vt 0.734375 0.578125
+vt 0.765625 0.640625
+vt 0.859375 0.640625
+vt 0.859375 0.734375
+vt 0.765625 0.734375
+vt 0.265625 0.640625
+vt 0.359375 0.640625
+vt 0.359375 0.734375
+vt 0.265625 0.734375
+vt 0.015625 0.640625
+vt 0.140625 0.640625
+vt 0.140625 0.765625
+vt 0.015625 0.765625
+vt 0.109375 0.453125
+vt 0.234375 0.453125
+vt 0.234375 0.578125
+vt 0.109375 0.578125
+vt 0.640625 0.640625
+vt 0.734375 0.640625
+vt 0.734375 0.734375
+vt 0.640625 0.734375
+vn 0.000009 0.999587 0.028760
+vn 0.000009 0.999587 0.028760
+vn 0.000009 0.999587 0.028760
+vn 0.000009 0.999587 0.028760
+vn 0.000009 0.999587 0.028760
+vn 0.000009 0.999587 0.028760
+vn 0.000009 0.999587 0.028760
+vn 0.000009 0.999587 0.028760
+vn -0.000010 -0.999587 -0.028760
+vn -0.000010 -0.999587 -0.028760
+vn -0.000010 -0.999587 -0.028760
+vn -0.000010 -0.999587 -0.028760
+vn -0.000009 -0.999587 -0.028760
+vn -0.000009 -0.999587 -0.028760
+vn -0.000009 -0.999587 -0.028760
+vn -0.000009 -0.999587 -0.028760
+vn 0.026521 -0.028750 0.999235
+vn 0.026521 -0.028750 0.999235
+vn 0.026521 -0.028750 0.999235
+vn 0.026521 -0.028750 0.999235
+vn 0.026521 -0.028750 0.999235
+vn 0.026521 -0.028750 0.999235
+vn 0.026521 -0.028750 0.999235
+vn 0.026521 -0.028750 0.999235
+vn -0.026521 0.028750 -0.999235
+vn -0.026521 0.028750 -0.999235
+vn -0.026521 0.028750 -0.999235
+vn -0.026521 0.028750 -0.999235
+vn -0.026521 0.028750 -0.999235
+vn -0.026521 0.028750 -0.999235
+vn -0.026521 0.028750 -0.999235
+vn -0.026521 0.028750 -0.999235
+vn 0.999649 0.000753 -0.026510
+vn 0.999649 0.000753 -0.026510
+vn 0.999649 0.000753 -0.026510
+vn 0.999649 0.000753 -0.026510
+vn 0.999649 0.000753 -0.026510
+vn 0.999649 0.000753 -0.026510
+vn 0.999649 0.000753 -0.026510
+vn 0.999649 0.000753 -0.026510
+vn -0.999649 -0.000753 0.026510
+vn -0.999649 -0.000753 0.026510
+vn -0.999649 -0.000753 0.026510
+vn -0.999649 -0.000753 0.026510
+vn -0.999649 -0.000753 0.026510
+vn -0.999649 -0.000753 0.026510
+vn -0.999649 -0.000753 0.026510
+vn -0.999649 -0.000753 0.026510
+f 25/25/25 26/26/26 27/27/27
+f 25/25/25 27/27/27 28/28/28
+f 29/29/29 30/30/30 31/31/31
+f 29/29/29 31/31/31 32/32/32
+f 33/33/33 34/34/34 35/35/35
+f 33/33/33 35/35/35 36/36/36
+f 37/37/37 38/38/38 39/39/39
+f 37/37/37 39/39/39 40/40/40
+f 41/41/41 42/42/42 43/43/43
+f 41/41/41 43/43/43 44/44/44
+f 45/45/45 46/46/46 47/47/47
+f 45/45/45 47/47/47 48/48/48
+f 49/49/49 50/50/50 51/51/51
+f 49/49/49 51/51/51 52/52/52
+f 53/53/53 54/54/54 55/55/55
+f 53/53/53 55/55/55 56/56/56
+f 57/57/57 58/58/58 59/59/59
+f 57/57/57 59/59/59 60/60/60
+f 61/61/61 62/62/62 63/63/63
+f 61/61/61 63/63/63 64/64/64
+f 65/65/65 66/66/66 67/67/67
+f 65/65/65 67/67/67 68/68/68
+f 69/69/69 70/70/70 71/71/71
+f 69/69/69 71/71/71 72/72/72
+g 1_2
+v 122.377100 7.100871 81.995690
+v 122.377100 7.108897 81.737900
+v 121.861200 7.108897 81.737900
+v 121.861200 7.100871 81.995690
+v 121.861200 6.456406 81.975620
+v 121.861200 6.464431 81.717830
+v 122.377100 6.464431 81.717830
+v 122.377100 6.456406 81.975620
+v 122.377100 7.100871 81.995690
+v 121.861200 7.100871 81.995690
+v 121.861200 6.456406 81.975620
+v 122.377100 6.456406 81.975620
+v 122.377100 6.464431 81.717830
+v 121.861200 6.464431 81.717830
+v 121.861200 7.108897 81.737900
+v 122.377100 7.108897 81.737900
+v 122.377100 6.456406 81.975620
+v 122.377100 6.464431 81.717830
+v 122.377100 7.108897 81.737900
+v 122.377100 7.100871 81.995690
+v 121.861200 7.100871 81.995690
+v 121.861200 7.108897 81.737900
+v 121.861200 6.464431 81.717830
+v 121.861200 6.456406 81.975620
+vt 0.171875 0.640625
+vt 0.234375 0.640625
+vt 0.234375 0.765625
+vt 0.171875 0.765625
+vt 0.890625 0.453125
+vt 0.953125 0.453125
+vt 0.953125 0.578125
+vt 0.890625 0.578125
+vt 0.734375 0.234375
+vt 0.859375 0.234375
+vt 0.859375 0.390625
+vt 0.734375 0.390625
+vt 0.578125 0.234375
+vt 0.703125 0.234375
+vt 0.703125 0.390625
+vt 0.578125 0.390625
+vt 0.015625 0.453125
+vt 0.078125 0.453125
+vt 0.078125 0.609375
+vt 0.015625 0.609375
+vt 0.890625 0.234375
+vt 0.953125 0.234375
+vt 0.953125 0.390625
+vt 0.890625 0.390625
+vn 0.000000 0.999516 0.031127
+vn 0.000000 0.999516 0.031127
+vn 0.000000 0.999516 0.031127
+vn 0.000000 0.999516 0.031127
+vn 0.000000 -0.999516 -0.031127
+vn 0.000000 -0.999516 -0.031127
+vn 0.000000 -0.999516 -0.031127
+vn 0.000000 -0.999516 -0.031127
+vn 0.000000 -0.031127 0.999516
+vn 0.000000 -0.031127 0.999516
+vn 0.000000 -0.031067 0.999517
+vn 0.000000 -0.031067 0.999517
+vn 0.000000 0.031127 -0.999516
+vn 0.000000 0.031127 -0.999516
+vn 0.000000 0.031127 -0.999516
+vn 0.000000 0.031127 -0.999516
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+f 73/73/73 74/74/74 75/75/75
+f 73/73/73 75/75/75 76/76/76
+f 77/77/77 78/78/78 79/79/79
+f 77/77/77 79/79/79 80/80/80
+f 81/81/81 82/82/82 83/83/83
+f 81/81/81 83/83/83 84/84/84
+f 85/85/85 86/86/86 87/87/87
+f 85/85/85 87/87/87 88/88/88
+f 89/89/89 90/90/90 91/91/91
+f 89/89/89 91/91/91 92/92/92
+f 93/93/93 94/94/94 95/95/95
+f 93/93/93 95/95/95 96/96/96
+g 1_3
+v 122.631800 7.157669 81.791590
+v 122.631800 6.899851 81.784630
+v 122.373900 6.899851 81.784630
+v 122.373900 7.157669 81.791590
+v 122.373900 7.136787 82.565040
+v 122.373900 6.878971 82.558070
+v 122.631800 6.878971 82.558070
+v 122.631800 7.136787 82.565040
+v 122.631800 7.157669 81.791590
+v 122.373900 7.157669 81.791590
+v 122.373900 7.136787 82.565040
+v 122.631800 7.136787 82.565040
+v 122.631800 6.878971 82.558070
+v 122.373900 6.878971 82.558070
+v 122.373900 6.899851 81.784630
+v 122.631800 6.899851 81.784630
+v 122.631800 7.136787 82.565040
+v 122.631800 6.878971 82.558070
+v 122.631800 6.899851 81.784630
+v 122.631800 7.157669 81.791590
+v 122.373900 7.157669 81.791590
+v 122.373900 6.899851 81.784630
+v 122.373900 6.878971 82.558070
+v 122.373900 7.136787 82.565040
+vt 0.671875 0.796875
+vt 0.734375 0.796875
+vt 0.734375 0.859375
+vt 0.671875 0.859375
+vt 0.203125 0.796875
+vt 0.265625 0.796875
+vt 0.265625 0.859375
+vt 0.203125 0.859375
+vt 0.109375 0.234375
+vt 0.171875 0.234375
+vt 0.171875 0.421875
+vt 0.109375 0.421875
+vt 0.109375 0.015625
+vt 0.171875 0.015625
+vt 0.171875 0.203125
+vt 0.109375 0.203125
+vt 0.296875 0.015625
+vt 0.359375 0.015625
+vt 0.359375 0.203125
+vt 0.296875 0.203125
+vt 0.296875 0.234375
+vt 0.359375 0.234375
+vt 0.359375 0.421875
+vt 0.296875 0.421875
+vn 0.000000 0.026987 -0.999636
+vn 0.000000 0.026987 -0.999636
+vn 0.000000 0.026987 -0.999636
+vn 0.000000 0.026987 -0.999636
+vn 0.000000 -0.026987 0.999636
+vn 0.000000 -0.026987 0.999636
+vn 0.000000 -0.026987 0.999636
+vn 0.000000 -0.026987 0.999636
+vn 0.000000 0.999636 0.026987
+vn 0.000000 0.999636 0.026987
+vn 0.000000 0.999636 0.026987
+vn 0.000000 0.999636 0.026987
+vn 0.000000 -0.999636 -0.026987
+vn 0.000000 -0.999636 -0.026987
+vn 0.000000 -0.999636 -0.026987
+vn 0.000000 -0.999636 -0.026987
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+f 97/97/97 98/98/98 99/99/99
+f 97/97/97 99/99/99 100/100/100
+f 101/101/101 102/102/102 103/103/103
+f 101/101/101 103/103/103 104/104/104
+f 105/105/105 106/106/106 107/107/107
+f 105/105/105 107/107/107 108/108/108
+f 109/109/109 110/110/110 111/111/111
+f 109/109/109 111/111/111 112/112/112
+f 113/113/113 114/114/114 115/115/115
+f 113/113/113 115/115/115 116/116/116
+f 117/117/117 118/118/118 119/119/119
+f 117/117/117 119/119/119 120/120/120
+g 1_4
+v 122.373900 6.459541 81.976910
+v 122.373900 6.470500 81.719240
+v 122.116000 6.470500 81.719240
+v 122.116000 6.459541 81.976910
+v 122.116000 5.686507 81.944040
+v 122.116000 5.697466 81.686360
+v 122.373900 5.697466 81.686360
+v 122.373900 5.686507 81.944040
+v 122.373900 6.459541 81.976910
+v 122.116000 6.459541 81.976910
+v 122.116000 5.686507 81.944040
+v 122.373900 5.686507 81.944040
+v 122.373900 5.697466 81.686360
+v 122.116000 5.697466 81.686360
+v 122.116000 6.470500 81.719240
+v 122.373900 6.470500 81.719240
+v 122.373900 5.686507 81.944040
+v 122.373900 5.697466 81.686360
+v 122.373900 6.470500 81.719240
+v 122.373900 6.459541 81.976910
+v 122.116000 6.459541 81.976910
+v 122.116000 6.470500 81.719240
+v 122.116000 5.697466 81.686360
+v 122.116000 5.686507 81.944040
+vt 0.390625 0.796875
+vt 0.453125 0.796875
+vt 0.453125 0.859375
+vt 0.390625 0.859375
+vt 0.109375 0.796875
+vt 0.171875 0.796875
+vt 0.171875 0.859375
+vt 0.109375 0.859375
+vt 0.578125 0.015625
+vt 0.640625 0.015625
+vt 0.640625 0.203125
+vt 0.578125 0.203125
+vt 0.203125 0.015625
+vt 0.265625 0.015625
+vt 0.265625 0.203125
+vt 0.203125 0.203125
+vt 0.390625 0.015625
+vt 0.453125 0.015625
+vt 0.453125 0.203125
+vt 0.390625 0.203125
+vt 0.484375 0.234375
+vt 0.546875 0.234375
+vt 0.546875 0.421875
+vt 0.484375 0.421875
+vn 0.000000 0.999097 0.042493
+vn 0.000000 0.999097 0.042493
+vn 0.000000 0.999097 0.042493
+vn 0.000000 0.999097 0.042493
+vn 0.000000 -0.999097 -0.042493
+vn 0.000000 -0.999097 -0.042493
+vn 0.000000 -0.999097 -0.042493
+vn 0.000000 -0.999097 -0.042493
+vn 0.000000 -0.042493 0.999097
+vn 0.000000 -0.042493 0.999097
+vn 0.000000 -0.042493 0.999097
+vn 0.000000 -0.042493 0.999097
+vn 0.000000 0.042493 -0.999097
+vn 0.000000 0.042493 -0.999097
+vn 0.000000 0.042493 -0.999097
+vn 0.000000 0.042493 -0.999097
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+f 121/121/121 122/122/122 123/123/123
+f 121/121/121 123/123/123 124/124/124
+f 125/125/125 126/126/126 127/127/127
+f 125/125/125 127/127/127 128/128/128
+f 129/129/129 130/130/130 131/131/131
+f 129/129/129 131/131/131 132/132/132
+f 133/133/133 134/134/134 135/135/135
+f 133/133/133 135/135/135 136/136/136
+f 137/137/137 138/138/138 139/139/139
+f 137/137/137 139/139/139 140/140/140
+f 141/141/141 142/142/142 143/143/143
+f 141/141/141 143/143/143 144/144/144
+g 1_005
+v 122.121300 6.462204 81.972020
+v 122.121300 6.467900 81.714170
+v 121.863400 6.467900 81.714170
+v 121.863400 6.462204 81.972020
+v 121.863400 5.688660 81.954930
+v 121.863400 5.694356 81.697080
+v 122.121300 5.694356 81.697080
+v 122.121300 5.688660 81.954930
+v 122.121300 6.462204 81.972020
+v 121.863400 6.462204 81.972020
+v 121.863400 5.688660 81.954930
+v 122.121300 5.688660 81.954930
+v 122.121300 5.694356 81.697080
+v 121.863400 5.694356 81.697080
+v 121.863400 6.467900 81.714170
+v 122.121300 6.467900 81.714170
+v 122.121300 5.688660 81.954930
+v 122.121300 5.694356 81.697080
+v 122.121300 6.467900 81.714170
+v 122.121300 6.462204 81.972020
+v 121.863400 6.462204 81.972020
+v 121.863400 6.467900 81.714170
+v 121.863400 5.694356 81.697080
+v 121.863400 5.688660 81.954930
+vt 0.484375 0.796875
+vt 0.546875 0.796875
+vt 0.546875 0.859375
+vt 0.484375 0.859375
+vt 0.296875 0.796875
+vt 0.359375 0.796875
+vt 0.359375 0.859375
+vt 0.296875 0.859375
+vt 0.671875 0.015625
+vt 0.734375 0.015625
+vt 0.734375 0.203125
+vt 0.671875 0.203125
+vt 0.859375 0.015625
+vt 0.921875 0.015625
+vt 0.921875 0.203125
+vt 0.859375 0.203125
+vt 0.484375 0.015625
+vt 0.546875 0.015625
+vt 0.546875 0.203125
+vt 0.484375 0.203125
+vt 0.390625 0.234375
+vt 0.453125 0.234375
+vt 0.453125 0.421875
+vt 0.390625 0.421875
+vn 0.000000 0.999756 0.022085
+vn 0.000000 0.999756 0.022085
+vn 0.000000 0.999756 0.022085
+vn 0.000000 0.999756 0.022085
+vn 0.000000 -0.999756 -0.022085
+vn 0.000000 -0.999756 -0.022085
+vn 0.000000 -0.999756 -0.022085
+vn 0.000000 -0.999756 -0.022085
+vn 0.000000 -0.022085 0.999756
+vn 0.000000 -0.022085 0.999756
+vn 0.000000 -0.022085 0.999756
+vn 0.000000 -0.022085 0.999756
+vn 0.000000 0.022085 -0.999756
+vn 0.000000 0.022085 -0.999756
+vn 0.000000 0.022085 -0.999756
+vn 0.000000 0.022085 -0.999756
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+f 145/145/145 146/146/146 147/147/147
+f 145/145/145 147/147/147 148/148/148
+f 149/149/149 150/150/150 151/151/151
+f 149/149/149 151/151/151 152/152/152
+f 153/153/153 154/154/154 155/155/155
+f 153/153/153 155/155/155 156/156/156
+f 157/157/157 158/158/158 159/159/159
+f 157/157/157 159/159/159 160/160/160
+f 161/161/161 162/162/162 163/163/163
+f 161/161/161 163/163/163 164/164/164
+f 165/165/165 166/166/166 167/167/167
+f 165/165/165 167/167/167 168/168/168
+g 1_006
+v 121.858500 7.092160 81.990260
+v 121.858500 7.099101 81.732440
+v 121.600600 7.099101 81.732440
+v 121.600600 7.092160 81.990260
+v 121.600600 6.318707 81.969440
+v 121.600600 6.325648 81.711620
+v 121.858500 6.325648 81.711620
+v 121.858500 6.318707 81.969440
+v 121.858500 7.092160 81.990260
+v 121.600600 7.092160 81.990260
+v 121.600600 6.318707 81.969440
+v 121.858500 6.318707 81.969440
+v 121.858500 6.325648 81.711620
+v 121.600600 6.325648 81.711620
+v 121.600600 7.099101 81.732440
+v 121.858500 7.099101 81.732440
+v 121.858500 6.318707 81.969440
+v 121.858500 6.325648 81.711620
+v 121.858500 7.099101 81.732440
+v 121.858500 7.092160 81.990260
+v 121.600600 7.092160 81.990260
+v 121.600600 7.099101 81.732440
+v 121.600600 6.325648 81.711620
+v 121.600600 6.318707 81.969440
+vt 0.578125 0.796875
+vt 0.640625 0.796875
+vt 0.640625 0.859375
+vt 0.578125 0.859375
+vt 0.015625 0.796875
+vt 0.078125 0.796875
+vt 0.078125 0.859375
+vt 0.015625 0.859375
+vt 0.765625 0.015625
+vt 0.828125 0.015625
+vt 0.828125 0.203125
+vt 0.765625 0.203125
+vt 0.015625 0.234375
+vt 0.078125 0.234375
+vt 0.078125 0.421875
+vt 0.015625 0.421875
+vt 0.015625 0.015625
+vt 0.078125 0.015625
+vt 0.078125 0.203125
+vt 0.015625 0.203125
+vt 0.203125 0.234375
+vt 0.265625 0.234375
+vt 0.265625 0.421875
+vt 0.203125 0.421875
+vn 0.000000 0.999638 0.026911
+vn 0.000000 0.999638 0.026911
+vn 0.000000 0.999638 0.026911
+vn 0.000000 0.999638 0.026911
+vn 0.000000 -0.999638 -0.026911
+vn 0.000000 -0.999638 -0.026911
+vn 0.000000 -0.999638 -0.026911
+vn 0.000000 -0.999638 -0.026911
+vn 0.000000 -0.026911 0.999638
+vn 0.000000 -0.026911 0.999638
+vn 0.000000 -0.026911 0.999638
+vn 0.000000 -0.026911 0.999638
+vn 0.000000 0.026911 -0.999638
+vn 0.000000 0.026911 -0.999638
+vn 0.000000 0.026911 -0.999638
+vn 0.000000 0.026911 -0.999638
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn 1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+vn -1.000000 0.000000 0.000000
+f 169/169/169 170/170/170 171/171/171
+f 169/169/169 171/171/171 172/172/172
+f 173/173/173 174/174/174 175/175/175
+f 173/173/173 175/175/175 176/176/176
+f 177/177/177 178/178/178 179/179/179
+f 177/177/177 179/179/179 180/180/180
+f 181/181/181 182/182/182 183/183/183
+f 181/181/181 183/183/183 184/184/184
+f 185/185/185 186/186/186 187/187/187
+f 185/185/185 187/187/187 188/188/188
+f 189/189/189 190/190/190 191/191/191
+f 189/189/189 191/191/191 192/192/192
+
+`;
+
+function remapEnemyAtlasUv(u, v, dstAtlas, partName) {
+  const px = u * SKIN_W;
+  const py = (1 - v) * SKIN_H;
+  const epsilon = 0.03;
+  for (const name of ENEMY_FACE_ORDER) {
+    if (name === 'blood' && partName !== 'blood') continue;
+    if (name !== 'blood' && partName === 'blood') continue;
+    const src = ENEMY_OLD_ATLAS[name];
+    const dst = dstAtlas[name];
+    if (!src || !dst) continue;
+    if (px < src[0] - epsilon || px > src[0] + src[2] + epsilon ||
+        py < src[1] - epsilon || py > src[1] + src[3] + epsilon) continue;
+    const lx = src[2] ? (px - src[0]) / src[2] : 0;
+    const ly = src[3] ? (py - src[1]) / src[3] : 0;
+    const dx = dst[0] + lx * dst[2];
+    const dy = dst[1] + ly * dst[3];
+    return { u: dx / SKIN_W, v: 1 - dy / SKIN_H };
+  }
+  return { u, v };
+}
+
+function remapPlayerBaseUv(u, v) {
+  return { u, v: 1 - (((1 - v) * 32) / SKIN_H) };
+}
+
+function remapPlayerLayerUv(u, v, partName) {
+  const py = (1 - v) * 32;
+  return { u, v: 1 - ((py + 32) / SKIN_H) };
+}
+
+function buildModel(objText) {
+  // Clear existing meshes
+  while (playerGroup.children.length) playerGroup.remove(playerGroup.children[0]);
+  for (const k of Object.keys(partMeshes)) delete partMeshes[k];
+
+  const lines = objText.split('\n');
 
   // Collect all global vertex data
   const gPos = [], gUV = [], gNrm = [];
@@ -2663,7 +4145,6 @@ f 544/544/544 541/541/541 543/543/543
   }
   const cx = (xMin+xMax)/2, cy = (yMin+yMax)/2, cz = (zMin+zMax)/2;
   const scl = 2.0 / (yMax - yMin); // normalize to 2 units tall (-1..+1 in Y)
-
   // Build one BufferGeometry per named group
   let curName = null;
   const groups = {};
@@ -2671,7 +4152,7 @@ f 544/544/544 541/541/541 543/543/543
     const p = line.trimStart().split(/\s+/);
     if (p[0] === 'g') {
       curName = p[1] || 'default';
-      if (!groups[curName]) groups[curName] = { pos: [], uv: [], nrm: [] };
+      if (!groups[curName]) groups[curName] = { pos: [], uv: [], origUv: [], nrm: [] };
     } else if (p[0] === 'f' && curName) {
       const verts = p.slice(1).map(tok => {
         const [vi, ti, ni] = tok.split('/').map(s => parseInt(s) - 1);
@@ -2687,10 +4168,24 @@ f 544/544/544 541/541/541 543/543/543
             (gPos[b+2] - cz) * scl
           );
           const t = v.ti * 2;
-          groups[curName].uv.push(gUV[t], gUV[t+1]);
+          let u = gUV.length > t + 1 ? gUV[t] : 0;
+          let vtx = gUV.length > t + 1 ? gUV[t+1] : 0;
+          const origU = u;
+          const origV = vtx;
+          if (activeSkinType === 'enemy') {
+            const remapped = remapEnemyAtlasUv(u, vtx, ENEMY_BASE_ATLAS, curName);
+            u = remapped.u;
+            vtx = remapped.v;
+          } else if (activeSkinType === 'player') {
+            const remapped = remapPlayerBaseUv(u, vtx);
+            u = remapped.u;
+            vtx = remapped.v;
+          }
+          groups[curName].uv.push(u, vtx);
+          groups[curName].origUv.push(origU, origV);
           if (gNrm.length) {
             const n = v.ni * 3;
-            groups[curName].nrm.push(gNrm[n], gNrm[n+1], gNrm[n+2]);
+            groups[curName].nrm.push(gNrm.length > n + 2 ? gNrm[n] : 0, gNrm.length > n + 2 ? gNrm[n+1] : 0, gNrm.length > n + 2 ? gNrm[n+2] : 1);
           }
         }
       }
@@ -2707,9 +4202,48 @@ f 544/544/544 541/541/541 543/543/543
     mesh.name = name;
     partMeshes[name] = mesh;
     playerGroup.add(mesh);
+
+    if (state.overlay && (activeSkinType === 'enemy' || activeSkinType === 'player') && name !== 'blood') {
+      const overlayUv = [];
+      for (let i = 0; i + 1 < data.origUv.length; i += 2) {
+        if (activeSkinType === 'enemy') {
+          const remapped = remapEnemyAtlasUv(data.origUv[i], data.origUv[i + 1], ENEMY_LAYER_ATLAS, name);
+          overlayUv.push(remapped.u, remapped.v);
+        } else {
+          const remapped = remapPlayerLayerUv(data.origUv[i], data.origUv[i + 1], name);
+          overlayUv.push(remapped.u, remapped.v);
+        }
+      }
+      const overlayGeo = new THREE.BufferGeometry();
+      overlayGeo.setAttribute('position', new THREE.Float32BufferAttribute(data.pos, 3));
+      overlayGeo.setAttribute('uv',       new THREE.Float32BufferAttribute(overlayUv, 2));
+      if (data.nrm.length) overlayGeo.setAttribute('normal', new THREE.Float32BufferAttribute(data.nrm, 3));
+      else overlayGeo.computeVertexNormals();
+      const overlayMat = skinMat.clone();
+      overlayMat.polygonOffset = true;
+      overlayMat.polygonOffsetFactor = -1;
+      overlayMat.polygonOffsetUnits = -1;
+      overlayMat.depthTest = true;
+      overlayMat.depthWrite = false;
+      overlayMat.transparent = false;
+      overlayMat.side = THREE.FrontSide;
+      overlayMat.alphaTest = skinMat.alphaTest;
+      const overlayMesh = new THREE.Mesh(overlayGeo, overlayMat);
+      overlayMesh.name = `${name}_layer`;
+      overlayMesh.scale.setScalar(activeSkinType === 'enemy' ? 1.04 : 1.01);
+      overlayMesh.renderOrder = 1;
+      playerGroup.add(overlayMesh);
+    }
   }
   buildPartsUI();
-})(CHARACTER_OBJ);
+}
+
+buildModel(CHARACTER_OBJ);
+document.getElementById('btn-toggle-overlay').addEventListener('click', () => {
+  state.overlay = !state.overlay;
+  document.getElementById('btn-toggle-overlay').textContent = state.overlay ? 'Overlay: On' : 'Overlay: Off';
+  buildModel((activeSkinType === 'enemy') ? getEnemyObjText() : CHARACTER_OBJ);
+});
 
 // ─── Preview resize ───────────────────────────────────────────────────────────
 
@@ -2753,10 +4287,6 @@ new ResizeObserver(() => { resizeCanvases(); positionOverlay(); }).observe(docum
 
 // ─── Mode switching ───────────────────────────────────────────────────────────
 
-let appMode = 'uv';
-let modelTool = 'select';
-let selectedPart = null;
-
 function switchMode(mode) {
   appMode = mode;
   document.body.classList.toggle('uv-mode',    mode === 'uv');
@@ -2767,7 +4297,7 @@ function switchMode(mode) {
     mode === 'uv' ? '3D Preview — drag to rotate' : '3D Model Editor — right-drag to rotate';
   if (mode === 'model') {
     orbitPrev.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
-    previewCanvas.style.cursor = (modelTool === 'paint' || modelTool === 'picker') ? 'crosshair' : 'default';
+    previewCanvas.style.cursor = (modelTool === 'paint' || modelTool === 'picker') ? 'crosshair' : modelTool === 'bucket' ? 'copy' : 'default';
   } else {
     orbitPrev.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     previewCanvas.style.cursor = '';
@@ -2785,7 +4315,7 @@ function setModelTool(t) {
   document.querySelectorAll('.model-tool-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.tool === t)
   );
-  if (appMode === 'model') previewCanvas.style.cursor = (t === 'paint' || t === 'picker') ? 'crosshair' : 'default';
+  if (appMode === 'model') previewCanvas.style.cursor = (t === 'paint' || t === 'picker') ? 'crosshair' : t === 'bucket' ? 'copy' : 'default';
 }
 
 document.querySelectorAll('.model-tool-btn').forEach(b =>
@@ -2798,8 +4328,14 @@ function buildPartsUI() {
   const list = document.getElementById('parts-list');
   if (!list) return;
   list.innerHTML = '';
-  const ORDER  = ['head', 'trunk', 'hand_left', 'hand_right', 'leg_left', 'leg_right'];
-  const LABELS = { head: 'Head', trunk: 'Torso', hand_left: 'Arm L', hand_right: 'Arm R', leg_left: 'Leg L', leg_right: 'Leg R' };
+  const ORDER  = ['head', 'trunk', 'hand_left', 'hand_right', 'leg_left', 'leg_right',
+                   'hat', 'legleft', 'legright', 'handleft', 'handright'];
+  const LABELS = {
+    head: 'Head', trunk: 'Torso',
+    hand_left: 'Arm L', hand_right: 'Arm R',
+    leg_left: 'Leg L', leg_right: 'Leg R',
+    hat: 'Hat', legleft: 'Leg L', legright: 'Leg R', handleft: 'Arm L', handright: 'Arm R',
+  };
   const names  = ORDER.filter(n => partMeshes[n]).concat(Object.keys(partMeshes).filter(n => !ORDER.includes(n)));
   for (const name of names) {
     const row = document.createElement('div');
@@ -2862,31 +4398,99 @@ document.getElementById('btn-show-all')?.addEventListener('click', () => {
 const raycaster = new THREE.Raycaster();
 let modelPainting = false;
 
-function paintOnModel(clientX, clientY) {
+function getVisibleModelMeshes() {
+  return Object.values(partMeshes).filter(m => m.visible);
+}
+
+function getIsolatedModelPartName() {
+  const visible = getVisibleModelMeshes();
+  return visible.length === 1 ? visible[0].name : null;
+}
+
+function hitAllowedForCurrentModelState(hit) {
+  const isolated = getIsolatedModelPartName();
+  return !isolated || hit.object.name === isolated;
+}
+
+function getModelHit(clientX, clientY) {
   const rect = previewCanvas.getBoundingClientRect();
   const ndcX =  ((clientX - rect.left) / rect.width)  * 2 - 1;
   const ndcY = -((clientY - rect.top)  / rect.height) * 2 + 1;
   raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), prevCamera);
-  const hits = raycaster.intersectObjects(Object.values(partMeshes).filter(m => m.visible), false);
-  if (!hits.length || !hits[0].uv) return;
-  const px = Math.floor(hits[0].uv.x * SKIN_W);
-  const py = Math.floor((1 - hits[0].uv.y) * SKIN_H);
-  paintPixel(px, py);
+  const hits = raycaster.intersectObjects(getVisibleModelMeshes(), false);
+  return hits.length ? hits[0] : null;
+}
+
+function paintHitOnTexture(hit) {
+  if (!hit || !hit.uv || !hitAllowedForCurrentModelState(hit)) return;
+  const px = Math.floor(hit.uv.x * SKIN_W);
+  const py = Math.floor((1 - hit.uv.y) * SKIN_H);
+  paintPixelMode(px, py, 'paint', state.color);
+}
+
+function pointInTriangle(px, py, ax, ay, bx, by, cx, cy) {
+  const v0x = cx - ax, v0y = cy - ay;
+  const v1x = bx - ax, v1y = by - ay;
+  const v2x = px - ax, v2y = py - ay;
+  const dot00 = v0x * v0x + v0y * v0y;
+  const dot01 = v0x * v1x + v0y * v1y;
+  const dot02 = v0x * v2x + v0y * v2y;
+  const dot11 = v1x * v1x + v1y * v1y;
+  const dot12 = v1x * v2x + v1y * v2y;
+  const denom = dot00 * dot11 - dot01 * dot01;
+  if (!denom) return false;
+  const inv = 1 / denom;
+  const u = (dot11 * dot02 - dot01 * dot12) * inv;
+  const v = (dot00 * dot12 - dot01 * dot02) * inv;
+  return u >= 0 && v >= 0 && (u + v) <= 1;
+}
+
+function fillTriangleUV(u0, v0, u1, v1, u2, v2) {
+  const x0 = u0 * SKIN_W, y0 = (1 - v0) * SKIN_H;
+  const x1 = u1 * SKIN_W, y1 = (1 - v1) * SKIN_H;
+  const x2 = u2 * SKIN_W, y2 = (1 - v2) * SKIN_H;
+  const minX = Math.max(0, Math.floor(Math.min(x0, x1, x2)));
+  const maxX = Math.min(SKIN_W - 1, Math.ceil(Math.max(x0, x1, x2)));
+  const minY = Math.max(0, Math.floor(Math.min(y0, y1, y2)));
+  const maxY = Math.min(SKIN_H - 1, Math.ceil(Math.max(y0, y1, y2)));
+  for (let py = minY; py <= maxY; py++) {
+    for (let px = minX; px <= maxX; px++) {
+      if (pointInTriangle(px + 0.5, py + 0.5, x0, y0, x1, y1, x2, y2)) {
+        pixelCtx.fillStyle = state.color;
+        pixelCtx.fillRect(px, py, 1, 1);
+      }
+    }
+  }
+}
+
+function fillPartSurface(mesh) {
+  if (!mesh || !mesh.geometry) return;
+  if (!hitAllowedForCurrentModelState({ object: mesh })) return;
+  const uvAttr = mesh.geometry.getAttribute('uv');
+  if (!uvAttr) return;
+  const uvs = uvAttr.array;
+  for (let i = 0; i + 5 < uvs.length; i += 6) {
+    fillTriangleUV(uvs[i], uvs[i + 1], uvs[i + 2], uvs[i + 3], uvs[i + 4], uvs[i + 5]);
+  }
+  redrawSkin();
+  update3dTexture();
+}
+
+function paintOnModel(clientX, clientY) {
+  const hit = getModelHit(clientX, clientY);
+  if (!hit || !hit.uv) return;
+  paintHitOnTexture(hit);
 }
 
 previewCanvas.addEventListener('contextmenu', e => e.preventDefault());
 
 previewCanvas.addEventListener('mousedown', e => {
   if (appMode !== 'model' || e.button !== 0) return;
-  const rect = previewCanvas.getBoundingClientRect();
-  const ndcX =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
-  const ndcY = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
-  raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), prevCamera);
-  const hits = raycaster.intersectObjects(Object.values(partMeshes).filter(m => m.visible), false);
+  const hit = getModelHit(e.clientX, e.clientY);
   if (modelTool === 'picker') {
-    if (hits.length && hits[0].uv) {
-      const px = Math.floor(hits[0].uv.x * SKIN_W);
-      const py = Math.floor((1 - hits[0].uv.y) * SKIN_H);
+    if (hit && hit.uv && hitAllowedForCurrentModelState(hit)) {
+      const px = Math.floor(hit.uv.x * SKIN_W);
+      const py = Math.floor((1 - hit.uv.y) * SKIN_H);
       pickColorFromPixel(px, py);
     }
     return;
@@ -2894,13 +4498,15 @@ previewCanvas.addEventListener('mousedown', e => {
     pushUndo();
     addRecentColor(state.color);
     modelPainting = true;
-    if (hits.length && hits[0].uv) {
-      const px = Math.floor(hits[0].uv.x * SKIN_W);
-      const py = Math.floor((1 - hits[0].uv.y) * SKIN_H);
-      paintPixel(px, py);
+    paintHitOnTexture(hit);
+  } else if (modelTool === 'bucket') {
+    if (hit && hitAllowedForCurrentModelState(hit)) {
+      pushUndo();
+      addRecentColor(state.color);
+      fillPartSurface(hit.object);
     }
-  } else if (modelTool === 'select' && hits.length) {
-    selectPart(hits[0].object.name);
+  } else if (modelTool === 'select' && hit) {
+    selectPart(hit.object.name);
   }
 });
 
@@ -2910,6 +4516,55 @@ previewCanvas.addEventListener('mousemove', e => {
 });
 
 window.addEventListener('mouseup', () => { modelPainting = false; });
+
+// ─── Skin type switching ──────────────────────────────────────────────────────
+
+const PLAYER_LEGEND_HTML = buildLegendHtml(PLAYER_UV_PARTS);
+const ENEMY_LEGEND_HTML  = buildLegendHtml(ENEMY_UV_PARTS);
+
+function switchSkinType(type) {
+  activeSkinType = type;
+  activeUVParts  = (type === 'enemy') ? ENEMY_UV_PARTS : PLAYER_UV_PARTS;
+
+  document.getElementById('btn-skin-player').classList.toggle('active', type === 'player');
+  document.getElementById('btn-skin-enemy').classList.toggle('active',  type === 'enemy');
+
+  const legend = document.getElementById('parts-legend');
+  if (legend) legend.innerHTML = (type === 'enemy') ? ENEMY_LEGEND_HTML : PLAYER_LEGEND_HTML;
+
+  buildModel((type === 'enemy') ? getEnemyObjText() : CHARACTER_OBJ);
+  redrawOverlay();
+}
+
+document.getElementById('btn-skin-player').addEventListener('click', () => switchSkinType('player'));
+document.getElementById('btn-skin-enemy').addEventListener('click',  () => switchSkinType('enemy'));
+
+document.getElementById('enemy-obj-input').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    const text = (await f.text()).replace(/\r\n/g, '\n');
+    if (!text || !/(^|\n)v\s+/m.test(text)) {
+      document.getElementById('status').textContent = `Enemy OBJ load failed: ${f.name} does not look like a valid OBJ`;
+      return;
+    }
+    customEnemyObjText = text;
+    document.getElementById('status').textContent = `Loaded Enemy OBJ: ${f.name}`;
+    switchSkinType('enemy');
+    switchMode('model');
+  } catch (err) {
+    document.getElementById('status').textContent = `Enemy OBJ load failed: ${err.message || err}`;
+  } finally {
+    e.target.value = '';
+  }
+});
+
+document.getElementById('btn-enemy-obj-reset').addEventListener('click', () => {
+  customEnemyObjText = null;
+  document.getElementById('status').textContent = 'Enemy OBJ reset to the built-in placeholder mesh';
+  switchSkinType('enemy');
+  switchMode('model');
+});
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 

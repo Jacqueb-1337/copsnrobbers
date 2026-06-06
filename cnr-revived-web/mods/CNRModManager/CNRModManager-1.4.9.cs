@@ -272,6 +272,15 @@ namespace CNRModManager
             public string url;
             public string changelog;
         }
+        private struct ModDependency
+        {
+            public string kind;
+            public string id;
+            public string filename;
+            public string url;
+            public string minVersion;
+            public bool latestOnly;
+        }
         private struct RepoMod
         {
             public string id;
@@ -282,6 +291,7 @@ namespace CNRModManager
             public string filename;
             public string latestUrl;
             public bool   latestOnly;
+            public List<ModDependency> dependencies;
             public List<ModVersion> versions;
         }
         private List<RepoMod> _browseMods  = new List<RepoMod>();
@@ -650,6 +660,7 @@ namespace CNRModManager
                             string latUrl     = ParseJsonStr(obj, "latestUrl");
                             mod.latestUrl     = !string.IsNullOrEmpty(latUrl) ? latUrl : ParseJsonStr(obj, "url");
                             mod.latestOnly    = ParseJsonBool(obj, "latestOnly");
+                            mod.dependencies  = ParseModDependencies(obj);
                             mod.versions      = ParseModVersions(obj);
                             if (mod.versions.Count == 0 && !string.IsNullOrEmpty(mod.latestVersion))
                             {
@@ -732,6 +743,46 @@ namespace CNRModManager
             return list;
         }
 
+        private static List<ModDependency> ParseModDependencies(string json)
+        {
+            var list = new List<ModDependency>();
+            int idx = json.IndexOf("\"dependencies\"");
+            if (idx < 0) return list;
+            int arrStart = json.IndexOf('[', idx);
+            int arrEnd = FindArrayEnd(json, arrStart);
+            if (arrStart < 0 || arrEnd <= arrStart) return list;
+            string arr = json.Substring(arrStart + 1, arrEnd - arrStart - 1);
+            int depth = 0, objStart = -1;
+            for (int i = 0; i < arr.Length; i++)
+            {
+                if (arr[i] == '{')
+                {
+                    if (depth == 0) objStart = i;
+                    depth++;
+                }
+                else if (arr[i] == '}')
+                {
+                    depth--;
+                    if (depth == 0 && objStart >= 0)
+                    {
+                        string o = arr.Substring(objStart, i - objStart + 1);
+                        ModDependency dep;
+                        dep.kind = ParseJsonStr(o, "kind");
+                        if (string.IsNullOrEmpty(dep.kind)) dep.kind = "mod";
+                        dep.id = ParseJsonStr(o, "id");
+                        dep.filename = ParseJsonStr(o, "filename");
+                        dep.url = ParseJsonStr(o, "url");
+                        dep.minVersion = ParseJsonStr(o, "minVersion");
+                        dep.latestOnly = ParseJsonBool(o, "latestOnly");
+                        if (!string.IsNullOrEmpty(dep.id) || !string.IsNullOrEmpty(dep.filename) || !string.IsNullOrEmpty(dep.url))
+                            list.Add(dep);
+                        objStart = -1;
+                    }
+                }
+            }
+            return list;
+        }
+
         private static int FindArrayEnd(string s, int start)
         {
             if (start < 0 || start >= s.Length || s[start] != '[') return -1;
@@ -779,6 +830,131 @@ namespace CNRModManager
                 _statusMsg = "Save error: " + ex.Message;
                 ModManagerEntry.Log("Download save err: " + ex.Message);
             }
+        }
+
+        private IEnumerator InstallRepoMod(RepoMod mod)
+        {
+            yield return StartCoroutine(InstallDependencies(mod));
+            yield return StartCoroutine(DownloadMod(mod.name, mod.filename, mod.latestUrl, mod.latestVersion));
+        }
+
+        private IEnumerator InstallDependencies(RepoMod mod)
+        {
+            if (mod.dependencies == null || mod.dependencies.Count == 0) yield break;
+            for (int i = 0; i < mod.dependencies.Count; i++)
+            {
+                ModDependency dep = mod.dependencies[i];
+                if (string.Equals(dep.kind, "file", StringComparison.OrdinalIgnoreCase))
+                    yield return StartCoroutine(DownloadDependencyFile(mod, dep));
+                else
+                    yield return StartCoroutine(DownloadDependencyMod(mod, dep));
+            }
+        }
+
+        private IEnumerator DownloadDependencyFile(RepoMod owner, ModDependency dep)
+        {
+            string destName = !string.IsNullOrEmpty(dep.filename) ? dep.filename : Path.GetFileName(dep.url);
+            if (string.IsNullOrEmpty(destName) || string.IsNullOrEmpty(dep.url)) yield break;
+            string dest = Path.Combine(ModManagerEntry.ModsDir, destName);
+            if (File.Exists(dest))
+            {
+                ModManagerEntry.Log("Dependency file already present: " + destName);
+                yield break;
+            }
+            _statusMsg = "Downloading dependency " + destName + "...";
+            ModManagerEntry.Log("Dependency file download: " + dep.url + " -> " + dest);
+            WWW www = new WWW(dep.url);
+            yield return www;
+            if (!string.IsNullOrEmpty(www.error))
+            {
+                _statusMsg = "Dependency download error: " + www.error;
+                ModManagerEntry.Log("Dependency file err: " + www.error);
+                yield break;
+            }
+            try
+            {
+                if (!Directory.Exists(ModManagerEntry.ModsDir))
+                    Directory.CreateDirectory(ModManagerEntry.ModsDir);
+                File.WriteAllBytes(dest, www.bytes);
+                ModManagerEntry.Log("Dependency file OK: " + dest + " (" + www.bytes.Length + " bytes)");
+            }
+            catch (Exception ex)
+            {
+                _statusMsg = "Dependency save error: " + ex.Message;
+                ModManagerEntry.Log("Dependency file save err: " + ex.Message);
+            }
+        }
+
+        private IEnumerator DownloadDependencyMod(RepoMod owner, ModDependency dep)
+        {
+            RepoMod target;
+            if (!FindRepoMod(dep, out target))
+            {
+                ModManagerEntry.Log("Dependency mod not found for " + owner.filename + " dep id=" + dep.id);
+                yield break;
+            }
+            string targetVersion = SelectDependencyVersion(target, dep);
+            string targetUrl = ResolveDependencyUrl(target, targetVersion);
+            string destPath = Path.Combine(ModManagerEntry.ModsDir, target.filename);
+            if (File.Exists(destPath))
+            {
+                string iv = GetInstalledVersion(target.filename);
+                string effectiveMin = !string.IsNullOrEmpty(dep.minVersion) ? dep.minVersion
+                                    : (dep.latestOnly ? target.latestVersion ?? "" : "");
+                if (string.IsNullOrEmpty(effectiveMin) || (!string.IsNullOrEmpty(iv) && CompareVersions(iv, effectiveMin) >= 0))
+                {
+                    ModManagerEntry.Log("Dependency mod already installed: " + target.filename);
+                    yield break;
+                }
+            }
+            yield return StartCoroutine(DownloadMod(target.name, target.filename, targetUrl, targetVersion));
+        }
+
+        private bool FindRepoMod(ModDependency dep, out RepoMod found)
+        {
+            for (int i = 0; i < _browseMods.Count; i++)
+            {
+                RepoMod rm = _browseMods[i];
+                if (!string.IsNullOrEmpty(dep.id) && rm.id.Equals(dep.id, StringComparison.OrdinalIgnoreCase))
+                {
+                    found = rm;
+                    return true;
+                }
+                if (!string.IsNullOrEmpty(dep.filename) && rm.filename.Equals(dep.filename, StringComparison.OrdinalIgnoreCase))
+                {
+                    found = rm;
+                    return true;
+                }
+            }
+            found = default(RepoMod);
+            return false;
+        }
+
+        private string SelectDependencyVersion(RepoMod mod, ModDependency dep)
+        {
+            if (dep.latestOnly || string.IsNullOrEmpty(dep.minVersion)) return mod.latestVersion;
+            string best = "";
+            for (int i = 0; i < mod.versions.Count; i++)
+            {
+                ModVersion mv = mod.versions[i];
+                if (string.IsNullOrEmpty(mv.version)) continue;
+                if (CompareVersions(mv.version, dep.minVersion) < 0) continue;
+                if (string.IsNullOrEmpty(best) || CompareVersions(mv.version, best) > 0)
+                    best = mv.version;
+            }
+            if (string.IsNullOrEmpty(best)) best = mod.latestVersion;
+            return best;
+        }
+
+        private string ResolveDependencyUrl(RepoMod mod, string version)
+        {
+            if (!string.IsNullOrEmpty(version))
+            {
+                for (int i = 0; i < mod.versions.Count; i++)
+                    if (mod.versions[i].version == version && !string.IsNullOrEmpty(mod.versions[i].url))
+                        return mod.versions[i].url;
+            }
+            return mod.latestUrl;
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -934,8 +1110,7 @@ namespace CNRModManager
             for (int i = 0; i < _batchQueue.Count; i++)
             {
                 RepoMod mod = _batchQueue[i];
-                yield return StartCoroutine(
-                    DownloadMod(mod.name, mod.filename, mod.latestUrl, mod.latestVersion));
+                yield return StartCoroutine(InstallRepoMod(mod));
                 _batchDone++;
             }
             _batchRunning          = false;
@@ -1342,7 +1517,7 @@ namespace CNRModManager
                     Color  instCol   = installed ? new Color(0.4f, 0.8f, 1f) : new Color(0.3f, 0.9f, 0.5f);
                     if (GUILayout.Button(instLabel, MakeBtnStyle(12, instCol),
                         GUILayout.Height(24f), GUILayout.Width(68f)))
-                        StartCoroutine(DownloadMod(capName, capFile, capUrl, capVer));
+                        StartCoroutine(InstallRepoMod(mod));
                 }
                 GUILayout.EndHorizontal();
 
@@ -1463,7 +1638,7 @@ namespace CNRModManager
                                 : new Color(0.65f, 0.65f, 0.75f);
                             if (GUILayout.Button(btnLbl, MakeBtnStyle(12, btnClr),
                                 GUILayout.Height(24f), GUILayout.Width(82f)))
-                                StartCoroutine(DownloadMod(mod.name + " v" + vTag, mod.filename, vUrl, vTag));
+                                StartCoroutine(InstallRepoMod(mod));
                         }
                     }
                     GUILayout.EndHorizontal();

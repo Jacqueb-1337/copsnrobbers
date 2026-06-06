@@ -377,6 +377,14 @@ namespace CNRZombieMod
         private static void ConfigureOverlayMaterial(Material m)
         {
             if (m == null) return;
+            try
+            {
+                Shader s = Shader.Find("Transparent/Cutout/Diffuse");
+                if (s == null) s = Shader.Find("Mobile/Transparent/Cutout");
+                if (s == null) s = Shader.Find("Transparent/Diffuse");
+                if (s != null) m.shader = s;
+            }
+            catch { }
             try { m.SetInt("_Cull", 0); } catch { }
             try { m.SetInt("_ZWrite", 0); } catch { }
             try { m.SetFloat("_Cutoff", 0.01f); } catch { }
@@ -1470,69 +1478,39 @@ namespace CNRZombieMod
 
         private static void BuildEnemyOverlay(GameObject go)
         {
-            if (go == null || go.transform.Find("__EnemyOverlay") != null) return;
-
-            GameObject root = new GameObject("__EnemyOverlay");
-            root.transform.parent = go.transform;
-            root.transform.localPosition = Vector3.zero;
-            root.transform.localRotation = Quaternion.identity;
-            root.transform.localScale = Vector3.one;
-            root.hideFlags = HideFlags.HideInHierarchy;
+            if (go == null) return;
 
             Renderer[] renderers = go.GetComponentsInChildren<Renderer>(true);
             for (int i = 0; i < renderers.Length; i++)
             {
                 Renderer src = renderers[i];
                 if (src == null || src.transform == null) continue;
-                if (LooksLikeHeldWeapon(src.transform) || LooksLikeEnemyHealthBar(src.transform)) continue;
+                if (LooksLikeHeldWeapon(src.transform) || LooksLikeEnemyHealthBar(src.transform) ||
+                    LooksLikeEnemyOverlay(src.transform))
+                    continue;
+                if (src.transform.Find("__EnemyOverlay") != null) continue;
 
                 Mesh srcMesh = GetRendererMesh(src);
                 if (srcMesh == null) continue;
-                Mesh clone = (Mesh)UnityEngine.Object.Instantiate(srcMesh);
-                RemapMeshUv(clone, ENEMY_LAYER_ATLAS, src.gameObject != null ? src.gameObject.name : "");
 
-                GameObject og = new GameObject(src.gameObject.name + "__overlay");
-                Transform overlayParent = EnsureOverlayPath(root.transform, src.transform.parent);
-                og.transform.parent = overlayParent != null ? overlayParent : root.transform;
-                og.transform.localPosition = src.transform.localPosition;
-                og.transform.localRotation = src.transform.localRotation;
-                og.transform.localScale = Vector3.one * 1.03f;
+                Mesh overlayMesh = (Mesh)UnityEngine.Object.Instantiate(srcMesh);
+                RemapMeshUv(overlayMesh, ENEMY_LAYER_ATLAS, src.gameObject != null ? src.gameObject.name : "");
 
-                MeshFilter mf = og.AddComponent<MeshFilter>();
-                mf.mesh = clone;
-                MeshRenderer mr = og.AddComponent<MeshRenderer>();
-                mr.sharedMaterials = src.sharedMaterials;
-                ConfigureOverlayMaterial(mr.material);
+                GameObject overlay = new GameObject("__EnemyOverlay");
+                overlay.transform.parent = src.transform;
+                overlay.transform.localPosition = Vector3.zero;
+                overlay.transform.localRotation = Quaternion.identity;
+                overlay.transform.localScale = Vector3.one * 1.04f;
+                overlay.hideFlags = HideFlags.HideInHierarchy;
+
+                MeshFilter mf = overlay.AddComponent<MeshFilter>();
+                mf.mesh = overlayMesh;
+                MeshRenderer mr = overlay.AddComponent<MeshRenderer>();
+                Material mat = src.material != null ? new Material(src.material) : new Material(Shader.Find("Diffuse"));
+                ConfigureOverlayMaterial(mat);
+                mr.material = mat;
                 try { mr.receiveShadows = false; } catch { }
             }
-        }
-
-        private static Transform EnsureOverlayPath(Transform overlayRoot, Transform srcParent)
-        {
-            if (overlayRoot == null || srcParent == null) return overlayRoot;
-            string path = TransformPath(srcParent);
-            if (string.IsNullOrEmpty(path)) return overlayRoot;
-
-            string[] parts = path.Split('/');
-            Transform cur = overlayRoot;
-            for (int i = 0; i < parts.Length; i++)
-            {
-                string part = parts[i];
-                if (string.IsNullOrEmpty(part) || part == overlayRoot.name) continue;
-                Transform next = cur.Find(part);
-                if (next == null)
-                {
-                    GameObject g = new GameObject(part);
-                    g.hideFlags = HideFlags.HideInHierarchy;
-                    g.transform.parent = cur;
-                    g.transform.localPosition = Vector3.zero;
-                    g.transform.localRotation = Quaternion.identity;
-                    g.transform.localScale = Vector3.one;
-                    next = g.transform;
-                }
-                cur = next;
-            }
-            return cur;
         }
 
         private static void RemapMeshUv(Mesh mesh, AtlasRemap[] remaps, string partName)
