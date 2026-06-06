@@ -2467,11 +2467,16 @@
       "id": "VoiceChat",
       "name": "Voice Chat",
       "description": "Mod-level voice chat bridge that uses the game WebView mediator and a site-hosted WebRTC page for live lobby audio.",
-      "latestVersion": "0.5.16",
+      "latestVersion": "0.5.17",
       "filename": "VoiceChat.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.16.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.17.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "0.5.17",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.17.dll",
+          "changelog": "Show the voice browser via a main-menu GUI button and wire it to WebView visibility"
+        },
         {
           "version": "0.5.16",
           "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.16.dll",
