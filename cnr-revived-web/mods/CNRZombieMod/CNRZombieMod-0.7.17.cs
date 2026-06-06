@@ -382,6 +382,8 @@ namespace CNRZombieMod
             try { m.SetFloat("_Cutoff", 0.01f); } catch { }
             try { m.EnableKeyword("_ALPHATEST_ON"); } catch { }
             try { m.renderQueue = 3000; } catch { }
+            try { m.mainTextureOffset = Vector2.zero; } catch { }
+            try { m.mainTextureScale = Vector2.one; } catch { }
         }
 
         private static bool LooksLikeEnemyHealthBar(Transform t)
@@ -1490,17 +1492,47 @@ namespace CNRZombieMod
                 RemapMeshUv(clone, ENEMY_LAYER_ATLAS, src.gameObject != null ? src.gameObject.name : "");
 
                 GameObject og = new GameObject(src.gameObject.name + "__overlay");
-                og.transform.parent = src.transform.parent != null ? src.transform.parent : root.transform;
+                Transform overlayParent = EnsureOverlayPath(root.transform, src.transform.parent);
+                og.transform.parent = overlayParent != null ? overlayParent : root.transform;
                 og.transform.localPosition = src.transform.localPosition;
                 og.transform.localRotation = src.transform.localRotation;
-                og.transform.localScale = src.transform.localScale * 1.03f;
+                og.transform.localScale = Vector3.one * 1.03f;
 
                 MeshFilter mf = og.AddComponent<MeshFilter>();
                 mf.mesh = clone;
                 MeshRenderer mr = og.AddComponent<MeshRenderer>();
                 mr.sharedMaterials = src.sharedMaterials;
+                ConfigureOverlayMaterial(mr.material);
                 try { mr.receiveShadows = false; } catch { }
             }
+        }
+
+        private static Transform EnsureOverlayPath(Transform overlayRoot, Transform srcParent)
+        {
+            if (overlayRoot == null || srcParent == null) return overlayRoot;
+            string path = TransformPath(srcParent);
+            if (string.IsNullOrEmpty(path)) return overlayRoot;
+
+            string[] parts = path.Split('/');
+            Transform cur = overlayRoot;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string part = parts[i];
+                if (string.IsNullOrEmpty(part) || part == overlayRoot.name) continue;
+                Transform next = cur.Find(part);
+                if (next == null)
+                {
+                    GameObject g = new GameObject(part);
+                    g.hideFlags = HideFlags.HideInHierarchy;
+                    g.transform.parent = cur;
+                    g.transform.localPosition = Vector3.zero;
+                    g.transform.localRotation = Quaternion.identity;
+                    g.transform.localScale = Vector3.one;
+                    next = g.transform;
+                }
+                cur = next;
+            }
+            return cur;
         }
 
         private static void RemapMeshUv(Mesh mesh, AtlasRemap[] remaps, string partName)

@@ -1490,7 +1490,7 @@ namespace CNRZombieMod
                 RemapMeshUv(clone, ENEMY_LAYER_ATLAS, src.gameObject != null ? src.gameObject.name : "");
 
                 GameObject og = new GameObject(src.gameObject.name + "__overlay");
-                og.transform.parent = root.transform;
+                og.transform.parent = src.transform.parent != null ? src.transform.parent : root.transform;
                 og.transform.localPosition = src.transform.localPosition;
                 og.transform.localRotation = src.transform.localRotation;
                 og.transform.localScale = src.transform.localScale * 1.03f;
