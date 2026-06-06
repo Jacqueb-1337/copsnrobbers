@@ -4276,7 +4276,14 @@ namespace CNRMods
                     bn == UIStoreBtnEvent.ButtonName.SkinSetUnlock ||
                     bn == UIStoreBtnEvent.ButtonName.BackToMenu)
                 {
-                    evt.enabled = false;
+                    if (bn == UIStoreBtnEvent.ButtonName.BackToMenu)
+                    {
+                        evt.buttonName = UIStoreBtnEvent.ButtonName.Nil;
+                    }
+                    else
+                    {
+                        evt.enabled = false;
+                    }
                     var interceptor = evt.gameObject.AddComponent<CNRSkinBtnInterceptor>();
                     interceptor.Hook   = this;
                     interceptor.BtnTag = bn;
@@ -4850,7 +4857,14 @@ namespace CNRMods
                     bn == UIProfileBtnEvent.ButtonName.SetSkin  ||
                     bn == UIProfileBtnEvent.ButtonName.BackToMenu)
                 {
-                    evt.enabled = false;
+                    if (bn == UIProfileBtnEvent.ButtonName.BackToMenu)
+                    {
+                        evt.buttonName = UIProfileBtnEvent.ButtonName.Nil;
+                    }
+                    else
+                    {
+                        evt.enabled = false;
+                    }
                     var interceptor    = evt.gameObject.AddComponent<CNRProfileBtnInterceptor>();
                     interceptor.Hook   = this;
                     interceptor.BtnTag = bn;
@@ -5019,16 +5033,15 @@ namespace CNRMods
             _scrollInitialized = false;
             _view = View.Grid;
             _dragging = false;
-            SetModelInteractive(false);
+            SetModelVisible(false);
         }
 
-        void SetModelInteractive(bool interactive)
+        void SetModelVisible(bool visible)
         {
             if (Hook == null) return;
             var model = Hook.RoleModel;
             if (model == null) return;
-            foreach (var col in model.GetComponentsInChildren<Collider>(true))
-                col.enabled = interactive;
+            model.SetActive(visible);
         }
 
         // ── Update: swipe tracking ────────────────────────────────────────────
@@ -5038,25 +5051,8 @@ namespace CNRMods
             if (!_thumbsStarted && Hook != null)
             { _thumbsStarted = true; StartCoroutine(RenderThumbs()); }
 
-            if (Hook != null && _view == View.Grid)
-                SetModelInteractive(false);
-
-            if (Hook != null && _view == View.Detail && Input.GetMouseButtonDown(0))
-            {
-                Rect back = Hook.SkinBackButtonRect;
-                if (back.width > 0f)
-                {
-                    Vector2 guiPos = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
-                    if (back.Contains(guiPos))
-                    {
-                        Hook.SetVanillaVisible(false);
-                        _scrollInitialized = false;
-                        _view = View.Grid;
-                        _dragging = false;
-                        return;
-                    }
-                }
-            }
+            if (Hook != null)
+                SetModelVisible(_view == View.Detail || !_thumbsReady);
 
             if (_view != View.Grid || Hook == null) return;
             var marker = Hook.SkinTabMarker;
@@ -5332,15 +5328,13 @@ namespace CNRMods
             Hook.NavigateTo(listIdx);
             // Show vanilla skin UI (arrows, equip btn, char model drag) and hide our grid
             Hook.SetVanillaVisible(true);
-            SetModelInteractive(true);
+            SetModelVisible(true);
             _view = View.Detail;
         }
 
         // ── Detail view — vanilla UI is visible; we just overlay a "← Grid" button ──
         void DrawDetail(float sw, float sh)
         {
-            float s  = Screen.height / 900f;
-            float bw = 130 * s, bh = 50 * s;
             return;
         }
 

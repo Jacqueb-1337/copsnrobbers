@@ -350,6 +350,8 @@ namespace CNRZombieMod
                 : _skinTextures[variant];
             if (tex == null) return; // not loaded yet — keep default
             Renderer[] renderers = go.GetComponentsInChildren<Renderer>(true);
+            int skinned = 0;
+            int overlays = 0;
             for (int i = 0; i < renderers.Length; i++)
             {
                 Renderer r = renderers[i];
@@ -361,9 +363,19 @@ namespace CNRZombieMod
                 m.mainTextureOffset = Vector2.zero;
                 m.mainTextureScale = Vector2.one;
                 if (LooksLikeEnemyOverlay(r.transform))
+                {
                     ConfigureOverlayMaterial(m);
+                    try { r.enabled = true; } catch { }
+                    overlays++;
+                }
                 r.material = m;
+                skinned++;
             }
+            ZombieModEntry.Log("ZombieSkin: applied root=" + go.name +
+                " renderers=" + skinned +
+                " overlays=" + overlays +
+                " tex=" + tex.width + "x" + tex.height +
+                " filter=" + tex.filterMode);
         }
 
         private static void ConfigureSkinTexture(Texture2D tex)
@@ -389,6 +401,8 @@ namespace CNRZombieMod
             try { m.SetInt("_ZWrite", 0); } catch { }
             try { m.SetFloat("_Cutoff", 0.01f); } catch { }
             try { m.EnableKeyword("_ALPHATEST_ON"); } catch { }
+            try { m.color = Color.white; } catch { }
+            try { m.SetColor("_Color", Color.white); } catch { }
             try { m.renderQueue = 3000; } catch { }
             try { m.mainTextureOffset = Vector2.zero; } catch { }
             try { m.mainTextureScale = Vector2.one; } catch { }
@@ -1498,22 +1512,50 @@ namespace CNRZombieMod
             if (go == null) return;
 
             Renderer[] renderers = go.GetComponentsInChildren<Renderer>(true);
+            int created = 0;
+            int bodyCandidates = 0;
+            int skippedSpecial = 0;
+            int skippedNonBody = 0;
+            int skippedExisting = 0;
+            int skippedNoMesh = 0;
+            int skippedNoUvRemap = 0;
+
             for (int i = 0; i < renderers.Length; i++)
             {
                 Renderer src = renderers[i];
                 if (src == null || src.transform == null) continue;
                 if (LooksLikeHeldWeapon(src.transform) || LooksLikeEnemyHealthBar(src.transform) ||
                     LooksLikeEnemyOverlay(src.transform))
+                {
+                    skippedSpecial++;
                     continue;
+                }
                 string name = src.gameObject != null ? src.gameObject.name : "";
-                if (!IsEnemyBodyPartName(name)) continue;
-                if (src.transform.Find("__EnemyOverlay") != null) continue;
+                if (!IsEnemyBodyPartName(name))
+                {
+                    skippedNonBody++;
+                    continue;
+                }
+                bodyCandidates++;
+                if (src.transform.Find("__EnemyOverlay") != null)
+                {
+                    skippedExisting++;
+                    continue;
+                }
 
                 Mesh srcMesh = GetRendererMesh(src);
-                if (srcMesh == null) continue;
+                if (srcMesh == null)
+                {
+                    skippedNoMesh++;
+                    continue;
+                }
 
                 Mesh overlayMesh = (Mesh)UnityEngine.Object.Instantiate(srcMesh);
-                if (!RemapMeshUv(overlayMesh, ENEMY_LAYER_ATLAS, name)) continue;
+                if (!RemapMeshUv(overlayMesh, ENEMY_LAYER_ATLAS, name))
+                {
+                    skippedNoUvRemap++;
+                    continue;
+                }
 
                 GameObject overlay = new GameObject("__EnemyOverlay");
                 overlay.transform.parent = src.transform;
@@ -1529,7 +1571,18 @@ namespace CNRZombieMod
                 ConfigureOverlayMaterial(mat);
                 mr.material = mat;
                 try { mr.receiveShadows = false; } catch { }
+                created++;
             }
+
+            ZombieModEntry.Log("EnemyOverlay: root=" + go.name +
+                " renderers=" + renderers.Length +
+                " bodyCandidates=" + bodyCandidates +
+                " created=" + created +
+                " skippedSpecial=" + skippedSpecial +
+                " skippedNonBody=" + skippedNonBody +
+                " skippedExisting=" + skippedExisting +
+                " skippedNoMesh=" + skippedNoMesh +
+                " skippedNoUvRemap=" + skippedNoUvRemap);
         }
 
         private static bool RemapMeshUv(Mesh mesh, AtlasRemap[] remaps, string partName)
@@ -1639,6 +1692,7 @@ namespace CNRZombieMod
         private static bool LooksLikeHeldWeapon(Transform t)
         {
             string path = TransformPath(t).ToLowerInvariant();
+            if (path.IndexOf("__enemyoverlay") >= 0) return false;
 
             // Match any weapon slot under weaponcontrol (1_0, 1_1, 1_2, 1_3, etc.)
             // but NOT the hand bones themselves.

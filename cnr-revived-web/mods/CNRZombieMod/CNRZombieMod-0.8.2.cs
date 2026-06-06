@@ -1968,6 +1968,10 @@ namespace CNRZombieMod
                   return pi != null && (bool)pi.GetValue(null, null); }
             catch { return false; }
         }
+        public bool IsMasterClientNow()
+        {
+            return IsMasterClient();
+        }
         private object GetNetworkingPeer()
         {
             try { Type t = GetPNType(); if (t == null) return null;
@@ -3693,6 +3697,9 @@ namespace CNRZombieMod
         private FieldInfo  _fSpeed;        // AIPath.speed      (float)
         private FieldInfo  _fCanSearch;    // AIPath.canSearch  (bool)
         private FieldInfo  _fCanMove;      // AIPath.canMove    (bool)
+        private FieldInfo  _fLogicBlood;   // SingleEnemyLogic.blood
+        private FieldInfo  _fLogicBDied;   // SingleEnemyLogic.bDied
+        private static Type _singleEnemyLogicType;
 
         // Melee attack
         private const float ATTACK_RANGE    = 1.5f;
@@ -3740,6 +3747,20 @@ namespace CNRZombieMod
                                    ?? aiType.BaseType.GetField("canMove",   BindingFlags.Public | BindingFlags.Instance);
                     }
                 }
+
+                try
+                {
+                    Type logicType = FindType("SingleEnemyLogic");
+                    if (logicType != null)
+                    {
+                        _singleEnemyLogicType = logicType;
+                        _fLogicBlood = logicType.GetField("blood", BindingFlags.Public | BindingFlags.Instance);
+                        _fLogicBDied = logicType.GetField("bDied", BindingFlags.Public | BindingFlags.Instance);
+                        ZombieModEntry.Log("ZombieDriver[" + ZombieId + "]: logic refs blood=" +
+                            (_fLogicBlood != null) + " bDied=" + (_fLogicBDied != null));
+                    }
+                }
+                catch (Exception ex) { ZombieModEntry.Log("ZombieDriver logic reflect err: " + ex.Message); }
 
                 // Check if A* is present in this scene
                 _hasAstar = CheckAstar();
@@ -3844,6 +3865,9 @@ namespace CNRZombieMod
                     if (_fCanMove   != null) _fCanMove.SetValue(_singleEnemyAI, false);
                 }
 
+                if (IsZombieDowned())
+                    return;
+
                 Transform playerTr = GetNearestPlayer();
                 if (playerTr == null) return;
 
@@ -3885,6 +3909,8 @@ namespace CNRZombieMod
                 }
 
                 // Proximity melee attack — playerTr is guaranteed non-null here
+                if (Hook != null && !Hook.IsMasterClientNow())
+                    return;
                 _attackCd -= Time.deltaTime;
                 if (_attackCd <= 0f && _sfPlayerLogicInst != null && _smPlayerDamage != null)
                 {
@@ -3903,6 +3929,30 @@ namespace CNRZombieMod
                 }
             }
             catch (Exception ex) { ZombieModEntry.Log("ZombieDriver.Update err: " + ex.Message); }
+        }
+
+        private bool IsZombieDowned()
+        {
+            try
+            {
+                if (_fLogicBDied == null && _fLogicBlood == null) return false;
+                object logic = null;
+                if (_singleEnemyLogicType != null)
+                    logic = GetComponent(_singleEnemyLogicType);
+                if (logic == null) return false;
+                if (_fLogicBDied != null)
+                {
+                    object died = _fLogicBDied.GetValue(logic);
+                    if (died is bool && (bool)died) return true;
+                }
+                if (_fLogicBlood != null)
+                {
+                    object blood = _fLogicBlood.GetValue(logic);
+                    if (blood is int && (int)blood <= 0) return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         // ─── helpers ───────────────────────────────────────────────────────
