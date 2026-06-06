@@ -2466,19 +2466,107 @@
     {
       "id": "VoiceChat",
       "name": "Voice Chat",
-      "description": "Diagnostic scaffold for future in-game voice chat. Registers with CNRMod and logs microphone devices plus available runtime networking APIs.",
-      "latestVersion": "0.3.0",
+      "description": "Mod-level voice chat bridge that uses the game WebView mediator and a site-hosted WebRTC page for live lobby audio.",
+      "latestVersion": "0.5.8",
       "filename": "VoiceChat.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.3.0.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.8.dll",
       "latestOnly": false,
-      "dependencies": [
-        {
-          "kind": "file",
-          "filename": "libwebrtc-android-release-144.7559.05.aar",
-          "url": "https://github.com/webrtc-sdk/android/releases/download/v144.7559.05/libwebrtc-android-release.aar"
-        }
-      ],
       "versions": [
+        {
+          "version": "0.5.8",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.8.dll",
+          "changelog": "Release workflow via build_and_release.ps1; stop manual repo edits"
+        },
+        {
+          "version": "0.5.7",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.7.dll",
+          "changelog": "Fix voice_room handling so 198 is processed before vc payload checks and mirror syncs to PHP"
+        },
+        {
+          "version": "0.5.6",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.6.dll",
+          "changelog": "Add verbose event-code and key logging for the Photon voice-room sync path"
+        },
+        {
+          "version": "0.5.5",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.5.dll",
+          "changelog": "Broadcast the voice room over Photon event 198 and heartbeat it into the PHP log"
+        },
+        {
+          "version": "0.5.4",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.4.dll",
+          "changelog": "Add bridge-connected and peer-count fields to the PHP state log"
+        },
+        {
+          "version": "0.5.3",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.3.dll",
+          "changelog": "Report runtime state, scene, room, and mic devices directly to the PHP voice log"
+        },
+        {
+          "version": "0.5.2",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.2.dll",
+          "changelog": "Report bridge bootstrap directly to the PHP log from the mod"
+        },
+        {
+          "version": "0.5.1",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.1.dll",
+          "changelog": "Start the WebView bridge on MainMenu instead of waiting for a room scene"
+        },
+        {
+          "version": "0.5.0",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.0.dll",
+          "changelog": "Only start the WebView bridge once we are actually in a room scene"
+        },
+        {
+          "version": "0.4.9",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.4.9.dll",
+          "changelog": "Simplify the WebView bootstrap test by loading the note URL directly after the page"
+        },
+        {
+          "version": "0.4.8",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.4.8.dll",
+          "changelog": "Emit a bootstrap note directly from the mod to test the WebMediator message path"
+        },
+        {
+          "version": "0.4.7",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.4.7.dll",
+          "changelog": "Start the WebView bridge from the menu so the page is visible immediately"
+        },
+        {
+          "version": "0.4.6",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.4.6.dll",
+          "changelog": "Load the WebView bridge outside a match so we can verify page rendering and logging earlier"
+        },
+        {
+          "version": "0.4.5",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.4.5.dll",
+          "changelog": "Remove the WebView debugging call that was freezing launch"
+        },
+        {
+          "version": "0.4.4",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.4.4.dll",
+          "changelog": "Move WebView debugging onto the Android UI thread so Chrome inspect can see the page"
+        },
+        {
+          "version": "0.4.3",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.4.3.dll",
+          "changelog": "Force WebView debugging on and keep the WebView visible as a centered in-game debug panel"
+        },
+        {
+          "version": "0.4.2",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.4.2.dll",
+          "changelog": "Show the WebView bridge visibly in-game and add page-side startup diagnostics"
+        },
+        {
+          "version": "0.4.1",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.4.1.dll",
+          "changelog": "Add WebView mic diagnostics and native note polling for voice page startup"
+        },
+        {
+          "version": "0.4.0",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.4.0.dll",
+          "changelog": "Use the game WebMediator plus a site-hosted WebRTC page for mod-level voice chat"
+        },
         {
           "version": "0.3.0",
           "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.3.0.dll",
