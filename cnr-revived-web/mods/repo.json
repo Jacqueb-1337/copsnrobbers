@@ -2467,11 +2467,16 @@
       "id": "VoiceChat",
       "name": "Voice Chat",
       "description": "Mod-level voice chat bridge that uses the game WebView mediator and a site-hosted WebRTC page for live lobby audio.",
-      "latestVersion": "0.5.10",
+      "latestVersion": "0.5.11",
       "filename": "VoiceChat.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.10.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.11.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "0.5.11",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.11.dll",
+          "changelog": "Forward voice room event 198 through the photon proxy receive path"
+        },
         {
           "version": "0.5.10",
           "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.10.dll",
