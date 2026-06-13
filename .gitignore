@@ -1,3 +1,9 @@
 /temp/**
 /graphify-out/**
 /graphify-tree-watch.ps1
+
+# Sensitive credentials — never commit these
+.vscode/sftp.json
+**/.env
+*.keystore
+*.jks
