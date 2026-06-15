@@ -1,3 +1,10 @@
 /temp/**
 /graphify-out/**
 /graphify-tree-watch.ps1
+/.vscode/**
+/.venv/**
+/venv/**
+/.codex/**
+**/.env
+*.keystore
+*.jks

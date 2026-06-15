@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CNR Voice Rooms</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;background:#0c1116;color:#eef;font-family:system-ui,Segoe UI,Arial;overflow:hidden}
+  *{box-sizing:border-box}
+  #shell{position:fixed;inset:0;display:flex;flex-direction:column;padding:16px;gap:12px}
+  #header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  #title{font-size:20px;font-weight:800;letter-spacing:0}
+  #meta{font-size:13px;opacity:.8;text-align:right}
+  #toolbar{display:flex;gap:8px;flex-wrap:wrap}
+  button{background:#1a2430;color:#eef;border:1px solid #324254;border-radius:8px;padding:10px 14px;font-weight:700}
+  button.primary{background:#4b7cff;border-color:#4b7cff;color:#fff}
+  #status{padding:10px 12px;background:#121922;border:1px solid #273040;border-radius:8px;font-size:14px;min-height:40px}
+  #rooms{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;overflow:auto;padding-right:4px}
+  .room{background:#111722;border:1px solid #263241;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px}
+  .room h2{margin:0;font-size:16px}
+  .room .sub{font-size:12px;opacity:.75}
+  .peers{display:flex;flex-wrap:wrap;gap:6px}
+  .peer{font-size:12px;padding:6px 8px;border-radius:999px;background:#1d2733;border:1px solid #314052}
+  .empty{opacity:.6;font-size:13px}
+  #log{height:120px;overflow:auto;background:#0f151d;border:1px solid #263241;border-radius:8px;padding:10px;font-size:12px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div id="shell">
+  <div id="header">
+    <div id="title">Voice Rooms</div>
+    <div id="meta"><span id="peerName"></span><br><span id="roomName"></span></div>
+  </div>
+  <div id="toolbar">
+    <button id="refreshBtn" class="primary">Refresh</button>
+    <button id="joinBtn">Join Current Game Room</button>
+    <button id="testAudioBtn">Test Audio</button>
+    <button id="testStreamBtn">Test Stream</button>
+  </div>
+  <div id="status">Loading rooms...</div>
+  <div id="rooms"></div>
+  <div id="log"></div>
+</div>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const peer = params.get('peer') || ('peer-' + Math.random().toString(36).slice(2));
+  const name = params.get('name') || peer;
+  let currentRoom = params.get('room') || 'offline';
+  const api = '/voicechat/api.php';
+  const roomsEl = document.getElementById('rooms');
+  const statusEl = document.getElementById('status');
+  const logEl = document.getElementById('log');
+  const peerNameEl = document.getElementById('peerName');
+  const roomNameEl = document.getElementById('roomName');
+  const refreshBtn = document.getElementById('refreshBtn');
+  const joinBtn = document.getElementById('joinBtn');
+  const testAudioBtn = document.getElementById('testAudioBtn');
+  const testStreamBtn = document.getElementById('testStreamBtn');
+  const audioCtx = window.AudioContext ? new AudioContext() : null;
+  const micQueue = [];
+  let micPlaying = false;
+  let lastMicLevel = 0;
+  let testStreamAudio = null;
+
+  window.__cnrVoice = {
+    setMicMuted(v) { log('micMuted=' + !!v); },
+    setSpeakerMuted(v) { log('speakerMuted=' + !!v); },
+    onSignal(kind, sdp, candidate, mline) { log('signal ' + kind + ' m=' + (mline == null ? 'null' : mline)); },
+    pushMicFrame(b64, rate, level) {
+      lastMicLevel = level || 0;
+      log('mic frame ' + Math.round(lastMicLevel * 100) + '%');
+      if (!audioCtx) return;
+      const binary = atob(b64);
+      const pcm = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) pcm[i] = binary.charCodeAt(i);
+      micQueue.push({ pcm, rate: rate || 8000 });
+      if (!micPlaying) playQueuedMic();
+    }
+  };
+
+  window.__cnrVoice.playTestStream = async function() {
+    try {
+      if (audioCtx && audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+      if (testStreamAudio) {
+        try { testStreamAudio.pause(); } catch (e) {}
+        testStreamAudio = null;
+      }
+      testStreamAudio = new Audio('https://audio-edge-vqwx4.yyz.g.radiomast.io/ref-128k-mp3-stereo');
+      testStreamAudio.crossOrigin = 'anonymous';
+      testStreamAudio.volume = 0.8;
+      testStreamAudio.loop = true;
+      testStreamAudio.onplay = () => log('test stream playing');
+      testStreamAudio.onerror = () => log('test stream error');
+      await testStreamAudio.play();
+      log('test stream requested');
+      return true;
+    } catch (e) {
+      log('test stream error ' + (e && e.message ? e.message : 'unknown'));
+      return false;
+    }
+  };
+
+  window.__cnrVoice.stopTestStream = function() {
+    try {
+      if (testStreamAudio) {
+        testStreamAudio.pause();
+        testStreamAudio = null;
+        log('test stream stopped');
+      }
+    } catch (e) {
+      log('test stream stop error ' + (e && e.message ? e.message : 'unknown'));
+    }
+  };
+
+  function playQueuedMic() {
+    if (!audioCtx || micQueue.length === 0) { micPlaying = false; return; }
+    micPlaying = true;
+    const item = micQueue.shift();
+    const samples = new Float32Array(item.pcm.length);
+    for (let i = 0; i < item.pcm.length; i++) samples[i] = ((item.pcm[i] - 128) / 127) * 0.8;
+    const buffer = audioCtx.createBuffer(1, samples.length, item.rate);
+    buffer.copyToChannel(samples, 0);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(audioCtx.destination);
+    src.onended = () => setTimeout(playQueuedMic, 0);
+    src.start();
+  }
+
+  peerNameEl.textContent = name + ' (' + peer + ')';
+  roomNameEl.textContent = 'room: ' + currentRoom;
+
+  function log(text) {
+    const line = new Date().toLocaleTimeString() + ' ' + text;
+    logEl.textContent = (line + '\n' + logEl.textContent).slice(0, 4000);
+  }
+
+  function setStatus(text) { statusEl.textContent = text; }
+
+  async function json(url, opts) {
+    const res = await fetch(url, opts);
+    return await res.json();
+  }
+
+  async function fetchRooms() {
+    setStatus('Refreshing rooms...');
+    try {
+      const data = await json(api + '?action=rooms', { cache: 'no-store' });
+      renderRooms(data && data.rooms ? data.rooms : []);
+      setStatus((data.rooms || []).length ? ('Found ' + data.rooms.length + ' active room(s)') : 'No active rooms yet');
+    } catch (e) {
+      setStatus('Room refresh failed');
+      log('refresh error ' + (e && e.message ? e.message : 'unknown'));
+    }
+  }
+
+  function renderRooms(list) {
+    roomsEl.innerHTML = '';
+    if (!list.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'No rooms are active right now.';
+      roomsEl.appendChild(empty);
+      return;
+    }
+    for (const room of list) {
+      const card = document.createElement('div');
+      card.className = 'room';
+      const peers = room.peers || [];
+      const names = peers.map(p => p.name || p.peer || 'unknown');
+      card.innerHTML = '<h2>' + escapeHtml(room.room) + '</h2>' +
+        '<div class="sub">' + room.peerCount + ' player(s)</div>';
+      const peerWrap = document.createElement('div');
+      peerWrap.className = 'peers';
+      if (peers.length) {
+        for (const p of peers) {
+          const chip = document.createElement('div');
+          chip.className = 'peer';
+          const pct = Math.max(0, Math.min(100, Math.round((p.level || 0) * 100)));
+          chip.textContent = (p.name || p.peer || 'unknown') + ' ' + pct + '%';
+          peerWrap.appendChild(chip);
+        }
+      } else {
+        const none = document.createElement('div');
+        none.className = 'empty';
+        none.textContent = 'No visible peers.';
+        peerWrap.appendChild(none);
+      }
+      const btn = document.createElement('button');
+      btn.className = 'primary';
+      btn.textContent = currentRoom === room.room ? 'Current Room' : 'Join Room';
+      btn.disabled = currentRoom === room.room;
+      btn.onclick = () => joinRoom(room.room);
+      card.appendChild(peerWrap);
+      card.appendChild(btn);
+      roomsEl.appendChild(card);
+    }
+  }
+
+  async function joinRoom(room) {
+    try {
+      const data = await json(api + '?action=join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room, peer, name })
+      });
+      if (data && data.ok) {
+        currentRoom = room;
+        roomNameEl.textContent = 'room: ' + currentRoom;
+        log('joined ' + room);
+        setStatus('Joined ' + room);
+        await fetchRooms();
+      }
+    } catch (e) {
+      setStatus('Join failed');
+      log('join error ' + (e && e.message ? e.message : 'unknown'));
+    }
+  }
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+
+  refreshBtn.addEventListener('click', fetchRooms);
+  joinBtn.addEventListener('click', () => joinRoom(currentRoom));
+  testAudioBtn.addEventListener('click', async () => {
+    try {
+      if (audioCtx && audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+      const audio = new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_115b5b5d9c.mp3?filename=notification-199434.mp3');
+      audio.volume = 0.8;
+      audio.onplay = () => log('test audio playing');
+      audio.onended = () => log('test audio ended');
+      audio.onerror = () => log('test audio error');
+      await audio.play();
+      setStatus('Test audio started');
+    } catch (e) {
+      setStatus('Test audio failed');
+      log('test audio error ' + (e && e.message ? e.message : 'unknown'));
+    }
+  });
+  testStreamBtn.addEventListener('click', async () => {
+    try {
+      if (audioCtx && audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+      const streamUrl = 'https://audio-edge-vqwx4.yyz.g.radiomast.io/ref-128k-mp3-stereo';
+      const audio = new Audio(streamUrl);
+      audio.crossOrigin = 'anonymous';
+      audio.volume = 0.8;
+      audio.onplay = () => log('test stream playing');
+      audio.onended = () => log('test stream ended');
+      audio.onerror = () => log('test stream error');
+      await audio.play();
+      setStatus('Test stream started');
+    } catch (e) {
+      setStatus('Test stream failed');
+      log('test stream error ' + (e && e.message ? e.message : 'unknown'));
+    }
+  });
+
+  log('page loaded for ' + name + ' in ' + currentRoom);
+  fetchRooms();
+  setInterval(fetchRooms, 2000);
+})();
+</script>
+</body>
+</html>
