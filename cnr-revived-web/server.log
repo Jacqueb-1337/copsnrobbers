@@ -1,0 +1,129 @@
+[2026-06-17T23:45:36.603Z] [watchdog] server started (PID 38884)
+Node-based CNR LAN Server (multi-network)
+  Master server : 0.0.0.0:5055  (all interfaces)
+  Game server   : 0.0.0.0:5056  (all interfaces)
+  Advertised game-server addresses:
+    play.jacqueb.me:5056
+
+  Set server.cfg on each client:
+    SERVER_IP=play.jacqueb.me  SERVER_PORT=5055
+
+[Master] Listening on 0.0.0.0:5055
+[Master] Advertised game-server addresses: play.jacqueb.me:5056
+[Game] Listening on 0.0.0.0:5056
+[Master] Client 1 connected from 127.0.0.1
+[Master] Client 1 (anon) disconnected
+[Master] Client 2 connected from 192.168.1.153
+[Master] Client 2 (anon) disconnected
+[Master] Client 3 connected from 127.0.0.1
+[Master] Client 3 (anon) disconnected
+[Master] Client 4 connected from 172.236.201.220
+[Master] Client 4 (anon) disconnected
+[Master] Client 5 connected from 172.236.201.220
+[Master] Client 5 (anon) disconnected
+[Master] Client 6 connected from 172.236.201.220
+[Master] Client 6 (anon) disconnected
+[Master] Client 7 connected from 172.236.201.220
+[Master] Client 7 (anon) disconnected
+[Master] Client 8 connected from 172.236.201.220
+[Master] Client 8 (anon) disconnected
+[Master] Client 9 connected from 172.236.201.220
+[Master] Client 9 (anon) disconnected
+[Master] Client 10 connected from 172.236.201.220
+[Master] Client 10 (anon) disconnected
+[Master] Client 11 connected from 172.236.201.220
+[Master] Client 11 (anon) disconnected
+[Master] Client 12 connected from 172.236.201.220
+[Master] Client 12 (anon) disconnected
+[Master] Client 13 connected from 172.236.201.220
+[Master] Client 13 (anon) disconnected
+[Master] Client 14 connected from 172.236.201.220
+[Master] Client 14 (anon) disconnected
+[Master] Client 15 connected from 172.236.201.220
+[Master] Client 15 (anon) disconnected
+[Master] Client 16 connected from 172.236.201.220
+[Master] Client 16 (anon) disconnected
+[Master] Client 17 connected from 172.236.201.220
+[Master] Client 17 (anon) disconnected
+[Master] Client 18 connected from 172.236.201.220
+[Master] Client 18 (anon) disconnected
+[Master] Client 19 connected from 172.236.201.220
+[Master] Client 19 (anon) disconnected
+[Master] Client 20 connected from 172.236.201.220
+[Master] Client 20 (anon) disconnected
+[Master] Client 21 connected from 172.236.201.220
+[Master] Client 21 (anon) disconnected
+[Master] Client 22 connected from 172.236.201.220
+[Master] Client 22 (anon) disconnected
+[Master] Client 23 connected from 172.236.201.220
+[Master] Client 23 (anon) disconnected
+[Master] Client 24 connected from 172.236.201.220
+[Master] Client 24 (anon) disconnected
+[Master] Client 25 connected from 172.236.201.220
+[Master] Client 25 (anon) disconnected
+[Master] Client 26 connected from 172.236.201.220
+[Master] Client 26 (anon) disconnected
+[Master] Client 27 connected from 172.236.201.220
+[Master] Client 27 (anon) disconnected
+[Master] Client 28 connected from 172.236.201.220
+[Master] Client 28 (anon) disconnected
+[Master] Client 29 connected from 172.236.201.220
+[Master] Client 29 (anon) disconnected
+[Master] Client 30 connected from 172.236.201.220
+[Master] Client 30 (anon) disconnected
+[Master] Client 31 connected from 172.236.201.220
+[Master] Client 31 (anon) disconnected
+[Master] Client 32 connected from 172.236.201.220
+[Master] Client 32 (anon) disconnected
+[Master] Client 33 connected from 172.236.201.220
+[Master] Client 33 (anon) disconnected
+[Master] Client 34 connected from 104.248.10.212
+[Master] Client 34 (anon) disconnected
+[Master] Client 35 connected from 172.30.228.151
+[Master] Client 35 (anon) disconnected
+[Master] Client 36 connected from 192.168.1.159
+[Master] Session 36 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] Client 36 (anon) disconnected
+[Master] Client 37 connected from 172.30.228.151
+[Master] Client 37 (anon) disconnected
+[Game] Client 1 connected from 172.30.228.151
+[Game] Client 1 (anon) disconnected
+[Master] Client 38 connected from 172.30.228.151
+[Master] Client 38 (anon) disconnected
+[Game] Client 2 connected from 172.30.228.151
+[Game] Client 2 (anon) disconnected
+[Master] Client 39 connected from 172.30.228.151
+[Master] Session 39 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 39 (anon) disconnected

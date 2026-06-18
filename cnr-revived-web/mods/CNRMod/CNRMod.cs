@@ -28,7 +28,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "3.2.73";
+        public const  string Version = "3.2.74";
 
         // -- Mod version registry ? every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -56,6 +56,8 @@ namespace CNRMods
         // Custom Photon event code for all CNR mod-to-mod communication.
         // Avoids SetCustomProperties entirely (which can trigger SendMonoMessage in old PUN).
         public const byte CNR_EVENT_CODE = 199;
+        public const byte CNR_FAST_EVENT_CODE = 198;
+        private static int _fastEventErrorLogBudget = 3;
 
         // Broadcast data to all room members via Photon RaiseEvent (no SendMonoMessage pathway).
         public static void RaiseCnrEvent(System.Collections.Hashtable data)
@@ -78,6 +80,37 @@ namespace CNRMods
                 Log("RaiseCnrEvent: sent " + data.Count + " keys");
             }
             catch (Exception ex) { Log("RaiseCnrEvent error: " + ex.Message); }
+        }
+
+        // Fast visual updates are high-frequency and disposable. Keep them off
+        // the reliable/logged CNR event path so gameplay state events stay clean.
+        public static void RaiseFastEvent(System.Collections.Hashtable data)
+        {
+            if (data == null) return;
+            try
+            {
+                Type pnt = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                { Type t = asm.GetType("PhotonNetwork"); if (t != null) { pnt = t; break; } }
+                if (pnt == null) { LogFastEventError("PhotonNetwork not found"); return; }
+                FieldInfo peerField = pnt.GetField("networkingPeer",
+                    BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+                if (peerField == null) { LogFastEventError("networkingPeer field not found"); return; }
+                object peer = peerField.GetValue(null);
+                if (peer == null) { LogFastEventError("networkingPeer is null"); return; }
+                MethodInfo raise = peer.GetType().GetMethod("OpRaiseEvent",
+                    new Type[] { typeof(byte), typeof(System.Collections.Hashtable), typeof(bool), typeof(byte) });
+                if (raise == null) { LogFastEventError("OpRaiseEvent not found"); return; }
+                raise.Invoke(peer, new object[] { CNR_FAST_EVENT_CODE, data, false, (byte)1 });
+            }
+            catch (Exception ex) { LogFastEventError(ex.Message); }
+        }
+
+        private static void LogFastEventError(string msg)
+        {
+            if (_fastEventErrorLogBudget <= 0) return;
+            _fastEventErrorLogBudget--;
+            Log("RaiseFastEvent error: " + msg);
         }
 
         // Inject CnrPhotonListenerProxy into NetworkingPeer.externalListener to receive CNR events.
@@ -333,6 +366,7 @@ namespace CNRMods
                 go.AddComponent<PackHook>();
                 go.AddComponent<SpeedHook>();
                 go.AddComponent<HitRegHook>();
+                go.AddComponent<FastVisualSyncHook>();
                 GameObject.DontDestroyOnLoad(go);
 
                 Log("Mod root created.  IP=" + (ServerIp != "" ? ServerIp : "(none)") +
@@ -664,6 +698,7 @@ namespace CNRMods
             PackState.Clear();
             CtfMode.OnLeftRoom();
             ZombieMode.OnLeftRoom();
+            FastVisualSyncHook.Clear();
         }
     }
 
@@ -683,7 +718,11 @@ namespace CNRMods
 
         public void OnEvent(EventData photonEvent)
         {
-            if (photonEvent.Code == ModEntry.CNR_EVENT_CODE)
+            if (photonEvent.Code == ModEntry.CNR_FAST_EVENT_CODE)
+            {
+                FastVisualSyncHook.OnFastPhotonEvent(photonEvent);
+            }
+            else if (photonEvent.Code == ModEntry.CNR_EVENT_CODE)
             {
                 // Parameter 245 = event data (Hashtable passed to OpRaiseEvent)
                 // Parameter 254 = sender ActorNr
@@ -705,6 +744,340 @@ namespace CNRMods
         public void OnStatusChanged(StatusCode statusCode)
         {
             _original.OnStatusChanged(statusCode);
+        }
+    }
+
+    public struct FastVisualState
+    {
+        public int Seq;
+        public Vector3 Position;
+        public float BodyYaw;
+        public float GunPitch;
+        public float Speed;
+        public PlayerStatus Status;
+        public WeaponType Weapon;
+        public float ReceiveTime;
+    }
+
+    public class FastVisualSyncHook : MonoBehaviour
+    {
+        public static float SendInterval = 0.05f;
+        public static float MaxStateAge = 0.35f;
+        public static float PositionSmoothing = 25f;
+        public static float RotationSmoothing = 35f;
+        public static float SnapDistance = 3f;
+        public static float WalkSpeedThreshold = 0.08f;
+
+        private static readonly Dictionary<int, FastVisualState> _states =
+            new Dictionary<int, FastVisualState>();
+        private static int _recvErrorLogBudget = 3;
+
+        private float _nextSendTime;
+        private int _seq;
+        private Vector3 _lastSamplePos;
+        private float _lastSampleTime;
+        private bool _hasLastSample;
+
+        void Update()
+        {
+            try
+            {
+                if (!IsInPhotonRoom())
+                {
+                    Clear();
+                    _hasLastSample = false;
+                    return;
+                }
+
+                SendLocalVisualState();
+
+                if (Time.frameCount % 30 == 0)
+                    AttachRemoteVisuals();
+            }
+            catch (Exception ex) { LogRecvError("Update: " + ex.Message); }
+        }
+
+        private void SendLocalVisualState()
+        {
+            float now = Time.realtimeSinceStartup;
+            if (now < _nextSendTime) return;
+            _nextSendTime = now + SendInterval;
+
+            CNRMultiplayerManager mgr = CNRMultiplayerManager.mInstance;
+            if (mgr == null || mgr.myPlayerInfo == null) return;
+            if (mgr.myPlayerInfo.mConnnectStatus != ConnectStatus.InGame) return;
+            if (mgr.myPlayerCharacterBody == null || mgr.myPlayerCharacterGun == null) return;
+            if (string.IsNullOrEmpty(mgr.myPlayerInfo.mId) || mgr.myPlayerInfo.mId == "null") return;
+
+            Vector3 pos = mgr.myPlayerCharacterBody.position;
+            float speed = 0f;
+            if (_hasLastSample)
+            {
+                float dt = Mathf.Max(0.001f, now - _lastSampleTime);
+                Vector3 d = pos - _lastSamplePos;
+                d.y = 0f;
+                speed = d.magnitude / dt;
+            }
+            _hasLastSample = true;
+            _lastSamplePos = pos;
+            _lastSampleTime = now;
+
+            float[] payload = new float[9];
+            payload[0] = ++_seq;
+            payload[1] = pos.x;
+            payload[2] = pos.y;
+            payload[3] = pos.z;
+            payload[4] = mgr.myPlayerCharacterBody.rotation.eulerAngles.y;
+            payload[5] = mgr.myPlayerCharacterGun.rotation.eulerAngles.x;
+            payload[6] = speed;
+            payload[7] = (float)((int)mgr.myPlayerInfo.mStatus);
+            payload[8] = (float)((int)mgr.myPlayerInfo.mWeaponType);
+
+            var ht = new System.Collections.Hashtable();
+            ht["fv"] = payload;
+            ModEntry.RaiseFastEvent(ht);
+        }
+
+        public static void OnFastPhotonEvent(EventData photonEvent)
+        {
+            try
+            {
+                if (photonEvent == null || photonEvent.Code != ModEntry.CNR_FAST_EVENT_CODE) return;
+                int senderId = photonEvent.Parameters.ContainsKey((byte)254)
+                    ? (int)photonEvent[(byte)254] : 0;
+                if (senderId <= 0 || senderId == GetLocalActorId()) return;
+
+                var ht = photonEvent.Parameters.ContainsKey((byte)245)
+                    ? photonEvent[(byte)245] as System.Collections.Hashtable : null;
+                if (ht == null || !ht.ContainsKey("fv")) return;
+                float[] payload = ht["fv"] as float[];
+                if (payload == null || payload.Length < 9) return;
+
+                int seq = Mathf.RoundToInt(payload[0]);
+                FastVisualState oldState;
+                if (_states.TryGetValue(senderId, out oldState) && seq <= oldState.Seq)
+                    return;
+
+                FastVisualState state = new FastVisualState();
+                state.Seq = seq;
+                state.Position = new Vector3(payload[1], payload[2], payload[3]);
+                state.BodyYaw = payload[4];
+                state.GunPitch = payload[5];
+                state.Speed = payload[6];
+                state.Status = ToPlayerStatus(Mathf.RoundToInt(payload[7]));
+                state.Weapon = ToWeaponType(Mathf.RoundToInt(payload[8]));
+                state.ReceiveTime = Time.realtimeSinceStartup;
+                _states[senderId] = state;
+            }
+            catch (Exception ex) { LogRecvError("recv: " + ex.Message); }
+        }
+
+        public static bool TryGetState(int actorId, out FastVisualState state)
+        {
+            if (_states.TryGetValue(actorId, out state))
+            {
+                if (Time.realtimeSinceStartup - state.ReceiveTime <= MaxStateAge)
+                    return true;
+                _states.Remove(actorId);
+            }
+            state = new FastVisualState();
+            return false;
+        }
+
+        public static void Clear()
+        {
+            _states.Clear();
+        }
+
+        private void AttachRemoteVisuals()
+        {
+            UnityEngine.Object[] npcs = FindObjectsOfType(typeof(NetPlayerController));
+            if (npcs == null) return;
+            for (int i = 0; i < npcs.Length; i++)
+            {
+                NetPlayerController npc = npcs[i] as NetPlayerController;
+                if (npc == null) continue;
+                GameObject go = ((Component)npc).gameObject;
+                if (go == null) continue;
+                if (go.GetComponent<FastRemoteVisual>() == null)
+                    go.AddComponent<FastRemoteVisual>();
+            }
+        }
+
+        private static bool IsInPhotonRoom()
+        {
+            try { return PhotonNetwork.connected && PhotonNetwork.room != null; }
+            catch { return false; }
+        }
+
+        private static int GetLocalActorId()
+        {
+            try
+            {
+                if (PhotonNetwork.player != null)
+                    return PhotonNetwork.player.ID;
+            }
+            catch { }
+            return 0;
+        }
+
+        private static PlayerStatus ToPlayerStatus(int raw)
+        {
+            if (raw == (int)PlayerStatus.walk) return PlayerStatus.walk;
+            if (raw == (int)PlayerStatus.fire) return PlayerStatus.fire;
+            if (raw == (int)PlayerStatus.dead) return PlayerStatus.dead;
+            if (raw == (int)PlayerStatus.knifeFire) return PlayerStatus.knifeFire;
+            return PlayerStatus.idle;
+        }
+
+        private static WeaponType ToWeaponType(int raw)
+        {
+            if (raw < (int)WeaponType.Nil || raw > (int)WeaponType.TeslaP1)
+                return WeaponType.Deagle;
+            return (WeaponType)raw;
+        }
+
+        private static void LogRecvError(string msg)
+        {
+            if (_recvErrorLogBudget <= 0) return;
+            _recvErrorLogBudget--;
+            ModEntry.Log("FastVisualSync: " + msg);
+        }
+    }
+
+    public class FastRemoteVisual : MonoBehaviour
+    {
+        private NetPlayerController _npc;
+        private int _actorId;
+        private bool _hasActorId;
+
+        void Awake()
+        {
+            _npc = GetComponent<NetPlayerController>();
+        }
+
+        void LateUpdate()
+        {
+            try
+            {
+                if (_npc == null) _npc = GetComponent<NetPlayerController>();
+                if (_npc == null || _npc.pInfo == null) return;
+
+                int actorId;
+                if (!TryGetActorId(out actorId)) return;
+
+                FastVisualState state;
+                if (!FastVisualSyncHook.TryGetState(actorId, out state)) return;
+
+                ApplyState(state);
+            }
+            catch { }
+        }
+
+        private bool TryGetActorId(out int actorId)
+        {
+            if (_hasActorId)
+            {
+                actorId = _actorId;
+                return true;
+            }
+
+            actorId = 0;
+            if (_npc == null || _npc.pInfo == null) return false;
+            string id = _npc.pInfo.mId;
+            if (string.IsNullOrEmpty(id) || id == "null") return false;
+            if (!int.TryParse(id, out actorId)) return false;
+            _actorId = actorId;
+            _hasActorId = true;
+            return true;
+        }
+
+        private void ApplyState(FastVisualState state)
+        {
+            PlayerStatus status = NormalizeStatus(state);
+            Quaternion bodyRot = Quaternion.Euler(0f, state.BodyYaw, 0f);
+            Quaternion gunRot = Quaternion.Euler(state.GunPitch, 0f, 0f);
+
+            _npc.pInfo.mPosition = state.Position;
+            _npc.pInfo.mBodyRotation = bodyRot;
+            _npc.pInfo.mGunRotation = gunRot;
+            _npc.pInfo.mStatus = status;
+            _npc.pInfo.mWeaponType = state.Weapon;
+
+            _npc.SetWeaponType(state.Weapon);
+            _npc.SetPlayerStatus(status);
+
+            if (status != PlayerStatus.dead)
+            {
+                ApplyPosition(state.Position);
+                ApplyRotation(bodyRot, gunRot);
+            }
+        }
+
+        private PlayerStatus NormalizeStatus(FastVisualState state)
+        {
+            if (_npc != null && _npc.pInfo != null && _npc.pInfo.mStatus == PlayerStatus.dead)
+                return PlayerStatus.dead;
+            if (state.Status == PlayerStatus.dead)
+                return PlayerStatus.dead;
+            if (state.Status == PlayerStatus.fire || state.Status == PlayerStatus.knifeFire)
+                return state.Status;
+            if (state.Speed > FastVisualSyncHook.WalkSpeedThreshold)
+                return PlayerStatus.walk;
+            return PlayerStatus.idle;
+        }
+
+        private void ApplyPosition(Vector3 bodyPos)
+        {
+            Transform root = transform;
+            Transform body = _npc.bodyTransform;
+            Vector3 target = bodyPos;
+            float dist = 0f;
+
+            if (body != null)
+            {
+                target = root.position - body.position + bodyPos;
+                target.y += 0.233f;
+                dist = Vector3.Distance(body.position, bodyPos);
+            }
+            else
+            {
+                dist = Vector3.Distance(root.position, target);
+            }
+
+            if (dist > FastVisualSyncHook.SnapDistance)
+            {
+                root.position = target;
+                return;
+            }
+
+            float t = Mathf.Min(1f, Time.deltaTime * FastVisualSyncHook.PositionSmoothing);
+            root.position = Vector3.Lerp(root.position, target, t);
+        }
+
+        private void ApplyRotation(Quaternion bodyRot, Quaternion gunRot)
+        {
+            try
+            {
+                Transform body = _npc.bodyTransform;
+                if (body != null)
+                {
+                    float targetRootYaw = transform.eulerAngles.y - body.eulerAngles.y + bodyRot.eulerAngles.y - 90f;
+                    float t = Mathf.Min(1f, Time.deltaTime * FastVisualSyncHook.RotationSmoothing);
+                    Vector3 e = transform.eulerAngles;
+                    e.y = Mathf.LerpAngle(e.y, targetRootYaw, t);
+                    transform.eulerAngles = e;
+                }
+                else
+                {
+                    Vector3 e = transform.eulerAngles;
+                    e.y = bodyRot.eulerAngles.y;
+                    transform.eulerAngles = e;
+                }
+
+                _npc.SetGunRotation(gunRot);
+            }
+            catch { }
         }
     }
 
