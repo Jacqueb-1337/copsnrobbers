@@ -60,6 +60,7 @@ game.start();
 webConsole.start({
   getStats: () => ({
     masterSessions: master.sessions.size,
+    authoritySessions: [...game.sessions].filter(s => s.currentRoom && s.actorNr && s.currentRoom.getAuthorityActorNr && s.currentRoom.getAuthorityActorNr() === s.actorNr).length,
     gameSessions:   game.sessions.size,
     rooms:          rooms.rooms.size,
     players:        [...rooms.rooms.values()].reduce((n, r) => n + r.playerCount, 0),
@@ -67,19 +68,20 @@ webConsole.start({
   getClients: () => ({
     master: [...master.sessions].map(s => ({
       id:            s.id,
-      userId:        s.userId,
+      userId:        s.userId || `Master Session ${s.id}`,
       ip:            s.socket.remoteAddress,
       connectTime:   s.connectTime,
       authenticated: s.isAuthenticated,
     })),
     game: [...game.sessions].map(s => ({
       id:            s.id,
-      userId:        s.userId,
+      userId:        s.userId || (s.actorNr ? `Actor ${s.actorNr}` : `Game Session ${s.id}`),
       ip:            s.socket.remoteAddress,
       connectTime:   s.connectTime,
       authenticated: s.isAuthenticated,
       room:          s.currentRoom ? s.currentRoom.name : null,
       actorNr:       s.actorNr,
+      isAuthority:   !!(s.currentRoom && s.actorNr && s.currentRoom.getAuthorityActorNr && s.currentRoom.getAuthorityActorNr() === s.actorNr),
     })),
   }),
   getRooms: () => [...rooms.rooms.values()].map(r => ({
@@ -91,6 +93,8 @@ webConsole.start({
     map:         r.map,
     version:     r.version,
     mode:        r.mode,
+    mapUrl:      r.mapUrl || '',
+    authorityActorNr: r.getAuthorityActorNr ? r.getAuthorityActorNr() : 0,
   })),
 });
 

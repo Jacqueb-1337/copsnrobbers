@@ -43,11 +43,20 @@ class RoomInfo {
     this.map = 'FreeRun3_1';      // C# default map
     this.version = '';
     this.mode = '0';              // C# default mode (TDM)
+    this.mapUrl = '';
     this.players = new Set();
     this._actorCounter = 0;
   }
   assignActorNr() { return ++this._actorCounter; }
   get playerCount() { return this.players.size; }
+  getAuthorityActorNr() {
+    let lowest = 0;
+    for (const p of this.players) {
+      if (!p || !p.actorNr) continue;
+      if (lowest === 0 || p.actorNr < lowest) lowest = p.actorNr;
+    }
+    return lowest;
+  }
   getGamePropsHashtable() {
     // Keys that the client reads as (byte) MUST be serialized as GpType.Byte.
     // Unboxing int→byte in C# throws InvalidCastException, crashing room setup.
@@ -59,7 +68,8 @@ class RoomInfo {
       251: false,                         // removedFromList
       map:     this.map,
       version: this.version,
-      mode:    this.mode
+      mode:    this.mode,
+      mapUrl:  this.mapUrl
     };
   }
 }
@@ -210,6 +220,7 @@ class MasterServer {
     const room = this.rooms.getOrCreateRoom(roomName);
     console.log(`[Master] Client ${session.id} creating room '${roomName}'`);
     const gameAddr = this.pickGameServer(session.socket.remoteAddress);
+    console.log(`[Master] Redirect create client ${session.id} ${session.socket.remoteAddress} -> ${gameAddr}`);
     const p = { [ParamKey.GameServer]: gameAddr };
     session.send(buildOpResponse(OpCode.CreateGame, 0, p));
   }
@@ -222,6 +233,7 @@ class MasterServer {
     }
     console.log(`[Master] Client ${session.id} joining room '${roomName}'`);
     const gameAddr = this.pickGameServer(session.socket.remoteAddress);
+    console.log(`[Master] Redirect join client ${session.id} ${session.socket.remoteAddress} -> ${gameAddr}`);
     const p = { [ParamKey.GameServer]: gameAddr };
     session.send(buildOpResponse(OpCode.JoinGame, 0, p));
   }
@@ -234,6 +246,7 @@ class MasterServer {
     }
     const room = visible[0];
     const gameAddr = this.pickGameServer(session.socket.remoteAddress);
+    console.log(`[Master] Redirect random client ${session.id} ${session.socket.remoteAddress} -> ${gameAddr}`);
     const p = { [ParamKey.RoomName]: room.name, [ParamKey.GameServer]: gameAddr };
     session.send(buildOpResponse(OpCode.JoinRandom, 0, p));
   }

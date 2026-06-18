@@ -1,5 +1,5 @@
 const net = require('net');
-const {peekFrameSize, parseFrame, buildOpResponse, buildPingResponse, buildEvent, ParamKey, OpCode} = require('./protocol');
+const {peekFrameSize, parseFrame, buildOpResponse, buildPingResponse, buildEvent, ParamKey, OpCode, intKeyHashtable} = require('./protocol');
 const {RoomManager, RoomInfo} = require('./masterServer');
 
 let sessionCounter = 1;
@@ -33,6 +33,12 @@ class PlayerSession {
   send(buf) {
     this.socket.write(buf);
   }
+}
+
+function getPlayerNameFromProps(props) {
+  if (!props || typeof props !== 'object') return '';
+  const name = props[255] ?? props['255'];
+  return name === undefined || name === null ? '' : String(name);
 }
 
 class GameServer {
@@ -150,6 +156,13 @@ class GameServer {
       if (gameProps['map'])     room.map     = gameProps['map'];
       if (gameProps['version']) room.version = gameProps['version'];
       if (gameProps['mode'])    room.mode    = gameProps['mode'];
+      if (gameProps['mapUrl'])  room.mapUrl  = gameProps['mapUrl'];
+    }
+    const playerProps = req.Parameters && req.Parameters[ParamKey.PlayerProps];
+    const advertisedName = getPlayerNameFromProps(playerProps);
+    if (advertisedName) session.userId = advertisedName;
+    if (playerProps && typeof playerProps === 'object') {
+      session.playerProps = playerProps;
     }
     // assign actor
     const actor = room.assignActorNr();
@@ -157,9 +170,10 @@ class GameServer {
     session.currentRoom = room;
     room.players.add(session);
     // build response: actorNr, playerProps, gameProps
+    const actorProps = intKeyHashtable([...room.players].map(p => [p.actorNr, p.playerProps || {}]));
     const opParams = {
       [254]: actor,
-      [249]: session.playerProps,
+      [249]: actorProps,
       [248]: room.getGamePropsHashtable()
     };
     session.send(buildOpResponse(req.OpCode, 0, opParams));
@@ -181,9 +195,10 @@ class GameServer {
     const evtParams = {[254]: session.actorNr};
     if (data !== undefined) evtParams[245] = data;
     const outEvt = buildEvent(evtCode, evtParams);
+    const authorityActorNr = room.getAuthorityActorNr ? room.getAuthorityActorNr() : 0;
     for (const p of room.players) {
       if (receivers === 0 && p === session) continue;          // Others: skip sender
-      if (receivers === 2 && p !== [...room.players][0]) continue; // MasterClient: first only
+      if (receivers === 2 && p.actorNr !== authorityActorNr) continue; // MasterClient: lowest actor
       p.send(outEvt);
     }
   }
@@ -193,6 +208,12 @@ class GameServer {
     // Broadcast PropsChanged event 253 to room (mirrors C# HandleSetPropertiesAsync)
     const room = session.currentRoom;
     if (!room) return;
+    const props = req.Parameters[251] ?? req.Parameters['251'];
+    const advertisedName = getPlayerNameFromProps(props);
+    if (advertisedName) {
+      session.userId = advertisedName;
+      session.playerProps = Object.assign({}, session.playerProps, props);
+    }
     const evtParams = Object.assign({}, req.Parameters, {[254]: session.actorNr});
     const propsEvt = buildEvent(253, evtParams);
     for (const p of room.players) p.send(propsEvt);

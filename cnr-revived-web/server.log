@@ -604,3 +604,1270 @@ Node-based CNR LAN Server (multi-network)
 [Game] Room 'yeet1' now has 2 players
 [Game] Client 1 (anon) disconnected
 [Game] Actor 1 left room 'yeet1' (1 remaining)
+[Game] Client 2 (anon) disconnected
+[Game] Actor 2 left room 'yeet1' (0 remaining)
+[Master] Client 3 connected from 172.30.228.151
+[Master] Session 3 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 4 connected from 192.168.1.159
+[Master] Session 4 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 4 creating room 'yeet1'
+[Master] Client 4 (anon) disconnected
+[Game] Client 3 connected from 192.168.1.159
+[Game] Session 3 auth ''
+[Game] Room 'yeet1' now has 1 players
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 3 joining room 'yeet1'
+[Master] Client 3 (anon) disconnected
+[Game] Client 4 connected from 172.30.228.151
+[Game] Session 4 auth ''
+[Game] Room 'yeet1' now has 2 players
+[Game] Client 3 (anon) disconnected
+[Game] Actor 1 left room 'yeet1' (1 remaining)
+[Game] Client 4 (anon) disconnected
+[Game] Actor 2 left room 'yeet1' (0 remaining)
+[Master] Client 5 connected from 172.30.228.151
+[Master] Session 5 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 6 connected from 192.168.1.159
+[Master] unhandled op 0xfd
+[Master] Session 6 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 6 creating room 'yeet1'
+[Master] unhandled op 0xfd
+[Master] Client 6 (anon) disconnected
+[Game] Client 5 connected from 192.168.1.159
+[Master] unhandled op 0xfd
+[Game] Session 5 auth ''
+[Master] unhandled op 0xfd
+[Game] Room 'yeet1' now has 1 players
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 5 joining room 'yeet1'
+[Master] Client 5 (anon) disconnected
+[Game] Client 6 connected from 172.30.228.151
+[Game] Session 6 auth ''
+[Game] Room 'yeet1' now has 2 players
+[Game] Client 5 (anon) disconnected
+[Game] Actor 1 left room 'yeet1' (1 remaining)
+[Master] Client 7 connected from 192.168.1.159
+[Master] Session 7 authenticated as ''
+[Master] Client 7 joining room 'yeet1'
+[Master] Client 7 (anon) disconnected
+[Game] Client 7 connected from 192.168.1.159
+[Game] Session 7 auth ''
+[Game] Room 'yeet1' now has 2 players
+[Game] Client 6 (anon) disconnected
+[Game] Actor 2 left room 'yeet1' (1 remaining)
+[Game] Client 7 (anon) disconnected
+[Game] Actor 3 left room 'yeet1' (0 remaining)
+[Master] Client 8 connected from 172.30.228.151
+[Master] Session 8 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 8 creating room 'Room Name 114'
+[Master] unhandled op 0xfd
+[Master] Client 8 (anon) disconnected
+[Game] Client 8 connected from 172.30.228.151
+[Game] Session 8 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 9 connected from 192.168.1.159
+[Master] Session 9 authenticated as ''
+[Master] Client 9 joining room 'Room Name 114'
+[Master] Client 9 (anon) disconnected
+[Game] Client 9 connected from 192.168.1.159
+[Game] Session 9 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 9 (anon) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 8 (anon) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 10 connected from 172.30.228.151
+[Master] Session 10 authenticated as ''
+[Master] Client 10 creating room 'Room Name 114'
+[Master] Client 10 (anon) disconnected
+[Game] Client 10 connected from 172.30.228.151
+[Game] Session 10 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 11 connected from 192.168.1.159
+[Master] Session 11 authenticated as ''
+[Master] Client 11 joining room 'Room Name 114'
+[Master] Client 11 (anon) disconnected
+[Game] Client 11 connected from 192.168.1.159
+[Game] Session 11 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 11 (anon) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Master] Client 12 connected from 192.168.1.159
+[Master] Session 12 authenticated as ''
+[Master] Client 12 joining room 'Room Name 114'
+[Master] Client 12 (anon) disconnected
+[Game] Client 12 connected from 192.168.1.159
+[Game] Session 12 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 10 (anon) disconnected
+[Game] Actor 1 left room 'Room Name 114' (1 remaining)
+[Game] Client 12 (anon) disconnected
+[Game] Actor 3 left room 'Room Name 114' (0 remaining)
+[Master] Client 13 connected from 192.168.1.159
+[Master] Session 13 authenticated as ''
+[Master] Client 14 connected from 172.30.228.151
+[Master] Session 14 authenticated as ''
+[Master] Client 14 creating room 'Room Name 114'
+[Master] Client 14 (anon) disconnected
+[Game] Client 13 connected from 172.30.228.151
+[Game] Session 13 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 13 joining room 'Room Name 114'
+[Master] Client 13 (anon) disconnected
+[Game] Client 14 connected from 192.168.1.159
+[Game] Session 14 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 14 (anon) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 13 (anon) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 15 connected from 172.30.228.151
+[Master] Session 15 authenticated as ''
+[Master] Client 15 creating room 'Room Name 114'
+[Master] Client 15 (anon) disconnected
+[Game] Client 15 connected from 172.30.228.151
+[Game] Session 15 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 16 connected from 192.168.1.159
+[Master] Session 16 authenticated as ''
+[Master] Client 16 joining room 'Room Name 114'
+[Master] Client 16 (anon) disconnected
+[Game] Client 16 connected from 192.168.1.159
+[Game] Session 16 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 16 (anon) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Master] Client 17 connected from 192.168.1.159
+[Master] Session 17 authenticated as ''
+[Master] Client 17 joining room 'Room Name 114'
+[Master] Client 17 (anon) disconnected
+[Game] Client 17 connected from 192.168.1.159
+[Game] Session 17 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 17 (anon) disconnected
+[Game] Actor 3 left room 'Room Name 114' (1 remaining)
+[Master] Client 18 connected from 192.168.1.159
+[Master] Session 18 authenticated as ''
+[Master] Client 18 joining room 'Room Name 114'
+[Master] Client 18 (anon) disconnected
+[Game] Client 18 connected from 192.168.1.159
+[Game] Session 18 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 18 (anon) disconnected
+[Game] Actor 4 left room 'Room Name 114' (1 remaining)
+[2026-06-18T02:19:46.892Z] [watchdog] args=[]
+[2026-06-18T02:19:46.892Z] [watchdog] server started (PID 15504)
+Node-based CNR LAN Server (multi-network)
+  Master server : 0.0.0.0:5055  (all interfaces)
+  Game server   : 0.0.0.0:5056  (all interfaces)
+  Advertised game-server addresses:
+    172.30.228.151:5056
+    169.254.75.197:5056
+    10.182.18.114:5056
+    192.168.1.153:5056
+    172.26.64.1:5056
+
+  Set server.cfg on each client:
+    SERVER_IP=172.30.228.151  SERVER_PORT=5055
+    SERVER_IP=169.254.75.197  SERVER_PORT=5055
+    SERVER_IP=10.182.18.114  SERVER_PORT=5055
+    SERVER_IP=192.168.1.153  SERVER_PORT=5055
+    SERVER_IP=172.26.64.1  SERVER_PORT=5055
+
+[Master] Listening on 0.0.0.0:5055
+[Master] Advertised game-server addresses: 172.30.228.151:5056, 169.254.75.197:5056, 10.182.18.114:5056, 192.168.1.153:5056, 172.26.64.1:5056
+[Game] Listening on 0.0.0.0:5056
+[Master] Client 1 connected from 172.30.228.151
+[Master] Session 1 authenticated as ''
+[Master] Client 1 (anon) disconnected
+[Master] Client 2 connected from 172.30.228.151
+[Master] Session 2 authenticated as ''
+[Master] Client 3 connected from 192.168.1.159
+[Master] Session 3 authenticated as ''
+[Master] Client 2 creating room 'Room Name 114'
+[Master] Client 2 (anon) disconnected
+[Game] Client 1 connected from 172.30.228.151
+[Game] Session 1 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 3 joining room 'Room Name 114'
+[Master] Client 3 (anon) disconnected
+[Game] Client 2 connected from 192.168.1.159
+[Game] Session 2 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[2026-06-18T02:28:54.154Z] [watchdog] args=[]
+[2026-06-18T02:28:54.154Z] [watchdog] server started (PID 39244)
+Node-based CNR LAN Server (multi-network)
+  Master server : 0.0.0.0:5055  (all interfaces)
+  Game server   : 0.0.0.0:5056  (all interfaces)
+  Advertised game-server addresses:
+    172.30.228.151:5056
+    169.254.75.197:5056
+    10.182.18.114:5056
+    192.168.1.153:5056
+    172.26.64.1:5056
+
+  Set server.cfg on each client:
+    SERVER_IP=172.30.228.151  SERVER_PORT=5055
+    SERVER_IP=169.254.75.197  SERVER_PORT=5055
+    SERVER_IP=10.182.18.114  SERVER_PORT=5055
+    SERVER_IP=192.168.1.153  SERVER_PORT=5055
+    SERVER_IP=172.26.64.1  SERVER_PORT=5055
+
+[Master] Listening on 0.0.0.0:5055
+[Master] Advertised game-server addresses: 172.30.228.151:5056, 169.254.75.197:5056, 10.182.18.114:5056, 192.168.1.153:5056, 172.26.64.1:5056
+[Game] Listening on 0.0.0.0:5056
+[Master] Client 1 connected from 192.168.1.159
+[Master] Session 1 authenticated as ''
+[Master] Client 2 connected from 172.30.228.151
+[Master] Session 2 authenticated as ''
+[Master] Client 1 (anon) disconnected
+[Master] Client 3 connected from 192.168.1.159
+[Master] Session 3 authenticated as ''
+[Master] Client 3 creating room 'yeet1'
+[Master] Client 3 (anon) disconnected
+[Game] Client 1 connected from 192.168.1.159
+[Game] Session 1 auth ''
+[Game] Room 'yeet1' now has 1 players
+[Master] Client 2 (anon) disconnected
+[Master] Client 4 connected from 172.30.228.151
+[Master] Session 4 authenticated as ''
+[Master] Client 4 joining room 'yeet1'
+[Master] Client 4 (anon) disconnected
+[Game] Client 2 connected from 172.30.228.151
+[Game] Session 2 auth ''
+[Game] Room 'yeet1' now has 2 players
+[Game] Client 1 (Jacqueb1337) disconnected
+[Game] Actor 1 left room 'yeet1' (1 remaining)
+[Master] Client 5 connected from 192.168.1.159
+[Master] Session 5 authenticated as ''
+[Game] Client 2 (Jacqueb) disconnected
+[Game] Actor 2 left room 'yeet1' (0 remaining)
+[Master] Client 6 connected from 172.30.228.151
+[Master] Session 6 authenticated as ''
+[Master] Client 6 creating room 'Room Name 114'
+[Master] Client 6 (anon) disconnected
+[Game] Client 3 connected from 172.30.228.151
+[Game] Session 3 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 5 (anon) disconnected
+[Master] Client 7 connected from 192.168.1.159
+[Master] Session 7 authenticated as ''
+[Game] Client 3 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 8 connected from 172.30.228.151
+[Master] Session 8 authenticated as ''
+[Master] Client 7 (anon) disconnected
+[Master] Client 9 connected from 192.168.1.159
+[Master] Session 9 authenticated as ''
+[Master] Client 8 creating room 'Room Name 114'
+[Master] Client 8 (anon) disconnected
+[Game] Client 4 connected from 172.30.228.151
+[Game] Session 4 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Game] Client 4 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 10 connected from 172.30.228.151
+[Master] Session 10 authenticated as ''
+[Master] Client 9 creating room 'yeet1'
+[Master] Client 9 (anon) disconnected
+[Game] Client 5 connected from 192.168.1.159
+[Game] Session 5 auth ''
+[Game] Room 'yeet1' now has 1 players
+[Game] Client 5 (Jacqueb1337) disconnected
+[Game] Actor 1 left room 'yeet1' (0 remaining)
+[Master] Client 11 connected from 192.168.1.159
+[Master] Session 11 authenticated as ''
+[2026-06-18T02:32:10.032Z] [watchdog] args=[]
+[2026-06-18T02:32:10.032Z] [watchdog] server started (PID 41704)
+Node-based CNR LAN Server (multi-network)
+  Master server : 0.0.0.0:5055  (all interfaces)
+  Game server   : 0.0.0.0:5056  (all interfaces)
+  Advertised game-server addresses:
+    172.30.228.151:5056
+    169.254.75.197:5056
+    10.182.18.114:5056
+    192.168.1.153:5056
+    172.26.64.1:5056
+
+  Set server.cfg on each client:
+    SERVER_IP=172.30.228.151  SERVER_PORT=5055
+    SERVER_IP=169.254.75.197  SERVER_PORT=5055
+    SERVER_IP=10.182.18.114  SERVER_PORT=5055
+    SERVER_IP=192.168.1.153  SERVER_PORT=5055
+    SERVER_IP=172.26.64.1  SERVER_PORT=5055
+
+[Master] Listening on 0.0.0.0:5055
+[Master] Advertised game-server addresses: 172.30.228.151:5056, 169.254.75.197:5056, 10.182.18.114:5056, 192.168.1.153:5056, 172.26.64.1:5056
+[Game] Listening on 0.0.0.0:5056
+[Master] Client 1 connected from 192.168.1.159
+[Master] Session 1 authenticated as ''
+[Master] Client 2 connected from 172.30.228.151
+[Master] Session 2 authenticated as ''
+[Master] Client 1 (anon) disconnected
+[Master] Client 3 connected from 192.168.1.159
+[Master] Session 3 authenticated as ''
+[Master] Client 2 creating room 'Room Name 114'
+[Master] Client 2 (anon) disconnected
+[Game] Client 1 connected from 172.30.228.151
+[Game] Session 1 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Game] Client 1 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 4 connected from 172.30.228.151
+[Master] Session 4 authenticated as ''
+[2026-06-18T02:34:19.548Z] [watchdog] args=[]
+[2026-06-18T02:34:19.548Z] [watchdog] server started (PID 20128)
+Node-based CNR LAN Server (multi-network)
+  Master server : 0.0.0.0:5055  (all interfaces)
+  Game server   : 0.0.0.0:5056  (all interfaces)
+  Advertised game-server addresses:
+    172.30.228.151:5056
+    169.254.75.197:5056
+    10.182.18.114:5056
+    192.168.1.153:5056
+    172.26.64.1:5056
+
+  Set server.cfg on each client:
+    SERVER_IP=172.30.228.151  SERVER_PORT=5055
+    SERVER_IP=169.254.75.197  SERVER_PORT=5055
+    SERVER_IP=10.182.18.114  SERVER_PORT=5055
+    SERVER_IP=192.168.1.153  SERVER_PORT=5055
+    SERVER_IP=172.26.64.1  SERVER_PORT=5055
+
+[Master] Listening on 0.0.0.0:5055
+[Master] Advertised game-server addresses: 172.30.228.151:5056, 169.254.75.197:5056, 10.182.18.114:5056, 192.168.1.153:5056, 172.26.64.1:5056
+[Game] Listening on 0.0.0.0:5056
+[Master] Client 1 connected from 192.168.1.159
+[Master] Session 1 authenticated as ''
+[Master] Client 2 connected from 172.30.228.151
+[Master] Session 2 authenticated as ''
+[Master] Client 1 (anon) disconnected
+[Master] Client 3 connected from 192.168.1.153
+[Master] Client 3 (anon) disconnected
+[Master] Client 4 connected from 192.168.1.159
+[Master] Session 4 authenticated as ''
+[Game] Client 1 connected from 192.168.1.153
+[Game] Client 1 (anon) disconnected
+[Master] Client 4 (anon) disconnected
+[Master] Client 5 connected from 172.30.228.151
+[Master] Client 5 (anon) disconnected
+[Master] Client 6 connected from 192.168.1.159
+[Master] Session 6 authenticated as ''
+[Game] Client 2 connected from 172.30.228.151
+[Game] Client 2 (anon) disconnected
+[Master] Client 6 creating room 'yeet1'
+[Master] Redirect create client 6 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 6 (anon) disconnected
+[Game] Client 3 connected from 192.168.1.159
+[Game] Session 3 auth ''
+[Game] Room 'yeet1' now has 1 players
+[Game] Client 4 connected from 172.30.228.151
+[Game] Client 4 (anon) disconnected
+[Game] Client 3 (Jacqueb1337) disconnected
+[Game] Actor 1 left room 'yeet1' (0 remaining)
+[Master] Client 7 connected from 192.168.1.159
+[Master] Session 7 authenticated as ''
+[Master] Client 8 connected from 172.30.228.151
+[Master] Client 8 (anon) disconnected
+[Game] Client 5 connected from 172.30.228.151
+[Game] Client 5 (anon) disconnected
+[Master] Client 9 connected from 172.30.228.151
+[Master] Client 9 (anon) disconnected
+[Game] Client 6 connected from 172.30.228.151
+[Game] Client 6 (anon) disconnected
+[Master] Client 7 creating room 'yeet1'
+[Master] Redirect create client 7 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 7 (anon) disconnected
+[Game] Client 7 connected from 192.168.1.159
+[Game] Session 7 auth ''
+[Game] Room 'yeet1' now has 1 players
+[Game] Client 7 (Jacqueb1337) disconnected
+[Game] Actor 1 left room 'yeet1' (0 remaining)
+[Master] Client 10 connected from 192.168.1.159
+[Master] Session 10 authenticated as ''
+[Master] Client 2 joining room 'yeet1'
+[Master] Redirect join client 2 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 2 (anon) disconnected
+[Game] Client 8 connected from 172.30.228.151
+[Game] Session 8 auth ''
+[Game] Room 'yeet1' now has 1 players
+[Game] Client 8 (Jacqueb) disconnected
+[Game] Actor 1 left room 'yeet1' (0 remaining)
+[Master] Client 11 connected from 172.30.228.151
+[Master] Session 11 authenticated as ''
+[Master] Client 11 (anon) disconnected
+[Master] Client 12 connected from 172.30.228.151
+[Master] Session 12 authenticated as ''
+[Master] Client 12 creating room 'Room Name 114'
+[Master] Redirect create client 12 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 12 (anon) disconnected
+[Game] Client 9 connected from 172.30.228.151
+[Game] Session 9 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Game] Client 9 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 13 connected from 172.30.228.151
+[Master] Session 13 authenticated as ''
+[Master] Client 10 creating room 'yeet1'
+[Master] Redirect create client 10 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 10 (anon) disconnected
+[Game] Client 10 connected from 192.168.1.159
+[Game] Session 10 auth ''
+[Game] Room 'yeet1' now has 1 players
+[Game] Client 10 (Jacqueb1337) disconnected
+[Game] Actor 1 left room 'yeet1' (0 remaining)
+[Master] Client 14 connected from 192.168.1.159
+[Master] Session 14 authenticated as ''
+[2026-06-18T02:43:51.208Z] [watchdog] args=[]
+[2026-06-18T02:43:51.208Z] [watchdog] server started (PID 14252)
+Node-based CNR LAN Server (multi-network)
+  Master server : 0.0.0.0:5055  (all interfaces)
+  Game server   : 0.0.0.0:5056  (all interfaces)
+  Advertised game-server addresses:
+    172.30.228.151:5056
+    169.254.75.197:5056
+    10.182.18.114:5056
+    192.168.1.153:5056
+    172.26.64.1:5056
+
+  Set server.cfg on each client:
+    SERVER_IP=172.30.228.151  SERVER_PORT=5055
+    SERVER_IP=169.254.75.197  SERVER_PORT=5055
+    SERVER_IP=10.182.18.114  SERVER_PORT=5055
+    SERVER_IP=192.168.1.153  SERVER_PORT=5055
+    SERVER_IP=172.26.64.1  SERVER_PORT=5055
+
+[Master] Listening on 0.0.0.0:5055
+[Master] Advertised game-server addresses: 172.30.228.151:5056, 169.254.75.197:5056, 10.182.18.114:5056, 192.168.1.153:5056, 172.26.64.1:5056
+[Game] Listening on 0.0.0.0:5056
+[Master] Client 1 connected from 192.168.1.159
+[Master] Session 1 authenticated as ''
+[Master] Client 2 connected from 172.30.228.151
+[Master] Session 2 authenticated as ''
+[Master] Client 2 creating room 'Room Name 114'
+[Master] Redirect create client 2 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 2 (anon) disconnected
+[Game] Client 1 connected from 172.30.228.151
+[Game] Session 1 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 1 joining room 'Room Name 114'
+[Master] Redirect join client 1 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 1 (anon) disconnected
+[Game] Client 2 connected from 192.168.1.159
+[Game] Session 2 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 1 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (1 remaining)
+[Game] Client 2 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (0 remaining)
+[Master] Client 3 connected from 172.30.228.151
+[Master] Session 3 authenticated as ''
+[Master] Client 3 (anon) disconnected
+[Master] Client 4 connected from 172.30.228.151
+[Master] Session 4 authenticated as ''
+[Master] Client 4 creating room 'Room Name 114'
+[Master] Redirect create client 4 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 4 (anon) disconnected
+[Game] Client 3 connected from 172.30.228.151
+[Game] Session 3 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 5 connected from 192.168.1.159
+[Master] Session 5 authenticated as ''
+[Master] Client 5 joining room 'Room Name 114'
+[Master] Redirect join client 5 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 5 (anon) disconnected
+[Game] Client 4 connected from 192.168.1.159
+[Game] Session 4 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 4 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 3 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 6 connected from 172.30.228.151
+[Master] Session 6 authenticated as ''
+[Master] Client 6 creating room 'Room Name 114'
+[Master] Redirect create client 6 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 6 (anon) disconnected
+[Game] Client 5 connected from 172.30.228.151
+[Game] Session 5 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 7 connected from 192.168.1.159
+[Master] Session 7 authenticated as ''
+[Master] Client 7 joining room 'Room Name 114'
+[Master] Redirect join client 7 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 7 (anon) disconnected
+[Game] Client 6 connected from 192.168.1.159
+[Game] Session 6 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 6 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 5 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 8 connected from 192.168.1.159
+[Master] Session 8 authenticated as ''
+[Master] Client 9 connected from 172.30.228.151
+[Master] Session 9 authenticated as ''
+[Master] Client 9 creating room 'Room Name 114'
+[Master] Redirect create client 9 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 9 (anon) disconnected
+[Game] Client 7 connected from 172.30.228.151
+[Game] Session 7 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 8 joining room 'Room Name 114'
+[Master] Redirect join client 8 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 8 (anon) disconnected
+[Game] Client 8 connected from 192.168.1.159
+[Game] Session 8 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 8 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 7 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 10 connected from 172.30.228.151
+[Master] Session 10 authenticated as ''
+[Master] Client 11 connected from 192.168.1.159
+[Master] Session 11 authenticated as ''
+[Master] Client 10 creating room 'Room Name 114'
+[Master] Redirect create client 10 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 10 (anon) disconnected
+[Game] Client 9 connected from 172.30.228.151
+[Game] Session 9 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 11 joining room 'Room Name 114'
+[Master] Redirect join client 11 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 11 (anon) disconnected
+[Game] Client 10 connected from 192.168.1.159
+[Game] Session 10 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 9 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (1 remaining)
+[Game] Client 10 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (0 remaining)
+[Master] Client 12 connected from 172.30.228.151
+[Master] Session 12 authenticated as ''
+[Master] Client 12 creating room 'Room Name 114'
+[Master] Redirect create client 12 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 12 (anon) disconnected
+[Game] Client 11 connected from 172.30.228.151
+[Game] Session 11 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 13 connected from 192.168.1.159
+[Master] Session 13 authenticated as ''
+[Master] Client 13 joining room 'Room Name 114'
+[Master] Redirect join client 13 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 13 (anon) disconnected
+[Game] Client 12 connected from 192.168.1.159
+[Game] Session 12 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 12 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 11 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 14 connected from 172.30.228.151
+[Master] Session 14 authenticated as ''
+[Master] Client 14 creating room 'Room Name 114'
+[Master] Redirect create client 14 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 14 (anon) disconnected
+[Game] Client 13 connected from 172.30.228.151
+[Game] Session 13 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 15 connected from 192.168.1.159
+[Master] Session 15 authenticated as ''
+[Master] Client 15 joining room 'Room Name 114'
+[Master] Redirect join client 15 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 15 (anon) disconnected
+[Game] Client 14 connected from 192.168.1.159
+[Game] Session 14 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 14 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 13 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 16 connected from 192.168.1.159
+[Master] Session 16 authenticated as ''
+[Master] Client 17 connected from 172.30.228.151
+[Master] Session 17 authenticated as ''
+[Master] Client 17 creating room 'Room Name 114'
+[Master] Redirect create client 17 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 17 (anon) disconnected
+[Game] Client 15 connected from 172.30.228.151
+[Game] Session 15 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 16 joining room 'Room Name 114'
+[Master] Redirect join client 16 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 16 (anon) disconnected
+[Game] Client 16 connected from 192.168.1.159
+[Game] Session 16 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 16 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 15 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 18 connected from 192.168.1.159
+[Master] Session 18 authenticated as ''
+[Master] Client 19 connected from 172.30.228.151
+[Master] Session 19 authenticated as ''
+[Master] Client 19 creating room 'Room Name 114'
+[Master] Redirect create client 19 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 19 (anon) disconnected
+[Game] Client 17 connected from 172.30.228.151
+[Game] Session 17 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 18 joining room 'Room Name 114'
+[Master] Redirect join client 18 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 18 (anon) disconnected
+[Game] Client 18 connected from 192.168.1.159
+[Game] Session 18 auth ''
+[Game] Room 'Room Name 114' now has 2 players

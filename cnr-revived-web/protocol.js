@@ -209,6 +209,11 @@ class PhotonByte {
 }
 function photonByte(v) { return new PhotonByte(v); }
 
+class PhotonIntKeyHashtable {
+  constructor(entries) { this.entries = entries || []; }
+}
+function intKeyHashtable(entries) { return new PhotonIntKeyHashtable(entries); }
+
 // write a value with its GpType prefix to a stream buffer
 function writeValueWithType(stream, value) {
   if (value === null || value === undefined) {
@@ -217,6 +222,20 @@ function writeValueWithType(stream, value) {
   }
   if (value instanceof PhotonByte) {
     stream.push(Buffer.from([GpType.Byte, value.v]));
+    return;
+  }
+  if (value instanceof PhotonIntKeyHashtable) {
+    const cnt = Buffer.alloc(2);
+    cnt.writeInt16BE(value.entries.length, 0);
+    stream.push(Buffer.from([GpType.Hashtable]));
+    stream.push(cnt);
+    for (const pair of value.entries) {
+      const keyBuf = Buffer.alloc(5);
+      keyBuf[0] = GpType.Integer;
+      keyBuf.writeInt32BE(pair[0], 1);
+      stream.push(keyBuf);
+      writeValueWithType(stream, pair[1]);
+    }
     return;
   }
   switch (typeof value) {
@@ -470,7 +489,9 @@ module.exports = {
   EgMsgType,
   TcpMagic,
   PhotonByte,
+  PhotonIntKeyHashtable,
   photonByte,
+  intKeyHashtable,
   readInt16BE,
   readInt32BE,
   writeInt16BE,

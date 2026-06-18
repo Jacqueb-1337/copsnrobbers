@@ -151,6 +151,7 @@ header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;disp
 <div class="stats">
   <div class="sc"><div class="lbl">Master</div><div class="val b" id="s-master">0</div></div>
   <div class="sc"><div class="lbl">In-Game</div><div class="val y" id="s-game">0</div></div>
+  <div class="sc"><div class="lbl">Authority</div><div class="val g" id="s-authority">0</div></div>
   <div class="sc"><div class="lbl">Rooms</div><div class="val p" id="s-rooms">0</div></div>
   <div class="sc"><div class="lbl">Players</div><div class="val g" id="s-players">0</div></div>
 </div>
@@ -213,6 +214,7 @@ header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;disp
     fetch('/api/status').then(function(r) { return r.json(); }).then(function(d) {
       document.getElementById('s-master').textContent  = d.masterSessions;
       document.getElementById('s-game').textContent    = d.gameSessions;
+      document.getElementById('s-authority').textContent = d.authoritySessions || 0;
       document.getElementById('s-rooms').textContent   = d.rooms;
       document.getElementById('s-players').textContent = d.players;
       var s = Math.floor(d.uptimeSeconds);
@@ -257,9 +259,10 @@ header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;disp
         var gkey = 'g:' + g.id;
         var gsel = selKey === gkey ? ' sel' : '';
         var gip = (g.ip || '').replace('::ffff:', '');
+        var gtag = g.isAuthority ? '<span class="tag tag-open">AUTH</span>' : '<span class="tag tag-g">GAME</span>';
         html += '<div class="cc' + gsel + '" data-key="' + gkey + '">'
               + '<div class="cc-name">' + (g.userId || '(anonymous)') + '</div>'
-              + '<div class="cc-sub"><span class="tag tag-g">GAME</span>' + gip + '</div>'
+              + '<div class="cc-sub">' + gtag + ' ' + gip + '</div>'
               + (g.room ? '<div class="cc-room">Room: ' + g.room + '  ·  Actor ' + g.actorNr + '</div>' : '')
               + '</div>';
       }
@@ -296,6 +299,7 @@ header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;disp
     if (type === 'g') {
       html += '<div class="dr"><span class="dk">Room</span><span class="dv">' + (c.room || '—') + '</span></div>';
       html += '<div class="dr"><span class="dk">Actor</span><span class="dv">' + (c.actorNr || '—') + '</span></div>';
+      html += '<div class="dr"><span class="dk">Authority</span><span class="dv">' + (c.isAuthority ? 'Yes' : 'No') + '</span></div>';
     }
     det.innerHTML = html;
   }
@@ -340,6 +344,7 @@ header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;disp
             + '<div class="cc-name">' + escHtml(r.name) + '</div>'
             + '<div class="cc-sub">' + openTag + ' ' + r.playerCount + '/' + r.maxPlayers + ' players</div>'
             + (r.map ? '<div class="cc-room">Map: ' + escHtml(r.map) + '</div>' : '')
+            + (r.authorityActorNr ? '<div class="cc-room">Authority: Actor ' + r.authorityActorNr + '</div>' : '<div class="cc-room" style="color:#6e7681">authority not assigned</div>')
             + (r.mapUrl ? '<div class="cc-room" style="color:#3fb950">&#x2713; map URL set</div>' : '<div class="cc-room" style="color:#6e7681">no map URL</div>')
             + '</div>';
     }
@@ -366,6 +371,7 @@ header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;disp
     html += '<div class="dr"><span class="dk">Players</span><span class="dv">' + r.playerCount + ' / ' + r.maxPlayers + '</span></div>';
     html += '<div class="dr"><span class="dk">Status</span><span class="dv">'  + (r.isOpen ? 'Open' : 'Closed') + '</span></div>';
     html += '<div class="dr"><span class="dk">Visible</span><span class="dv">' + (r.isVisible ? 'Yes' : 'No') + '</span></div>';
+    html += '<div class="dr"><span class="dk">Authority</span><span class="dv">' + (r.authorityActorNr || '—') + '</span></div>';
     if (r.map)     html += '<div class="dr"><span class="dk">Map</span><span class="dv">'     + escHtml(r.map)     + '</span></div>';
     if (r.version) html += '<div class="dr"><span class="dk">Version</span><span class="dv">' + escHtml(r.version) + '</span></div>';
     if (r.mode)    html += '<div class="dr"><span class="dk">Mode</span><span class="dv">'    + escHtml(r.mode)    + '</span></div>';
