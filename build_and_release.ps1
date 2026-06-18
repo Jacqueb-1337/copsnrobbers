@@ -48,7 +48,7 @@ $RepoJson    = Join-Path $ModsDir "repo.json"
 $RepoJson2   = Join-Path $ModsDir "repo2.json"
 $BuildScript = Join-Path $BuildDir "build_mod.ps1"
 $BaseUrl     = "https://play.jacqueb.me/mods"
-$BaseUrl2    = "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/refs/heads/master/cnr-revived-webmods"
+$BaseUrl2    = "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods"
 
 # -- Helpers ------------------------------------------------------------------
 function Write-Step { param($msg) Write-Host "`n-- $msg" -ForegroundColor Cyan }
