@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 
 const pidFile = './server.pid';
 const logFile = './server.log';
+const serverArgs = process.env.CNR_SERVER_ARGS ? process.env.CNR_SERVER_ARGS.split(' ').filter(Boolean) : [];
 
 const MIN_RESTART_DELAY = 1000;
 const MAX_RESTART_DELAY = 30000;
@@ -30,12 +31,13 @@ function startServer() {
   lastStartTime = Date.now();
   const logFd = fs.openSync(logFile, 'a');
 
-  const child = spawn('node', ['index.js', 'play.jacqueb.me'], {
+  const child = spawn('node', ['index.js', ...serverArgs], {
     stdio: ['ignore', logFd, logFd]
   });
   currentChild = child;
 
   const ts = new Date().toISOString();
+  fs.appendFileSync(logFile, `[${ts}] [watchdog] args=${JSON.stringify(serverArgs)}\n`);
   fs.appendFileSync(logFile, `[${ts}] [watchdog] server started (PID ${child.pid})\n`);
 
   child.on('close', (code) => {

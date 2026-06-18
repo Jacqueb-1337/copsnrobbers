@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 
 const pidFile = './server.pid';
 const logFile = './server.log';
+const serverArg = process.env.CNR_SERVER_ARG || '';
 
 if (fs.existsSync(pidFile)) {
   const pid = fs.readFileSync(pidFile, 'utf8').trim();

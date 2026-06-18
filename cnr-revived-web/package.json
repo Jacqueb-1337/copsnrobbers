@@ -4,11 +4,11 @@
   "description": "Node.js reimplementation of the CNR LAN Server Option B (Photon-like TCP protocol)",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js play.jacqueb.me",
+    "start": "node index.js",
     "start:bg": "node start-bg.js",
-    "dev": "NODE_ENV=development node index.js play.jacqueb.me",
+    "dev": "NODE_ENV=development node index.js",
     "stop": "node stop.js",
-    "killorphan": "pkill -f 'node index.js play.jacqueb.me' ; echo done",
+    "killorphan": "pkill -f 'node index.js' ; echo done",
     "restart": "node stop.js ; sleep 1 ; node start-bg.js",
     "status": "node status.js",
     "logs": "node logs.js"

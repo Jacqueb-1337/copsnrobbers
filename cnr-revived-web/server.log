@@ -127,3 +127,478 @@ Node-based CNR LAN Server (multi-network)
 [Master] unhandled op 0xfd
 [Master] unhandled op 0xfd
 [Master] Client 39 (anon) disconnected
+[Master] Client 40 connected from 172.30.228.151
+[Master] Session 40 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 40 creating room 'Room Name 114'
+[Master] Client 40 (anon) disconnected
+[Master] Client 41 connected from 172.30.228.151
+[Master] Session 41 authenticated as ''
+[Master] Client 41 (anon) disconnected
+[Master] Client 42 connected from 192.168.1.159
+[Master] Session 42 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 43 connected from 172.30.228.151
+[Master] Session 43 authenticated as ''
+[Master] Client 42 creating room 'yeet1'
+[Master] Client 42 (anon) disconnected
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 44 connected from 192.168.1.159
+[Master] Session 44 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 44 creating room 'yeet1'
+[Master] Client 44 (anon) disconnected
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 45 connected from 192.168.1.159
+[Master] Session 45 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[2026-06-18T01:04:33.830Z] [watchdog] server exited (code 3221225786), restarting in 1000ms
+[2026-06-18T01:04:34.844Z] [watchdog] server started (PID 10160)
+Node-based CNR LAN Server (multi-network)
+  Master server : 0.0.0.0:5055  (all interfaces)
+  Game server   : 0.0.0.0:5056  (all interfaces)
+  Advertised game-server addresses:
+    play.jacqueb.me:5056
+
+  Set server.cfg on each client:
+    SERVER_IP=play.jacqueb.me  SERVER_PORT=5055
+
+[Master] Listening on 0.0.0.0:5055
+[Master] Advertised game-server addresses: play.jacqueb.me:5056
+[Game] Listening on 0.0.0.0:5056
+[Master] Client 1 connected from 192.168.1.159
+[Master] Session 1 authenticated as ''
+[Master] unhandled op 0xfd
+[2026-06-18T01:04:37.794Z] [watchdog] server exited (code 3221225786), restarting in 1000ms
+[2026-06-18T01:04:39.804Z] [watchdog] server started (PID 42092)
+Node-based CNR LAN Server (multi-network)
+  Master server : 0.0.0.0:5055  (all interfaces)
+  Game server   : 0.0.0.0:5056  (all interfaces)
+  Advertised game-server addresses:
+    play.jacqueb.me:5056
+
+  Set server.cfg on each client:
+    SERVER_IP=play.jacqueb.me  SERVER_PORT=5055
+
+[Master] Listening on 0.0.0.0:5055
+[Master] Advertised game-server addresses: play.jacqueb.me:5056
+[Game] Listening on 0.0.0.0:5056
+[Master] Client 1 connected from 192.168.1.159
+[Master] Session 1 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[2026-06-18T01:07:07.704Z] [watchdog] args=[]
+[2026-06-18T01:07:07.704Z] [watchdog] server started (PID 41872)
+Node-based CNR LAN Server (multi-network)
+  Master server : 0.0.0.0:5055  (all interfaces)
+  Game server   : 0.0.0.0:5056  (all interfaces)
+  Advertised game-server addresses:
+    172.30.228.151:5056
+    169.254.75.197:5056
+    10.182.18.114:5056
+    192.168.1.153:5056
+    172.26.64.1:5056
+
+  Set server.cfg on each client:
+    SERVER_IP=172.30.228.151  SERVER_PORT=5055
+    SERVER_IP=169.254.75.197  SERVER_PORT=5055
+    SERVER_IP=10.182.18.114  SERVER_PORT=5055
+    SERVER_IP=192.168.1.153  SERVER_PORT=5055
+    SERVER_IP=172.26.64.1  SERVER_PORT=5055
+
+[Master] Listening on 0.0.0.0:5055
+[Master] Advertised game-server addresses: 172.30.228.151:5056, 169.254.75.197:5056, 10.182.18.114:5056, 192.168.1.153:5056, 172.26.64.1:5056
+[Game] Listening on 0.0.0.0:5056
+[Master] Client 1 connected from 192.168.1.159
+[Master] Session 1 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 1 creating room 'yeet1'
+[Master] unhandled op 0xfd
+[Master] Client 1 (anon) disconnected
+[Game] Client 1 connected from 192.168.1.159
+[Game] Session 1 auth ''
+[Game] Room 'yeet1' now has 1 players
+[Master] Client 2 connected from 172.30.228.151
+[Master] Session 2 authenticated as ''
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] unhandled op 0xfd
+[Master] Client 2 joining room 'yeet1'
+[Master] Client 2 (anon) disconnected
+[Game] Client 2 connected from 172.30.228.151
+[Game] Session 2 auth ''
+[Game] Room 'yeet1' now has 2 players

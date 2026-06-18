@@ -201,6 +201,7 @@ class MasterServer {
   }
 
   handleJoinLobby(session) {
+    console.log(`[Master] Session ${session.id} join lobby`);
     session.send(buildOpResponse(OpCode.JoinLobby, 0, null));
     this.sendRoomList(session, true);
   }
@@ -208,33 +209,38 @@ class MasterServer {
   handleCreateGame(session, req) {
     const roomName = (req.Parameters && req.Parameters[ParamKey.RoomName]) || Math.random().toString(36).slice(2,10);
     const room = this.rooms.getOrCreateRoom(roomName);
-    console.log(`[Master] Client ${session.id} creating room '${roomName}'`);
+    console.log(`[Master] Client ${session.id} creating room '${roomName}' roomCount=${room.playerCount} params=${JSON.stringify(req.Parameters || {})}`);
     const gameAddr = this.pickGameServer(session.socket.remoteAddress);
     const p = { [ParamKey.GameServer]: gameAddr };
+    console.log(`[Master] Client ${session.id} create redirect -> ${gameAddr}`);
     session.send(buildOpResponse(OpCode.CreateGame, 0, p));
   }
 
   handleJoinGame(session, req) {
     const roomName = req.Parameters && req.Parameters[ParamKey.RoomName];
     if (!roomName) {
+      console.log(`[Master] Client ${session.id} join room rejected: missing room name params=${JSON.stringify(req.Parameters || {})}`);
       session.send(buildOpResponse(OpCode.JoinGame, 32765, null, 'Room name missing'));
       return;
     }
-    console.log(`[Master] Client ${session.id} joining room '${roomName}'`);
+    console.log(`[Master] Client ${session.id} joining room '${roomName}' params=${JSON.stringify(req.Parameters || {})}`);
     const gameAddr = this.pickGameServer(session.socket.remoteAddress);
     const p = { [ParamKey.GameServer]: gameAddr };
+    console.log(`[Master] Client ${session.id} join redirect -> ${gameAddr}`);
     session.send(buildOpResponse(OpCode.JoinGame, 0, p));
   }
 
   handleJoinRandom(session) {
     const visible = this.rooms.getVisibleRooms();
     if (visible.length === 0) {
+      console.log(`[Master] Client ${session.id} join random failed: no visible rooms`);
       session.send(buildOpResponse(OpCode.JoinRandom, 32760, null, 'NoRandomMatchFound'));
       return;
     }
     const room = visible[0];
     const gameAddr = this.pickGameServer(session.socket.remoteAddress);
     const p = { [ParamKey.RoomName]: room.name, [ParamKey.GameServer]: gameAddr };
+    console.log(`[Master] Client ${session.id} join random -> room '${room.name}' redirect ${gameAddr}`);
     session.send(buildOpResponse(OpCode.JoinRandom, 0, p));
   }
 

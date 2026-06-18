@@ -1,0 +1,147 @@
+[2026-06-18T01:03:54.852Z] [watchdog] args=[]
+[2026-06-18T01:03:54.852Z] [watchdog] server started (PID 42112)
+node:internal/modules/cjs/loader:1413
+  throw err;
+  ^
+
+Error: Cannot find module 'D:\Projects\copsnrobbers\index.js'
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1410:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1051:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1056:22)
+    at Module._load (node:internal/modules/cjs/loader:1219:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:238:24)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v24.7.0
+[2026-06-18T01:03:54.899Z] [watchdog] server exited (code 1), restarting in 1000ms
+[2026-06-18T01:03:56.918Z] [watchdog] args=[]
+[2026-06-18T01:03:56.918Z] [watchdog] server started (PID 34604)
+node:internal/modules/cjs/loader:1413
+  throw err;
+  ^
+
+Error: Cannot find module 'D:\Projects\copsnrobbers\index.js'
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1410:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1051:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1056:22)
+    at Module._load (node:internal/modules/cjs/loader:1219:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:238:24)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v24.7.0
+[2026-06-18T01:03:56.955Z] [watchdog] server exited (code 1), restarting in 2000ms
+[2026-06-18T01:04:00.977Z] [watchdog] args=[]
+[2026-06-18T01:04:00.977Z] [watchdog] server started (PID 27088)
+node:internal/modules/cjs/loader:1413
+  throw err;
+  ^
+
+Error: Cannot find module 'D:\Projects\copsnrobbers\index.js'
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1410:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1051:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1056:22)
+    at Module._load (node:internal/modules/cjs/loader:1219:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:238:24)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v24.7.0
+[2026-06-18T01:04:01.019Z] [watchdog] server exited (code 1), restarting in 4000ms
+[2026-06-18T01:04:09.032Z] [watchdog] args=[]
+[2026-06-18T01:04:09.032Z] [watchdog] server started (PID 24288)
+node:internal/modules/cjs/loader:1413
+  throw err;
+  ^
+
+Error: Cannot find module 'D:\Projects\copsnrobbers\index.js'
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1410:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1051:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1056:22)
+    at Module._load (node:internal/modules/cjs/loader:1219:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:238:24)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v24.7.0
+[2026-06-18T01:04:09.071Z] [watchdog] server exited (code 1), restarting in 8000ms
+[2026-06-18T01:04:25.079Z] [watchdog] args=[]
+[2026-06-18T01:04:25.079Z] [watchdog] server started (PID 37032)
+node:internal/modules/cjs/loader:1413
+  throw err;
+  ^
+
+Error: Cannot find module 'D:\Projects\copsnrobbers\index.js'
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1410:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1051:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1056:22)
+    at Module._load (node:internal/modules/cjs/loader:1219:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:238:24)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v24.7.0
+[2026-06-18T01:04:25.119Z] [watchdog] server exited (code 1), restarting in 16000ms
+[2026-06-18T01:04:55.129Z] [watchdog] args=[]
+[2026-06-18T01:04:55.129Z] [watchdog] server started (PID 41488)
+node:internal/modules/cjs/loader:1413
+  throw err;
+  ^
+
+Error: Cannot find module 'D:\Projects\copsnrobbers\index.js'
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1410:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1051:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1056:22)
+    at Module._load (node:internal/modules/cjs/loader:1219:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:238:24)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v24.7.0
+[2026-06-18T01:04:55.167Z] [watchdog] server exited (code 1), restarting in 30000ms
+[2026-06-18T01:05:25.182Z] [watchdog] args=[]
+[2026-06-18T01:05:25.182Z] [watchdog] server started (PID 40912)
+node:internal/modules/cjs/loader:1413
+  throw err;
+  ^
+
+Error: Cannot find module 'D:\Projects\copsnrobbers\index.js'
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1410:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1051:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1056:22)
+    at Module._load (node:internal/modules/cjs/loader:1219:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:238:24)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v24.7.0
+[2026-06-18T01:05:25.220Z] [watchdog] server exited (code 1), restarting in 30000ms

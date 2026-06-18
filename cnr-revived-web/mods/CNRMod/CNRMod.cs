@@ -761,12 +761,12 @@ namespace CNRMods
 
     public class FastVisualSyncHook : MonoBehaviour
     {
-        public static float SendInterval = 0.05f;
-        public static float MaxStateAge = 0.35f;
-        public static float PositionSmoothing = 25f;
-        public static float RotationSmoothing = 35f;
+        public static float SendInterval = 0.025f;
+        public static float MaxStateAge = 0.75f;
+        public static float PositionSmoothing = 45f;
+        public static float RotationSmoothing = 55f;
         public static float SnapDistance = 3f;
-        public static float WalkSpeedThreshold = 0.08f;
+        public static float WalkSpeedThreshold = 0.04f;
 
         private static readonly Dictionary<int, FastVisualState> _states =
             new Dictionary<int, FastVisualState>();
@@ -997,15 +997,18 @@ namespace CNRMods
             PlayerStatus status = NormalizeStatus(state);
             Quaternion bodyRot = Quaternion.Euler(0f, state.BodyYaw, 0f);
             Quaternion gunRot = Quaternion.Euler(state.GunPitch, 0f, 0f);
+            PlayerStatus prevStatus = _npc.pInfo.mStatus;
 
-            _npc.pInfo.mPosition = state.Position;
+            if (_npc.pInfo.mPosition != state.Position)
+                _npc.pInfo.mPosition = state.Position;
             _npc.pInfo.mBodyRotation = bodyRot;
             _npc.pInfo.mGunRotation = gunRot;
             _npc.pInfo.mStatus = status;
             _npc.pInfo.mWeaponType = state.Weapon;
 
             _npc.SetWeaponType(state.Weapon);
-            _npc.SetPlayerStatus(status);
+            if (prevStatus != status)
+                _npc.SetPlayerStatus(status);
 
             if (status != PlayerStatus.dead)
             {
@@ -1060,23 +1063,23 @@ namespace CNRMods
             try
             {
                 Transform body = _npc.bodyTransform;
-                if (body != null)
-                {
-                    float targetRootYaw = transform.eulerAngles.y - body.eulerAngles.y + bodyRot.eulerAngles.y - 90f;
-                    float t = Mathf.Min(1f, Time.deltaTime * FastVisualSyncHook.RotationSmoothing);
-                    Vector3 e = transform.eulerAngles;
-                    e.y = Mathf.LerpAngle(e.y, targetRootYaw, t);
-                    transform.eulerAngles = e;
-                }
-                else
-                {
-                    Vector3 e = transform.eulerAngles;
-                    e.y = bodyRot.eulerAngles.y;
-                    transform.eulerAngles = e;
-                }
-
-                _npc.SetGunRotation(gunRot);
+            if (body != null)
+            {
+                float targetRootYaw = transform.eulerAngles.y - body.eulerAngles.y + bodyRot.eulerAngles.y - 90f;
+                float t = Mathf.Min(1f, Time.deltaTime * FastVisualSyncHook.RotationSmoothing);
+                Vector3 e = transform.eulerAngles;
+                e.y = Mathf.LerpAngle(e.y, targetRootYaw, t);
+                transform.eulerAngles = e;
             }
+            else
+            {
+                Vector3 e = transform.eulerAngles;
+                e.y = bodyRot.eulerAngles.y;
+                transform.eulerAngles = e;
+            }
+
+            _npc.SetGunRotation(gunRot);
+        }
             catch { }
         }
     }

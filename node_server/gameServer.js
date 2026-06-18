@@ -116,6 +116,7 @@ class GameServer {
   handleJoin(session, req) {
     const roomName = (req.Parameters && req.Parameters[ParamKey.RoomName]) || Math.random().toString(36).slice(2,10);
     const room = this.rooms.getOrCreateRoom(roomName);
+    console.log(`[Game] Client ${session.id} join/create room '${roomName}' params=${JSON.stringify(req.Parameters || {})}`);
     // Apply room properties from the client's CreateGame/JoinGame request (param 248 = GameProps).
     // Mirrors C# ApplyRoomPropsFromRequest.
     const gameProps = req.Parameters && req.Parameters[ParamKey.GameProps];
@@ -137,6 +138,7 @@ class GameServer {
     session.actorNr = actor;
     session.currentRoom = room;
     room.players.add(session);
+    console.log(`[Game] Room '${roomName}' actor=${actor} playerCount=${room.playerCount} props=${JSON.stringify(room.getGamePropsHashtable())}`);
     // build response: actorNr, playerProps, gameProps
     const opParams = {
       [254]: actor,
