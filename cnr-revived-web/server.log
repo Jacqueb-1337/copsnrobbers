@@ -602,3 +602,5 @@ Node-based CNR LAN Server (multi-network)
 [Game] Client 2 connected from 172.30.228.151
 [Game] Session 2 auth ''
 [Game] Room 'yeet1' now has 2 players
+[Game] Client 1 (anon) disconnected
+[Game] Actor 1 left room 'yeet1' (1 remaining)
