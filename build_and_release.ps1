@@ -45,14 +45,78 @@ $RootDir     = $PSScriptRoot
 $BuildDir    = Join-Path $RootDir "APK_Build_Active"
 $ModsDir     = Join-Path $RootDir "cnr-revived-web\mods"
 $RepoJson    = Join-Path $ModsDir "repo.json"
+$RepoJson2   = Join-Path $ModsDir "repo2.json"
 $BuildScript = Join-Path $BuildDir "build_mod.ps1"
 $BaseUrl     = "https://play.jacqueb.me/mods"
+$BaseUrl2    = "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/refs/heads/master/cnr-revived-webmods"
 
 # -- Helpers ------------------------------------------------------------------
 function Write-Step { param($msg) Write-Host "`n-- $msg" -ForegroundColor Cyan }
 function Write-Ok   { param($msg) Write-Host "   $msg" -ForegroundColor Green }
 function Write-Warn { param($msg) Write-Host "   WARN: $msg" -ForegroundColor Yellow }
 function Write-Err  { param($msg) Write-Host "   ERROR: $msg" -ForegroundColor Red }
+function Update-RepoManifest {
+    param(
+        [string]$Path,
+        [string]$BaseUrl,
+        [string]$Label
+    )
+
+    if (-not (Test-Path $Path)) {
+        Write-Warn "$Label not found: $Path"
+        return $false
+    }
+
+    $repoLines   = Get-Content $Path
+    $outLines    = [System.Collections.Generic.List[string]]::new()
+    $inTargetMod = $false
+    $vBumped     = $false
+    $vInserted   = $false
+
+    for ($li = 0; $li -lt $repoLines.Count; $li++) {
+        $line = $repoLines[$li]
+
+        if (-not $inTargetMod -and $line -match ('"id"\s*:\s*"' + [regex]::Escape($ModBase) + '"')) {
+            $inTargetMod = $true
+        }
+
+        if ($inTargetMod -and -not $vBumped -and $line -match '"latestVersion"\s*:\s*"[^"]*"') {
+            $line    = $line -replace '"latestVersion"\s*:\s*"[^"]*"', ('"latestVersion": "' + $newVer + '"')
+            $vBumped = $true
+        }
+
+        if ($inTargetMod -and $line -match '"latestUrl"\s*:\s*"[^"]*"') {
+            $newLatestUrl = $BaseUrl + '/' + $ModBase + '/' + $ModBase + '-' + $newVer + '.dll'
+            $line = $line -replace '"latestUrl"\s*:\s*"[^"]*"', ('"latestUrl": "' + $newLatestUrl + '"')
+        }
+
+        if ($inTargetMod -and -not $vInserted -and $line -match '"versions"\s*:\s*\[') {
+            $outLines.Add($line)
+            $cl   = $Changelog -replace '\\', '\\\\' -replace '"', '\\"'
+            $vUrl = $BaseUrl + '/' + $ModBase + '/' + $ModBase + '-' + $newVer + '.dll'
+            $outLines.Add('        {')
+            $outLines.Add('          "version": "' + $newVer + '",')
+            $outLines.Add('          "url": "' + $vUrl + '",')
+            $outLines.Add('          "changelog": "' + $cl + '"')
+            $outLines.Add('        },')
+            $vInserted = $true
+            continue
+        }
+
+        if ($inTargetMod -and $vBumped -and $vInserted -and $line -match '^\s*\{\s*$') {
+            $inTargetMod = $false
+        }
+
+        $outLines.Add($line)
+    }
+
+    if (-not $vBumped)   { Write-Warn "latestVersion not found in $Label for $ModBase" }
+    if (-not $vInserted) { Write-Warn "versions array not found in $Label for $ModBase" }
+
+    Set-Content -Path $Path -Value $outLines
+    Write-Ok "$Label updated (id=$ModBase, version=$newVer)"
+    return $true
+}
 
 # -- 1. Discover mod CS files -------------------------------------------------
 Write-Step "Discovering mods in cnr-revived-web/mods/"
@@ -182,8 +246,8 @@ $versionedCs = Join-Path $ModCsDir "$ModBase-$newVer.cs"
 Copy-Item $selectedCs.FullName $versionedCs -Force
 Write-Ok "-> $versionedCs"
 
-# -- 7. Update repo.json ------------------------------------------------------
-Write-Step "repo.json update"
+# -- 7. Update repo manifests -------------------------------------------------
+Write-Step "repo manifest update"
 
 $doRepo = $false
 if ($Changelog -ne "") {
@@ -198,76 +262,17 @@ if ($Changelog -ne "") {
 }
 
 if ($doRepo) {
-    $repoCheck = Get-Content $RepoJson
-    $modFound  = $repoCheck | Where-Object { $_ -match ('"id"\s*:\s*"' + [regex]::Escape($ModBase) + '"') }
-    if (-not $modFound) {
-        Write-Warn "Mod id '$ModBase' not found in repo.json -- skipping repo update."
-        $doRepo = $false
-    }
-}
-
-if ($doRepo) {
     if ($Changelog -eq "") {
         Write-Host "  Enter changelog for v$newVer (single line, press Enter when done):"
         $Changelog = Read-Host "  Changelog"
     }
-
-    # Line-by-line surgery: update latestVersion and insert new version entry.
-    $repoLines   = Get-Content $RepoJson
-    $outLines    = [System.Collections.Generic.List[string]]::new()
-    $inTargetMod = $false
-    $vBumped     = $false
-    $vInserted   = $false
-
-    for ($li = 0; $li -lt $repoLines.Count; $li++) {
-        $line = $repoLines[$li]
-
-        # Enter this mod's block
-        if (-not $inTargetMod -and $line -match ('"id"\s*:\s*"' + [regex]::Escape($ModBase) + '"')) {
-            $inTargetMod = $true
-        }
-
-        # Bump latestVersion (first occurrence after entering the block)
-        if ($inTargetMod -and -not $vBumped -and $line -match '"latestVersion"\s*:\s*"[^"]*"') {
-            $line    = $line -replace '"latestVersion"\s*:\s*"[^"]*"', ('"latestVersion": "' + $newVer + '"')
-            $vBumped = $true
-        }
-
-        # Update latestUrl to point to the new versioned DLL (avoids browser caching of unversioned URL)
-        if ($inTargetMod -and $line -match '"latestUrl"\s*:\s*"[^"]*"') {
-            $newLatestUrl = $BaseUrl + '/' + $ModBase + '/' + $ModBase + '-' + $newVer + '.dll'
-            $line = $line -replace '"latestUrl"\s*:\s*"[^"]*"', ('"latestUrl": "' + $newLatestUrl + '"')
-        }
-
-        # Insert new version entry at top of versions array
-        if ($inTargetMod -and -not $vInserted -and $line -match '"versions"\s*:\s*\[') {
-            $outLines.Add($line)
-            $cl   = $Changelog -replace '\\', '\\\\' -replace '"', '\\"'
-            $vUrl = $BaseUrl + '/' + $ModBase + '/' + $ModBase + '-' + $newVer + '.dll'
-            $outLines.Add('        {')
-            $outLines.Add('          "version": "' + $newVer + '",')
-            $outLines.Add('          "url": "' + $vUrl + '",')
-            $outLines.Add('          "changelog": "' + $cl + '"')
-            $outLines.Add('        },')
-            $vInserted = $true
-            continue
-        }
-
-        # Leave block when next top-level object opens (next mod entry)
-        if ($inTargetMod -and $vBumped -and $vInserted -and $line -match '^\s*\{\s*$') {
-            $inTargetMod = $false
-        }
-
-        $outLines.Add($line)
+    $updated1 = Update-RepoManifest -Path $RepoJson  -BaseUrl $BaseUrl  -Label "repo.json"
+    $updated2 = Update-RepoManifest -Path $RepoJson2 -BaseUrl $BaseUrl2 -Label "repo2.json"
+    if (-not $updated1 -and -not $updated2) {
+        Write-Warn "No repo manifest updated."
     }
-
-    if (-not $vBumped)   { Write-Warn "latestVersion not found in repo.json for $ModBase" }
-    if (-not $vInserted) { Write-Warn "versions array not found in repo.json for $ModBase" }
-
-    Set-Content -Path $RepoJson -Value $outLines
-    Write-Ok "repo.json updated (id=$ModBase, version=$newVer)"
 } else {
-    Write-Warn "Skipping repo.json update."
+    Write-Warn "Skipping repo manifest update."
 }
 
 # -- 8. Deploy to device ------------------------------------------------------
@@ -321,7 +326,7 @@ if ($doCommit) {
         $relVDll = "mods/$ModBase/$ModBase-$newVer.dll"
         $relVCs  = "mods/$ModBase/$ModBase-$newVer.cs"
 
-        git add $relCs $relDll $relVDll $relVCs "mods/repo.json" 2>&1 | Out-Null
+        git add $relCs $relDll $relVDll $relVCs "mods/repo.json" "mods/repo2.json" 2>&1 | Out-Null
         $commitMsg = "$ModBase $newVer"
         if ($Changelog -ne "") { $commitMsg += " -- $Changelog" }
         git commit -m $commitMsg
