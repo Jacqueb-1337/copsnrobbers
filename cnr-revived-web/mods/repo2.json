@@ -2073,12 +2073,17 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.5.0",
+      "latestVersion": "1.5.1",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
-      "latestUrl": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.5.0.dll",
+      "latestUrl": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.5.1.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.5.1",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.5.1.dll",
+          "changelog": "Fix installed-version detection after manual DLL replacement by reading the DLL Version before stale PlayerPrefs cache"
+        },
         {
           "version": "1.5.0",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.5.0.dll",
