@@ -1871,3 +1871,384 @@ Node-based CNR LAN Server (multi-network)
 [Game] Client 18 connected from 192.168.1.159
 [Game] Session 18 auth ''
 [Game] Room 'Room Name 114' now has 2 players
+[Game] Client 17 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (1 remaining)
+[Game] Client 18 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (0 remaining)
+[Master] Client 20 connected from 172.30.228.151
+[Master] Session 20 authenticated as ''
+[Master] Client 21 connected from 192.168.1.159
+[Master] Session 21 authenticated as ''
+[Master] Client 20 creating room 'Room Name 114'
+[Master] Redirect create client 20 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 20 (anon) disconnected
+[Game] Client 19 connected from 172.30.228.151
+[Game] Session 19 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 21 joining room 'Room Name 114'
+[Master] Redirect join client 21 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 21 (anon) disconnected
+[Game] Client 20 connected from 192.168.1.159
+[Game] Session 20 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 20 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 19 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 22 connected from 172.30.228.151
+[Master] Session 22 authenticated as ''
+[Master] Client 23 connected from 192.168.1.159
+[Master] Session 23 authenticated as ''
+[Master] Client 22 creating room 'Room Name 114'
+[Master] Redirect create client 22 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 22 (anon) disconnected
+[Game] Client 21 connected from 172.30.228.151
+[Game] Session 21 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 23 joining room 'Room Name 114'
+[Master] Redirect join client 23 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 23 (anon) disconnected
+[Game] Client 22 connected from 192.168.1.159
+[Game] Session 22 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 22 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 21 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 24 connected from 172.30.228.151
+[Master] Session 24 authenticated as ''
+[Master] Client 25 connected from 192.168.1.159
+[Master] Session 25 authenticated as ''
+[Master] Client 24 creating room 'Room Name 114'
+[Master] Redirect create client 24 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 24 (anon) disconnected
+[Game] Client 23 connected from 172.30.228.151
+[Game] Session 23 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 25 joining room 'Room Name 114'
+[Master] Redirect join client 25 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 25 (anon) disconnected
+[Game] Client 24 connected from 192.168.1.159
+[Game] Session 24 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 23 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (1 remaining)
+[Game] Client 24 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (0 remaining)
+[Master] Client 26 connected from 172.30.228.151
+[Master] Session 26 authenticated as ''
+[Master] Client 27 connected from 192.168.1.159
+[Master] Session 27 authenticated as ''
+[Master] Client 26 creating room 'Room Name 114'
+[Master] Redirect create client 26 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 26 (anon) disconnected
+[Game] Client 25 connected from 172.30.228.151
+[Game] Session 25 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 27 joining room 'Room Name 114'
+[Master] Redirect join client 27 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 27 (anon) disconnected
+[Game] Client 26 connected from 192.168.1.159
+[Game] Session 26 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 25 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (1 remaining)
+[Game] Client 26 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (0 remaining)
+[Master] Client 28 connected from 192.168.1.159
+[Master] Session 28 authenticated as ''
+[Master] Client 29 connected from 172.30.228.151
+[Master] Session 29 authenticated as ''
+[Master] Client 29 creating room 'Room Name 114'
+[Master] Redirect create client 29 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 29 (anon) disconnected
+[Game] Client 27 connected from 172.30.228.151
+[Game] Session 27 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 28 joining room 'Room Name 114'
+[Master] Redirect join client 28 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 28 (anon) disconnected
+[Game] Client 28 connected from 192.168.1.159
+[Game] Session 28 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 28 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 27 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 30 connected from 172.30.228.151
+[Master] Session 30 authenticated as ''
+[Master] Client 31 connected from 192.168.1.159
+[Master] Session 31 authenticated as ''
+[Master] Client 30 creating room 'Room Name 114'
+[Master] Redirect create client 30 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 30 (anon) disconnected
+[Game] Client 29 connected from 172.30.228.151
+[Game] Session 29 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 31 joining room 'Room Name 114'
+[Master] Redirect join client 31 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 31 (anon) disconnected
+[Game] Client 30 connected from 192.168.1.159
+[Game] Session 30 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 30 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 29 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 32 connected from 172.30.228.151
+[Master] Session 32 authenticated as ''
+[Master] Client 32 creating room 'Room Name 114'
+[Master] Redirect create client 32 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 32 (anon) disconnected
+[Game] Client 31 connected from 172.30.228.151
+[Game] Session 31 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 33 connected from 192.168.1.159
+[Master] Session 33 authenticated as ''
+[Master] Client 33 joining room 'Room Name 114'
+[Master] Redirect join client 33 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 33 (anon) disconnected
+[Game] Client 32 connected from 192.168.1.159
+[Game] Session 32 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 31 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (1 remaining)
+[Game] Client 32 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (0 remaining)
+[Master] Client 34 connected from 172.30.228.151
+[Master] Session 34 authenticated as ''
+[Master] Client 35 connected from 192.168.1.159
+[Master] Session 35 authenticated as ''
+[Master] Client 34 creating room 'Room Name 114'
+[Master] Redirect create client 34 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 34 (anon) disconnected
+[Game] Client 33 connected from 172.30.228.151
+[Game] Session 33 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 35 joining room 'Room Name 114'
+[Master] Redirect join client 35 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 35 (anon) disconnected
+[Game] Client 34 connected from 192.168.1.159
+[Game] Session 34 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 34 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 33 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 36 connected from 192.168.1.159
+[Master] Session 36 authenticated as ''
+[Master] Client 37 connected from 172.30.228.151
+[Master] Session 37 authenticated as ''
+[Master] Client 37 creating room 'Room Name 114'
+[Master] Redirect create client 37 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 37 (anon) disconnected
+[Game] Client 35 connected from 172.30.228.151
+[Game] Session 35 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 36 joining room 'Room Name 114'
+[Master] Redirect join client 36 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 36 (anon) disconnected
+[Game] Client 36 connected from 192.168.1.159
+[Game] Session 36 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 36 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 35 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 38 connected from 172.30.228.151
+[Master] Session 38 authenticated as ''
+[Master] Client 39 connected from 192.168.1.159
+[Master] Session 39 authenticated as ''
+[Master] Client 38 creating room 'Room Name 114'
+[Master] Redirect create client 38 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 38 (anon) disconnected
+[Game] Client 37 connected from 172.30.228.151
+[Game] Session 37 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 39 joining room 'Room Name 114'
+[Master] Redirect join client 39 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 39 (anon) disconnected
+[Game] Client 38 connected from 192.168.1.159
+[Game] Session 38 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 38 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 37 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 40 connected from 172.30.228.151
+[Master] Session 40 authenticated as ''
+[Master] Client 41 connected from 192.168.1.159
+[Master] Session 41 authenticated as ''
+[Master] Client 40 creating room 'Room Name 114'
+[Master] Redirect create client 40 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 40 (anon) disconnected
+[Game] Client 39 connected from 172.30.228.151
+[Game] Session 39 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 41 joining room 'Room Name 114'
+[Master] Redirect join client 41 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 41 (anon) disconnected
+[Game] Client 40 connected from 192.168.1.159
+[Game] Session 40 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 40 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 39 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 42 connected from 172.30.228.151
+[Master] Session 42 authenticated as ''
+[Master] Client 42 creating room 'Room Name 114'
+[Master] Redirect create client 42 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 42 (anon) disconnected
+[Game] Client 41 connected from 172.30.228.151
+[Game] Session 41 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 43 connected from 192.168.1.159
+[Master] Session 43 authenticated as ''
+[Master] Client 43 joining room 'Room Name 114'
+[Master] Redirect join client 43 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 43 (anon) disconnected
+[Game] Client 42 connected from 192.168.1.159
+[Game] Session 42 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 42 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 41 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 44 connected from 192.168.1.159
+[Master] Session 44 authenticated as ''
+[Master] Client 45 connected from 172.30.228.151
+[Master] Session 45 authenticated as ''
+[Master] Client 45 creating room 'Room Name 114'
+[Master] Redirect create client 45 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 45 (anon) disconnected
+[Game] Client 43 connected from 172.30.228.151
+[Game] Session 43 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 44 joining room 'Room Name 114'
+[Master] Redirect join client 44 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 44 (anon) disconnected
+[Game] Client 44 connected from 192.168.1.159
+[Game] Session 44 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 44 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (1 remaining)
+[Game] Client 43 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (0 remaining)
+[Master] Client 46 connected from 192.168.1.159
+[Master] Session 46 authenticated as ''
+[Master] Client 47 connected from 172.30.228.151
+[Master] Session 47 authenticated as ''
+[Master] Client 47 creating room 'Room Name 114'
+[Master] Redirect create client 47 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 47 (anon) disconnected
+[Game] Client 45 connected from 172.30.228.151
+[Game] Session 45 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 46 joining room 'Room Name 114'
+[Master] Redirect join client 46 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 46 (anon) disconnected
+[Game] Client 46 connected from 192.168.1.159
+[Game] Session 46 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 45 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (1 remaining)
+[Game] Client 46 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (0 remaining)
+[Master] Client 48 connected from 192.168.1.159
+[Master] Session 48 authenticated as ''
+[Master] Client 49 connected from 172.30.228.151
+[Master] Session 49 authenticated as ''
+[Master] Client 49 creating room 'Room Name 114'
+[Master] Redirect create client 49 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 49 (anon) disconnected
+[Game] Client 47 connected from 172.30.228.151
+[Game] Session 47 auth ''
+[Game] Room 'Room Name 114' now has 1 players
+[Master] Client 48 joining room 'Room Name 114'
+[Master] Redirect join client 48 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 48 (anon) disconnected
+[Game] Client 48 connected from 192.168.1.159
+[Game] Session 48 auth ''
+[Game] Room 'Room Name 114' now has 2 players
+[Game] Client 47 (Jacqueb) disconnected
+[Game] Actor 1 left room 'Room Name 114' (1 remaining)
+[Game] Client 48 (Jacqueb1337) disconnected
+[Game] Actor 2 left room 'Room Name 114' (0 remaining)
+[Master] Client 50 connected from 192.168.1.159
+[Master] Session 50 authenticated as ''
+[Master] Client 50 creating room 'yeet1'
+[Master] Redirect create client 50 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 50 (anon) disconnected
+[Game] Client 49 connected from 192.168.1.159
+[Game] Session 49 auth ''
+[Game] Room 'yeet1' now has 1 players
+[Master] Client 51 connected from 172.30.228.151
+[Master] Session 51 authenticated as ''
+[Master] Client 51 joining room 'yeet1'
+[Master] Redirect join client 51 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 51 (anon) disconnected
+[Game] Client 50 connected from 172.30.228.151
+[Game] Session 50 auth ''
+[Game] Room 'yeet1' now has 2 players
+[Game] Client 50 (Jacqueb) disconnected
+[Game] Actor 2 left room 'yeet1' (1 remaining)
+[Master] Client 52 connected from 172.30.228.151
+[Master] Session 52 authenticated as ''
+[Master] Client 52 joining room 'yeet1'
+[Master] Redirect join client 52 172.30.228.151 -> 172.30.228.151:5056
+[Master] Client 52 (anon) disconnected
+[Game] Client 51 connected from 172.30.228.151
+[Game] Session 51 auth ''
+[Game] Room 'yeet1' now has 2 players
+[Game] Client 49 (Jacqueb1337) disconnected
+[Game] Actor 1 left room 'yeet1' (1 remaining)
+[Master] Client 53 connected from 192.168.1.159
+[Master] Session 53 authenticated as ''
+[Master] Client 53 joining room 'yeet1'
+[Master] Redirect join client 53 192.168.1.159 -> 192.168.1.153:5056
+[Master] Client 53 (anon) disconnected
+[Game] Client 52 connected from 192.168.1.159
+[Game] Session 52 auth ''
+[Game] Room 'yeet1' now has 2 players
+[Game] Client 52 (Jacqueb1337) disconnected
+[Game] Actor 4 left room 'yeet1' (1 remaining)
+[Game] Session 51 (Jacqueb) idle >60s, closing
+[Game] Client 51 (Jacqueb) disconnected
+[Game] Actor 3 left room 'yeet1' (0 remaining)
+[Master] Client 54 connected from 80.94.95.221
+[Master] Client 54 (anon) disconnected
+[Master] Client 55 connected from 80.94.95.221
+[Master] Client 55 (anon) disconnected
+[Master] Client 56 connected from 80.94.95.221
+[Master] Client 56 (anon) disconnected
+[Master] Client 57 connected from 80.94.95.221
+[Master] Client 57 (anon) disconnected
+[Master] Client 58 connected from 80.94.95.221
+[Master] Client 58 (anon) disconnected
+[Master] Client 59 connected from 172.30.228.151
+[Master] Session 59 authenticated as ''
+[Master] Client 59 (anon) disconnected
+[2026-06-19T17:38:30.359Z] [watchdog] server exited (code 3221225786), restarting in 1000ms
+[2026-06-19T17:38:31.386Z] [watchdog] args=[]
+[2026-06-19T17:38:31.386Z] [watchdog] server started (PID 1228)
+Node-based CNR LAN Server (multi-network)
+  Master server : 0.0.0.0:5055  (all interfaces)
+  Game server   : 0.0.0.0:5056  (all interfaces)
+  Advertised game-server addresses:
+    172.30.228.151:5056
+    169.254.75.197:5056
+    10.182.18.114:5056
+    192.168.1.153:5056
+    172.26.64.1:5056
+
+  Set server.cfg on each client:
+    SERVER_IP=172.30.228.151  SERVER_PORT=5055
+    SERVER_IP=169.254.75.197  SERVER_PORT=5055
+    SERVER_IP=10.182.18.114  SERVER_PORT=5055
+    SERVER_IP=192.168.1.153  SERVER_PORT=5055
+    SERVER_IP=172.26.64.1  SERVER_PORT=5055
+
+[Master] Listening on 0.0.0.0:5055
+[Master] Advertised game-server addresses: 172.30.228.151:5056, 169.254.75.197:5056, 10.182.18.114:5056, 192.168.1.153:5056, 172.26.64.1:5056
+[Game] Listening on 0.0.0.0:5056

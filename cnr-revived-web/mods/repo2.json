@@ -306,11 +306,106 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.2.110",
+      "latestVersion": "3.2.130",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.110.dll",
+      "latestUrl": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.130.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.2.130",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.130.dll",
+          "changelog": "Main-menu version watermark now only renders on MainMenu; removed in-game version text."
+        },
+        {
+          "version": "3.2.129",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.129.dll",
+          "changelog": "Perks UI: match perks page text sizing to skins grid and increase perk card text space."
+        },
+        {
+          "version": "3.2.128",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.128.dll",
+          "changelog": "Tracker perk: extend timeout to 5 seconds and track attackers who damage the local player while Tracker is equipped."
+        },
+        {
+          "version": "3.2.127",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.127.dll",
+          "changelog": "Tracker fix: restore tracked player materials after timeout and use overlay shader while tracked so highlights can show through walls."
+        },
+        {
+          "version": "3.2.126",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.126.dll",
+          "changelog": "Tracker fix: mark tracked actors locally on hit and log CNR event proxy delivery for tracker events."
+        },
+        {
+          "version": "3.2.125",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.125.dll",
+          "changelog": "Tracker debug: remove enemy gate from tracker visual pass so receive path can be isolated."
+        },
+        {
+          "version": "3.2.124",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.124.dll",
+          "changelog": "Tracker debug: log renderer-side tracked/enemy evaluation before applying outline."
+        },
+        {
+          "version": "3.2.123",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.123.dll",
+          "changelog": "Tracker visual pass: strengthen enemy outline tint/emission and log when tracker visuals are applied."
+        },
+        {
+          "version": "3.2.122",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.122.dll",
+          "changelog": "Tracker fix: resolve game types by scanning loaded assemblies instead of Type.GetType in HitRegRelay.EnsureRefl."
+        },
+        {
+          "version": "3.2.121",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.121.dll",
+          "changelog": "Tracker debug: log exact reflection members missing in HitRegRelay.EnsureRefl."
+        },
+        {
+          "version": "3.2.120",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.120.dll",
+          "changelog": "Tracker debug: log each early exit in HitRegRelay.OnDamaged to isolate tracker gate failure."
+        },
+        {
+          "version": "3.2.119",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.119.dll",
+          "changelog": "Tracker debug: log tracker perk gate and refresh local tracker state on hit."
+        },
+        {
+          "version": "3.2.118",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.118.dll",
+          "changelog": "Tracker debug: log local damage receiver handlers and kill-credit entry to trace tracker path."
+        },
+        {
+          "version": "3.2.117",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.117.dll",
+          "changelog": "Tracker debug: log HitReg attachment and OnDamaged entry to verify tracker path."
+        },
+        {
+          "version": "3.2.116",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.116.dll",
+          "changelog": "Add tracker debug logging on hit relay and tracker event receipt to diagnose damaged-enemy outline flow"
+        },
+        {
+          "version": "3.2.115",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.115.dll",
+          "changelog": "Add perk framework effects for Toughened, Quick Hands, Ammo Reserve, Hardline, Medic, Scavenger, Nimble, Evasive, Lightweight, and Tracker; add perk UI feedback and kill/hit event wiring"
+        },
+        {
+          "version": "3.2.114",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.114.dll",
+          "changelog": "Make perks armor-tab picker a skin-style grid with reserved 1:1 icon cells and swipe scrolling"
+        },
+        {
+          "version": "3.2.112",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.112.dll",
+          "changelog": "Fix perks armor-tab UI to use the same profile content bounds and touch-drag scrolling behavior as the skins grid"
+        },
+        {
+          "version": "3.2.111",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.111.dll",
+          "changelog": "Add perks foundation: profile armor tab now shows a 3-slot perk picker with saved perk selections and a perks implementation checklist"
+        },
         {
           "version": "3.2.110",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-3.2.110.dll",
@@ -1352,11 +1447,121 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.77",
+      "latestVersion": "3.1.100",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.77.dll",
+      "latestUrl": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.100.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.100",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.100.dll",
+          "changelog": "Restore aim proxy to tap-only behavior; remove fake held aim state"
+        },
+        {
+          "version": "3.1.99",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.99.dll",
+          "changelog": "Make aim proxy a held control that reasserts OnAim while pressed"
+        },
+        {
+          "version": "3.1.97",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.97.dll",
+          "changelog": "Make aim button one-way scope-on only for unscope test"
+        },
+        {
+          "version": "3.1.96",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.96.dll",
+          "changelog": "Sync selected weapon aimed state from modAimed each frame after vanilla updates"
+        },
+        {
+          "version": "3.1.95",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.95.dll",
+          "changelog": "Replace scope driver with modAimed shadow state and move all aim-sensitive code to it"
+        },
+        {
+          "version": "3.1.94",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.94.dll",
+          "changelog": "Disable original fire button handlers and leave only mod proxy on the button object"
+        },
+        {
+          "version": "3.1.93",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.93.dll",
+          "changelog": "Remove remaining button-event dispatch from fire path; fire now uses direct flags only"
+        },
+        {
+          "version": "3.1.92",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.92.dll",
+          "changelog": "Remove remaining GenFireEvent calls from fire paths so fire uses direct flags only"
+        },
+        {
+          "version": "3.1.91",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.91.dll",
+          "changelog": "Patch touch fire button to route through mod proxy and suppress vanilla button handlers"
+        },
+        {
+          "version": "3.1.90",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.90.dll",
+          "changelog": "Replace persistent scope lock with short reassertion window to avoid stuck zoom after fire"
+        },
+        {
+          "version": "3.1.89",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.89.dll",
+          "changelog": "Treat post-fire scope lock as scoped state so overlay and FOV stay in sync"
+        },
+        {
+          "version": "3.1.88",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.88.dll",
+          "changelog": "Keep scoped hold alive briefly after fire so vanilla un-scope animation cannot win the frame"
+        },
+        {
+          "version": "3.1.87",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.87.dll",
+          "changelog": "Hold scoped state through fire by reasserting scope lock on fire edge and while scoped; keep unscope-off default"
+        },
+        {
+          "version": "3.1.86",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.86.dll",
+          "changelog": "Keep scope stable after firing; reassert scope widget after late update; default unscope-off"
+        },
+        {
+          "version": "3.1.85",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.85.dll",
+          "changelog": "Remove fire re-scope loop and keep scope widget tied to direct aim state for diagnostics"
+        },
+        {
+          "version": "3.1.84",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.84.dll",
+          "changelog": "Control sniper scope widget directly from mod code and keep overlay aligned with ADS state"
+        },
+        {
+          "version": "3.1.83",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.83.dll",
+          "changelog": "Remove permanent FOV lock regression and add scope UI diagnostics for vanilla fire un-scope behavior"
+        },
+        {
+          "version": "3.1.82",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.82.dll",
+          "changelog": "Restore FOV on real weapon changes and keep scoped state tied to the selected aim weapon instead of a permanent fire lock"
+        },
+        {
+          "version": "3.1.81",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.81.dll",
+          "changelog": "Keep ADS scoped through fire without dropping the scope overlay or reverting FOV after the shot"
+        },
+        {
+          "version": "3.1.80",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.80.dll",
+          "changelog": "Disable visible ADS un-scope by holding scoped FOV and aim state through fire instead of re-scoping after fire"
+        },
+        {
+          "version": "3.1.79",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.79.dll",
+          "changelog": "Scope behavior: run direct scope preservation after vanilla fire/reload and restore fallback re-scope if direct prevention misses."
+        },
+        {
+          "version": "3.1.78",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.78.dll",
+          "changelog": "Scope behavior: replace post-fire re-scope simulation with direct CRWeaponScript scope preservation so firing no longer forces vanilla bow un-scope when the setting is disabled."
+        },
         {
           "version": "3.1.77",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.77.dll",
