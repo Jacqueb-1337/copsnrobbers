@@ -123,12 +123,12 @@
         {
           "version": "1.34.0",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRRecordingMod/CNRRecordingMod-1.34.0.dll",
-          "changelog": "Fix grey frames: switch from cam.Render() to OnRenderImage image-effect. Attach a FrameCapture component to Camera.main that blits each rendered frame to our RenderTexture via OnRenderImage \ufffd fires inside the camera pipeline before Kamcord's EGL redirect, so src contains real pixels."
+          "changelog": "Fix grey frames: switch from cam.Render() to OnRenderImage image-effect. Attach a FrameCapture component to Camera.main that blits each rendered frame to our RenderTexture via OnRenderImage � fires inside the camera pipeline before Kamcord's EGL redirect, so src contains real pixels."
         },
         {
           "version": "1.33.0",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRRecordingMod/CNRRecordingMod-1.33.0.dll",
-          "changelog": "Fix grey frames: Kamcord's kamcordPreCamera clears the EGL window surface to grey every frame at game init regardless of recording state. Bypass it by rendering Camera.main directly to our own RenderTexture \ufffd Kamcord's EGL pbuffer redirect does not affect FBO-based RenderTextures. Fall back to EGL read if Camera.main is unavailable."
+          "changelog": "Fix grey frames: Kamcord's kamcordPreCamera clears the EGL window surface to grey every frame at game init regardless of recording state. Bypass it by rendering Camera.main directly to our own RenderTexture � Kamcord's EGL pbuffer redirect does not affect FBO-based RenderTextures. Fall back to EGL read if Camera.main is unavailable."
         },
         {
           "version": "1.32.0",
@@ -258,7 +258,7 @@
         {
           "version": "1.7.0",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRRecordingMod/CNRRecordingMod-1.7.0.dll",
-          "changelog": "Attempted fix: switched to getInputImage+Image.Plane JNI to read actual encoder strides. Caused immediate crash on record button press because raw AndroidJNI calls (GetObjectArrayElement etc.) are fatal when any intermediate pointer is null \ufffd not catchable by C# exceptions."
+          "changelog": "Attempted fix: switched to getInputImage+Image.Plane JNI to read actual encoder strides. Caused immediate crash on record button press because raw AndroidJNI calls (GetObjectArrayElement etc.) are fatal when any intermediate pointer is null � not catchable by C# exceptions."
         },
         {
           "version": "1.6.0",
@@ -268,7 +268,7 @@
         {
           "version": "1.5.0",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRRecordingMod/CNRRecordingMod-1.5.0.dll",
-          "changelog": "Fixed corrupt/short MP4s: removed outBuf.Call(position) and outBuf.Call(limit) calls in DrainEncoder \ufffd Unity 4.6 AndroidJavaObject cannot resolve these inherited java.nio.Buffer methods on DirectByteBuffer. MediaMuxer.nativeWriteSampleData uses bufferInfo.offset and bufferInfo.size directly so the calls were unnecessary and were crashing the drain loop before any frames were written to the muxer."
+          "changelog": "Fixed corrupt/short MP4s: removed outBuf.Call(position) and outBuf.Call(limit) calls in DrainEncoder � Unity 4.6 AndroidJavaObject cannot resolve these inherited java.nio.Buffer methods on DirectByteBuffer. MediaMuxer.nativeWriteSampleData uses bufferInfo.offset and bufferInfo.size directly so the calls were unnecessary and were crashing the drain loop before any frames were written to the muxer."
         },
         {
           "version": "1.4.0",
@@ -288,7 +288,7 @@
         {
           "version": "1.1.0",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRRecordingMod/CNRRecordingMod-1.1.0.dll",
-          "changelog": "Replaced PNG frame capture with hardware-encoded H.264 MP4 via Android MediaCodec + MediaMuxer. Encoding runs on the GPU/hardware encoder \ufffd zero ReadPixels overhead. Output is a real .mp4 at 854x480 @ 30fps / 2 Mbps saved to /sdcard/CNRMods/recordings/<timestamp>.mp4. Recordings viewer now lists .mp4 files with file size."
+          "changelog": "Replaced PNG frame capture with hardware-encoded H.264 MP4 via Android MediaCodec + MediaMuxer. Encoding runs on the GPU/hardware encoder � zero ReadPixels overhead. Output is a real .mp4 at 854x480 @ 30fps / 2 Mbps saved to /sdcard/CNRMods/recordings/<timestamp>.mp4. Recordings viewer now lists .mp4 files with file size."
         },
         {
           "version": "1.0.1",
@@ -1199,7 +1199,7 @@
         {
           "version": "2.1.6",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-2.1.6.dll",
-          "changelog": "Fix event receive side: replace failed OnEventCall hook attempt with CnrPhotonListenerProxy injected into NetworkingPeer.externalListener \ufffd now correctly receives code-199 events from all players. Fix: remote DLC skins now applied on all clients. Fix: WebUrl for public hostnames now uses HTTPS (Android 9+ cleartext block workaround; /rooms web console endpoint requires nginx proxy to localhost:1337)."
+          "changelog": "Fix event receive side: replace failed OnEventCall hook attempt with CnrPhotonListenerProxy injected into NetworkingPeer.externalListener � now correctly receives code-199 events from all players. Fix: remote DLC skins now applied on all clients. Fix: WebUrl for public hostnames now uses HTTPS (Android 9+ cleartext block workaround; /rooms web console endpoint requires nginx proxy to localhost:1337)."
         },
         {
           "version": "2.1.5",
@@ -1214,12 +1214,12 @@
         {
           "version": "2.1.3",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-2.1.3.dll",
-          "changelog": "Fix WSA/slow-device freeze on room join: ApplyToActor was calling FindObjectsOfType(MonoBehaviour) \ufffd scanning every MonoBehaviour in the scene plus reflection on each, causing ANR freezes. Now scans only PhotonView components (handful vs thousands) with cached property lookup."
+          "changelog": "Fix WSA/slow-device freeze on room join: ApplyToActor was calling FindObjectsOfType(MonoBehaviour) � scanning every MonoBehaviour in the scene plus reflection on each, causing ANR freezes. Now scans only PhotonView components (handful vs thousands) with cached property lookup."
         },
         {
           "version": "2.1.2",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-2.1.2.dll",
-          "changelog": "Fix room join detection: this PUN version has no PhotonNetwork.inRoom \ufffd now checks room != null. This was silently returning false always, breaking OnEnteredRoom, BroadcastDlcSkin, CNRRemoteSkinRenderer, map sync, and kick logic."
+          "changelog": "Fix room join detection: this PUN version has no PhotonNetwork.inRoom � now checks room != null. This was silently returning false always, breaking OnEnteredRoom, BroadcastDlcSkin, CNRRemoteSkinRenderer, map sync, and kick logic."
         },
         {
           "version": "2.1.1",
@@ -1259,7 +1259,7 @@
         {
           "version": "2.0.57",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-2.0.57.dll",
-          "changelog": "Fix DLC skin equipped state lost when re-opening shop. vanillaSkinActive now only triggers when CNR_EquippedDLCSkin is empty \ufffd equipping a DLC skin no longer reverts to the previous vanilla selection."
+          "changelog": "Fix DLC skin equipped state lost when re-opening shop. vanillaSkinActive now only triggers when CNR_EquippedDLCSkin is empty � equipping a DLC skin no longer reverts to the previous vanilla selection."
         },
         {
           "version": "2.0.56",
@@ -1339,7 +1339,7 @@
         {
           "version": "2.0.23",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-2.0.23.dll",
-          "changelog": "Fixed custom map loading for joining clients. Three root bugs: (1) SetRoomProp silently did nothing \ufffd GetMethod with typeof(System.Collections.Hashtable) returns null because Photon uses ExitGames.Client.Photon.Hashtable; fixed by reflecting the actual parameter type dynamically. (2) Master never called SetRoomProp \ufffd OnEnteredRoom never fires due to inRoom polling issue; fixed by calling PublishMapUrl from MapLoader.OnLevelWasLoaded when activeUrl is set. (3) TriggerClientFetch was one-shot at 3s \ufffd now polls the room prop every 0.5s for up to 25s, then falls back to HTTP."
+          "changelog": "Fixed custom map loading for joining clients. Three root bugs: (1) SetRoomProp silently did nothing � GetMethod with typeof(System.Collections.Hashtable) returns null because Photon uses ExitGames.Client.Photon.Hashtable; fixed by reflecting the actual parameter type dynamically. (2) Master never called SetRoomProp � OnEnteredRoom never fires due to inRoom polling issue; fixed by calling PublishMapUrl from MapLoader.OnLevelWasLoaded when activeUrl is set. (3) TriggerClientFetch was one-shot at 3s � now polls the room prop every 0.5s for up to 25s, then falls back to HTTP."
         },
         {
           "version": "2.0.22",
@@ -1349,12 +1349,12 @@
         {
           "version": "2.0.21",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-2.0.21.dll",
-          "changelog": "Fixed: TriggerClientFetch room prop read always returned null. Photon's Room.customProperties is ExitGames.Client.Photon.Hashtable, not System.Collections.Hashtable \ufffd the as-cast silently failed. Fixed by casting to IDictionary instead, which both types implement."
+          "changelog": "Fixed: TriggerClientFetch room prop read always returned null. Photon's Room.customProperties is ExitGames.Client.Photon.Hashtable, not System.Collections.Hashtable � the as-cast silently failed. Fixed by casting to IDictionary instead, which both types implement."
         },
         {
           "version": "2.0.20",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-2.0.20.dll",
-          "changelog": "Fixed: joining clients fail to load custom map on devices with Android cleartext HTTP restrictions (WSA, newer Android). TriggerClientFetch now reads the CNR_MAP_URL Photon room property (set by the master at room creation) as its primary path \ufffd no HTTP required. Falls back to node-server HTTP fetch only if the room prop is absent."
+          "changelog": "Fixed: joining clients fail to load custom map on devices with Android cleartext HTTP restrictions (WSA, newer Android). TriggerClientFetch now reads the CNR_MAP_URL Photon room property (set by the master at room creation) as its primary path � no HTTP required. Falls back to node-server HTTP fetch only if the room prop is absent."
         },
         {
           "version": "2.0.16",
@@ -1409,12 +1409,12 @@
         {
           "version": "2.0.6",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-2.0.6.dll",
-          "changelog": "Multi-device account support: one account can be linked to multiple Android devices. Display name syncs from server on login \ufffd the server's canonical name is applied to all linked devices. Game progression (weapon upgrade levels, skin/armor unlocks, equipped slots, level/XP) is now synced with the server via sync.php on every login. Claim now links a new device instead of migrating (old devices stay valid)."
+          "changelog": "Multi-device account support: one account can be linked to multiple Android devices. Display name syncs from server on login � the server's canonical name is applied to all linked devices. Game progression (weapon upgrade levels, skin/armor unlocks, equipped slots, level/XP) is now synced with the server via sync.php on every login. Claim now links a new device instead of migrating (old devices stay valid)."
         },
         {
           "version": "2.0.5",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-2.0.5.dll",
-          "changelog": "Account recovery now requires a password (6+ chars) AND a 4-8 digit PIN. Hash is bcrypt(password+pin) with no device ID \ufffd portable across devices and eliminates multi-match collisions."
+          "changelog": "Account recovery now requires a password (6+ chars) AND a 4-8 digit PIN. Hash is bcrypt(password+pin) with no device ID � portable across devices and eliminates multi-match collisions."
         },
         {
           "version": "2.0.4",
@@ -1429,7 +1429,7 @@
         {
           "version": "2.0.2",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRMod/CNRMod-2.0.2.dll",
-          "changelog": "Mail and settings icons are now embedded in the DLL \ufffd no longer need settings.png / mail.png on the device."
+          "changelog": "Mail and settings icons are now embedded in the DLL � no longer need settings.png / mail.png on the device."
         },
         {
           "version": "2.0.1",
@@ -1447,11 +1447,26 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.100",
+      "latestVersion": "3.1.103",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.100.dll",
+      "latestUrl": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.103.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.103",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.103.dll",
+          "changelog": "Improve audio routing so main-menu and lobby background music classify as music instead of SFX."
+        },
+        {
+          "version": "3.1.102",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.102.dll",
+          "changelog": "Applied audio volume control across all scenes, including menu and lobby screens."
+        },
+        {
+          "version": "3.1.101",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.101.dll",
+          "changelog": "Added master/music/announcement/SFX audio sliders with master-multiplied volume control."
+        },
         {
           "version": "3.1.100",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.100.dll",
@@ -1795,7 +1810,7 @@
         {
           "version": "3.1.32",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.32.dll",
-          "changelog": "Ammo pack now refills ammo via SendMessage(receiveBullets) \u2014 the exact mechanism the original server uses \u2014 so the Bullets HUD counter updates correctly"
+          "changelog": "Ammo pack now refills ammo via SendMessage(receiveBullets) — the exact mechanism the original server uses — so the Bullets HUD counter updates correctly"
         },
         {
           "version": "3.1.31",
@@ -1885,7 +1900,7 @@
         {
           "version": "3.1.14",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.14.dll",
-          "changelog": "Controller right stick: increased cam sensitivity slider range (0.05-3.0, default 0.5) \u2014 was too slow even at max"
+          "changelog": "Controller right stick: increased cam sensitivity slider range (0.05-3.0, default 0.5) — was too slow even at max"
         },
         {
           "version": "3.1.13",
@@ -2215,7 +2230,7 @@
         {
           "version": "2.0.12",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-2.0.12.dll",
-          "changelog": "Fixed: fire button requires two fingers to activate. Root cause: the NGUI camera viewport was being expanded to full screen, which changed the camera projection matrix. JoyStickController uses Camera.ScreenPointToRay() with Physics.Raycast to detect the FireButton collider \ufffd with the modified viewport the ray no longer intersected the collider, so one-finger fire failed silently. Fix: the camera viewport is no longer expanded. Note: HUD buttons dragged to the left quarter of the screen (outside the original NGUI camera viewport) will not respond to touches; all other positions are unaffected."
+          "changelog": "Fixed: fire button requires two fingers to activate. Root cause: the NGUI camera viewport was being expanded to full screen, which changed the camera projection matrix. JoyStickController uses Camera.ScreenPointToRay() with Physics.Raycast to detect the FireButton collider � with the modified viewport the ray no longer intersected the collider, so one-finger fire failed silently. Fix: the camera viewport is no longer expanded. Note: HUD buttons dragged to the left quarter of the screen (outside the original NGUI camera viewport) will not respond to touches; all other positions are unaffected."
         },
         {
           "version": "2.0.11",
@@ -2235,17 +2250,17 @@
         {
           "version": "2.0.8",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-2.0.8.dll",
-          "changelog": "Fixed fire button broken even at default button positions. Root cause: CNRSettingsMod 2.0.5 expanded the NGUI camera viewport to full screen, which changed the camera aspect ratio and shifted all Physics.Raycast hit zones \ufffd JoyStickController's fire-button raycast missed every time. The remap introduced in 2.0.6 to compensate had an accumulation bug (positions drifted further wrong on every scene reload), so even 'Reset All HUD' didn't fix it. Fix: the camera viewport is no longer expanded. JoyStickController now works correctly at all default and right-side button positions. The supplemental screen-space fire detector (TouchFireDetect) is still present but now only activates when the fire button has been explicitly dragged outside the camera viewport. Migration: on first run, any button positions saved under the expanded-camera versions (2.0.5\ufffd2.0.7) are automatically cleared so the game defaults are used."
+          "changelog": "Fixed fire button broken even at default button positions. Root cause: CNRSettingsMod 2.0.5 expanded the NGUI camera viewport to full screen, which changed the camera aspect ratio and shifted all Physics.Raycast hit zones � JoyStickController's fire-button raycast missed every time. The remap introduced in 2.0.6 to compensate had an accumulation bug (positions drifted further wrong on every scene reload), so even 'Reset All HUD' didn't fix it. Fix: the camera viewport is no longer expanded. JoyStickController now works correctly at all default and right-side button positions. The supplemental screen-space fire detector (TouchFireDetect) is still present but now only activates when the fire button has been explicitly dragged outside the camera viewport. Migration: on first run, any button positions saved under the expanded-camera versions (2.0.5�2.0.7) are automatically cleared so the game defaults are used."
         },
         {
           "version": "2.0.7",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-2.0.7.dll",
-          "changelog": "Fixed fire button not working when the fire button is repositioned to the left side of the screen. Root cause: after the NGUI camera viewport was expanded to full-screen (2.0.5), JoyStickController's Physics.Raycast missed the fire button, so it reset PlayerLogic.mStatus to 'walk' every frame. The 2.0.6 fallback worked but couldn't persist the 'fire' state because JoyStickController overwrote it the very next Update(). Fix: the supplemental touch detector now also sets JoyStickController's private fireStatusHoldTimeCount field (via reflection) to 0.235f on each detected fire touch. This is the same mechanism JoyStickController uses internally to guard against walk resets \ufffd when holdCount > 0 its 'if (!flag && holdCount <= 0) mStatus = walk' branch is skipped, so mStatus stays 'fire' until consumed by the gun script. Cooldown is 0.2f (slightly below 0.235f) so holdCount is refreshed before it ever reaches zero while the button is held."
+          "changelog": "Fixed fire button not working when the fire button is repositioned to the left side of the screen. Root cause: after the NGUI camera viewport was expanded to full-screen (2.0.5), JoyStickController's Physics.Raycast missed the fire button, so it reset PlayerLogic.mStatus to 'walk' every frame. The 2.0.6 fallback worked but couldn't persist the 'fire' state because JoyStickController overwrote it the very next Update(). Fix: the supplemental touch detector now also sets JoyStickController's private fireStatusHoldTimeCount field (via reflection) to 0.235f on each detected fire touch. This is the same mechanism JoyStickController uses internally to guard against walk resets � when holdCount > 0 its 'if (!flag && holdCount <= 0) mStatus = walk' branch is skipped, so mStatus stays 'fire' until consumed by the gun script. Cooldown is 0.2f (slightly below 0.235f) so holdCount is refreshed before it ever reaches zero while the button is held."
         },
         {
           "version": "2.0.6",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-2.0.6.dll",
-          "changelog": "Fixed firing/aiming issues introduced by the 2.0.5 camera viewport expansion. Expanding the NGUI camera rect changes the camera aspect ratio, which shifts the fire button's Physics.Raycast hit zone away from its visual, causing fire to fail on the first touch and joystick touches to hit the fire collider accidentally. Fix 1 (remap): when the camera rect is expanded, each button's world position is recalculated so it projects to the exact same screen pixel as before \ufffd keeping Physics.Raycast aligned with the visual. The corrected positions are persisted so future loads need no remap. Fix 2 (fallback): a supplemental screen-space fire detector runs in LateUpdate; if any touch falls inside the fire button's projected screen bounds it directly sets the fire status, bypassing Physics.Raycast entirely as a safety net."
+          "changelog": "Fixed firing/aiming issues introduced by the 2.0.5 camera viewport expansion. Expanding the NGUI camera rect changes the camera aspect ratio, which shifts the fire button's Physics.Raycast hit zone away from its visual, causing fire to fail on the first touch and joystick touches to hit the fire collider accidentally. Fix 1 (remap): when the camera rect is expanded, each button's world position is recalculated so it projects to the exact same screen pixel as before � keeping Physics.Raycast aligned with the visual. The corrected positions are persisted so future loads need no remap. Fix 2 (fallback): a supplemental screen-space fire detector runs in LateUpdate; if any touch falls inside the fire button's projected screen bounds it directly sets the fire status, bypassing Physics.Raycast entirely as a safety net."
         },
         {
           "version": "2.0.5",
@@ -2278,12 +2293,32 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.5.1",
+      "latestVersion": "1.6.0",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
-      "latestUrl": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.5.1.dll",
+      "latestUrl": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.6.0.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.6.0",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.6.0.dll",
+          "changelog": "test"
+        },
+        {
+          "version": "1.5.4",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.5.4.dll",
+          "changelog": "Make NGUI camera blocking re-scan stale camera caches so long-idle MainMenu state is less likely to leave buttons and restart actions frozen."
+        },
+        {
+          "version": "1.5.3",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.5.3.dll",
+          "changelog": "Refresh installed mods and re-check repo updates every time MainMenu is entered so the update banner reappears after returning from another scene."
+        },
+        {
+          "version": "1.5.2",
+          "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.5.2.dll",
+          "changelog": "Show restart-game state after single mod installs and removals, not just batch updates."
+        },
         {
           "version": "1.5.1",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.5.1.dll",
@@ -2357,7 +2392,7 @@
         {
           "version": "1.4.0",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.4.0.dll",
-          "changelog": "latestOnly mods now block multiplayer (HasRequiredPending=true) when installed but not at latest version. effectiveMin is latestVersion when no explicit minVersion is set \ufffd applies to CheckForUpdates, HasRequiredPending gate, and update banner required/optional classification."
+          "changelog": "latestOnly mods now block multiplayer (HasRequiredPending=true) when installed but not at latest version. effectiveMin is latestVersion when no explicit minVersion is set � applies to CheckForUpdates, HasRequiredPending gate, and update banner required/optional classification."
         },
         {
           "version": "1.3.9",
@@ -2402,7 +2437,7 @@
         {
           "version": "1.3.1",
           "url": "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.3.1.dll",
-          "changelog": "Download buttons for versions below minVersion are now disabled on both the website and the in-game version history \ufffd you can no longer manually install an outdated version that would be immediately force-updated."
+          "changelog": "Download buttons for versions below minVersion are now disabled on both the website and the in-game version history � you can no longer manually install an outdated version that would be immediately force-updated."
         },
         {
           "version": "1.3.0",
