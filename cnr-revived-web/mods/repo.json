@@ -306,11 +306,36 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "3.2.130",
+      "latestVersion": "3.2.137",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.130.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.137.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.2.137",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.137.dll",
+          "changelog": "Add native Stripe cancel button and reset checkout state when WebView is dismissed"
+        },
+        {
+          "version": "3.2.136",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.136.dll",
+          "changelog": "Resolve Stripe amounts from store UI and suppress legacy Unibill billing bootstrap."
+        },
+        {
+          "version": "3.2.135",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.135.dll",
+          "changelog": "Resolve Stripe amounts from store UI and destroy legacy Unibill store hooks."
+        },
+        {
+          "version": "3.2.134",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.134.dll",
+          "changelog": "Fix Stripe checkout verification and WebView URL polling on Android UI thread."
+        },
+        {
+          "version": "3.2.133",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.133.dll",
+          "changelog": "Replace Google Play billing with a Stripe Checkout bridge for coin/gem purchase SKUs."
+        },
         {
           "version": "3.2.130",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-3.2.130.dll",
@@ -2475,11 +2500,16 @@
       "id": "CNRZombieMod",
       "name": "CNR Zombie Mod",
       "description": "Multiplayer zombie test mod. Master client spawns real game enemies (SingleEnemyAI + model + animations + pathfinding) and syncs their positions via Photon event 198. All clients see the same NPCs moving in real time.",
-      "latestVersion": "0.8.52",
+      "latestVersion": "0.8.53",
       "filename": "CNRZombieMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.52.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.53.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "0.8.53",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.53.dll",
+          "changelog": "Skip zombie diagnostics and player lookup while outside game scenes to avoid main-menu stalls"
+        },
         {
           "version": "0.8.52",
           "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.52.dll",
@@ -2907,11 +2937,101 @@
       "id": "VoiceChat",
       "name": "Voice Chat",
       "description": "Mod-level voice chat bridge that uses the game WebView mediator and a site-hosted WebRTC page for live lobby audio.",
-      "latestVersion": "0.5.17",
+      "latestVersion": "0.5.36",
       "filename": "VoiceChat.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.17.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.36.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "0.5.36",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.36.dll",
+          "changelog": "Keep game voice WebView locked to Photon room for native PCM"
+        },
+        {
+          "version": "0.5.35",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.35.dll",
+          "changelog": "Keep Unity hide voice button outside WebView popup"
+        },
+        {
+          "version": "0.5.34",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.34.dll",
+          "changelog": "Avoid WebView mic permission by streaming native PCM to browser listeners"
+        },
+        {
+          "version": "0.5.33",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.33.dll",
+          "changelog": "Move WebView overlay into touchable Android popup window"
+        },
+        {
+          "version": "0.5.32",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.32.dll",
+          "changelog": "Consume WebView touch input in Android overlay"
+        },
+        {
+          "version": "0.5.31",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.31.dll",
+          "changelog": "WebView overlay touch routing and larger voice toggle"
+        },
+        {
+          "version": "0.5.30",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.30.dll",
+          "changelog": "Room auto-join/host by voice room; actor metadata"
+        },
+        {
+          "version": "0.5.29",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.29.dll",
+          "changelog": "Removed mediator path; auto-start debug WebView in room"
+        },
+        {
+          "version": "0.5.28",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.28.dll",
+          "changelog": "Use native Android WebView as the sole visible voice debug layer so touches reach the page"
+        },
+        {
+          "version": "0.5.27",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.27.dll",
+          "changelog": "Stop automatic VoiceChat PHP diagnostics and offline Photon room broadcasts while the diagnostic WebView is open"
+        },
+        {
+          "version": "0.5.26",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.26.dll",
+          "changelog": "Stop reusing the stale startup URL when showing the native WebView and suppress mute-state log spam"
+        },
+        {
+          "version": "0.5.25",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.25.dll",
+          "changelog": "Add an in-game WebView show/hide button so the diagnostic browser can be brought up during matches"
+        },
+        {
+          "version": "0.5.24",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.24.dll",
+          "changelog": "Allow the diagnostic WebView to stay available outside MainMenu so it can be shown during gameplay"
+        },
+        {
+          "version": "0.5.23",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.23.dll",
+          "changelog": "Make the native diagnostic WebView more responsive by enabling focus and scroll input, and trim unnecessary overlay settings"
+        },
+        {
+          "version": "0.5.22",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.22.dll",
+          "changelog": "Bump the diagnostic release while iterating on the WebView browser and WebRTC test page"
+        },
+        {
+          "version": "0.5.21",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.21.dll",
+          "changelog": "Auto-open the native WebView diagnostic browser on MainMenu instead of waiting for the update loop or a button toggle"
+        },
+        {
+          "version": "0.5.20",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.20.dll",
+          "changelog": "Render the diagnostic browser with a native Android WebView overlay when the game's WebMediator reports success but does not display content"
+        },
+        {
+          "version": "0.5.19",
+          "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.19.dll",
+          "changelog": "Voice chat WebView diagnostic build: use a non-conflicting room event code and fix the standalone diagnostic syntax error"
+        },
         {
           "version": "0.5.17",
           "url": "https://play.jacqueb.me/mods/VoiceChat/VoiceChat-0.5.17.dll",
