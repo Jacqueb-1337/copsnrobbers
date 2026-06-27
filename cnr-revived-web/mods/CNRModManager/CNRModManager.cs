@@ -592,10 +592,11 @@ namespace CNRModManager
         {
             _repos.Clear();
             string saved = PlayerPrefs.GetString(PREF_REPOS, "");
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (!string.IsNullOrEmpty(saved))
                 foreach (string r in saved.Split('|'))
-                    if (!string.IsNullOrEmpty(r)) _repos.Add(r);
-            if (!_repos.Contains(ModManagerEntry.DefaultRepoUrl))
+                    if (!string.IsNullOrEmpty(r) && seen.Add(r)) _repos.Add(r);
+            if (seen.Add(ModManagerEntry.DefaultRepoUrl))
                 _repos.Insert(0, ModManagerEntry.DefaultRepoUrl);
         }
 
@@ -647,6 +648,7 @@ namespace CNRModManager
                 int arrEnd   = json.LastIndexOf(']');
                 if (arrStart < 0 || arrEnd <= arrStart) { _browseStatus = "Invalid repo format"; return; }
                 string arr = json.Substring(arrStart + 1, arrEnd - arrStart - 1);
+                var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 int depth = 0, objStart = -1;
                 for (int i = 0; i < arr.Length; i++)
@@ -683,7 +685,8 @@ namespace CNRModManager
                                 fallback.changelog = "";
                                 mod.versions.Add(fallback);
                             }
-                            if (!string.IsNullOrEmpty(mod.filename)) _browseMods.Add(mod);
+                            if (!string.IsNullOrEmpty(mod.filename) && seenFiles.Add(mod.filename))
+                                _browseMods.Add(mod);
                             objStart = -1;
                         }
                     }
@@ -1058,8 +1061,11 @@ namespace CNRModManager
         private void CheckForUpdates()
         {
             _pendingUpdates.Clear();
+            var queuedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (RepoMod mod in _browseMods)
             {
+                if (string.IsNullOrEmpty(mod.filename) || !queuedFiles.Add(mod.filename))
+                    continue;
                 // Effective minimum: explicit minVersion, or latestVersion when latestOnly=true
                 string effectiveMin = !string.IsNullOrEmpty(mod.minVersion) ? mod.minVersion
                                     : (mod.latestOnly ? mod.latestVersion ?? "" : "");

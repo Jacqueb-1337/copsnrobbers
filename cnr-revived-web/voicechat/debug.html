@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CNR Voice Room</title>
+<style>
+  :root {
+    --bg: #0b1016;
+    --panel: #111923;
+    --panel2: #0f1620;
+    --line: #243142;
+    --text: #edf4ff;
+    --muted: #9db0c7;
+    --accent: #5f8cff;
+    --accent2: #2bc58f;
+    --warn: #ffb84d;
+    --bad: #ff6e6e;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    width: 100%;
+    min-height: 100%;
+    background: radial-gradient(circle at top, #132031 0, var(--bg) 55%);
+    color: var(--text);
+    font-family: Inter, Segoe UI, Arial, sans-serif;
+  }
+  body { overflow-x: hidden; }
+  a { color: inherit; }
+  #app {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 18px;
+  }
+  .topbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .title {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: 0;
+    margin: 0;
+  }
+  .subtitle {
+    margin-top: 6px;
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1.15fr .85fr;
+    gap: 14px;
+  }
+  .card {
+    background: linear-gradient(180deg, rgba(17,25,35,.98), rgba(12,18,26,.98));
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.24);
+  }
+  .sectionTitle {
+    font-size: 15px;
+    font-weight: 800;
+    margin: 0 0 10px 0;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  .row + .row { margin-top: 10px; }
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  input, button, select {
+    font: inherit;
+    color: var(--text);
+  }
+  input {
+    min-width: 170px;
+    padding: 11px 12px;
+    border-radius: 10px;
+    border: 1px solid #2a394e;
+    background: #0a1119;
+    outline: none;
+  }
+  input:focus {
+    border-color: #5677c7;
+    box-shadow: 0 0 0 2px rgba(95,140,255,.18);
+  }
+  button {
+    padding: 11px 14px;
+    border: 1px solid #324255;
+    border-radius: 10px;
+    background: #17202d;
+    cursor: pointer;
+    font-weight: 700;
+  }
+  button:hover { border-color: #4e6786; }
+  button.primary {
+    background: linear-gradient(180deg, #5f8cff, #3f67e6);
+    border-color: #5f8cff;
+    color: #fff;
+  }
+  button.good {
+    background: linear-gradient(180deg, #2fcb93, #1ea86c);
+    border-color: #2bc58f;
+    color: #082018;
+  }
+  button.bad {
+    background: linear-gradient(180deg, #ff7d7d, #e34b4b);
+    border-color: #ff6e6e;
+    color: #2a0505;
+  }
+  button:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+  }
+  .status {
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    background: rgba(10,15,22,.92);
+    border-radius: 10px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .status strong { color: var(--text); }
+  .stack { display: grid; gap: 12px; }
+  .peerList, .log {
+    display: grid;
+    gap: 8px;
+  }
+  .peerCard {
+    border: 1px solid #253345;
+    background: rgba(8,13,19,.9);
+    border-radius: 10px;
+    padding: 10px;
+  }
+  .peerHead {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .peerName { font-weight: 800; }
+  .peerMeta, .small {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .peerMeta { line-height: 1.45; word-break: break-word; }
+  .audioWrap {
+    margin-top: 8px;
+    display: grid;
+    gap: 6px;
+  }
+  audio {
+    width: 100%;
+    height: 34px;
+  }
+  #log {
+    max-height: 280px;
+    overflow: auto;
+    white-space: pre-wrap;
+    font-size: 12px;
+    line-height: 1.45;
+    padding-right: 2px;
+  }
+  #log div {
+    padding: 6px 8px;
+    border: 1px solid #223042;
+    background: rgba(6,10,15,.7);
+    border-radius: 8px;
+  }
+  .hint {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 8px;
+    line-height: 1.45;
+  }
+  @media (max-width: 980px) {
+    .grid { grid-template-columns: 1fr; }
+    .topbar { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+  <div id="app">
+    <div class="topbar">
+      <div>
+        <h1 class="title">Voice Room</h1>
+        <div class="subtitle">
+          Browser-to-browser WebRTC voice using the existing PHP API as signaling storage.
+          Join the same room on two devices, allow microphone access, then start.
+        </div>
+      </div>
+      <div class="status" id="status">Loading...</div>
+    </div>
+
+    <div class="grid">
+      <div class="stack">
+        <div class="card">
+          <div class="sectionTitle">Session</div>
+          <div class="row">
+            <label>Room<input id="roomInput" autocomplete="off"></label>
+            <label>Peer<input id="peerInput" autocomplete="off"></label>
+            <label>Name<input id="nameInput" autocomplete="off"></label>
+          </div>
+          <div class="row">
+            <button class="primary" id="startBtn">Start</button>
+            <button id="muteBtn">Mute mic</button>
+            <button id="testBtn">Test tone</button>
+            <button class="bad" id="leaveBtn" disabled>Leave</button>
+            <button id="refreshBtn">Refresh room</button>
+            <button id="copyBtn">Copy room link</button>
+          </div>
+          <div class="hint">
+            This page uses one shared room name. Each browser keeps its own peer id, exchanges offers/answers through PHP, and the actual audio streams peer-to-peer.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="sectionTitle">Connected Peers</div>
+          <div id="peers" class="peerList"></div>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="card">
+          <div class="sectionTitle">State</div>
+          <div id="info" class="small">booting...</div>
+        </div>
+
+        <div class="card">
+          <div class="sectionTitle">Log</div>
+          <div id="log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/simple-peer@9.11.1/simplepeer.min.js"></script>
+  <script>
+  (() => {
+    const api = '/voicechat/api.php';
+    const params = new URLSearchParams(location.search);
+    const roomInput = document.getElementById('roomInput');
+    const peerInput = document.getElementById('peerInput');
+    const nameInput = document.getElementById('nameInput');
+    const startBtn = document.getElementById('startBtn');
+    const muteBtn = document.getElementById('muteBtn');
+    const testBtn = document.getElementById('testBtn');
+    const leaveBtn = document.getElementById('leaveBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const statusEl = document.getElementById('status');
+    const infoEl = document.getElementById('info');
+    const peersEl = document.getElementById('peers');
+    const logEl = document.getElementById('log');
+
+    const state = {
+      room: params.get('room') || 'voice-debug',
+      peer: params.get('peer') || makeId('web'),
+      name: params.get('name') || 'Browser',
+      joined: false,
+      lastSeq: 0,
+      localStream: null,
+      muted: false,
+      polling: null,
+      peers: new Map(),
+      remoteStates: new Map(),
+    };
+
+    roomInput.value = state.room;
+    peerInput.value = state.peer;
+    nameInput.value = state.name;
+
+    function makeId(prefix) {
+      return prefix + '-' + Math.random().toString(36).slice(2, 8);
+    }
+
+    function escapeHtml(text) {
+      return String(text).replace(/[&<>"']/g, c => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[c]);
+    }
+
+    function log(text) {
+      const row = document.createElement('div');
+      row.textContent = new Date().toLocaleTimeString() + ' ' + text;
+      logEl.prepend(row);
+      while (logEl.childElementCount > 80) logEl.removeChild(logEl.lastElementChild);
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function updateInfo(extra) {
+      const room = roomInput.value.trim() || 'voice-debug';
+      const peer = peerInput.value.trim() || state.peer;
+      const name = nameInput.value.trim() || peer;
+      infoEl.innerHTML = [
+        '<strong>room:</strong> ' + escapeHtml(room),
+        '<strong>peer:</strong> ' + escapeHtml(peer),
+        '<strong>name:</strong> ' + escapeHtml(name),
+        '<strong>joined:</strong> ' + (state.joined ? 'yes' : 'no'),
+        '<strong>mic:</strong> ' + (state.localStream ? (state.muted ? 'muted' : 'live') : 'off'),
+        '<strong>peers:</strong> ' + state.peers.size,
+        '<strong>last seq:</strong> ' + state.lastSeq,
+        '<strong>extra:</strong> ' + escapeHtml(extra || 'idle'),
+      ].join('<br>');
+    }
+
+    async function json(url, opts) {
+      const res = await fetch(url, Object.assign({ cache: 'no-store' }, opts || {}));
+      const data = await res.json();
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.error || ('HTTP ' + res.status));
+      }
+      return data;
+    }
+
+    function rtcConfig() {
+      return {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      };
+    }
+
+    function currentRoom() {
+      return roomInput.value.trim() || 'voice-debug';
+    }
+
+    function currentPeer() {
+      return peerInput.value.trim() || state.peer;
+    }
+
+    function currentName() {
+      return nameInput.value.trim() || currentPeer();
+    }
+
+    function roomLink() {
+      const url = new URL(location.href);
+      url.searchParams.set('room', currentRoom());
+      url.searchParams.set('peer', currentPeer());
+      url.searchParams.set('name', currentName());
+      return url.toString();
+    }
+
+    async function postMessage(type, to, data) {
+      await json(api + '?action=send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          room: currentRoom(),
+          peer: currentPeer(),
+          type,
+          to: to || '',
+          data: data || {}
+        })
+      });
+    }
+
+    async function joinRoom() {
+      state.room = currentRoom();
+      state.peer = currentPeer();
+      state.name = currentName();
+
+      if (!state.localStream) {
+        state.localStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1
+          },
+          video: false
+        });
+      }
+
+      const joined = await json(api + '?action=join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          room: state.room,
+          peer: state.peer,
+          name: state.name,
+          actor: state.peer,
+          source: 'browser'
+        })
+      });
+
+      state.joined = true;
+      state.lastSeq = joined.seq || 0;
+      setStatus('Joined room ' + state.room + ' as ' + state.name);
+      log('joined ' + state.room);
+      attachLocalStream();
+      syncPeers(joined.peers || []);
+      startPolling();
+      updateButtons();
+      updateInfo('joined');
+    }
+
+    function attachLocalStream() {
+      if (!state.localStream) return;
+      for (const track of state.localStream.getAudioTracks()) {
+        track.enabled = !state.muted;
+      }
+    }
+
+    function updateButtons() {
+      leaveBtn.disabled = !state.joined;
+      muteBtn.textContent = state.muted ? 'Unmute mic' : 'Mute mic';
+    }
+
+    async function playTestTone() {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) {
+        throw new Error('Web Audio unavailable');
+      }
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 660;
+      gain.gain.value = 0.0001;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      const now = ctx.currentTime;
+      gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+      osc.stop(now + 0.45);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      try { ctx.close(); } catch (e) {}
+    }
+
+    function shouldInitiate(remotePeer) {
+      return currentPeer().localeCompare(remotePeer) < 0;
+    }
+
+    function createEntry(remotePeer, initiator) {
+      if (state.peers.has(remotePeer)) return state.peers.get(remotePeer);
+
+      const entry = {
+        peerId: remotePeer,
+        initiator,
+        peer: null,
+        audio: null,
+        connected: false,
+        lastSeen: Date.now(),
+        remoteName: remotePeer,
+      };
+
+      const peer = new SimplePeer({
+        initiator,
+        trickle: true,
+        stream: state.localStream,
+        config: rtcConfig()
+      });
+
+      peer.on('signal', signal => {
+        postMessage('sp_signal', remotePeer, { signal }).catch(err => {
+          log('signal send failed to ' + remotePeer + ': ' + err.message);
+        });
+      });
+
+      peer.on('connect', () => {
+        entry.connected = true;
+        log('connected with ' + remotePeer);
+        renderPeers();
+        updateInfo('peer connected');
+      });
+
+      peer.on('stream', stream => {
+        ensureAudioElement(entry, stream);
+        log('audio stream from ' + remotePeer);
+      });
+
+      peer.on('close', () => {
+        log('peer closed ' + remotePeer);
+        destroyPeer(remotePeer);
+      });
+
+      peer.on('error', err => {
+        log('peer error ' + remotePeer + ': ' + err.message);
+      });
+
+      entry.peer = peer;
+      state.peers.set(remotePeer, entry);
+      return entry;
+    }
+
+    function ensureAudioElement(entry, stream) {
+      if (!entry.audio) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'peerCard';
+        wrapper.dataset.peerId = entry.peerId;
+        wrapper.innerHTML = '<div class="peerHead"><div class="peerName"></div><div class="peerMeta"></div></div><div class="peerMeta state"></div>';
+        const audioWrap = document.createElement('div');
+        audioWrap.className = 'audioWrap';
+        const audio = document.createElement('audio');
+        audio.autoplay = true;
+        audio.controls = true;
+        audio.playsInline = true;
+        audioWrap.appendChild(audio);
+        wrapper.appendChild(audioWrap);
+        peersEl.appendChild(wrapper);
+        entry.audio = audio;
+      }
+      entry.audio.srcObject = stream;
+      entry.audio.play().catch(() => {
+        log('audio autoplay blocked for ' + entry.peerId);
+      });
+      renderPeerCard(entry);
+    }
+
+    function renderPeerCard(entry) {
+      const node = peersEl.querySelector('[data-peer-id="' + CSS.escape(entry.peerId) + '"]');
+      if (!node) return;
+      node.querySelector('.peerName').textContent = entry.remoteName || entry.peerId;
+      node.querySelector('.peerMeta').textContent = entry.peerId + (entry.initiator ? ' | initiator' : ' | receiver');
+      node.querySelector('.state').textContent = entry.connected ? 'connected' : 'connecting';
+    }
+
+    function destroyPeer(remotePeer) {
+      const entry = state.peers.get(remotePeer);
+      if (!entry) return;
+      try { entry.peer.destroy(); } catch (e) {}
+      if (entry.audio && entry.audio.parentElement) {
+        const card = entry.audio.closest('.peerCard');
+        if (card && card.parentElement) card.parentElement.removeChild(card);
+      }
+      state.peers.delete(remotePeer);
+      renderPeers();
+      updateInfo('peer removed');
+    }
+
+    function syncPeers(list) {
+      const visible = new Set();
+      for (const peer of list) {
+        const remotePeer = peer.peer || peer.id || '';
+        if (!remotePeer || remotePeer === currentPeer()) continue;
+        visible.add(remotePeer);
+        state.remoteStates.set(remotePeer, peer);
+        const entry = createEntry(remotePeer, shouldInitiate(remotePeer));
+        entry.remoteName = peer.name || remotePeer;
+        entry.lastSeen = Date.now();
+        renderPeerCard(entry);
+      }
+
+      for (const existing of Array.from(state.peers.keys())) {
+        if (!visible.has(existing)) {
+          destroyPeer(existing);
+        }
+      }
+
+      renderPeers();
+    }
+
+    function renderPeers() {
+      if (!state.peers.size) {
+        peersEl.innerHTML = '<div class="peerMeta">No remote peers connected yet.</div>';
+        return;
+      }
+      const cards = [];
+      for (const [peerId, entry] of state.peers.entries()) {
+        cards.push({ peerId, entry });
+      }
+      peersEl.innerHTML = '';
+      for (const { entry } of cards) {
+        if (!entry.audio) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'peerCard';
+          wrapper.dataset.peerId = entry.peerId;
+          wrapper.innerHTML = '<div class="peerHead"><div class="peerName"></div><div class="peerMeta"></div></div><div class="peerMeta state"></div>';
+          const audioWrap = document.createElement('div');
+          audioWrap.className = 'audioWrap';
+          const audio = document.createElement('audio');
+          audio.autoplay = true;
+          audio.controls = true;
+          audio.playsInline = true;
+          audioWrap.appendChild(audio);
+          wrapper.appendChild(audioWrap);
+          peersEl.appendChild(wrapper);
+          entry.audio = audio;
+        } else if (!entry.audio.closest('.peerCard')) {
+          peersEl.appendChild(entry.audio.closest('.peerCard'));
+        }
+        renderPeerCard(entry);
+      }
+    }
+
+    async function poll() {
+      if (!state.joined) return;
+      try {
+        const data = await json(api + '?action=poll&room=' + encodeURIComponent(state.room) + '&peer=' + encodeURIComponent(state.peer) + '&since=' + encodeURIComponent(state.lastSeq));
+        state.lastSeq = data.seq || state.lastSeq;
+        if (Array.isArray(data.peers)) {
+          syncPeers(data.peers);
+        }
+        if (Array.isArray(data.messages)) {
+          for (const msg of data.messages) {
+            if (!msg || msg.from === state.peer) continue;
+            if (msg.type === 'sp_signal' && msg.data && msg.data.signal) {
+              const entry = createEntry(msg.from, shouldInitiate(msg.from));
+              try {
+                entry.peer.signal(msg.data.signal);
+              } catch (err) {
+                log('signal apply failed from ' + msg.from + ': ' + err.message);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        log('poll failed: ' + err.message);
+      }
+    }
+
+    function startPolling() {
+      stopPolling();
+      state.polling = setInterval(poll, 700);
+      poll();
+    }
+
+    function stopPolling() {
+      if (state.polling) clearInterval(state.polling);
+      state.polling = null;
+    }
+
+    async function refreshRoom() {
+      const data = await json(api + '?action=rooms');
+      const room = (data.rooms || []).find(r => r.room === currentRoom());
+      if (room) {
+        syncPeers(room.peers || []);
+      }
+      updateInfo('refreshed');
+    }
+
+    async function leaveRoom() {
+      stopPolling();
+      for (const remotePeer of Array.from(state.peers.keys())) {
+        destroyPeer(remotePeer);
+      }
+      if (state.localStream) {
+        for (const track of state.localStream.getTracks()) {
+          try { track.stop(); } catch (e) {}
+        }
+      }
+      state.localStream = null;
+      state.joined = false;
+      state.lastSeq = 0;
+      try {
+        await json(api + '?action=leave', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            room: currentRoom(),
+            peer: currentPeer()
+          })
+        });
+      } catch (err) {
+        log('leave failed: ' + err.message);
+      }
+      setStatus('Left room');
+      updateButtons();
+      updateInfo('left');
+    }
+
+    startBtn.addEventListener('click', async () => {
+      try {
+        setStatus('Requesting microphone access...');
+        await joinRoom();
+        log('voice active');
+      } catch (err) {
+        log('start failed: ' + err.message);
+        setStatus('Start failed: ' + err.message);
+        updateInfo('start failed');
+      }
+    });
+
+    muteBtn.addEventListener('click', () => {
+      state.muted = !state.muted;
+      attachLocalStream();
+      updateButtons();
+      updateInfo('mute toggled');
+    });
+
+    testBtn.addEventListener('click', async () => {
+      try {
+        await playTestTone();
+        log('test tone played');
+        setStatus('Test tone played');
+      } catch (err) {
+        log('test tone failed: ' + err.message);
+        setStatus('Test tone failed: ' + err.message);
+      }
+    });
+
+    leaveBtn.addEventListener('click', () => {
+      leaveRoom().catch(err => log('leave error: ' + err.message));
+    });
+
+    refreshBtn.addEventListener('click', () => {
+      refreshRoom().catch(err => {
+        log('refresh failed: ' + err.message);
+        setStatus('Refresh failed: ' + err.message);
+      });
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(roomLink());
+        setStatus('Room link copied');
+      } catch (err) {
+        setStatus('Copy failed');
+        log('copy failed: ' + err.message);
+      }
+    });
+
+    roomInput.addEventListener('change', updateInfo);
+    peerInput.addEventListener('change', updateInfo);
+    nameInput.addEventListener('change', updateInfo);
+
+    window.addEventListener('beforeunload', () => {
+      stopPolling();
+      try {
+        navigator.sendBeacon(
+          api + '?action=leave',
+          new Blob([JSON.stringify({ room: currentRoom(), peer: currentPeer() })], { type: 'application/json' })
+        );
+      } catch (e) {}
+    });
+
+    async function bootstrap() {
+      updateButtons();
+      updateInfo('ready');
+      setStatus('Ready. Pick a room and press Start.');
+      try {
+        const data = await json(api + '?action=rooms');
+        if (data && Array.isArray(data.rooms)) {
+          syncPeers((data.rooms.find(r => r.room === currentRoom()) || {}).peers || []);
+        }
+      } catch (err) {
+        log('room query failed: ' + err.message);
+      }
+    }
+
+    bootstrap().catch(err => {
+      setStatus('Boot failed: ' + err.message);
+      log('boot failed: ' + err.message);
+    });
+  })();
+  </script>
+</body>
+</html>

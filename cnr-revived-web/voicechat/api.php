@@ -32,12 +32,16 @@ try {
             $peer = peer_key($body['peer'] ?? '');
             $name = trim((string)($body['name'] ?? $peer));
             $level = normalize_level($body['level'] ?? 0);
-            $resp = with_room($room, function (&$roomState) use ($peer, $name) {
+            $actor = trim((string)($body['actor'] ?? ''));
+            $source = trim((string)($body['source'] ?? ''));
+            $resp = with_room($room, function (&$roomState) use ($peer, $name, $actor, $source) {
                 init_room($roomState);
                 $peerState = $roomState['peers'][$peer] ?? [];
                 $roomState['peers'][$peer] = array_merge($peerState, [
                     'peer' => $peer,
                     'name' => mb_substr($name, 0, 64),
+                    'actor' => mb_substr($actor, 0, 64),
+                    'source' => mb_substr($source, 0, 32),
                     'seen' => time(),
                     'micMuted' => false,
                     'speakerMuted' => false,
@@ -47,7 +51,7 @@ try {
                     'type' => 'join',
                     'from' => $peer,
                     'to' => null,
-                    'data' => ['peer' => $peer, 'name' => mb_substr($name, 0, 64)],
+                    'data' => ['peer' => $peer, 'name' => mb_substr($name, 0, 64), 'actor' => mb_substr($actor, 0, 64), 'source' => mb_substr($source, 0, 32)],
                 ]);
                 cleanup_room($roomState);
                 return [

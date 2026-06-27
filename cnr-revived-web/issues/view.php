@@ -108,6 +108,7 @@
 // ── Helpers ───────────────────────────────────────────────────────────────
 const API = 'api.php';
 let isAdmin = false;
+let diffStickyTick = 0;
 
 async function checkAdminStatus() {
   try {
@@ -400,6 +401,55 @@ async function renderCsDiff(commentId, newFilename, refVersion) {
     container.innerHTML = `<span style="color:var(--danger);font-size:12px">Diff error: ${esc(e.message)}</span>`;
   }
 }
+
+function updateStickyDiffHunks() {
+  const hunks = Array.from(document.querySelectorAll('.diff-hunk[open]'));
+  let active = null;
+  const threshold = 8;
+  for (const hunk of hunks) {
+    const rect = hunk.getBoundingClientRect();
+    if (rect.top <= threshold && rect.bottom > threshold) active = hunk;
+    hunk.classList.remove('is-sticky');
+  }
+  if (!active && hunks.length) {
+    let best = null;
+    let bestDist = Infinity;
+    for (const hunk of hunks) {
+      const rect = hunk.getBoundingClientRect();
+      const dist = Math.abs(rect.top - threshold);
+      if (dist < bestDist) { bestDist = dist; best = hunk; }
+    }
+    active = best;
+  }
+  if (active) active.classList.add('is-sticky');
+}
+
+function queueStickyDiffUpdate() {
+  if (diffStickyTick) return;
+  diffStickyTick = requestAnimationFrame(() => {
+    diffStickyTick = 0;
+    updateStickyDiffHunks();
+  });
+}
+
+document.addEventListener('click', e => {
+  const summary = e.target.closest('.diff-hunk > summary');
+  if (!summary) return;
+  const details = summary.parentElement;
+  if (!details || !details.classList.contains('diff-hunk')) return;
+  const willClose = details.open;
+  if (!willClose) return;
+  setTimeout(() => {
+    details.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'smooth' });
+  }, 0);
+});
+
+window.addEventListener('scroll', queueStickyDiffUpdate, { passive: true });
+window.addEventListener('resize', queueStickyDiffUpdate);
+document.addEventListener('toggle', e => {
+  if (e.target?.classList?.contains('diff-hunk')) queueStickyDiffUpdate();
+}, true);
+queueStickyDiffUpdate();
 
 async function uploadCsFile(file, commentId) {
   const fd = new FormData();

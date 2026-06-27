@@ -124,7 +124,11 @@ $csFiles = Get-ChildItem -Path $ModsDir -Recurse -Filter "*.cs" |
     Where-Object { $_.Name -notmatch '-\d+\.\d+\.\d+\.cs$' } |
     Sort-Object FullName
 
-if ($csFiles.Count -eq 0) {
+$primaryCsFiles = $csFiles | Where-Object {
+    $_.BaseName -eq $_.Directory.Name
+} | Sort-Object FullName
+
+if ($primaryCsFiles.Count -eq 0) {
     Write-Err "No .cs files found under $ModsDir"
     exit 1
 }
@@ -134,30 +138,30 @@ $selectedCs = $null
 
 if ($ModName -ne "") {
     # Flag mode: match by basename
-    $selectedCs = $csFiles | Where-Object { $_.BaseName -eq $ModName } | Select-Object -First 1
+    $selectedCs = $primaryCsFiles | Where-Object { $_.BaseName -eq $ModName } | Select-Object -First 1
     if ($null -eq $selectedCs) {
         Write-Err "No .cs file found with basename '$ModName' under $ModsDir"
-        Write-Host "   Available mods:"
-        foreach ($f in $csFiles) { Write-Host "     $($f.BaseName)  ($($f.FullName))" }
+        Write-Host "   Available mods:" 
+        foreach ($f in $primaryCsFiles) { Write-Host "     $($f.BaseName)  ($($f.FullName))" }
         exit 1
     }
     Write-Ok "Mod: $($selectedCs.BaseName)  ($($selectedCs.FullName))"
 } else {
     # Interactive mode: numbered menu
     Write-Host ""
-    for ($i = 0; $i -lt $csFiles.Count; $i++) {
-        $rel = $csFiles[$i].FullName.Substring($RootDir.Length).TrimStart('\')
+    for ($i = 0; $i -lt $primaryCsFiles.Count; $i++) {
+        $rel = $primaryCsFiles[$i].FullName.Substring($RootDir.Length).TrimStart('\')
         Write-Host "  [$($i+1)] $rel" -ForegroundColor White
     }
     Write-Host ""
     $pickInt = 0
     do {
-        $pick = Read-Host "Select mod [1-$($csFiles.Count)]"
+        $pick = Read-Host "Select mod [1-$($primaryCsFiles.Count)]"
         $pickInt = 0
-        $valid = [int]::TryParse($pick, [ref]$pickInt) -and $pickInt -ge 1 -and $pickInt -le $csFiles.Count
-        if (-not $valid) { Write-Warn "Enter a number between 1 and $($csFiles.Count)." }
+        $valid = [int]::TryParse($pick, [ref]$pickInt) -and $pickInt -ge 1 -and $pickInt -le $primaryCsFiles.Count
+        if (-not $valid) { Write-Warn "Enter a number between 1 and $($primaryCsFiles.Count)." }
     } while (-not $valid)
-    $selectedCs = $csFiles[$pickInt - 1]
+    $selectedCs = $primaryCsFiles[$pickInt - 1]
     Write-Ok "Selected: $($selectedCs.BaseName)"
 }
 
@@ -241,10 +245,16 @@ $versionedDll = Join-Path $ModCsDir "$ModBase-$newVer.dll"
 Copy-Item $builtDll $versionedDll -Force
 Write-Ok "-> $versionedDll"
 
-# Also save versioned source .cs for issue tracker diff feature
-$versionedCs = Join-Path $ModCsDir "$ModBase-$newVer.cs"
-Copy-Item $selectedCs.FullName $versionedCs -Force
-Write-Ok "-> $versionedCs"
+# Also save versioned source .cs files for issue tracker diff feature.
+# This mirrors the compiler's multi-file behavior for a mod folder.
+$modSourceFiles = Get-ChildItem -Path $ModCsDir -File -Filter "*.cs" |
+    Where-Object { $_.Name -notmatch '-\d+\.\d+\.\d+\.cs$' } |
+    Sort-Object Name
+foreach ($src in $modSourceFiles) {
+    $versionedCs = Join-Path $ModCsDir ($src.BaseName + "-" + $newVer + ".cs")
+    Copy-Item $src.FullName $versionedCs -Force
+    Write-Ok "-> $versionedCs"
+}
 
 # -- 7. Update repo manifests -------------------------------------------------
 Write-Step "repo manifest update"
@@ -324,9 +334,12 @@ if ($doCommit) {
         $relCs   = $selectedCs.FullName.Substring((Join-Path $RootDir "cnr-revived-web\").Length)
         $relDll  = "mods/$ModBase/$ModBase.dll"
         $relVDll = "mods/$ModBase/$ModBase-$newVer.dll"
-        $relVCs  = "mods/$ModBase/$ModBase-$newVer.cs"
+        $versionedSourcePaths = @()
+        foreach ($src in (Get-ChildItem -Path $ModCsDir -File -Filter "*.cs" | Where-Object { $_.Name -notmatch '-\d+\.\d+\.\d+\.cs$' } | Sort-Object Name)) {
+            $versionedSourcePaths += ("mods/$ModBase/" + $src.BaseName + "-" + $newVer + ".cs")
+        }
 
-        git add $relCs $relDll $relVDll $relVCs "mods/repo.json" "mods/repo2.json" 2>&1 | Out-Null
+        git add $relCs $relDll $relVDll @versionedSourcePaths "mods/repo.json" "mods/repo2.json" 2>&1 | Out-Null
         $commitMsg = "$ModBase $newVer"
         if ($Changelog -ne "") { $commitMsg += " -- $Changelog" }
         git commit -m $commitMsg

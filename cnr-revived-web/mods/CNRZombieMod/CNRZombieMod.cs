@@ -37,7 +37,7 @@ namespace CNRZombieMod
     // ─────────────────────────────────────────────────────────────────────────
     public class ZombieModEntry
     {
-        public const  string Version = "0.8.52";
+        public const  string Version = "0.8.53";
         public const  byte   ZOMBIE_EVENT = 198;   // Photon custom event code (≠ CNRMod's 199)
         private const string LogPath      = "/storage/emulated/0/CNRMods/zombiemod.log";
         private static readonly string[] QuietPrefixes = new string[] {
@@ -528,6 +528,14 @@ namespace CNRZombieMod
             if (!_proxyInstalled) TryInstallProxy();
 
             string scene = Application.loadedLevelName;
+            bool gameScene = IsGameScene(scene);
+            if (!gameScene)
+            {
+                _hud = "";
+                _diagTimer = DIAG_INTERVAL;
+                return;
+            }
+
             bool inRoom   = IsInRoom();
             bool photonMaster = IsMasterClient();
             bool isAuthority = inRoom && IsMasterClientNow();
@@ -546,7 +554,7 @@ namespace CNRZombieMod
                 _diagTimer = DIAG_INTERVAL;
                 ZombieModEntry.Log(string.Format(
                     "Diag: scene={0} gameScene={1} inRoom={2} photonMaster={3} zombieAuthority={4} hasTemplate={5} player={6} spawned={7} {8}",
-                    scene, IsGameScene(scene), inRoom, photonMaster, isAuthority, hasTemplate,
+                    scene, gameScene, inRoom, photonMaster, isAuthority, hasTemplate,
                     ec != null ? ec.name : "null", _masterSpawned, GetAuthorityDebug()));
                 // Retry caching the prefab if it failed on scene load
                 // (SingleEnemyManager.mInstance may have been null at OnLevelWasLoaded time)
@@ -560,7 +568,6 @@ namespace CNRZombieMod
                 inRoom, isAuthority, photonMaster, hasTemplate, _navDebugEnabled ? "ON" : "OFF",
                 _navDebugStatus);
 
-            if (!IsGameScene(scene)) return;
             if (!inRoom)             return;
             CachePlayerLogicFields();
             ForceCopTeamIfNeeded();
