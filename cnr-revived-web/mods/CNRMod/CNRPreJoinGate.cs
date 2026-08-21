@@ -62,11 +62,7 @@ namespace CNRMods
             CNRMultiplayerManifest m = new CNRMultiplayerManifest();
             m.schema = 1;
             m.protocol = DefaultProtocol;
-            m.requiredMods = new CNRRequiredMod[]
-            {
-                new CNRRequiredMod { id = "CNRModManager", minVersion = "1.6.1" },
-                new CNRRequiredMod { id = "CNRSettingsMod", minVersion = "3.1.103" }
-            };
+            m.requiredMods = new CNRRequiredMod[0];
             return m;
         }
 
