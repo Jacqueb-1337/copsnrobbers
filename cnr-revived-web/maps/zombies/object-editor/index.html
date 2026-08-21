@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CNR Zombies Object Editor</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#101019;color:#ddd;font:13px Segoe UI,Arial,sans-serif}button,input,select{background:#151522;color:#ddd;border:1px solid #3b3b55;border-radius:4px;padding:6px 8px}button{cursor:pointer}button:hover{background:#28283a}.ok{background:#174a32;border-color:#2c7952}.danger{background:#421d1d;border-color:#753535}.file{position:relative;overflow:hidden;display:inline-block}.file input{position:absolute;inset:0;opacity:0;cursor:pointer}#app{height:100%;display:flex;flex-direction:column}#top{height:46px;display:flex;align-items:center;gap:7px;padding:7px 10px;background:#181827;border-bottom:1px solid #303047}#top h1{font-size:14px;color:#72e7ff;margin:0 8px 0 0}.spacer{flex:1}#main{flex:1;min-height:0;display:flex}.side{width:250px;background:#181827;overflow:auto;flex-shrink:0}.left{border-right:1px solid #303047}.right{border-left:1px solid #303047;width:285px}.section{padding:10px;border-bottom:1px solid #2a2a3c}.section h3{margin:0 0 8px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#85859e}.hint{font-size:11px;color:#85859e;line-height:1.45}.row{display:flex;gap:6px;align-items:center;margin:6px 0}.row label{width:94px;color:#9999ad;flex-shrink:0}.row input,.row select{flex:1;min-width:0}.item{padding:7px 9px;border-bottom:1px solid #252538;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.item:hover{background:#252538}.item.sel{background:#203039;color:#72e7ff}.badge{display:inline-block;padding:2px 6px;border-radius:10px;background:#26263a;color:#9a9ab6;font-size:10px}#viewport{position:relative;flex:1;min-width:0}#viewport canvas{display:block}.overlay{position:absolute;pointer-events:none;background:#000a;padding:5px 10px;border-radius:12px;color:#aaaac0;font-size:11px}#info{left:10px;top:10px}#statusbar{height:30px;padding:6px 10px;background:#181827;border-top:1px solid #303047;color:#8e8ea7;font-size:11px;display:flex;gap:10px}.warn{color:#ffb36e}.good{color:#74e6a8}.swatch{width:24px;height:24px;border-radius:3px;border:1px solid #555}.full{width:100%}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"}}</script>
+</head>
+<body>
+<div id="app">
+<div id="top">
+<h1>CNR Zombies Object Editor</h1>
+<label class="file"><button>Import FBX</button><input id="fbx" type="file" accept=".fbx"></label>
+<label class="file"><button>Load Asset JSON</button><input id="loadAsset" type="file" accept=".json,.cnrzobj"></label>
+<div class="spacer"></div>
+<button id="resetView">Frame Model</button>
+<button class="ok" id="export">Export Object Asset</button>
+</div>
+<div id="main">
+<div class="side left">
+<div class="section"><h3>Asset</h3>
+<div class="row"><label>ID</label><input id="assetId" value="custom_object"></div>
+<div class="row"><label>Name</label><input id="assetName" value="Custom Object"></div>
+<div class="row"><label>Import scale</label><input id="importScale" type="number" step="0.01" value="1"></div>
+<div class="hint">FBX is converted in-browser into a Unity-friendly mesh JSON. Runtime does not need an FBX parser.</div>
+</div>
+<div class="section"><h3>Mesh Parts</h3><div id="parts"><div class="hint">Import an FBX to begin.</div></div></div>
+<div class="section"><h3>Whole Object</h3><button class="full" id="center">Center at Origin</button><button class="full" id="applyAll" style="margin-top:6px">Copy Material to All Parts</button></div>
+</div>
+<div id="viewport"><div class="overlay" id="info">No model loaded</div></div>
+<div class="side right">
+<div class="section"><h3>Selected Mesh</h3><div id="selName" class="hint">None</div><div id="meshStats" class="hint" style="margin-top:5px"></div></div>
+<div class="section"><h3>Material</h3>
+<div class="row"><label>Mode</label><select id="matMode"><option value="vanilla">Vanilla game material</option><option value="url">Texture library</option><option value="custom">Custom texture</option><option value="color">Solid color</option></select></div>
+<div id="urlControls" style="display:none"><div class="row"><label>Texture</label><select id="vanillaTex"></select></div><div class="hint">Reusable texture files from the existing map-tool library.</div></div>
+<div id="vanillaControls"><div class="row"><label>Vanilla map</label><select id="vanillaMap"><option value="">Select map…</option></select></div><div class="row"><label>Game material</label><select id="vanillaMat"><option value="">Select material…</option></select></div><div class="row"><label>Material name</label><input id="matName" placeholder="Default-Diffuse"></div><div class="hint">At runtime the mesh reuses the exact material already loaded by the vanilla scene. The map selector is only used to browse material names.</div></div>
+<div id="customControls" style="display:none"><label class="file full"><button class="full">Import PNG/JPG</button><input id="customTex" type="file" accept="image/png,image/jpeg"></label><div id="customName" class="hint" style="margin-top:5px">No texture imported.</div></div>
+<div id="colorControls" style="display:none"><div class="row"><label>Color</label><input id="color" type="color" value="#b8b8b8"></div></div>
+<div class="row"><label>Collidable</label><select id="collidable"><option value="true">Yes</option><option value="false">No</option></select></div>
+</div>
+<div class="section"><h3>Runtime Notes</h3><div class="hint">Object assets are referenced by Zombies overlay objects using <b>assetUrl</b>. Photon 197 syncs the placement/config; every client then loads the same asset URL. Keep each mesh below 65,000 vertices for this old Unity build.</div></div>
+</div>
+</div>
+<div id="statusbar"><span class="badge">FBX → CNR mesh JSON</span><span id="status">Ready.</span></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {FBXLoader} from 'three/addons/loaders/FBXLoader.js';
+
+const TEX_BASE='../../editor/textures/';
+const DONOR_BASE='../../editor/donors/';
+const VANILLA_TEXTURES=['brick.png','cobblestone.png','cobblestone_mossy.png','dirt.png','grass_side.png','grass_top.png','gravel.png','hellrock.png','ice.png','nether_brick.png','planks_jungle.png','planks_oak.png','planks_spruce.png','sand.png','sandstone_normal.png','sandstone_side.png','sandstone_top.png','snow.png','stone.png','stonebrick.png','wood1.png','wood_spruce1.png'];
+const vp=document.getElementById('viewport');
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setClearColor(0x0d0d16);vp.appendChild(renderer.domElement);
+const scene=new THREE.Scene();const camera=new THREE.PerspectiveCamera(55,1,.01,5000);camera.position.set(4,3,6);const orbit=new OrbitControls(camera,renderer.domElement);orbit.enableDamping=true;
+scene.add(new THREE.HemisphereLight(0xffffff,0x202030,1.4));const dl=new THREE.DirectionalLight(0xffffff,1.5);dl.position.set(5,8,4);scene.add(dl);const grid=new THREE.GridHelper(20,20,0x444466,0x24243a);scene.add(grid);
+const modelRoot=new THREE.Group();scene.add(modelRoot);
+let selected=null,counter=0;
+const textureLoader=new THREE.TextureLoader();
+const vanillaSel=document.getElementById('vanillaTex');for(const n of VANILLA_TEXTURES){const o=document.createElement('option');o.value=n;o.textContent=n.replace(/\.png$/,'');vanillaSel.appendChild(o)}
+const vanillaMap=document.getElementById('vanillaMap'),vanillaMat=document.getElementById('vanillaMat');const vanillaMaterialColors=new Map();
+function status(s,cls=''){const e=document.getElementById('status');e.textContent=s;e.className=cls}
+function disposeMat(m){if(!m)return;(Array.isArray(m)?m:[m]).forEach(x=>{if(x.map&&x.map.userData?.owned)x.map.dispose();x.dispose?.()})}
+function clearModel(){selected=null;while(modelRoot.children.length){const o=modelRoot.children[0];o.traverse(x=>{if(x.isMesh){x.geometry?.dispose();disposeMat(x.material)}});modelRoot.remove(o)}refreshParts();updatePanel();updateInfo()}
+function meta(mesh){if(!mesh.userData.cnrz)mesh.userData.cnrz={materialMode:'vanilla',materialName:'',textureUrl:'',textureData:'',color:[.72,.72,.72,1],collidable:true,customTextureName:''};return mesh.userData.cnrz}
+function makePreviewMaterial(mesh){const d=meta(mesh);let mat=new THREE.MeshLambertMaterial({color:new THREE.Color(d.color[0],d.color[1],d.color[2])});if(d.materialMode==='url'&&d.textureUrl){const u=d.textureUrl.startsWith('/maps/editor/textures/')?'../../editor/textures/'+d.textureUrl.split('/').pop():d.textureUrl;textureLoader.load(u,t=>{t.wrapS=t.wrapT=THREE.RepeatWrapping;mat.map=t;mat.needsUpdate=true})}else if(d.materialMode==='custom'&&d.textureData){textureLoader.load(d.textureData,t=>{t.userData.owned=true;t.wrapS=t.wrapT=THREE.RepeatWrapping;mat.map=t;mat.needsUpdate=true})}else if(d.materialMode==='vanilla'){const c=vanillaMaterialColors.get(d.materialName);if(c)mat.color.setRGB(c[0],c[1],c[2]);else mat.color.set(0x8fb4c4)}return mat}
+function refreshPreview(mesh){if(!mesh)return;disposeMat(mesh.material);mesh.material=makePreviewMaterial(mesh)}
+function allMeshes(){const a=[];modelRoot.traverse(o=>{if(o.isMesh)a.push(o)});return a}
+function refreshParts(){const p=document.getElementById('parts'),ms=allMeshes();p.innerHTML='';if(!ms.length){p.innerHTML='<div class="hint">Import an FBX to begin.</div>';return}ms.forEach((m,i)=>{const e=document.createElement('div');e.className='item'+(m===selected?' sel':'');e.textContent=(m.name||('Mesh '+(i+1)))+' · '+m.geometry.attributes.position.count+'v';e.onclick=()=>select(m);p.appendChild(e)})}
+function select(m){selected=m;refreshParts();updatePanel()}
+function updatePanel(){const n=document.getElementById('selName'),s=document.getElementById('meshStats');if(!selected){n.textContent='None';s.textContent='';return}const d=meta(selected),g=selected.geometry;n.textContent=selected.name||'Mesh';s.textContent=g.attributes.position.count+' vertices · '+((g.index?g.index.count:g.attributes.position.count)/3|0)+' triangles';document.getElementById('matMode').value=d.materialMode;document.getElementById('matName').value=d.materialName||'';document.getElementById('collidable').value=String(d.collidable!==false);document.getElementById('color').value=rgbHex(d.color);if(d.textureUrl){const fn=d.textureUrl.split('/').pop();if(VANILLA_TEXTURES.includes(fn))vanillaSel.value=fn}document.getElementById('customName').textContent=d.customTextureName||'No texture imported.';showMatMode(d.materialMode)}
+function rgbHex(c){const h=x=>Math.max(0,Math.min(255,Math.round(x*255))).toString(16).padStart(2,'0');return '#'+h(c?.[0]??.7)+h(c?.[1]??.7)+h(c?.[2]??.7)}
+function hexRgb(h){return[parseInt(h.slice(1,3),16)/255,parseInt(h.slice(3,5),16)/255,parseInt(h.slice(5,7),16)/255,1]}
+function showMatMode(m){for(const id of['urlControls','vanillaControls','customControls','colorControls'])document.getElementById(id).style.display='none';document.getElementById(({url:'urlControls',vanilla:'vanillaControls',custom:'customControls',color:'colorControls'})[m]).style.display='block'}
+function frame(){const b=new THREE.Box3().setFromObject(modelRoot);if(b.isEmpty())return;const c=b.getCenter(new THREE.Vector3()),sz=b.getSize(new THREE.Vector3()),d=Math.max(sz.x,sz.y,sz.z)||1;orbit.target.copy(c);camera.position.set(c.x+d*1.2,c.y+d*.8,c.z+d*1.4);camera.near=Math.max(.001,d/1000);camera.far=Math.max(100,d*50);camera.updateProjectionMatrix();grid.scale.setScalar(Math.max(1,d/10))}
+function centerModel(){const b=new THREE.Box3().setFromObject(modelRoot);if(b.isEmpty())return;const c=b.getCenter(new THREE.Vector3());modelRoot.children.forEach(x=>x.position.sub(c));modelRoot.updateMatrixWorld(true);frame();status('Centered object at origin.','good')}
+function updateInfo(){const ms=allMeshes();let v=0,t=0,bad=0;for(const m of ms){const n=m.geometry.attributes.position?.count||0;v+=n;t+=(m.geometry.index?m.geometry.index.count:n)/3;if(n>65000)bad++}const over=bad||v>250000||ms.length>64;document.getElementById('info').textContent=ms.length?`${ms.length} mesh part(s) · ${v.toLocaleString()} vertices · ${Math.round(t).toLocaleString()} tris${bad?' · '+bad+' OVER 65k':''}${v>250000?' · OVER 250k TOTAL':''}${ms.length>64?' · OVER 64 PARTS':''}`:'No model loaded';document.getElementById('info').className='overlay'+(over?' warn':'')}
+
+document.getElementById('fbx').onchange=e=>{const f=e.target.files[0];if(!f)return;status('Parsing '+f.name+'…');const r=new FileReader();r.onload=()=>{try{clearModel();const loader=new FBXLoader(),obj=loader.parse(r.result,'');const sc=+document.getElementById('importScale').value||1;obj.scale.setScalar(sc);obj.updateMatrixWorld(true);modelRoot.add(obj);obj.traverse(x=>{if(x.isMesh){x.geometry=x.geometry.clone();if(!x.geometry.attributes.normal)x.geometry.computeVertexNormals();meta(x);x.material=makePreviewMaterial(x)}});modelRoot.updateMatrixWorld(true);centerModel();const ms=allMeshes();select(ms[0]||null);updateInfo();status('Imported '+f.name+'.','good')}catch(err){status('FBX import failed: '+err.message,'warn')}};r.readAsArrayBuffer(f);e.target.value=''};
+
+document.getElementById('matMode').onchange=e=>{if(!selected)return;const d=meta(selected);d.materialMode=e.target.value;showMatMode(d.materialMode);refreshPreview(selected)};
+vanillaSel.onchange=e=>{if(!selected)return;const d=meta(selected);d.materialMode='url';d.textureUrl='/maps/editor/textures/'+e.target.value;d.textureData='';document.getElementById('matMode').value='url';refreshPreview(selected)};
+async function loadVanillaMaterials(name){vanillaMat.innerHTML='<option value="">Select material…</option>';vanillaMaterialColors.clear();if(!name)return;try{const r=await fetch(DONOR_BASE+name+'.json');if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json(),mats=new Map();for(const o of(j.objects||[])){if(!o.mat||String(o.path||'').includes('_UIDrawCall'))continue;if(!mats.has(o.mat)){let c=[.55,.55,.6];if(o.color&&o.color.length>=3)c=[o.color[0]/255,o.color[1]/255,o.color[2]/255];mats.set(o.mat,c)}}for(const name of[...mats.keys()].sort((a,b)=>a.localeCompare(b))){vanillaMaterialColors.set(name,mats.get(name));const op=document.createElement('option');op.value=op.textContent=name;vanillaMat.appendChild(op)}status('Loaded '+mats.size+' vanilla game material names from '+name+'.','good')}catch(err){status('Could not read vanilla materials: '+err.message,'warn')}}
+vanillaMap.onchange=e=>loadVanillaMaterials(e.target.value);
+vanillaMat.onchange=e=>{if(!selected||!e.target.value)return;const d=meta(selected);d.materialName=e.target.value;d.materialMode='vanilla';d.textureUrl='';d.textureData='';document.getElementById('matMode').value='vanilla';document.getElementById('matName').value=d.materialName;refreshPreview(selected)};
+document.getElementById('matName').onchange=e=>{if(!selected)return;const d=meta(selected);d.materialName=e.target.value.trim();d.materialMode='vanilla';d.textureUrl='';d.textureData='';document.getElementById('matMode').value='vanilla';refreshPreview(selected)};
+document.getElementById('collidable').onchange=e=>{if(selected)meta(selected).collidable=e.target.value==='true'};
+document.getElementById('color').oninput=e=>{if(!selected)return;const d=meta(selected);d.color=hexRgb(e.target.value);if(d.materialMode==='color')refreshPreview(selected)};
+document.getElementById('customTex').onchange=e=>{if(!selected)return;const f=e.target.files[0];if(!f)return;if(f.size>4*1024*1024){status('Texture is larger than 4 MB; resize/compress it first.','warn');e.target.value='';return}const r=new FileReader();r.onload=()=>{const d=meta(selected);d.materialMode='custom';d.textureData=r.result;d.textureUrl='';d.customTextureName=f.name;document.getElementById('matMode').value='custom';document.getElementById('customName').textContent=f.name;showMatMode('custom');refreshPreview(selected);status('Applied custom texture '+f.name+'.','good')};r.readAsDataURL(f);e.target.value=''};
+document.getElementById('applyAll').onclick=()=>{if(!selected)return;const src={...meta(selected)};allMeshes().forEach(m=>{if(m===selected)return;m.userData.cnrz={...src};refreshPreview(m)});status('Copied selected material settings to all mesh parts.','good')};
+document.getElementById('center').onclick=centerModel;document.getElementById('resetView').onclick=frame;
+
+function exportMesh(m){m.updateWorldMatrix(true,false);const g=m.geometry,pa=g.attributes.position,na=g.attributes.normal,ua=g.attributes.uv;const verts=[],norms=[],uv=[],tris=[];const v=new THREE.Vector3(),n=new THREE.Vector3(),nm=new THREE.Matrix3().getNormalMatrix(m.matrixWorld);for(let i=0;i<pa.count;i++){v.fromBufferAttribute(pa,i).applyMatrix4(m.matrixWorld);verts.push(+v.x.toFixed(6),+v.y.toFixed(6),+v.z.toFixed(6));if(na){n.fromBufferAttribute(na,i).applyMatrix3(nm).normalize();norms.push(+n.x.toFixed(6),+n.y.toFixed(6),+n.z.toFixed(6))}if(ua)uv.push(+ua.getX(i).toFixed(6),+ua.getY(i).toFixed(6))}if(g.index)for(let i=0;i<g.index.count;i++)tris.push(g.index.getX(i));else for(let i=0;i<pa.count;i++)tris.push(i);const d=meta(m);return{name:m.name||'mesh',vertices:verts,normals:norms,uv,triangles:tris,materialMode:d.materialMode,materialName:d.materialName||'',textureUrl:d.materialMode==='url'?(d.textureUrl||''):'',textureData:d.materialMode==='custom'?(d.textureData||''):'',color:d.color||[.72,.72,.72,1],collidable:d.collidable!==false}}
+function exportAsset(){const ms=allMeshes();if(!ms.length){status('Import an FBX first.','warn');return}if(ms.length>64){status('Object has more than 64 mesh parts. Merge or simplify it first.','warn');return}let total=0;for(const m of ms){const n=m.geometry.attributes.position.count;total+=n;if(n>65000){status('A mesh exceeds 65,000 vertices. Split it before export.','warn');return}}if(total>250000){status('Object exceeds the 250,000 total-vertex runtime cap. Simplify it first.','warn');return}modelRoot.updateMatrixWorld(true);const out={version:1,id:(document.getElementById('assetId').value.trim()||'custom_object'),name:(document.getElementById('assetName').value.trim()||'Custom Object'),meshes:ms.map(exportMesh)};const blob=new Blob([JSON.stringify(out)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=out.id+'.cnrzobj.json';a.click();URL.revokeObjectURL(url);status('Exported '+out.id+' ('+ms.length+' mesh parts).','good')}
+document.getElementById('export').onclick=exportAsset;
+
+document.getElementById('loadAsset').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const j=JSON.parse(r.result);loadAsset(j);status('Loaded '+f.name+'.','good')}catch(err){status('Asset JSON failed: '+err.message,'warn')}};r.readAsText(f);e.target.value=''};
+function loadAsset(j){clearModel();document.getElementById('assetId').value=j.id||'custom_object';document.getElementById('assetName').value=j.name||'Custom Object';for(const s of(j.meshes||[])){if(!s.vertices||!s.triangles)continue;const g=new THREE.BufferGeometry(),p=new Float32Array(s.vertices);g.setAttribute('position',new THREE.BufferAttribute(p,3));g.setIndex(s.triangles);if(s.normals?.length===s.vertices.length)g.setAttribute('normal',new THREE.BufferAttribute(new Float32Array(s.normals),3));else g.computeVertexNormals();if(s.uv?.length===p.length/3*2)g.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(s.uv),2));g.computeBoundingBox();const m=new THREE.Mesh(g);m.name=s.name||'mesh';m.userData.cnrz={materialMode:s.materialMode||'color',materialName:s.materialName||'',textureUrl:s.textureUrl||'',textureData:s.textureData||'',color:s.color||[.72,.72,.72,1],collidable:s.collidable!==false,customTextureName:s.textureData?'Embedded texture':''};m.material=makePreviewMaterial(m);modelRoot.add(m)}const ms=allMeshes();select(ms[0]||null);frame();updateInfo()}
+
+(async()=>{try{const r=await fetch(DONOR_BASE+'manifest.json'),names=await r.json();for(const n of names){const o=document.createElement('option');o.value=o.textContent=n;vanillaMap.appendChild(o)}}catch(err){status('Vanilla map material browser unavailable: '+err.message,'warn')}})();
+function resize(){const w=vp.clientWidth,h=vp.clientHeight;camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h)}window.addEventListener('resize',resize);resize();(function loop(){requestAnimationFrame(loop);orbit.update();renderer.render(scene,camera)})();
+</script>
+</body>
+</html>

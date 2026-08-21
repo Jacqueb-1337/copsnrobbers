@@ -62,6 +62,20 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 Write-Host "Building $OutName from $([System.IO.Path]::GetFileName($ModFile)) ..." -ForegroundColor Cyan
 
 $ModDir = [System.IO.Path]::GetDirectoryName($ModFile)
+
+# CNRMod carries baked Zombies overlay content. Regenerate the C# registry from
+# maps/zombies/configs + assets immediately before source discovery/compile.
+if ([System.IO.Path]::GetFileName($ModDir) -ieq "CNRMod") {
+    $zombieGen = Join-Path $ScriptDir "generate_zombie_builtin.ps1"
+    if (Test-Path $zombieGen) {
+        & $zombieGen
+        $generatedZombieSource = Join-Path $ModDir "ZombieBuiltinContent.generated.cs"
+        if (-not (Test-Path $generatedZombieSource)) {
+            Write-Host "ERROR: Zombies built-in content generation did not produce $generatedZombieSource" -ForegroundColor Red
+            exit 1
+        }
+    }
+}
 $sourceFiles = Get-ChildItem -Path $ModDir -File -Filter "*.cs" |
     Where-Object { $_.Name -notmatch '-\d+\.\d+\.\d+\.cs$' } |
     Sort-Object Name

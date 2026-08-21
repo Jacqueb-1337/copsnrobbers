@@ -1,0 +1,313 @@
+{
+  "version": 1,
+  "scene": "SnowMap3_Zombies",
+  "zombieSpawns": [
+    {
+      "id": "spawn_2",
+      "zone": "",
+      "pos": [
+        107.947,
+        2.225,
+        47.935
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_3",
+      "zone": "",
+      "pos": [
+        75.182,
+        2.011,
+        46.62
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_4",
+      "zone": "",
+      "pos": [
+        84.82,
+        3.008,
+        62.97
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_5",
+      "zone": "",
+      "pos": [
+        84.738,
+        2.207,
+        95.136
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_6",
+      "zone": "",
+      "pos": [
+        74.842,
+        2.362,
+        107.293
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_7",
+      "zone": "",
+      "pos": [
+        102.529,
+        2.186,
+        107.129
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_8",
+      "zone": "",
+      "pos": [
+        107.671,
+        2.451,
+        107.046
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_9",
+      "zone": "",
+      "pos": [
+        134.719,
+        2.316,
+        106.589
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_10",
+      "zone": "",
+      "pos": [
+        124.634,
+        2.506,
+        90.962
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_11",
+      "zone": "",
+      "pos": [
+        124.916,
+        2.225,
+        62.937
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_12",
+      "zone": "",
+      "pos": [
+        134.746,
+        2.481,
+        45.954
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "spawn_13",
+      "zone": "",
+      "pos": [
+        101.739,
+        2.588,
+        45.821
+      ],
+      "minDistance": 8,
+      "maxDistance": 42,
+      "rot": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "wallBuys": [
+    {
+      "id": "wallbuy_1",
+      "weaponId": "mp5ka5",
+      "runtimeName": "MP5KA5",
+      "displayName": "MP5KA5",
+      "slot": "primary",
+      "price": 1500,
+      "ammoPrice": 250,
+      "pos": [
+        125.974,
+        2.911,
+        57.838
+      ],
+      "rot": [
+        0,
+        0,
+        0
+      ],
+      "interactRadius": 2.6,
+      "scale": 0.7
+    },
+    {
+      "id": "wallbuy_14",
+      "weaponId": "candyrifle",
+      "runtimeName": "CandyRifle",
+      "displayName": "Candy Rifle",
+      "slot": "primary",
+      "price": 2500,
+      "ammoPrice": 450,
+      "pos": [
+        84.195,
+        2.533,
+        58.827
+      ],
+      "rot": [
+        0,
+        0,
+        0
+      ],
+      "interactRadius": 2.6,
+      "scale": 0.7
+    },
+    {
+      "id": "wallbuy_15",
+      "weaponId": "m3",
+      "runtimeName": "M3",
+      "displayName": "M3",
+      "slot": "primary",
+      "price": 1500,
+      "ammoPrice": 250,
+      "pos": [
+        84.75,
+        2.161,
+        91.993
+      ],
+      "rot": [
+        0,
+        0,
+        0
+      ],
+      "interactRadius": 2.6,
+      "scale": 0.7
+    },
+    {
+      "id": "wallbuy_16",
+      "weaponId": "gingerbreadbomb",
+      "runtimeName": "GingerbreadBomb",
+      "displayName": "Gingerbread Bomb",
+      "slot": "grenade",
+      "price": 750,
+      "ammoPrice": 100,
+      "pos": [
+        106.571,
+        2.62,
+        52.679
+      ],
+      "rot": [
+        0,
+        0,
+        0
+      ],
+      "interactRadius": 2.6,
+      "scale": 0.7
+    }
+  ],
+  "doors": [],
+  "barriers": [],
+  "customObjects": [
+    {
+      "id": "object_17",
+      "assetUrl": "",
+      "pos": [
+        107.258,
+        3.64,
+        76.846
+      ],
+      "rot": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "collidable": true,
+      "interactionType": "",
+      "interactionId": "",
+      "price": 5000,
+      "interactRadius": 2.6,
+      "upgradeSeconds": 4
+    }
+  ]
+}
