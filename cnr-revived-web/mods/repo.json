@@ -306,11 +306,21 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "4.1.1",
+      "latestVersion": "4.1.3",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.1.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.3.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "4.1.3",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.3.dll",
+          "changelog": "Add username/password account login and merge/switch sync support; allow legacy multiplayer rooms that do not advertise CNR compatibility metadata while still enforcing advertised mismatches."
+        },
+        {
+          "version": "4.1.2",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.2.dll",
+          "changelog": "Added username/password login accounts with guest-vs-login stat preview and merge/switch account sync."
+        },
         {
           "version": "4.1.1",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.1.dll",
@@ -1531,12 +1541,22 @@
     {
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
-      "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and a player account system with password+PIN recovery.",
-      "latestVersion": "3.1.103",
+      "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and username/password account login, preview, merge, and sync controls.",
+      "latestVersion": "3.1.105",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.103.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.105.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.105",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.105.dll",
+          "changelog": "Add username/password account creation, login preview, merge, and switch-account controls."
+        },
+        {
+          "version": "3.1.104",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.104.dll",
+          "changelog": "Replaced account tab recovery flow with username/password login creation, preview, merge, and sync controls."
+        },
         {
           "version": "3.1.103",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.103.dll",

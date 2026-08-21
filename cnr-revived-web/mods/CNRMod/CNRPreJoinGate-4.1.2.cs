@@ -62,7 +62,11 @@ namespace CNRMods
             CNRMultiplayerManifest m = new CNRMultiplayerManifest();
             m.schema = 1;
             m.protocol = DefaultProtocol;
-            m.requiredMods = new CNRRequiredMod[0];
+            m.requiredMods = new CNRRequiredMod[]
+            {
+                new CNRRequiredMod { id = "CNRModManager", minVersion = "1.6.1" },
+                new CNRRequiredMod { id = "CNRSettingsMod", minVersion = "3.1.103" }
+            };
             return m;
         }
 
@@ -109,16 +113,20 @@ namespace CNRMods
 
             string apk = GetRoomProp(room, "cnra");
             string localApk = GetLocalAppVersion();
-            // Legacy CNR rooms did not advertise cnra. Treat that as unknown rather
-            // than incompatible; protocol/CNRMod checks below still gate gameplay.
-            if (!string.IsNullOrEmpty(apk) && !string.Equals(apk, localApk, StringComparison.Ordinal))
+            if (string.IsNullOrEmpty(apk))
+            {
+                reason = "Host is using an older CNR build that does not advertise APK compatibility.";
+                modManagerHelpful = true;
+                return false;
+            }
+            if (!string.Equals(apk, localApk, StringComparison.Ordinal))
             {
                 reason = "APK version mismatch. Host: " + apk + "  You: " + localApk;
                 return false;
             }
 
             string protocol = GetRoomProp(room, "cnrp");
-            if (!string.IsNullOrEmpty(protocol) && !string.Equals(protocol, Protocol, StringComparison.Ordinal))
+            if (string.IsNullOrEmpty(protocol) || !string.Equals(protocol, Protocol, StringComparison.Ordinal))
             {
                 reason = "Multiplayer protocol mismatch. Host: " + Safe(protocol) + "  You: " + Protocol;
                 modManagerHelpful = true;
@@ -126,7 +134,7 @@ namespace CNRMods
             }
 
             string cnrmod = GetRoomProp(room, "cnrm");
-            if (!string.IsNullOrEmpty(cnrmod) && !string.Equals(cnrmod, ModEntry.Version, StringComparison.Ordinal))
+            if (string.IsNullOrEmpty(cnrmod) || !string.Equals(cnrmod, ModEntry.Version, StringComparison.Ordinal))
             {
                 reason = "CNRMod version mismatch. Host: " + Safe(cnrmod) + "  You: " + ModEntry.Version;
                 modManagerHelpful = true;

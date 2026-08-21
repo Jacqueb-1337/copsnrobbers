@@ -116,6 +116,16 @@ function init_schema(PDO $pdo): void {
             enabled       INTEGER NOT NULL DEFAULT 1,
             created_at    INTEGER NOT NULL DEFAULT 0
         );
+
+        -- Optional username/password login. Accounts remain valid guest accounts
+        -- unless a row exists here for their account_id.
+        CREATE TABLE IF NOT EXISTS account_logins (
+            username      TEXT    PRIMARY KEY COLLATE NOCASE,
+            account_id    TEXT    NOT NULL UNIQUE,
+            password_hash TEXT    NOT NULL,
+            created_at    INTEGER NOT NULL,
+            last_login    INTEGER NOT NULL DEFAULT 0
+        );
     ");
     // Add columns to existing databases (idempotent)
     try { $pdo->exec("ALTER TABLE content_items ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT ''"); } catch (Exception $e) {}
@@ -123,6 +133,178 @@ function init_schema(PDO $pdo): void {
     try { $pdo->exec("ALTER TABLE content_items ADD COLUMN thumbnail_hash TEXT NOT NULL DEFAULT ''"); } catch (Exception $e) {}
     try { $pdo->exec("ALTER TABLE player_mail ADD COLUMN spins INTEGER NOT NULL DEFAULT 0"); } catch (Exception $e) {}
     try { $pdo->exec("ALTER TABLE wheel_spins ADD COLUMN bonus_spins INTEGER NOT NULL DEFAULT 0"); } catch (Exception $e) {}
+}
+
+function account_stats(PDO $pdo, string $account_id): array {
+    $stmt = $pdo->prepare("SELECT id, display_name, coins, gems, registered_at, last_seen FROM accounts WHERE id=?");
+    $stmt->execute([$account_id]);
+    $acct = $stmt->fetch();
+    if (!$acct) return [];
+
+    $stmt = $pdo->prepare("SELECT * FROM account_progression WHERE account_id=?");
+    $stmt->execute([$account_id]);
+    $prog = $stmt->fetch();
+
+    $owned = 0;
+    $level = 1;
+    $exp = 0;
+    if ($prog) {
+        $level = (int)$prog['level'];
+        $exp = (int)$prog['exp'];
+        $skins = json_decode($prog['skin_unlocks'] ?: '[]', true) ?: [];
+        $armors = json_decode($prog['armor_unlocks'] ?: '[]', true) ?: [];
+        $weapons = json_decode($prog['weapon_levels'] ?: '{}', true) ?: [];
+        $owned += count(array_unique(array_filter($skins, 'is_string')));
+        $owned += count(array_unique(array_filter($armors, 'is_string')));
+        foreach ($weapons as $lvl) {
+            if ((int)$lvl > 0) $owned++;
+        }
+    }
+
+    return [
+        'account_id' => $acct['id'],
+        'display_name' => $acct['display_name'],
+        'coins' => (int)$acct['coins'],
+        'gems' => (int)$acct['gems'],
+        'level' => $level,
+        'exp' => $exp,
+        'owned_items' => $owned,
+        'registered_at' => (int)$acct['registered_at'],
+        'last_seen' => (int)$acct['last_seen'],
+    ];
+}
+
+function merge_account_into(PDO $pdo, string $source, string $target): void {
+    if ($source === $target) return;
+
+    $src = account_stats($pdo, $source);
+    if (!$src) return;
+
+    $pdo->prepare("UPDATE accounts SET coins=coins + ?, gems=gems + ?, last_seen=? WHERE id=?")
+        ->execute([(int)$src['coins'], (int)$src['gems'], time(), $target]);
+
+    $tp = $pdo->prepare("SELECT * FROM account_progression WHERE account_id=?");
+    $tp->execute([$target]);
+    $target_prog = $tp->fetch();
+    if (!$target_prog) {
+        $pdo->prepare("INSERT INTO account_progression (account_id,updated_at) VALUES (?,0)")->execute([$target]);
+        $tp->execute([$target]);
+        $target_prog = $tp->fetch();
+    }
+
+    $sp = $pdo->prepare("SELECT * FROM account_progression WHERE account_id=?");
+    $sp->execute([$source]);
+    $source_prog = $sp->fetch();
+
+    if ($source_prog && $target_prog) {
+        $target_wl = json_decode($target_prog['weapon_levels'] ?: '{}', true) ?: [];
+        $source_wl = json_decode($source_prog['weapon_levels'] ?: '{}', true) ?: [];
+        foreach ($source_wl as $weapon => $level) {
+            $target_wl[$weapon] = max((int)($target_wl[$weapon] ?? 0), (int)$level);
+        }
+
+        $target_skins = json_decode($target_prog['skin_unlocks'] ?: '[]', true) ?: [];
+        $source_skins = json_decode($source_prog['skin_unlocks'] ?: '[]', true) ?: [];
+        $target_armors = json_decode($target_prog['armor_unlocks'] ?: '[]', true) ?: [];
+        $source_armors = json_decode($source_prog['armor_unlocks'] ?: '[]', true) ?: [];
+        $merged_skins = array_values(array_unique(array_merge(
+            array_filter($target_skins, 'is_string'),
+            array_filter($source_skins, 'is_string')
+        )));
+        $merged_armors = array_values(array_unique(array_merge(
+            array_filter($target_armors, 'is_string'),
+            array_filter($source_armors, 'is_string')
+        )));
+
+        $target_updated = (int)$target_prog['updated_at'];
+        $source_updated = (int)$source_prog['updated_at'];
+        if ($source_updated > $target_updated) {
+            $equipped = $source_prog['equipped_slots'];
+            $skin = $source_prog['current_skin'];
+            $armor = $source_prog['current_armor'];
+            $updated = $source_updated;
+        } else {
+            $equipped = $target_prog['equipped_slots'];
+            $skin = $target_prog['current_skin'];
+            $armor = $target_prog['current_armor'];
+            $updated = $target_updated;
+        }
+
+        $pdo->prepare("
+            UPDATE account_progression
+               SET level=?, exp=?, weapon_levels=?, skin_unlocks=?, armor_unlocks=?,
+                   equipped_slots=?, current_skin=?, current_armor=?, updated_at=?
+             WHERE account_id=?
+        ")->execute([
+            max((int)$target_prog['level'], (int)$source_prog['level']),
+            max((int)$target_prog['exp'], (int)$source_prog['exp']),
+            json_encode($target_wl),
+            json_encode($merged_skins),
+            json_encode($merged_armors),
+            $equipped,
+            $skin,
+            $armor,
+            $updated,
+            $target,
+        ]);
+    }
+
+    $sw = $pdo->prepare("SELECT * FROM wheel_spins WHERE player_id=?");
+    $sw->execute([$source]);
+    $source_wheel = $sw->fetch();
+    if ($source_wheel) {
+        $tw = $pdo->prepare("SELECT * FROM wheel_spins WHERE player_id=?");
+        $tw->execute([$target]);
+        $target_wheel = $tw->fetch();
+        if ($target_wheel) {
+            $pdo->prepare("UPDATE wheel_spins SET last_spin_at=?, bonus_spins=? WHERE player_id=?")
+                ->execute([
+                    max((int)$target_wheel['last_spin_at'], (int)$source_wheel['last_spin_at']),
+                    max((int)($target_wheel['bonus_spins'] ?? 0), (int)($source_wheel['bonus_spins'] ?? 0)),
+                    $target,
+                ]);
+            $pdo->prepare("DELETE FROM wheel_spins WHERE player_id=?")->execute([$source]);
+        } else {
+            $pdo->prepare("UPDATE wheel_spins SET player_id=? WHERE player_id=?")->execute([$target, $source]);
+        }
+    }
+
+    $pdo->prepare("UPDATE OR IGNORE transactions SET player_id=? WHERE player_id=?")->execute([$target, $source]);
+    $pdo->prepare("DELETE FROM transactions WHERE player_id=?")->execute([$source]);
+    $pdo->prepare("UPDATE player_mail SET player_id=? WHERE player_id=?")->execute([$target, $source]);
+}
+
+function response_account_payload(PDO $pdo, array $account, string $token): array {
+    $resp = [
+        'token' => $token,
+        'account_id' => $account['id'],
+        'coins' => (int)$account['coins'],
+        'gems' => (int)$account['gems'],
+        'display_name' => $account['display_name'],
+    ];
+
+    $stmt = $pdo->prepare("SELECT * FROM account_progression WHERE account_id=?");
+    $stmt->execute([$account['id']]);
+    $prog = $stmt->fetch();
+    if (!$prog) return $resp;
+
+    $resp['level'] = (int)$prog['level'];
+    $resp['exp'] = (int)$prog['exp'];
+    $resp['current_skin'] = $prog['current_skin'];
+    $resp['current_armor'] = $prog['current_armor'];
+    $resp['prog_updated_at'] = (int)$prog['updated_at'];
+    foreach ((json_decode($prog['weapon_levels'] ?: '{}', true) ?: []) as $wname => $wlevel) {
+        if (preg_match('/^[A-Za-z0-9_]{1,32}$/', $wname)) $resp['wl_' . $wname] = (int)$wlevel;
+    }
+    foreach ((json_decode($prog['skin_unlocks'] ?: '[]', true) ?: []) as $s) {
+        if (preg_match('/^Skin_\d+$/', $s)) $resp['su_' . $s] = 1;
+    }
+    foreach ((json_decode($prog['armor_unlocks'] ?: '[]', true) ?: []) as $a) {
+        if (preg_match('/^[A-Za-z0-9_]{1,32}$/', $a)) $resp['au_' . $a] = 1;
+    }
+    $equipped = json_decode($prog['equipped_slots'] ?: '[]', true) ?: [];
+    for ($i = 0; $i < 8; $i++) $resp['eq_' . ($i + 1)] = $equipped[$i] ?? '';
+    return $resp;
 }
 
 // ---------- one-time migration: players → accounts + devices ------------------

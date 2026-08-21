@@ -35,7 +35,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.105";
+        public  const string Version = "3.1.104";
 
         public static void Load()
         {
