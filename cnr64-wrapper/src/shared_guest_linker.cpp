@@ -3857,10 +3857,19 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "pthread_attr_init" || name == "pthread_attr_destroy" || name == "pthread_attr_setstacksize" ||
-            name == "pthread_attr_setdetachstate" || name == "pthread_attr_setschedparam" ||
-            name == "pthread_attr_setschedpolicy" || name == "pthread_setschedparam" ||
-            name == "pthread_detach" || name == "pthread_sigmask") {
+        if (name == "pthread_attr_init") {
+            guest_pthread_attr_threads_.erase(Arg(0));
+            Ret(0);
+            return true;
+        }
+        if (name == "pthread_attr_destroy") {
+            guest_pthread_attr_threads_.erase(Arg(0));
+            Ret(0);
+            return true;
+        }
+        if (name == "pthread_attr_setstacksize" || name == "pthread_attr_setdetachstate" ||
+            name == "pthread_attr_setschedparam" || name == "pthread_attr_setschedpolicy" ||
+            name == "pthread_setschedparam" || name == "pthread_detach" || name == "pthread_sigmask") {
             Ret(0);
             return true;
         }
@@ -3875,7 +3884,17 @@ public:
         if (name == "pthread_key_delete") { tls_values_.erase(Arg(0)); Ret(0); return true; }
         if (name == "pthread_setspecific") { tls_values_[Arg(0)] = Arg(1); Ret(0); return true; }
         if (name == "pthread_getspecific") { Ret(tls_values_[Arg(0)]); return true; }
-        if (name == "pthread_getattr_np") { Ret(0); return true; }
+        if (name == "pthread_getattr_np") {
+            const std::uint32_t thread_id = Arg(0);
+            const std::uint32_t attr = Arg(1);
+            const bool known_thread = thread_id == 1u ||
+                std::any_of(guest_thread_launches_.begin(), guest_thread_launches_.end(),
+                            [&](const GuestThreadLaunch& item) { return item.id == thread_id; });
+            if (!known_thread) { Ret(3u); return true; } // ESRCH
+            if (attr) guest_pthread_attr_threads_[attr] = thread_id;
+            Ret(0);
+            return true;
+        }
         if (name == "setjmp" || name == "sigsetjmp") {
             const std::uint32_t buffer = Arg(0);
             if (!jit || buffer == 0) {
@@ -3912,9 +3931,34 @@ public:
             Ret(0); return true;
         }
         if (name == "pthread_attr_getstack") {
-            if (Arg(1)) Write32(memory_, Arg(1), 0x06f00000);
-            if (Arg(2)) Write32(memory_, Arg(2), 0x00100000);
-            Ret(0); return true;
+            std::uint32_t thread_id = current_thread_id_;
+            if (const auto it = guest_pthread_attr_threads_.find(Arg(0)); it != guest_pthread_attr_threads_.end())
+                thread_id = it->second;
+
+            std::uint32_t stack_base = 0x06f00000u;
+            std::uint32_t stack_size = 0x00100000u;
+            if (thread_id >= 2u) {
+                const std::uint64_t stack_offset =
+                    static_cast<std::uint64_t>(thread_id - 2u) * kGuestThreadStackStride;
+                if (stack_offset > static_cast<std::uint64_t>(kGuestThreadStackTop - kGuestThreadStackFloor)) {
+                    Ret(22u); // EINVAL
+                    return true;
+                }
+                const std::uint32_t stack_top =
+                    kGuestThreadStackTop - static_cast<std::uint32_t>(stack_offset);
+                stack_base = stack_top - kGuestThreadStackStride;
+                stack_size = kGuestThreadStackStride;
+            }
+            if (Arg(1)) Write32(memory_, Arg(1), stack_base);
+            if (Arg(2)) Write32(memory_, Arg(2), stack_size);
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7STACK pthread_attr_getstack caller=%u target=%u attr=0x%08x base=0x%08x size=0x%08x sp=0x%08x",
+                                current_thread_id_, thread_id, Arg(0), stack_base, stack_size,
+                                jit ? jit->Regs()[13] : 0u);
+#endif
+            Ret(0);
+            return true;
         }
         if (name == "__pthread_cleanup_push" || name == "__pthread_cleanup_pop") { Ret(0); return true; }
         if (name == "dlopen") { Ret(1); return true; }
@@ -5049,6 +5093,7 @@ public:
     };
     std::unordered_map<std::uint32_t, GuestMutexState> guest_mutexes_;
     std::unordered_map<std::uint32_t, std::uint32_t> guest_mutex_attr_types_;
+    std::unordered_map<std::uint32_t, std::uint32_t> guest_pthread_attr_threads_;
     std::unordered_map<std::uint32_t, GuestCondState> guest_conds_;
     std::unordered_map<std::uint64_t, GuestCondWaitState> guest_cond_waits_;
     std::unordered_map<std::uint32_t, std::int64_t> guest_semaphores_;
