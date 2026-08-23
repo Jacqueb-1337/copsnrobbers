@@ -1,0 +1,46 @@
+# ProjectV7 build output
+/build-*/
+/build-host/
+/build-hotpatch/
+/dist/
+/apk-build/
+/generated/
+/devtools/hotpatch/build/
+
+# Vendored/build-cache dependencies are not part of checkpoint history yet
+/third_party/
+
+# Root-level diagnostic and reverse-engineering scratch artifacts
+/_*
+/*.log
+/*.status
+/*.done
+/*.txt
+!/CMakeLists.txt
+/*.json
+/*.png
+/*.apk
+/*.so
+/*.bin
+
+# Temporary packaging/runtime output
+/*-install.*
+/*-launch.*
+/*-logcat.*
+/*-pid.*
+/*-capture.*
+/*-poll.*
+/*-tail.*
+/*-key.*
+
+# Common editor/build noise
+.vscode/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.obj
+*.o
+*.pdb
+*.ilk
+*.tmp
+*.bak
