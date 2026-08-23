@@ -2584,7 +2584,11 @@ public:
                     ++cooperative_yields;
                     cooperative_yield_requested_ = false;
                     jit->ClearHalt();
-                    continue;
+                    // A cooperative yield ends this guest thread's current quantum.
+                    // Re-entering the same worker immediately defeats sched_yield and
+                    // repeatedly retries blocked pthread/sem waits before another
+                    // runnable guest thread gets a chance to make progress.
+                    break;
                 }
                 if (pending_guest_callback) {
                     pending_guest_callback = false;
@@ -3562,6 +3566,15 @@ public:
                 mutex.owner = current_thread_id_;
                 mutex.recursion = 1;
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                mutex.acquire_lr = jit ? jit->Regs()[14] : 0u;
+                mutex.acquire_sp = jit ? jit->Regs()[13] : 0u;
+                mutex.acquire_pc = jit ? jit->Regs()[15] : 0u;
+                mutex.acquire_caller_lr = 0u;
+                mutex.acquire_caller2_lr = 0u;
+                if (mutex.acquire_sp != 0u && Fits(mutex.acquire_sp + 4u, 4u))
+                    Read32(memory_, mutex.acquire_sp + 4u, mutex.acquire_caller_lr);
+                if (mutex.acquire_sp != 0u && Fits(mutex.acquire_sp + 12u, 4u))
+                    Read32(memory_, mutex.acquire_sp + 12u, mutex.acquire_caller2_lr);
                 RecordSyncEvent("lock", Arg(0));
 #endif
                 Ret(0);
@@ -3576,7 +3589,48 @@ public:
                 return true;
             }
             if (name == "pthread_mutex_trylock") {
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                const std::uint64_t trylock_key =
+                    (static_cast<std::uint64_t>(current_thread_id_) << 32) | Arg(0);
+                const std::uint32_t trylock_busy_count = guest_trylock_busy_log_counts_[trylock_key]++;
+                if (trylock_busy_count < 4u) {
+                    const auto owner = std::find_if(
+                        guest_thread_launches_.begin(), guest_thread_launches_.end(),
+                        [&](const GuestThreadLaunch& item) { return item.id == mutex.owner; });
+                    std::uint32_t raw_mutex = 0;
+                    Read32(memory_, Arg(0), raw_mutex);
+                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                        "PV7MUTEX trylock-busy thread=%u mutex=0x%08x owner=%u recursion=%u type=%u raw=0x%08x owner_started=%s owner_finished=%s owner_pc=0x%08x acquire_pc=0x%08x acquire_lr=0x%08x acquire_sp=0x%08x acquire_caller_lr=0x%08x acquire_caller2_lr=0x%08x lr=0x%08x",
+                                        current_thread_id_, Arg(0), mutex.owner, mutex.recursion, mutex.type,
+                                        raw_mutex,
+                                        owner != guest_thread_launches_.end() && owner->started ? "YES" : "NO",
+                                        owner != guest_thread_launches_.end() && owner->finished ? "YES" : "NO",
+                                        owner != guest_thread_launches_.end() ? owner->regs[15] : 0u,
+                                        mutex.acquire_pc, mutex.acquire_lr, mutex.acquire_sp, mutex.acquire_caller_lr,
+                                        mutex.acquire_caller2_lr, jit ? jit->Regs()[14] : 0u);
+                    if (trylock_busy_count == 0u) {
+                        const auto owner_sync = guest_thread_sync_traces_.find(mutex.owner);
+                        if (owner_sync != guest_thread_sync_traces_.end()) {
+                            const std::size_t start = owner_sync->second.size() > 32u
+                                ? owner_sync->second.size() - 32u : 0u;
+                            for (std::size_t i = start; i < owner_sync->second.size(); ++i) {
+                                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                    "PV7MUTEX owner-prior[%zu]=%s",
+                                                    i - start, owner_sync->second[i].c_str());
+                            }
+                        }
+                    }
+                }
+#endif
                 Ret(16u); // EBUSY
+                if (jit) {
+                    // trylock itself must remain non-blocking, but on the cooperative
+                    // guest scheduler a contended spin must still give the owning
+                    // guest thread a chance to run. Otherwise legacy spin loops can
+                    // burn an entire JIT quantum while the lock owner is starved.
+                    cooperative_yield_requested_ = true;
+                    jit->HaltExecution();
+                }
                 return true;
             }
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
@@ -5080,6 +5134,13 @@ public:
         std::uint32_t owner = 0;
         std::uint32_t recursion = 0;
         std::uint32_t type = 0;
+#if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+        std::uint32_t acquire_lr = 0;
+        std::uint32_t acquire_sp = 0;
+        std::uint32_t acquire_pc = 0;
+        std::uint32_t acquire_caller_lr = 0;
+        std::uint32_t acquire_caller2_lr = 0;
+#endif
     };
     struct GuestCondState {
         std::uint64_t broadcast_generation = 0;
@@ -5100,6 +5161,7 @@ public:
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
     std::unordered_map<std::uint64_t, bool> guest_sem_wait_logged_;
     std::unordered_map<std::uint64_t, bool> guest_mutex_block_logged_;
+    std::unordered_map<std::uint64_t, std::uint32_t> guest_trylock_busy_log_counts_;
     std::unordered_map<std::uint32_t, std::vector<std::string>> guest_thread_call_traces_;
     std::unordered_map<std::uint32_t, std::vector<std::string>> guest_thread_sync_traces_;
     std::unordered_map<std::uint32_t, std::uint32_t> guest_sleep_log_counts_;
@@ -6159,11 +6221,23 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                         int followup_slices = 0;
                         std::size_t followup_cache_restarts = 0;
                         std::size_t followup_worker_pumps = 0;
+#if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                        std::uint64_t followup_main_run_us = 0;
+                        std::uint64_t followup_worker_pump_us = 0;
+#endif
                         std::array<std::uint32_t, 8> followup_previous_state{};
                         bool followup_have_previous_state = false;
                         int followup_same_state_slices = 0;
                         auto pump_render_workers = [&]() -> bool {
+#if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                            const auto worker_pump_begin = std::chrono::steady_clock::now();
+#endif
                             followup_worker_pumps += env.PumpQueuedGuestThreads(32, 4);
+#if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                            followup_worker_pump_us += static_cast<std::uint64_t>(
+                                std::chrono::duration_cast<std::chrono::microseconds>(
+                                    std::chrono::steady_clock::now() - worker_pump_begin).count());
+#endif
                             env.ResetPhaseDiagnostics();
                             env.saw_return = false;
                             env.premature_return = false;
@@ -6177,14 +6251,38 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                         };
                         for (; followup_slices < kUnityFollowupMaxSlices; ++followup_slices) {
                             env.ticks_left = kTicksPerSlice;
+#if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                            const auto main_run_begin = std::chrono::steady_clock::now();
+                            const std::uint32_t main_run_pc_before = jit.Regs()[15];
+#endif
                             const auto halt_reason = jit.Run();
+#if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                            const std::uint64_t main_run_elapsed_us = static_cast<std::uint64_t>(
+                                std::chrono::duration_cast<std::chrono::microseconds>(
+                                    std::chrono::steady_clock::now() - main_run_begin).count());
+                            followup_main_run_us += main_run_elapsed_us;
+#if defined(__ANDROID__)
+                            if (main_run_elapsed_us >= 100000u) {
+                                const char* slow_last_call = env.call_trace.empty() ? "-" : env.call_trace.back().c_str();
+                                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                    "PV7PERF slow-main slice=%d elapsed_us=%llu ticks_left=%llu pc_before=0x%08x pc_after=0x%08x lr_after=0x%08x last=%s",
+                                                    followup_slices + 1,
+                                                    static_cast<unsigned long long>(main_run_elapsed_us),
+                                                    static_cast<unsigned long long>(env.ticks_left),
+                                                    main_run_pc_before, jit.Regs()[15], jit.Regs()[14], slow_last_call);
+                            }
+#endif
+#endif
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
                             if ((followup_slices & 63) == 63) {
                                 const char* last_call = env.call_trace.empty() ? "-" : env.call_trace.back().c_str();
                                 __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
-                                                    "Unity %s progress slice=%d pc=0x%08x lr=0x%08x sp=0x%08x last=%s",
+                                                    "Unity %s progress slice=%d pc=0x%08x lr=0x%08x sp=0x%08x last=%s main_us=%llu worker_us=%llu worker_pumps=%zu",
                                                     label, followup_slices + 1, jit.Regs()[15], jit.Regs()[14],
-                                                    jit.Regs()[13], last_call);
+                                                    jit.Regs()[13], last_call,
+                                                    static_cast<unsigned long long>(followup_main_run_us),
+                                                    static_cast<unsigned long long>(followup_worker_pump_us),
+                                                    followup_worker_pumps);
                             }
 #endif
                             if (env.saw_return || env.premature_return || env.failed || !env.first_thunk.empty()) break;
