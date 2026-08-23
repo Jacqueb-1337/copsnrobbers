@@ -44,3 +44,15 @@ cmake_install.cmake
 *.ilk
 *.tmp
 *.bak
+
+# One-off local smoke/test harnesses and temporary launch helpers
+/*.exit
+/*.tsv
+/*.ready
+/current-smoke.*
+/cycle*_smoke.ps1
+/cycle_current.cmd
+/cycle_smoke_resume.ps1
+/smoke_existing.cmd
+/ngrok-apk-temp.yml
+/temp_download_proxy.js
