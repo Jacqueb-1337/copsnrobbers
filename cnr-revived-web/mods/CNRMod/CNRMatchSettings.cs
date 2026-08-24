@@ -45,8 +45,11 @@ namespace CNRMods
         private static CNRMatchSettingsData _pending;
         private static CNRMatchSettingsData _active;
         private static string _pendingRoom = "";
+        private static bool _hostHasCustomSettings;
+        private static string _hostMapKey = "";
 
         internal static CNRMatchSettingsData Host { get { return _host; } }
+        internal static bool HostHasCustomSettings { get { return _hostHasCustomSettings; } }
         internal static CNRMatchSettingsData Pending { get { return _pending; } }
         internal static CNRMatchSettingsData Active
         {
@@ -58,6 +61,66 @@ namespace CNRMods
             CNRMatchSettingsData d = new CNRMatchSettingsData();
             d.Mode = NormalizeMode(mode);
             return d;
+        }
+
+        internal static void CommitHostDraft(CNRMatchSettingsData draft, MultiplayerSelectDirector msd)
+        {
+            if (draft == null) return;
+            CNRMatchSettingsData committed = draft.Clone();
+            string selected = CNRMatchMetadata.GetSelectedGameMode(msd);
+            if (!string.IsNullOrEmpty(selected)) committed.Mode = selected;
+            Sanitize(committed);
+            _host = committed;
+            _hostHasCustomSettings = true;
+            _hostMapKey = GetHostMapKey(msd);
+            ClearPending();
+            ModEntry.Log("MatchSettings: host custom settings saved map=" + _hostMapKey + " settings=" + Pack(_host));
+        }
+
+        internal static void ResetHostToDefaults(MultiplayerSelectDirector msd)
+        {
+            string mode = CNRMatchMetadata.GetSelectedGameMode(msd);
+            if (string.IsNullOrEmpty(mode)) mode = _host != null ? _host.Mode : "tdm";
+            _host = NewDefaults(mode);
+            _hostHasCustomSettings = false;
+            _hostMapKey = GetHostMapKey(msd);
+            ClearPending();
+            ModEntry.Log("MatchSettings: host settings reset map=" + _hostMapKey + " mode=" + mode);
+        }
+
+        internal static bool ObserveHostMap(MultiplayerSelectDirector msd)
+        {
+            if (msd == null) return false;
+            string key = GetHostMapKey(msd);
+            if (string.IsNullOrEmpty(_hostMapKey))
+            {
+                _hostMapKey = key;
+                return false;
+            }
+            if (string.Equals(_hostMapKey, key, StringComparison.Ordinal)) return false;
+            ResetHostToDefaults(msd);
+            return true;
+        }
+
+        internal static void NotifyHostMapChanged(MultiplayerSelectDirector msd)
+        {
+            string oldKey = _hostMapKey;
+            string newKey = GetHostMapKey(msd);
+            if (!string.IsNullOrEmpty(oldKey) && string.Equals(oldKey, newKey, StringComparison.Ordinal)) return;
+            ResetHostToDefaults(msd);
+        }
+
+        internal static string GetHostMapKey(MultiplayerSelectDirector msd)
+        {
+            if (msd == null) return "";
+            string id, displayName, thumb;
+            if (CNRMatchMetadata.TryGetSelectedCustomMap(out id, out displayName, out thumb))
+            {
+                string url = "";
+                try { url = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "") ?? ""; } catch { }
+                return "custom|" + (id ?? "") + "|" + (displayName ?? "") + "|" + url;
+            }
+            return "vanilla|" + (msd.mCurWWMapSelect ?? "");
         }
 
         internal static void SyncHostModeFromRoomUi(MultiplayerSelectDirector msd)
@@ -106,6 +169,7 @@ namespace CNRMods
 
         internal static string PackHost(MultiplayerSelectDirector msd)
         {
+            ObserveHostMap(msd);
             SyncHostModeFromRoomUi(msd);
             Sanitize(_host);
             return Pack(_host);
