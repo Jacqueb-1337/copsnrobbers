@@ -92,6 +92,7 @@ namespace CNRMods
         private float _stuckFor;
         private Vector3 _lastStuckSamplePos;
         private int _strafeSign = 1;
+        private bool _brainDrivingMovement;
         private int _logBudget = 4;
 
         void Awake()
@@ -227,11 +228,13 @@ namespace CNRMods
         {
             if (distance <= 2.1f)
             {
+                _brainDrivingMovement = false;
                 SetAction(EnemyAction.attack);
                 _ai.canSearch = false;
             }
             else
             {
+                _brainDrivingMovement = true;
                 SetAction(EnemyAction.rush);
                 _ai.target = _player;
                 _ai.canSearch = true;
@@ -243,6 +246,7 @@ namespace CNRMods
         {
             if (distance > 20f)
             {
+                _brainDrivingMovement = true;
                 SetAction(EnemyAction.rush);
                 _ai.target = _player;
                 _ai.canSearch = true;
@@ -284,6 +288,7 @@ namespace CNRMods
             else
             {
                 // A sniper with a clean sight line should stop wandering randomly.
+                _brainDrivingMovement = false;
                 _ai.canSearch = false;
             }
         }
@@ -292,6 +297,7 @@ namespace CNRMods
         {
             if (distance > 26f)
             {
+                _brainDrivingMovement = true;
                 SetAction(EnemyAction.rush);
                 _ai.target = _player;
                 _ai.canSearch = true;
@@ -320,6 +326,7 @@ namespace CNRMods
             float sinceSeen = Time.realtimeSinceStartup - _lastSeenAt;
             if (sinceSeen <= MEMORY_SECONDS)
             {
+                _brainDrivingMovement = true;
                 SetAction(EnemyAction.search);
                 _memoryTarget.position = _lastSeenPos;
                 _ai.target = _memoryTarget;
@@ -327,6 +334,8 @@ namespace CNRMods
                 _ai.speed = Mathf.Max(_ai.speed, _logic.RushSpeed * 0.9f);
                 return;
             }
+
+            _brainDrivingMovement = false;
 
             // End the vanilla warning/search loops instead of letting an enemy
             // repeatedly stare at a wall forever after losing sight of the player.
@@ -342,6 +351,13 @@ namespace CNRMods
 
         private void SetAction(EnemyAction action)
         {
+            if (action == EnemyAction.idle ||
+                action == EnemyAction.patrol ||
+                action == EnemyAction.warning)
+            {
+                _brainDrivingMovement = false;
+            }
+
             if (_logic.enemyAction == action) return;
             _logic.enemyAction = action;
 
@@ -356,6 +372,7 @@ namespace CNRMods
 
         private void SetMoveTarget(Vector3 position, float speed)
         {
+            _brainDrivingMovement = true;
             _memoryTarget.position = position;
             _ai.target = _memoryTarget;
             _ai.canSearch = true;
@@ -384,6 +401,7 @@ namespace CNRMods
 
                 SingleEnemyLogic other = col.gameObject.GetComponent<SingleEnemyLogic>();
                 SingleEnemyAI otherAi = col.gameObject.GetComponent<SingleEnemyAI>();
+                CNRSingleEnemyBrain otherBrain = col.gameObject.GetComponent<CNRSingleEnemyBrain>();
                 if (other == null || otherAi == null || other.bDead) continue;
 
                 if (other.enemyAction == EnemyAction.idle ||
@@ -395,6 +413,13 @@ namespace CNRMods
                     otherAi.target = _player;
                     otherAi.canSearch = true;
                     otherAi.speed = Mathf.Max(otherAi.speed, other.RushSpeed);
+
+                    if (otherBrain != null)
+                    {
+                        otherBrain._lastSeenAt = Time.realtimeSinceStartup;
+                        otherBrain._lastSeenPos = _player.position;
+                        otherBrain._brainDrivingMovement = true;
+                    }
                 }
             }
         }
@@ -403,6 +428,17 @@ namespace CNRMods
         {
             if (Time.realtimeSinceStartup < _nextStuckSampleAt) return;
             _nextStuckSampleAt = Time.realtimeSinceStartup + STUCK_SAMPLE_INTERVAL;
+
+            bool aggressiveMovement = _logic.enemyAction == EnemyAction.rush ||
+                                      _logic.enemyAction == EnemyAction.search ||
+                                      _logic.enemyAction == EnemyAction.attack ||
+                                      _logic.enemyAction == EnemyAction.escape;
+            if (!_brainDrivingMovement || !aggressiveMovement)
+            {
+                _stuckFor = 0f;
+                _lastStuckSamplePos = transform.position;
+                return;
+            }
 
             bool shouldMove = _ai.canSearch && _ai.target != null &&
                               Vector3.Distance(transform.position, _ai.target.position) > 2f;
