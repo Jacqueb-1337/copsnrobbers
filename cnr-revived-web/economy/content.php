@@ -69,10 +69,13 @@ foreach ($rows as $r) {
             ];
             break;
         case 'gun':
+            // Keep legacy gun_key while also emitting the field names the client
+            // manifest parser consumes: name=internal key, display_name=shop label.
             $guns[] = [
                 'id'            => $r['id'],
                 'gun_key'       => $r['data_key'],
-                'name'          => $r['name'],
+                'name'          => $r['data_key'] ?: $r['name'],
+                'display_name'  => $r['name'],
                 'material_name' => $r['material_name'],
                 'url'           => $r['url'],
                 'hash'          => $r['file_hash'] ?? '',
@@ -82,8 +85,27 @@ foreach ($rows as $r) {
     }
 }
 
-// manifest_version is a hash of the content so clients know when to re-sync
-$version = count($rows) > 0 ? substr(md5(json_encode($rows)), 0, 12) : '0';
+// Bussin' ships with CNR itself so a fresh install can discover it even if the
+// admin DB row has not been created yet. A real admin entry with id=bussin wins.
+$has_bussin = false;
+foreach ($guns as $g) {
+    if (($g['id'] ?? '') === 'bussin') { $has_bussin = true; break; }
+}
+if (!$has_bussin) {
+    $guns[] = [
+        'id'            => 'bussin',
+        'gun_key'       => 'Bussin',
+        'name'          => 'Bussin',
+        'display_name'  => "Bussin'",
+        'material_name' => 'bussin',
+        'url'           => 'https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/economy/uploads/guns/bussin.json',
+        'hash'          => 'cb6dc095ea7665cedc988b5fa938340d',
+        'price'         => 1000,
+    ];
+}
+
+// manifest_version is a hash of the public content so clients know when to re-sync.
+$version = substr(md5(json_encode([$rows, $guns])), 0, 12);
 
 echo json_encode([
     'ok'               => true,

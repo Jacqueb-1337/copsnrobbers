@@ -99,6 +99,7 @@ $compileArgs = @(
     "/reference:$ManagedDir\JsonFx.Json.dll",
     "/reference:$ManagedDir\Assembly-CSharp-firstpass.dll",
     "/reference:$ManagedDir\Assembly-CSharp.dll",
+    "/reference:$ManagedDir\Assembly-UnityScript.dll",
     "/reference:$ManagedDir\Photon3Unity3D.dll"
 )
 foreach ($sf in $sourceFiles) { $compileArgs += $sf.FullName }
