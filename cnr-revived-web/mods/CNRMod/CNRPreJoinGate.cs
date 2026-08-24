@@ -265,6 +265,8 @@ namespace CNRMods
         private float _scanAt;
         private string _blockReason = "";
         private bool _blockCanOpenManager;
+        private bool _preflightRunning;
+        private string _preflightStatus = "";
         private GUIStyle _box;
         private GUIStyle _button;
 
@@ -278,6 +280,9 @@ namespace CNRMods
         {
             _scanAt = 0f;
             _blockReason = "";
+            _preflightRunning = false;
+            _preflightStatus = "";
+            if (Application.loadedLevelName == "MultiplayerSelect") CNRMatchSettings.ClearPending();
         }
 
         void Update()
@@ -327,14 +332,51 @@ namespace CNRMods
 
         internal void JoinRoomPreflight(RoomInfo room)
         {
+            if (_preflightRunning) return;
+            StartCoroutine(JoinRoomPreflightRoutine(room));
+        }
+
+        private IEnumerator JoinRoomPreflightRoutine(RoomInfo room)
+        {
+            _preflightRunning = true;
+            _preflightStatus = "Checking room compatibility...";
+            _blockReason = "";
+
             bool managerHelpful;
             string reason;
             if (!CNRCompatibility.ValidateRoom(room, out reason, out managerHelpful))
             {
+                _preflightRunning = false;
+                CNRMatchSettings.ClearPending();
                 ShowBlocked(reason, managerHelpful);
-                return;
+                yield break;
             }
+
+            if (!CNRMatchSettings.QueueFromRoom(room, out reason))
+            {
+                _preflightRunning = false;
+                CNRMatchSettings.ClearPending();
+                ShowBlocked(reason, false);
+                yield break;
+            }
+
+            bool resourcesOk = false;
+            string resourceReason = "";
+            yield return StartCoroutine(CNRRoomResources.PrepareRoom(room,
+                delegate(string status) { _preflightStatus = status; },
+                delegate(bool ok, string why) { resourcesOk = ok; resourceReason = why; }));
+
+            if (!resourcesOk)
+            {
+                _preflightRunning = false;
+                CNRMatchSettings.ClearPending();
+                ShowBlocked(resourceReason, false);
+                yield break;
+            }
+
+            _preflightStatus = "Joining room...";
             BeginJoin(room);
+            _preflightRunning = false;
         }
 
         internal void QuickStartPreflight()
@@ -356,7 +398,7 @@ namespace CNRMods
                 ShowBlocked("No compatible rooms are currently available.", false);
                 return;
             }
-            BeginJoin(compatible[UnityEngine.Random.Range(0, compatible.Count)]);
+            JoinRoomPreflight(compatible[UnityEngine.Random.Range(0, compatible.Count)]);
         }
 
         internal void CreateRoomWithCompatibility()
@@ -376,6 +418,10 @@ namespace CNRMods
                 props["cnrm"] = ModEntry.Version;
                 props["cnra"] = CNRCompatibility.GetLocalAppVersion();
                 props["cnrr"] = CNRCompatibility.PackRequirements();
+                props[CNRMatchSettings.PropSettings] = CNRMatchSettings.PackHost(msd);
+                props[CNRRoomResources.PropManifestUrl] = CNRRoomResources.HostManifestUrl ?? "";
+                props[CNRRoomResources.PropManifestHash] = CNRRoomResources.HostManifestHash ?? "";
+                props[CNRRoomResources.PropInlineResources] = CNRRoomResources.BuildInlineHostResources();
 
                 string canonicalMode = CNRMatchMetadata.GetSelectedGameMode(msd);
                 props[CNRMatchMetadata.PropGameMode] = canonicalMode;
@@ -393,14 +439,18 @@ namespace CNRMods
                 string[] lobbyProps = new string[] {
                     "map", "version", "mode", "cnrp", "cnrm", "cnra", "cnrr",
                     CNRMatchMetadata.PropGameMode, CNRMatchMetadata.PropMapId,
-                    CNRMatchMetadata.PropMapName, CNRMatchMetadata.PropMapThumb
+                    CNRMatchMetadata.PropMapName, CNRMatchMetadata.PropMapThumb,
+                    CNRMatchSettings.PropSettings, CNRRoomResources.PropManifestUrl,
+                    CNRRoomResources.PropManifestHash, CNRRoomResources.PropInlineResources
                 };
 
                 int maxPlayers = 8;
                 FieldInfo maxFi = typeof(MultiplayerSelectDirector).GetField("mWWMaxPlayersNum", BindingFlags.Instance | BindingFlags.NonPublic);
                 if (maxFi != null) maxPlayers = Convert.ToInt32(maxFi.GetValue(msd));
 
-                PhotonNetwork.CreateRoom(UserDataController.GetMyRoomName(), true, true, maxPlayers, props, lobbyProps);
+                string roomName = UserDataController.GetMyRoomName();
+                CNRMatchSettings.QueueHostForCreatedRoom(roomName);
+                PhotonNetwork.CreateRoom(roomName, true, true, maxPlayers, props, lobbyProps);
                 PhotonNetwork.playerName = GrowthManagerKit.GetMyNickName();
                 msd.StopAllCoroutines();
                 msd.StartCoroutine(msd.WWRoomCreateTimeOutChk());
@@ -434,9 +484,26 @@ namespace CNRMods
             }
             catch (Exception ex)
             {
+                CNRMatchSettings.ClearPending();
                 ModEntry.Log("PreJoin room join error: " + ex.Message);
                 ShowBlocked("Could not join room: " + ex.Message, false);
             }
+        }
+
+        void OnPhotonJoinRoomFailed(object[] cause)
+        {
+            _preflightRunning = false;
+            _preflightStatus = "";
+            CNRMatchSettings.ClearPending();
+            ShowBlocked("Room join failed before the match could start.", false);
+        }
+
+        void OnLeftRoom()
+        {
+            _preflightRunning = false;
+            _preflightStatus = "";
+            CNRMatchSettings.ClearPending();
+            CNRMatchSettings.ClearActive();
         }
 
         internal void ShowBlocked(string reason, bool managerHelpful)
@@ -476,7 +543,8 @@ namespace CNRMods
 
         void OnGUI()
         {
-            if (string.IsNullOrEmpty(_blockReason)) return;
+            bool showingPreflight = _preflightRunning && !string.IsNullOrEmpty(_preflightStatus);
+            if (!showingPreflight && string.IsNullOrEmpty(_blockReason)) return;
             GUI.depth = -200;
             if (_box == null)
             {
@@ -492,7 +560,10 @@ namespace CNRMods
             float h = Mathf.Min(250f, Screen.height * 0.42f);
             float x = (Screen.width - w) * 0.5f;
             float y = (Screen.height - h) * 0.5f;
-            GUI.Box(new Rect(x, y, w, h), "MULTIPLAYER COMPATIBILITY\n\n" + _blockReason, _box);
+            string title = showingPreflight ? "PREPARING MATCH" : "MULTIPLAYER COMPATIBILITY";
+            string body = showingPreflight ? _preflightStatus : _blockReason;
+            GUI.Box(new Rect(x, y, w, h), title + "\n\n" + body, _box);
+            if (showingPreflight) return;
             float bw = _blockCanOpenManager ? (w - 30f) * 0.5f : (w - 20f);
             if (_blockCanOpenManager && GUI.Button(new Rect(x + 10f, y + h - 50f, bw, 38f), "Open Mod Manager", _button)) OpenModManager();
             float closeX = _blockCanOpenManager ? x + 20f + bw : x + 10f;

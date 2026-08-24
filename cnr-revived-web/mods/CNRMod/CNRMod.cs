@@ -582,6 +582,7 @@ namespace CNRMods
                 go.AddComponent<CNRSinglePlayerAIHook>();
                 go.AddComponent<FastVisualSyncHook>();
                 go.AddComponent<CNRPreJoinGate>();
+                go.AddComponent<CNRMatchSettingsRuntimeHook>();
                 GameObject.DontDestroyOnLoad(go);
 
                 Log("Mod root created.  IP=" + (ServerIp != "" ? ServerIp : "(none)") +
@@ -15569,7 +15570,7 @@ namespace CNRMods
         public static Vector3 RobberCarrierPos;
         public static int     CopScore         = 0;
         public static int     RobberScore      = 0;
-        public const  int     WinScore         = 30;
+        public static int     WinScore         = 30;
 
         // Monotonically incremented on every game-state change (pickup, drop, score, return).
         // Receivers reject incoming state with gen < StateGen so a stale authority broadcast
@@ -16319,7 +16320,7 @@ namespace CNRMods
 
         private float _copDropTimer = 0f;
         private float _robDropTimer = 0f;
-        private const float AutoReturnSecs  = 30f;
+        private static float AutoReturnSecs { get { return CNRMatchSettingsRuntimeHook.CtfFlagReturnSeconds; } }
         private const float BroadcastSecs   = 0.5f;
         private float _bcastTimer          = 0f;
         private float _carrierBcastTimer   = 0f; // independent timer so carrier always broadcasts its own position

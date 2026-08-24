@@ -366,11 +366,11 @@ namespace CNRZombieMod
         private const int   STARTING_POINTS = 500;
         private const string ENEMY_DUMP_DIR = "/storage/emulated/0/CNRMods/Enemy3Dump";
         private const int   BASE_ZOMBIES_PER_ROUND = 6;
-        private const int   MAX_ZOMBIES_PER_ROUND = 75;
+        private static int MAX_ZOMBIES_PER_ROUND { get { return CNRMods.CNRMatchSettingsRuntimeHook.ZombieMaxPerRound; } }
         private const int   MAX_ACTIVE_ZOMBIES = 12;
         private const float ZOMBIES_PER_ROUND_MULT = 0.75f;
-        private const float ROUND_START_DELAY = 8f;
-        private const float INTER_ROUND_DELAY = 10f;
+        private static float ROUND_START_DELAY { get { return CNRMods.CNRMatchSettingsRuntimeHook.ZombieStartDelay; } }
+        private static float INTER_ROUND_DELAY { get { return CNRMods.CNRMatchSettingsRuntimeHook.ZombieInterRoundDelay; } }
         private const float BASE_SPAWN_INTERVAL = 2.5f;
         private const float SPAWN_INTERVAL_DECAY = 0.08f;
         private const float MIN_SPAWN_INTERVAL = 0.35f;
