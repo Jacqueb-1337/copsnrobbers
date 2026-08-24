@@ -306,11 +306,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "4.1.36",
+      "latestVersion": "4.1.37",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.36.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.37.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "4.1.37",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.37.dll",
+          "changelog": "Refine bot match settings: TDM now has independent Cop and Robber bot counts with separate Auto toggles that treat each count as the target team population, while Kill Competition keeps one global bot count with one Auto toggle that targets total match population."
+        },
         {
           "version": "4.1.36",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.36.dll",
