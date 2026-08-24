@@ -39,8 +39,8 @@ namespace CNRZombieMod
     public class ZombieModEntry
     {
         public const  string Version = "0.9.0";
-        public const  byte   ZOMBIE_EVENT = 198;       // zombie simulation/state
-        public const  byte   ZOMBIE_MAP_EVENT = 197;   // overlay map request/snapshot/state
+        public const  byte   ZOMBIE_EVENT = 196;       // zombie simulation/state; keep separate from CNRMod fast visual sync 198
+        public const  byte   ZOMBIE_MAP_EVENT = 195;   // overlay map request/snapshot/state
         private const string LogPath      = "/storage/emulated/0/CNRMods/zombiemod.log";
         private static readonly string[] QuietPrefixes = new string[] {
             "ZAI[", "NavDebug", "EnemyRendererDump", "DumpEnemy3", "TryCachePrefab",
@@ -452,6 +452,11 @@ namespace CNRZombieMod
         private Type _weaponScriptType;
         private System.Collections.IList _weaponList;
         private System.Collections.IList _weaponTotal;
+        private readonly List<object> _vanillaWeaponList = new List<object>();
+        private object _vanillaSelectedWeapon;
+        private int _vanillaWeaponIndex = -1;
+        private bool _vanillaCanSwitch = true;
+        private bool _zombieInventoryApplied;
         private readonly string[] _primarySlots = new string[2];
         private string _meleeSlot = "";
         private string _grenadeSlot = "";
@@ -469,6 +474,7 @@ namespace CNRZombieMod
         private string _weaponUpgradeName = "";
         private string _weaponUpgradeSlot = "";
         private float _weaponUpgradeCompleteAt;
+        private float _zombieWeaponDiagTimer;
         private ZombieCustomObject _nearUpgradeObject;
         private string _modeMessage = "";
         private float  _modeMessageTimer;
@@ -794,7 +800,7 @@ namespace CNRZombieMod
             ClearAll();
             ClearZombieMapRuntime();
             _hud = "";
-            if (IsGameScene(scene))
+            if (IsGameScene(scene) && IsZombieRoomSelected())
                 StartCoroutine(LoadZombieMapConfig(scene));
 
             // Avoid live enemy component dumps during normal play. The old
@@ -860,10 +866,20 @@ namespace CNRZombieMod
             if (!IsGameScene(scene)) return;
             if (!inRoom)             return;
             if (!IsZombieSessionActive())
+            {
+                if (HasZombieRuntimeState())
+                {
+                    ZombieModEntry.Log("ZombieMode: clearing stale runtime in non-zombie room");
+                    ClearAll();
+                    ClearZombieMapRuntime();
+                }
                 return;
+            }
             CachePlayerLogicFields();
             ForceCopTeamIfNeeded();
             EnsureZombieMapRuntime();
+            EnforceZombieInventory();
+            DiagnoseZombieWeaponFireState();
             UpdateWeaponUpgradeLock();
             UpdateZombieInteraction(ec);
             if (_phase != PHASE_GAMEOVER)
@@ -923,8 +939,18 @@ namespace CNRZombieMod
 
         private bool IsZombieSessionActive()
         {
-            return CNRMods.ZombieMode.IsZombieRoom || CNRMods.ZombieMode.PendingZombie ||
-                _zombieSessionActive || _modeStarted || _drivers.Count > 0 || _proxies.Count > 0;
+            return CNRMods.ZombieMode.IsZombieRoom || _zombieSessionActive;
+        }
+
+        private bool IsZombieRoomSelected()
+        {
+            return CNRMods.ZombieMode.IsZombieRoom || CNRMods.ZombieMode.PendingZombie;
+        }
+
+        private bool HasZombieRuntimeState()
+        {
+            return _zombieSessionActive || _modeStarted || _drivers.Count > 0 || _proxies.Count > 0 ||
+                   _zombieInventoryApplied || _zombieInventoryReady || _overlayObjects.Count > 0;
         }
 
         private void MarkZombieSessionActive()
@@ -935,6 +961,7 @@ namespace CNRZombieMod
 
         private void ClearZombieMapRuntime()
         {
+            RestoreVanillaInventory();
             for (int i = 0; i < _overlayObjects.Count; i++)
             {
                 if (_overlayObjects[i] != null)
@@ -979,15 +1006,17 @@ namespace CNRZombieMod
             if (_zombieMapLoading || string.IsNullOrEmpty(scene)) yield break;
             _zombieMapLoading = true;
             _zombieMapScene = scene;
+            List<string> lookupKeys = GetZombieMapLookupKeys(scene);
 
             if (!IsMasterClientNow())
             {
                 string builtRaw;
-                if (ZombieBuiltinContent.TryGetMap(MakeSafe(scene), out builtRaw))
+                string builtKey;
+                if (TryGetBuiltinZombieMap(lookupKeys, out builtKey, out builtRaw))
                 {
                     _zombieMapFromBuiltin = true;
                     ApplyZombieMapRaw(scene, builtRaw);
-                    ZombieModEntry.Log("ZombieMap: client loaded built-in overlay for " + scene);
+                    ZombieModEntry.Log("ZombieMap: client loaded built-in overlay key=" + builtKey + " scene=" + scene);
                 }
                 _zombieMapLoading = false;
                 RequestZombieMapSnapshot();
@@ -998,32 +1027,108 @@ namespace CNRZombieMod
             _zombieMapFromBuiltin = false;
             try
             {
-                string safeScene = MakeSafe(scene);
-                string localPath = Path.Combine(ZOMBIE_MAP_LOCAL_DIR, safeScene + ".json");
-                if (File.Exists(localPath)) raw = File.ReadAllText(localPath);
+                for (int i = 0; i < lookupKeys.Count && string.IsNullOrEmpty(raw); i++)
+                {
+                    string localPath = Path.Combine(ZOMBIE_MAP_LOCAL_DIR, lookupKeys[i] + ".json");
+                    if (File.Exists(localPath))
+                    {
+                        raw = File.ReadAllText(localPath);
+                        ZombieModEntry.Log("ZombieMap: loaded local overlay key=" + lookupKeys[i] + " scene=" + scene);
+                    }
+                }
             }
             catch (Exception ex) { ZombieModEntry.Log("ZombieMap local read err: " + ex.Message); }
 
             if (string.IsNullOrEmpty(raw))
             {
-                if (ZombieBuiltinContent.TryGetMap(MakeSafe(scene), out raw))
+                string builtKey;
+                if (TryGetBuiltinZombieMap(lookupKeys, out builtKey, out raw))
                 {
                     _zombieMapFromBuiltin = true;
-                    ZombieModEntry.Log("ZombieMap: loaded built-in overlay for " + scene);
+                    ZombieModEntry.Log("ZombieMap: loaded built-in overlay key=" + builtKey + " scene=" + scene);
                 }
             }
 
             if (string.IsNullOrEmpty(raw))
             {
-                WWW www = new WWW(ZOMBIE_MAP_BASE_URL + "/configs/" + MakeSafe(scene) + ".json");
-                yield return www;
-                if (string.IsNullOrEmpty(www.error)) raw = www.text;
-                else ZombieModEntry.Log("ZombieMap: no built-in/hosted overlay for " + scene + " (fallback spawning remains active)");
+                for (int i = 0; i < lookupKeys.Count && string.IsNullOrEmpty(raw); i++)
+                {
+                    WWW www = new WWW(ZOMBIE_MAP_BASE_URL + "/configs/" + lookupKeys[i] + ".json");
+                    yield return www;
+                    if (string.IsNullOrEmpty(www.error) && !string.IsNullOrEmpty(www.text))
+                    {
+                        raw = www.text;
+                        ZombieModEntry.Log("ZombieMap: loaded hosted overlay key=" + lookupKeys[i] + " scene=" + scene);
+                    }
+                }
+                if (string.IsNullOrEmpty(raw))
+                    ZombieModEntry.Log("ZombieMap: no local/built-in/hosted overlay for " + scene + " (fallback spawning remains active)");
             }
 
             ApplyZombieMapRaw(scene, raw);
             _zombieMapLoading = false;
             SendZombieMapSnapshot();
+        }
+
+        private List<string> GetZombieMapLookupKeys(string scene)
+        {
+            List<string> keys = new List<string>();
+            AppendZombieMapKey(keys, scene);
+            try { AppendZombieMapKey(keys, PlayerPrefs.GetString("CNRMod_CustomMapName", "")); } catch { }
+            try
+            {
+                string url = PlayerPrefs.GetString("CNRMod_ActiveMapURL", "");
+                if (!string.IsNullOrEmpty(url))
+                {
+                    int q = url.IndexOf('?');
+                    if (q >= 0) url = url.Substring(0, q);
+                    int slash = Math.Max(url.LastIndexOf('/'), url.LastIndexOf('\\'));
+                    string file = slash >= 0 ? url.Substring(slash + 1) : url;
+                    int dot = file.LastIndexOf('.');
+                    if (dot > 0) file = file.Substring(0, dot);
+                    AppendZombieMapKey(keys, file);
+                }
+            }
+            catch { }
+
+            if (string.Equals(scene, "FreeRun5_1", StringComparison.OrdinalIgnoreCase) ||
+                ContainsKeyPart(keys, "snow"))
+                AppendZombieMapKey(keys, "SnowMap3_Zombies");
+
+            return keys;
+        }
+
+        private static void AppendZombieMapKey(List<string> keys, string raw)
+        {
+            string safe = MakeSafe(raw);
+            if (string.IsNullOrEmpty(safe)) return;
+            for (int i = 0; i < keys.Count; i++)
+                if (string.Equals(keys[i], safe, StringComparison.OrdinalIgnoreCase)) return;
+            keys.Add(safe);
+        }
+
+        private static bool ContainsKeyPart(List<string> keys, string part)
+        {
+            if (keys == null || string.IsNullOrEmpty(part)) return false;
+            for (int i = 0; i < keys.Count; i++)
+                if (!string.IsNullOrEmpty(keys[i]) && keys[i].IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
+        }
+
+        private static bool TryGetBuiltinZombieMap(List<string> keys, out string key, out string raw)
+        {
+            key = "";
+            raw = null;
+            if (keys == null) return false;
+            for (int i = 0; i < keys.Count; i++)
+            {
+                if (ZombieBuiltinContent.TryGetMap(keys[i], out raw))
+                {
+                    key = keys[i];
+                    return true;
+                }
+            }
+            return false;
         }
 
         private void ApplyZombieMapRaw(string scene, string raw)
@@ -1110,7 +1215,7 @@ namespace CNRZombieMod
             if (!IsInRoom() || !IsMasterClientNow() || !_zombieMapLoaded) return;
             System.Collections.Hashtable ht = new System.Collections.Hashtable();
             ht["mapscene"] = _zombieMapScene ?? Application.loadedLevelName;
-            if (!_zombieMapFromBuiltin) ht["mapjson"] = _zombieMapRaw ?? "";
+            ht["mapjson"] = _zombieMapRaw ?? "";
             ht["doors"] = SerializeOpenedDoors();
             ht["barriers"] = SerializeBarrierBoards();
             RaiseZombieMapEvent(ht, true);
@@ -1136,9 +1241,11 @@ namespace CNRZombieMod
             {
                 System.Collections.Hashtable ht = ExtractZombiePayload(ev);
                 if (ht == null) return;
+                if (!HasZombieMapPayload(ht)) return;
 
                 if (ht.ContainsKey("mapreq") && IsMasterClientNow())
                 {
+                    if (!IsZombieSessionActive()) return;
                     string requestedScene = Convert.ToString(ht["mapreq"]);
                     if (string.Equals(requestedScene, Application.loadedLevelName, StringComparison.OrdinalIgnoreCase))
                     {
@@ -1151,6 +1258,7 @@ namespace CNRZombieMod
                 if (!ht.ContainsKey("mapscene")) return;
                 string scene = Convert.ToString(ht["mapscene"]);
                 if (!string.Equals(scene, Application.loadedLevelName, StringComparison.OrdinalIgnoreCase)) return;
+                MarkZombieSessionActive();
 
                 if (ht.ContainsKey("mapjson") && !IsMasterClientNow())
                 {
@@ -1162,6 +1270,13 @@ namespace CNRZombieMod
                 EnsureZombieMapRuntime();
             }
             catch (Exception ex) { ZombieModEntry.Log("OnZombieMapEvent err: " + ex.Message); }
+        }
+
+        private bool HasZombieMapPayload(System.Collections.Hashtable ht)
+        {
+            if (ht == null) return false;
+            return ht.ContainsKey("mapreq") || ht.ContainsKey("mapscene") ||
+                   ht.ContainsKey("mapjson") || ht.ContainsKey("doors") || ht.ContainsKey("barriers");
         }
 
         private string SerializeOpenedDoors()
@@ -1250,10 +1365,36 @@ namespace CNRZombieMod
                 for (int i = 0; i < _zombieMapConfig.customObjects.Length; i++)
                 {
                     ZombieCustomObject obj = _zombieMapConfig.customObjects[i];
-                    if (obj == null || string.IsNullOrEmpty(obj.assetUrl) || !ValidVec3(obj.pos)) continue;
-                    StartCoroutine(LoadZombieCustomObject(obj));
+                    if (obj == null || !ValidVec3(obj.pos)) continue;
+                    if (string.IsNullOrEmpty(obj.assetUrl)) BuildZombiePlaceholderObject(obj, i);
+                    else StartCoroutine(LoadZombieCustomObject(obj));
                 }
             }
+        }
+
+        private void BuildZombiePlaceholderObject(ZombieCustomObject placement, int index)
+        {
+            try
+            {
+                GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                go.name = "ZombieObject_" + (!string.IsNullOrEmpty(placement.id) ? placement.id : index.ToString());
+                go.transform.position = ToVec3(placement.pos);
+                if (ValidVec3(placement.rot)) go.transform.eulerAngles = ToVec3(placement.rot);
+                go.transform.localScale = ValidVec3(placement.scale) ? ToVec3(placement.scale) : new Vector3(1.25f, 1.75f, 1.25f);
+                Renderer rend = go.GetComponent<Renderer>();
+                if (rend != null)
+                {
+                    rend.material = new Material(Shader.Find("Diffuse"));
+                    rend.material.color = new Color(0.45f, 0.1f, 0.9f, 0.85f);
+                }
+                if (!placement.collidable)
+                {
+                    Collider col = go.GetComponent<Collider>();
+                    if (col != null) UnityEngine.Object.Destroy(col);
+                }
+                _overlayObjects.Add(go);
+            }
+            catch (Exception ex) { ZombieModEntry.Log("ZombieObject placeholder err: " + ex.Message); }
         }
 
         private IEnumerator LoadZombieCustomObject(ZombieCustomObject placement)
@@ -1464,7 +1605,12 @@ namespace CNRZombieMod
             string runtimeName = ResolveWallBuyRuntimeName(buy);
             object weapon = FindWeaponByName(runtimeName);
             Component wc = weapon as Component;
-            if (wc == null) return;
+            if (wc == null)
+            {
+                CreateWallBuyFallbackHologram(buy, runtimeName);
+                ZombieModEntry.Log("WallBuy: source weapon missing for " + runtimeName + ", used fallback hologram");
+                return;
+            }
 
             try
             {
@@ -1490,6 +1636,51 @@ namespace CNRZombieMod
                 _overlayObjects.Add(go);
             }
             catch (Exception ex) { ZombieModEntry.Log("CreateWallBuyHologram err: " + ex.Message); }
+        }
+
+        private void CreateWallBuyFallbackHologram(ZombieWallBuy buy, string runtimeName)
+        {
+            try
+            {
+                GameObject root = new GameObject("ZombieWallBuy_" + (buy.id ?? runtimeName));
+                root.transform.position = ToVec3(buy.pos);
+                if (ValidVec3(buy.rot)) root.transform.eulerAngles = ToVec3(buy.rot);
+                float holoScale = buy.scale > 0.01f ? buy.scale : 0.7f;
+
+                GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                body.name = "WeaponMarker";
+                body.transform.parent = root.transform;
+                body.transform.localPosition = Vector3.zero;
+                body.transform.localRotation = Quaternion.Euler(0f, 45f, 20f);
+                body.transform.localScale = new Vector3(1.25f, 0.35f, 0.35f) * holoScale;
+                Collider col = body.GetComponent<Collider>();
+                if (col != null) UnityEngine.Object.Destroy(col);
+                Renderer rend = body.GetComponent<Renderer>();
+                if (rend != null)
+                {
+                    rend.material = new Material(Shader.Find("Diffuse"));
+                    rend.material.color = new Color(0.20f, 0.85f, 1f, 0.72f);
+                }
+
+                GameObject label = new GameObject("Label");
+                label.transform.parent = root.transform;
+                label.transform.localPosition = new Vector3(0f, 0.65f * holoScale, 0f);
+                label.transform.localRotation = Quaternion.identity;
+                TextMesh tm = label.AddComponent<TextMesh>();
+                tm.text = ResolveWallBuyDisplayName(buy);
+                tm.anchor = TextAnchor.MiddleCenter;
+                tm.alignment = TextAlignment.Center;
+                tm.characterSize = 0.22f * holoScale;
+                tm.color = new Color(0.20f, 0.85f, 1f, 0.95f);
+
+                ZombieWallBuyHologram holo = root.AddComponent<ZombieWallBuyHologram>();
+                holo.Data = buy;
+                holo.Hook = this;
+                holo.BaseY = root.transform.position.y;
+                _wallBuyHolograms.Add(holo);
+                _overlayObjects.Add(root);
+            }
+            catch (Exception ex) { ZombieModEntry.Log("WallBuy fallback err: " + ex.Message); }
         }
 
         private static void DisableHologramGameplay(GameObject go)
@@ -1705,6 +1896,7 @@ namespace CNRZombieMod
                 _weaponList = all != null ? all.GetValue(_weaponManager) as System.Collections.IList : null;
                 _weaponTotal = total != null ? total.GetValue(_weaponManager) as System.Collections.IList : null;
                 if (_weaponList == null || _weaponTotal == null) return false;
+                CaptureVanillaInventory();
 
                 _primarySlots[0] = "Deagle";
                 _primarySlots[1] = null;
@@ -1726,6 +1918,109 @@ namespace CNRZombieMod
                 ZombieModEntry.Log("EnsureZombieInventory err: " + ex.Message);
                 return false;
             }
+        }
+
+        private void EnforceZombieInventory()
+        {
+            if (!_zombieInventoryReady || _weaponUpgradeLocked) return;
+            if (_weaponManager == null || _weaponList == null || _weaponTotal == null) return;
+            try
+            {
+                bool dirty = false;
+                int expected = 0;
+                if (!string.IsNullOrEmpty(_primarySlots[0]) && FindWeaponByName(_primarySlots[0]) != null) expected++;
+                if (!string.IsNullOrEmpty(_primarySlots[1]) && FindWeaponByName(_primarySlots[1]) != null) expected++;
+                if (!string.IsNullOrEmpty(_meleeSlot) && FindWeaponByName(_meleeSlot) != null) expected++;
+                if (!string.IsNullOrEmpty(_grenadeSlot) && FindWeaponByName(_grenadeSlot) != null) expected++;
+
+                if (_weaponList.Count != expected) dirty = true;
+                for (int i = 0; i < _weaponList.Count && !dirty; i++)
+                {
+                    string runtime = GetWeaponName(_weaponList[i]);
+                    if (!ZombieInventoryContains(runtime)) dirty = true;
+                }
+
+                string selectedName = GetSelectedWeaponName();
+                if (!string.IsNullOrEmpty(selectedName) && !ZombieInventoryContains(selectedName))
+                    dirty = true;
+
+                if (!dirty) return;
+                string keepSelected = ZombieInventoryContains(selectedName) ? selectedName : _primarySlots[0];
+                if (string.IsNullOrEmpty(keepSelected)) keepSelected = _meleeSlot;
+                ZombieModEntry.Log("ZombieInventory: enforcing zombie weapon list count=" + _weaponList.Count + " expected=" + expected + " selected=" + selectedName);
+                RebuildZombieInventory(keepSelected);
+            }
+            catch (Exception ex) { ZombieModEntry.Log("EnforceZombieInventory err: " + ex.Message); }
+        }
+
+        private void CaptureVanillaInventory()
+        {
+            if (_zombieInventoryApplied || _weaponList == null || _weaponManager == null || _weaponManagerType == null) return;
+            try
+            {
+                _vanillaWeaponList.Clear();
+                for (int i = 0; i < _weaponList.Count; i++)
+                    _vanillaWeaponList.Add(_weaponList[i]);
+                BindingFlags f = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                FieldInfo idx = _weaponManagerType.GetField("index", f);
+                FieldInfo selected = _weaponManagerType.GetField("SelectedWeapon", f);
+                FieldInfo canSwitch = _weaponManagerType.GetField("canSwitch", f);
+                _vanillaWeaponIndex = idx != null ? Convert.ToInt32(idx.GetValue(_weaponManager)) : -1;
+                _vanillaSelectedWeapon = selected != null ? selected.GetValue(_weaponManager) : null;
+                _vanillaCanSwitch = canSwitch == null || Convert.ToBoolean(canSwitch.GetValue(_weaponManager));
+            }
+            catch (Exception ex) { ZombieModEntry.Log("CaptureVanillaInventory err: " + ex.Message); }
+        }
+
+        private void RestoreVanillaInventory()
+        {
+            if (!_zombieInventoryApplied || _weaponList == null || _weaponManager == null || _weaponManagerType == null) return;
+            try
+            {
+                if (_weaponTotal != null)
+                {
+                    for (int i = 0; i < _weaponTotal.Count; i++)
+                    {
+                        Component c = _weaponTotal[i] as Component;
+                        if (c != null) c.gameObject.SetActive(false);
+                    }
+                }
+
+                _weaponList.Clear();
+                for (int i = 0; i < _vanillaWeaponList.Count; i++)
+                    if (_vanillaWeaponList[i] != null && !_weaponList.Contains(_vanillaWeaponList[i]))
+                        _weaponList.Add(_vanillaWeaponList[i]);
+
+                BindingFlags f = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                FieldInfo idx = _weaponManagerType.GetField("index", f);
+                FieldInfo selected = _weaponManagerType.GetField("SelectedWeapon", f);
+                FieldInfo canSwitch = _weaponManagerType.GetField("canSwitch", f);
+
+                int restoreIndex = _vanillaWeaponIndex;
+                if (restoreIndex < 0 || restoreIndex >= _weaponList.Count) restoreIndex = _weaponList.Count > 0 ? 0 : -1;
+                object restoreWeapon = _vanillaSelectedWeapon;
+                if (restoreWeapon == null || !_weaponList.Contains(restoreWeapon))
+                    restoreWeapon = restoreIndex >= 0 ? _weaponList[restoreIndex] : null;
+
+                if (idx != null && restoreIndex >= 0) idx.SetValue(_weaponManager, restoreIndex);
+                if (selected != null && restoreWeapon != null) selected.SetValue(_weaponManager, restoreWeapon);
+                if (canSwitch != null) canSwitch.SetValue(_weaponManager, _vanillaCanSwitch);
+
+                Component chosen = restoreWeapon as Component;
+                if (chosen != null)
+                {
+                    chosen.gameObject.SetActive(true);
+                    chosen.gameObject.SendMessage("selectWeapon", SendMessageOptions.DontRequireReceiver);
+                    GameObject ng = GameObject.Find("UI Root (3D)");
+                    if (ng != null) ng.SendMessage("receiveGunName", GetWeaponName(restoreWeapon), SendMessageOptions.DontRequireReceiver);
+                }
+                _zombieInventoryApplied = false;
+                ZombieModEntry.Log("ZombieInventory: restored vanilla weapon list count=" + _weaponList.Count);
+            }
+            catch (Exception ex) { ZombieModEntry.Log("RestoreVanillaInventory err: " + ex.Message); }
+            _vanillaWeaponList.Clear();
+            _vanillaSelectedWeapon = null;
+            _vanillaWeaponIndex = -1;
         }
 
         private string GetStrongestOwnedKnifeName()
@@ -2013,12 +2308,6 @@ namespace CNRZombieMod
                     if (c != null) c.gameObject.SetActive(false);
                     if (string.Equals(GetWeaponName(_weaponList[i]), selectName, StringComparison.OrdinalIgnoreCase)) selectedIndex = i;
                 }
-                Component chosen = _weaponList[selectedIndex] as Component;
-                if (chosen != null)
-                {
-                    chosen.gameObject.SetActive(true);
-                    chosen.gameObject.SendMessage("selectWeapon", SendMessageOptions.DontRequireReceiver);
-                }
                 BindingFlags f = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
                 FieldInfo idx = _weaponManagerType.GetField("index", f);
                 FieldInfo selected = _weaponManagerType.GetField("SelectedWeapon", f);
@@ -2026,10 +2315,220 @@ namespace CNRZombieMod
                 if (idx != null) idx.SetValue(_weaponManager, selectedIndex);
                 if (selected != null) selected.SetValue(_weaponManager, _weaponList[selectedIndex]);
                 if (canSwitch != null) canSwitch.SetValue(_weaponManager, !_weaponUpgradeLocked);
+                SelectZombieWeaponViaVanilla(selectedIndex);
                 GameObject ng = GameObject.Find("UI Root (3D)");
                 if (ng != null) ng.SendMessage("receiveGunName", GetWeaponName(_weaponList[selectedIndex]), SendMessageOptions.DontRequireReceiver);
+                ApplySelectedZombieWeaponState(_weaponList[selectedIndex]);
+                _zombieInventoryApplied = true;
             }
             catch (Exception ex) { ZombieModEntry.Log("RebuildZombieInventory err: " + ex.Message); }
+        }
+
+        private void SelectZombieWeaponViaVanilla(int selectedIndex)
+        {
+            try
+            {
+                if (_weaponManager == null || _weaponList == null || selectedIndex < 0 || selectedIndex >= _weaponList.Count) return;
+                Component chosen = _weaponList[selectedIndex] as Component;
+                if (chosen == null) return;
+
+                BindingFlags f = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                FieldInfo idx = _weaponManagerType.GetField("index", f);
+                FieldInfo selected = _weaponManagerType.GetField("SelectedWeapon", f);
+                int oldIndex = idx != null ? Convert.ToInt32(idx.GetValue(_weaponManager)) : selectedIndex;
+                object oldWeapon = selected != null ? selected.GetValue(_weaponManager) : null;
+                Component oldComp = oldWeapon as Component;
+
+                if (oldComp == null || oldComp == chosen || oldIndex == selectedIndex)
+                {
+                    for (int i = 0; i < _weaponList.Count; i++)
+                    {
+                        Component c = _weaponList[i] as Component;
+                        if (c != null && c != chosen) c.gameObject.SetActive(false);
+                    }
+                    chosen.gameObject.SetActive(true);
+                    chosen.gameObject.SendMessage("selectWeapon", SendMessageOptions.DontRequireReceiver);
+                    if (idx != null) idx.SetValue(_weaponManager, selectedIndex);
+                    if (selected != null) selected.SetValue(_weaponManager, chosen);
+                    return;
+                }
+
+                if (idx != null) idx.SetValue(_weaponManager, oldIndex);
+                if (selected != null) selected.SetValue(_weaponManager, oldComp);
+                MonoBehaviour mb = _weaponManager as MonoBehaviour;
+                if (mb != null)
+                {
+                    object routine = _weaponManagerType.InvokeMember("SwitchWeapons",
+                        BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance,
+                        null, _weaponManager, new object[] { oldComp.gameObject, chosen.gameObject });
+                    IEnumerator enumerator = routine as IEnumerator;
+                    if (enumerator != null) mb.StartCoroutine(enumerator);
+                    else chosen.gameObject.SetActive(true);
+                }
+                else
+                {
+                    oldComp.gameObject.SetActive(false);
+                    chosen.gameObject.SetActive(true);
+                    chosen.gameObject.SendMessage("selectWeapon", SendMessageOptions.DontRequireReceiver);
+                }
+                if (idx != null) idx.SetValue(_weaponManager, selectedIndex);
+                if (selected != null) selected.SetValue(_weaponManager, chosen);
+            }
+            catch (Exception ex) { ZombieModEntry.Log("SelectZombieWeaponViaVanilla err: " + ex.Message); }
+        }
+
+        private void ApplySelectedZombieWeaponState(object weapon)
+        {
+            try
+            {
+                string runtime = GetWeaponName(weapon);
+                Type nguiType = FindType("NGUI");
+                if (nguiType != null)
+                {
+                    FieldInfo inst = nguiType.GetField("mInstance", BindingFlags.Public | BindingFlags.Static);
+                    object ngui = inst != null ? inst.GetValue(null) : null;
+                    FieldInfo cur = nguiType.GetField("curWeapon", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (ngui != null && cur != null) cur.SetValue(ngui, runtime);
+                }
+                if (PlayerLogic.mInstance != null)
+                    PlayerLogic.mInstance.mWeaponType = RuntimeNameToWeaponType(runtime);
+                if (CNRMultiplayerManager.mInstance != null && CNRMultiplayerManager.mInstance.myPlayerInfo != null)
+                    CNRMultiplayerManager.mInstance.myPlayerInfo.mWeaponType = RuntimeNameToWeaponType(runtime);
+
+                BindingFlags f = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                FieldInfo canFire = weapon.GetType().GetField("canFire", f);
+                FieldInfo noBullets = weapon.GetType().GetField("noBullets", f);
+                FieldInfo isReload = weapon.GetType().GetField("isReload", f);
+                FieldInfo singleFire = weapon.GetType().GetField("singleFire", f);
+                FieldInfo fire = weapon.GetType().GetField("fire", f);
+                if (canFire != null) canFire.SetValue(weapon, true);
+                if (noBullets != null) noBullets.SetValue(weapon, false);
+                if (isReload != null) isReload.SetValue(weapon, false);
+                if (singleFire != null) singleFire.SetValue(weapon, true);
+                if (fire != null) fire.SetValue(weapon, false);
+            }
+            catch (Exception ex) { ZombieModEntry.Log("ApplySelectedZombieWeaponState err: " + ex.Message); }
+        }
+
+        private void DiagnoseZombieWeaponFireState()
+        {
+            if (_zombieWeaponDiagTimer > 0f) { _zombieWeaponDiagTimer -= Time.deltaTime; return; }
+            if (PlayerPrefs.GetInt("FpsOnFire", 0) != 1) return;
+            _zombieWeaponDiagTimer = 0.5f;
+            try
+            {
+                object weapon = null;
+                if (_weaponManager != null && _weaponManagerType != null)
+                {
+                    BindingFlags f = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                    FieldInfo selected = _weaponManagerType.GetField("SelectedWeapon", f);
+                    weapon = selected != null ? selected.GetValue(_weaponManager) : null;
+                }
+                Component c = weapon as Component;
+                string runtime = GetWeaponName(weapon);
+                string details = "ZombieWeaponFireDiag: selected=" + (string.IsNullOrEmpty(runtime) ? "(none)" : runtime);
+                details += " active=" + (c != null ? c.gameObject.activeSelf.ToString() : "null");
+                details += " enabled=" + (c != null ? ((Behaviour)c).enabled.ToString() : "null");
+                details += " listCount=" + (_weaponList != null ? _weaponList.Count.ToString() : "null");
+                details += " index=" + GetWeaponManagerIndex();
+                details += " FpsOnFire=1";
+                if (weapon != null)
+                {
+                    details += " GunType=" + GetFieldString(weapon, "GunType");
+                    details += " canFire=" + GetFieldString(weapon, "canFire");
+                    details += " noBullets=" + GetFieldString(weapon, "noBullets");
+                    details += " isReload=" + GetFieldString(weapon, "isReload");
+                    details += " singleFire=" + GetFieldString(weapon, "singleFire");
+                    details += " ammo=" + GetWeaponAmmoDebug(weapon);
+                }
+                ZombieModEntry.Log(details);
+            }
+            catch (Exception ex) { ZombieModEntry.Log("ZombieWeaponFireDiag err: " + ex.Message); }
+        }
+
+        private int GetWeaponManagerIndex()
+        {
+            try
+            {
+                if (_weaponManager == null || _weaponManagerType == null) return -1;
+                FieldInfo idx = _weaponManagerType.GetField("index", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                return idx != null ? Convert.ToInt32(idx.GetValue(_weaponManager)) : -1;
+            }
+            catch { return -1; }
+        }
+
+        private static string GetFieldString(object obj, string name)
+        {
+            try
+            {
+                if (obj == null) return "null";
+                FieldInfo fi = obj.GetType().GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                object v = fi != null ? fi.GetValue(obj) : null;
+                return v != null ? v.ToString() : "null";
+            }
+            catch { return "err"; }
+        }
+
+        private static string GetWeaponAmmoDebug(object weapon)
+        {
+            try
+            {
+                BindingFlags f = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                int gunType = GetIntField(weapon, "GunType", -1);
+                if (gunType == 0)
+                {
+                    FieldInfo machine = weapon.GetType().GetField("machineGun", f);
+                    object mg = machine != null ? machine.GetValue(weapon) : null;
+                    return "mg " + GetFieldString(mg, "bulletsLeft") + "/" + GetFieldString(mg, "bulletsPerClip") + " clips=" + GetFieldString(mg, "clips");
+                }
+                if (gunType == 2)
+                {
+                    FieldInfo shotgun = weapon.GetType().GetField("ShotGun", f);
+                    object sg = shotgun != null ? shotgun.GetValue(weapon) : null;
+                    return "sg " + GetFieldString(sg, "bulletsLeft") + "/" + GetFieldString(sg, "bulletsPerClip") + " clips=" + GetFieldString(sg, "clips");
+                }
+                if (gunType == 1)
+                {
+                    FieldInfo launcher = weapon.GetType().GetField("grenadeLauncher", f);
+                    object gl = launcher != null ? launcher.GetValue(weapon) : null;
+                    return "gl ammoCount=" + GetFieldString(gl, "ammoCount");
+                }
+                return "knife";
+            }
+            catch { return "err"; }
+        }
+
+        private static WeaponType RuntimeNameToWeaponType(string runtime)
+        {
+            if (runtime == "Deagle") return WeaponType.Deagle;
+            if (runtime == "M67") return WeaponType.M67;
+            if (runtime == "M87T") return WeaponType.M87T;
+            if (runtime == "MP5KA4") return WeaponType.MP5KA4;
+            if (runtime == "RPG") return WeaponType.RPG;
+            if (runtime == "STW-25") return WeaponType.STW_25;
+            if (runtime == "BallisticKnife") return WeaponType.BallisticKnife;
+            if (runtime == "Blaser R93") return WeaponType.AWP;
+            if (runtime == "G36K") return WeaponType.G36K;
+            if (runtime == "GLOCK21") return WeaponType.GLOCK21;
+            if (runtime == "MP5KA5") return WeaponType.MP5KA5;
+            if (runtime == "UZI") return WeaponType.UZI;
+            if (runtime == "MilkBomb") return WeaponType.MilkBomb;
+            if (runtime == "M249") return WeaponType.M249;
+            if (runtime == "CandyRifle") return WeaponType.CandyRifle;
+            if (runtime == "ChristmasSniper") return WeaponType.ChristmasSniper;
+            if (runtime == "GingerbreadBomb") return WeaponType.GingerbreadBomb;
+            if (runtime == "GingerbreadKnife") return WeaponType.GingerbreadKnife;
+            if (runtime == "SantaGun") return WeaponType.SantaGun;
+            if (runtime == "AUG") return WeaponType.AUG;
+            if (runtime == "M3") return WeaponType.M3;
+            if (runtime == "M134") return WeaponType.M134;
+            if (runtime == "G36K1") return WeaponType.G36K1;
+            if (runtime == "RAZER") return WeaponType.RAZER;
+            if (runtime == "FRF2") return WeaponType.FRF2;
+            if (runtime == "M1Carbine") return WeaponType.M1Carbine;
+            if (runtime == "MiniCannon") return WeaponType.MiniCannon;
+            if (runtime == "TeslaP1") return WeaponType.TeslaP1;
+            return WeaponType.Deagle;
         }
 
         private void AddInventoryWeapon(string runtimeName)
@@ -2148,6 +2647,7 @@ namespace CNRZombieMod
                         SetIntField(gl, "ammoCount", Mathf.Max(1, Mathf.CeilToInt(baseReserve * reserveMult)));
                     }
                 }
+                RefillBowAmmoContainer(weapon, runtime, slot, reserveMult);
 
                 FieldInfo noBullets = weapon.GetType().GetField("noBullets", f);
                 FieldInfo reloadFlag = weapon.GetType().GetField("reloadFlag", f);
@@ -2158,6 +2658,23 @@ namespace CNRZombieMod
                 ZombieModEntry.Log("ZombieWeaponAmmo: " + runtime + " star=" + star + " magMult=" + magMult.ToString("F2") + " reserveMult=" + reserveMult.ToString("F2"));
             }
             catch (Exception ex) { ZombieModEntry.Log("RefillWeaponAmmo err: " + ex.Message); }
+        }
+
+        private void RefillBowAmmoContainer(object weapon, string runtime, string slot, float reserveMult)
+        {
+            try
+            {
+                BindingFlags f = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                FieldInfo bowField = weapon.GetType().GetField("bow", f);
+                object bow = bowField != null ? bowField.GetValue(weapon) : null;
+                if (bow == null) return;
+                int baseClip, baseReserve;
+                bool knownBase = TryGetZombieBaseAmmo(runtime, out baseClip, out baseReserve);
+                int fallback = string.Equals(slot, "grenade", StringComparison.OrdinalIgnoreCase) ? 3 : 100;
+                int reserve = knownBase ? baseReserve : fallback;
+                SetIntField(bow, "ammoCount", Mathf.Max(1, Mathf.CeilToInt(reserve * reserveMult)));
+            }
+            catch (Exception ex) { ZombieModEntry.Log("RefillBowAmmoContainer err: " + ex.Message); }
         }
 
         private void StartZombieMode(Vector3 origin)
@@ -3324,9 +3841,23 @@ namespace CNRZombieMod
 
         private void KillZombie(byte id, GameObject go, string attackerId)
         {
+            Vector3 dropPos = Vector3.zero;
+            bool haveDropPos = false;
             ZombieDriver drv;
             if (_drivers.TryGetValue(id, out drv))
+            {
+                if (drv != null)
+                {
+                    dropPos = drv.transform.position + Vector3.up * 0.25f;
+                    haveDropPos = true;
+                }
                 _drivers.Remove(id);
+            }
+            if (!haveDropPos && go != null)
+            {
+                dropPos = go.transform.position + Vector3.up * 0.25f;
+                haveDropPos = true;
+            }
             _zombieHealth.Remove(id);
             _zombieVariant.Remove(id);
             _zombieLastAttacker.Remove(id);
@@ -3347,6 +3878,7 @@ namespace CNRZombieMod
             {
                 _points += award;
                 AddLocalZombieKillStat("KillZombie");
+                if (haveDropPos) CNRMods.CNRPerkSystem.TrySpawnKillDrops(dropPos);
                 ShowModeMessage("+" + award + " ZOMBIE KILL", 1.5f);
             }
             ZombieModEntry.Log("ZombieKilled: id=" + id + " round=" + _round +
@@ -3780,7 +4312,13 @@ namespace CNRZombieMod
                 bool authority = IsMasterClientNow();
                 var ht = ExtractZombiePayload(ev);
                 if (ht == null) return;
+                if (!HasZombieEventPayload(ht)) return;
                 MarkZombieSessionActive();
+
+                if (ht.ContainsKey("zpdmg"))
+                {
+                    ApplyZombiePlayerDamageEvent(ht["zpdmg"]);
+                }
 
                 if (authority)
                 {
@@ -3794,7 +4332,7 @@ namespace CNRZombieMod
                     }
                     if (ht.ContainsKey("kc"))
                     {
-                        ApplyKillCredit(ht["kc"]);
+                        ApplyKillCredit(ht["kc"], ht.ContainsKey("zk") ? ht["zk"] : null);
                     }
                     if (ht.ContainsKey("zk"))
                     {
@@ -3817,7 +4355,7 @@ namespace CNRZombieMod
                 }
                 if (ht.ContainsKey("kc"))
                 {
-                    ApplyKillCredit(ht["kc"]);
+                    ApplyKillCredit(ht["kc"], ht.ContainsKey("zk") ? ht["zk"] : null);
                 }
                 if (ht.ContainsKey("zpdown"))
                 {
@@ -3839,6 +4377,10 @@ namespace CNRZombieMod
                 {
                     ApplyGameOverSync(ht["gd"]);
                 }
+                if (ht.ContainsKey("zpdmg"))
+                {
+                    return;
+                }
                 if (!ht.ContainsKey("zd")) return;
                 float[] data = NormalizeFloatArray(ht["zd"]);
                 if (data == null) return;
@@ -3859,6 +4401,15 @@ namespace CNRZombieMod
                 _hud = "[ZombieMod] Client — " + count + " zombies synced";
             }
             catch (Exception ex) { ZombieModEntry.Log("OnZombieEvent err: " + ex.Message); }
+        }
+
+        private bool HasZombieEventPayload(System.Collections.Hashtable ht)
+        {
+            if (ht == null) return false;
+            return ht.ContainsKey("zh") || ht.ContainsKey("pd") || ht.ContainsKey("kc") ||
+                   ht.ContainsKey("zk") || ht.ContainsKey("zhp") || ht.ContainsKey("gd") ||
+                   ht.ContainsKey("zs") || ht.ContainsKey("zpdown") || ht.ContainsKey("zv") ||
+                   ht.ContainsKey("zd") || ht.ContainsKey("zpdmg");
         }
 
         private System.Collections.Hashtable ExtractZombiePayload(EventData ev)
@@ -4080,6 +4631,23 @@ namespace CNRZombieMod
             catch (Exception ex) { ZombieModEntry.Log("ApplyLocalPlayerDamage err: " + ex.Message); }
         }
 
+        private void ApplyZombiePlayerDamageEvent(object raw)
+        {
+            try
+            {
+                System.Collections.IDictionary dict = raw as System.Collections.IDictionary;
+                if (dict == null) return;
+                string peerId = dict.Contains("peer") ? Convert.ToString(dict["peer"]) : "";
+                int damage = dict.Contains("dmg") ? Convert.ToInt32(dict["dmg"]) : 0;
+                if (damage <= 0 || string.IsNullOrEmpty(peerId)) return;
+                string localId = GetLocalPeerId();
+                if (string.IsNullOrEmpty(localId) || !string.Equals(localId, peerId, StringComparison.Ordinal)) return;
+                ZombieModEntry.Log("ZombieDamageEvent: applying local dmg=" + damage + " peer=" + peerId);
+                ApplyLocalPlayerDamage(damage);
+            }
+            catch (Exception ex) { ZombieModEntry.Log("ApplyZombiePlayerDamageEvent err: " + ex.Message); }
+        }
+
         public void ApplyPlayerDamageToPeer(string peerId, int damage)
         {
             if (damage <= 0 || string.IsNullOrEmpty(peerId))
@@ -4095,17 +4663,13 @@ namespace CNRZombieMod
                     return;
                 }
 
-                Type mgrType = FindType("CNRMultiplayerManager");
-                if (mgrType == null) return;
-                FieldInfo fiMgr = mgrType.GetField("mInstance", BindingFlags.Public | BindingFlags.Static);
-                object mgrInst = fiMgr != null ? fiMgr.GetValue(null) : null;
-                if (mgrInst == null) return;
-                MethodInfo send = mgrType.GetMethod("sendMessageToPeersAdapt", BindingFlags.Public | BindingFlags.Instance);
-                if (send == null) return;
-                object[] peers = new object[] { peerId };
-                string payload = GetLocalPeerId() + "@" + damage.ToString();
-                send.Invoke(mgrInst, new object[] { peers, "ExampleCharacter", "DamageToPlayerStrOnline", payload, false });
-                ZombieModEntry.Log("ZombieDamagePeer: peer=" + peerId + " dmg=" + damage);
+                var ht = new System.Collections.Hashtable();
+                ht["zpdmg"] = new System.Collections.Hashtable {
+                    { "peer", peerId },
+                    { "dmg", damage }
+                };
+                RaiseZombieEvent(ht, true);
+                ZombieModEntry.Log("ZombieDamagePeerEvent: peer=" + peerId + " dmg=" + damage);
             }
             catch (Exception ex) { ZombieModEntry.Log("ApplyPlayerDamageToPeer err: " + ex.Message); }
         }
@@ -4408,7 +4972,7 @@ namespace CNRZombieMod
             return null;
         }
 
-        private void ApplyKillCredit(object raw)
+        private void ApplyKillCredit(object raw, object zombieRaw)
         {
             string peerId = raw as string;
             if (string.IsNullOrEmpty(peerId)) return;
@@ -4419,9 +4983,49 @@ namespace CNRZombieMod
                 int award = POINTS_PER_KILL + Mathf.Max(0, _round - 1) * POINTS_PER_ROUND_BONUS;
                 _points += award;
                 AddLocalZombieKillStat("KillCredit");
+                byte zombieId;
+                Vector3 dropPos;
+                if (TryParseZombieId(zombieRaw, out zombieId) && TryFindZombieDropPosition(zombieId, out dropPos))
+                    CNRMods.CNRPerkSystem.TrySpawnKillDrops(dropPos + Vector3.up * 0.25f);
                 ZombieModEntry.Log("KillCredit: awarded to local peer " + peerId + " points=" + _points);
             }
             catch (Exception ex) { ZombieModEntry.Log("ApplyKillCredit err: " + ex.Message); }
+        }
+
+        private static bool TryParseZombieId(object raw, out byte id)
+        {
+            id = 0;
+            if (raw == null) return false;
+            try
+            {
+                int n = Convert.ToInt32(raw);
+                if (n < 0 || n > 255) return false;
+                id = (byte)n;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        private bool TryFindZombieDropPosition(byte id, out Vector3 pos)
+        {
+            pos = Vector3.zero;
+            try
+            {
+                ZombieDriver drv;
+                if (_drivers.TryGetValue(id, out drv) && drv != null)
+                {
+                    pos = drv.transform.position;
+                    return true;
+                }
+                ZombieProxy proxy;
+                if (_proxies.TryGetValue(id, out proxy) && proxy != null)
+                {
+                    pos = proxy.transform.position;
+                    return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         private void AddLocalZombieKillStat(string reason)
@@ -4655,8 +5259,8 @@ namespace CNRZombieMod
                 _weaponUpgradeLocked = false;
                 _weaponUpgradeName = "";
                 _weaponUpgradeSlot = "";
-                if (_zombieInventoryReady) RebuildZombieInventory(_primarySlots[0]);
             }
+            RestoreVanillaInventory();
             _nearUpgradeObject = null;
             foreach (var kv in _drivers)
                 if (kv.Value != null && kv.Value.gameObject != null)

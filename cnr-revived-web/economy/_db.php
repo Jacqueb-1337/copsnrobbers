@@ -66,7 +66,9 @@ function init_schema(PDO $pdo): void {
             weapon_levels   TEXT    NOT NULL DEFAULT '{}',
             skin_unlocks    TEXT    NOT NULL DEFAULT '[]',
             armor_unlocks   TEXT    NOT NULL DEFAULT '[]',
+            perk_unlocks    TEXT    NOT NULL DEFAULT '[]',
             equipped_slots  TEXT    NOT NULL DEFAULT '[]',
+            equipped_perks  TEXT    NOT NULL DEFAULT '[]',
             current_skin    TEXT    NOT NULL DEFAULT 'Skin_1',
             current_armor   TEXT    NOT NULL DEFAULT '',
             updated_at      INTEGER NOT NULL DEFAULT 0
@@ -133,6 +135,8 @@ function init_schema(PDO $pdo): void {
     try { $pdo->exec("ALTER TABLE content_items ADD COLUMN thumbnail_hash TEXT NOT NULL DEFAULT ''"); } catch (Exception $e) {}
     try { $pdo->exec("ALTER TABLE player_mail ADD COLUMN spins INTEGER NOT NULL DEFAULT 0"); } catch (Exception $e) {}
     try { $pdo->exec("ALTER TABLE wheel_spins ADD COLUMN bonus_spins INTEGER NOT NULL DEFAULT 0"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE account_progression ADD COLUMN perk_unlocks TEXT NOT NULL DEFAULT '[]'"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE account_progression ADD COLUMN equipped_perks TEXT NOT NULL DEFAULT '[]'"); } catch (Exception $e) {}
 }
 
 function account_stats(PDO $pdo, string $account_id): array {
@@ -153,9 +157,11 @@ function account_stats(PDO $pdo, string $account_id): array {
         $exp = (int)$prog['exp'];
         $skins = json_decode($prog['skin_unlocks'] ?: '[]', true) ?: [];
         $armors = json_decode($prog['armor_unlocks'] ?: '[]', true) ?: [];
+        $perks = json_decode(($prog['perk_unlocks'] ?? '') ?: '[]', true) ?: [];
         $weapons = json_decode($prog['weapon_levels'] ?: '{}', true) ?: [];
         $owned += count(array_unique(array_filter($skins, 'is_string')));
         $owned += count(array_unique(array_filter($armors, 'is_string')));
+        $owned += count(array_unique(array_filter($perks, 'is_string')));
         foreach ($weapons as $lvl) {
             if ((int)$lvl > 0) $owned++;
         }
@@ -207,6 +213,8 @@ function merge_account_into(PDO $pdo, string $source, string $target): void {
         $source_skins = json_decode($source_prog['skin_unlocks'] ?: '[]', true) ?: [];
         $target_armors = json_decode($target_prog['armor_unlocks'] ?: '[]', true) ?: [];
         $source_armors = json_decode($source_prog['armor_unlocks'] ?: '[]', true) ?: [];
+        $target_perks = json_decode(($target_prog['perk_unlocks'] ?? '') ?: '[]', true) ?: [];
+        $source_perks = json_decode(($source_prog['perk_unlocks'] ?? '') ?: '[]', true) ?: [];
         $merged_skins = array_values(array_unique(array_merge(
             array_filter($target_skins, 'is_string'),
             array_filter($source_skins, 'is_string')
@@ -215,16 +223,22 @@ function merge_account_into(PDO $pdo, string $source, string $target): void {
             array_filter($target_armors, 'is_string'),
             array_filter($source_armors, 'is_string')
         )));
+        $merged_perks = array_values(array_unique(array_merge(
+            array_filter($target_perks, 'is_string'),
+            array_filter($source_perks, 'is_string')
+        )));
 
         $target_updated = (int)$target_prog['updated_at'];
         $source_updated = (int)$source_prog['updated_at'];
         if ($source_updated > $target_updated) {
             $equipped = $source_prog['equipped_slots'];
+            $equipped_perks = $source_prog['equipped_perks'] ?? '[]';
             $skin = $source_prog['current_skin'];
             $armor = $source_prog['current_armor'];
             $updated = $source_updated;
         } else {
             $equipped = $target_prog['equipped_slots'];
+            $equipped_perks = $target_prog['equipped_perks'] ?? '[]';
             $skin = $target_prog['current_skin'];
             $armor = $target_prog['current_armor'];
             $updated = $target_updated;
@@ -233,7 +247,8 @@ function merge_account_into(PDO $pdo, string $source, string $target): void {
         $pdo->prepare("
             UPDATE account_progression
                SET level=?, exp=?, weapon_levels=?, skin_unlocks=?, armor_unlocks=?,
-                   equipped_slots=?, current_skin=?, current_armor=?, updated_at=?
+                   perk_unlocks=?, equipped_slots=?, equipped_perks=?,
+                   current_skin=?, current_armor=?, updated_at=?
              WHERE account_id=?
         ")->execute([
             max((int)$target_prog['level'], (int)$source_prog['level']),
@@ -241,7 +256,9 @@ function merge_account_into(PDO $pdo, string $source, string $target): void {
             json_encode($target_wl),
             json_encode($merged_skins),
             json_encode($merged_armors),
+            json_encode($merged_perks),
             $equipped,
+            $equipped_perks,
             $skin,
             $armor,
             $updated,
@@ -302,8 +319,13 @@ function response_account_payload(PDO $pdo, array $account, string $token): arra
     foreach ((json_decode($prog['armor_unlocks'] ?: '[]', true) ?: []) as $a) {
         if (preg_match('/^[A-Za-z0-9_]{1,32}$/', $a)) $resp['au_' . $a] = 1;
     }
+    foreach ((json_decode(($prog['perk_unlocks'] ?? '') ?: '[]', true) ?: []) as $p) {
+        if (preg_match('/^[A-Za-z0-9_]{1,32}$/', $p)) $resp['pu_' . $p] = 1;
+    }
     $equipped = json_decode($prog['equipped_slots'] ?: '[]', true) ?: [];
     for ($i = 0; $i < 8; $i++) $resp['eq_' . ($i + 1)] = $equipped[$i] ?? '';
+    $equipped_perks = json_decode(($prog['equipped_perks'] ?? '') ?: '[]', true) ?: [];
+    for ($i = 0; $i < 3; $i++) $resp['perk_slot_' . ($i + 1)] = $equipped_perks[$i] ?? '';
     return $resp;
 }
 

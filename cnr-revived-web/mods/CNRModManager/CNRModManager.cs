@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.6.0";
+        public  const string Version        = "1.6.2";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -337,14 +337,13 @@ namespace CNRModManager
         private void Start()
         {
             _scene = Application.loadedLevelName ?? "";
-            if (_scene == "MainMenu") PatchMenu();
             LoadRepoList();
-            // Silent background fetch on startup to detect available updates
+            if (_scene == "MainMenu") PatchMenu();
+            // Silent background fetch on startup to detect available updates.
+            // PatchMenu may already have started this, so route through the
+            // guarded fetch path instead of starting a second coroutine.
             if (!_autoFetchDone && _repos.Count > 0)
-            {
-                _autoFetchDone = true;
-                StartCoroutine(FetchBrowse(_repos[0]));
-            }
+                StartFetchBrowse();
         }
 
         private void OnLevelWasLoaded(int level)
@@ -525,7 +524,7 @@ namespace CNRModManager
             _swipeDragging = false;
             _statusMsg  = "";
             RefreshInstalledMods();
-            if (_tab == 1 && _browseMods.Count == 0 && !_browseFetching)
+            if ((_tab == 0 || _tab == 1) && _browseMods.Count == 0 && !_browseFetching)
                 StartFetchBrowse();
         }
 
@@ -613,12 +612,13 @@ namespace CNRModManager
         {
             if (_browseFetching) return;
             string repoUrl = _repos.Count > 0 ? _repos[0] : ModManagerEntry.DefaultRepoUrl;
+            _autoFetchDone = true;
+            _browseFetching = true;
             StartCoroutine(FetchBrowse(repoUrl));
         }
 
         private IEnumerator FetchBrowse(string url)
         {
-            _browseFetching = true;
             _browseStatus   = "Fetching...";
             _browseMods.Clear();
             ModManagerEntry.Log("FetchBrowse: " + url);
@@ -636,6 +636,8 @@ namespace CNRModManager
                 yield break;
             }
             ParseRepoJson(www.text);
+            if (_statusMsg == "Refreshing installed mods and update info...")
+                _statusMsg = "";
         }
 
         private void ParseRepoJson(string json)
@@ -649,6 +651,11 @@ namespace CNRModManager
                 if (arrStart < 0 || arrEnd <= arrStart) { _browseStatus = "Invalid repo format"; return; }
                 string arr = json.Substring(arrStart + 1, arrEnd - arrStart - 1);
                 var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int existing = 0; existing < _browseMods.Count; existing++)
+                {
+                    if (!string.IsNullOrEmpty(_browseMods[existing].filename))
+                        seenFiles.Add(_browseMods[existing].filename);
+                }
 
                 int depth = 0, objStart = -1;
                 for (int i = 0; i < arr.Length; i++)
@@ -1218,7 +1225,7 @@ namespace CNRModManager
                 if (GUI.Button(new Rect(winX + tabW * i, tabY, tabW, tabH), tabNames[i], tabSt))
                 {
                     if (_tab != i) { _tab = i; _scroll = Vector2.zero; _statusMsg = ""; _detailModIdx = -1; }
-                    if (_tab == 1 && _browseMods.Count == 0 && !_browseFetching)
+                    if ((_tab == 0 || _tab == 1) && _browseMods.Count == 0 && !_browseFetching)
                         StartFetchBrowse();
                 }
             }
@@ -1328,8 +1335,24 @@ namespace CNRModManager
             GUILayout.Space(4f);
             if (GUILayout.Button("Refresh", MakeBtnStyle(12, new Color(0.5f, 0.8f, 0.5f)),
                 GUILayout.Height(24f), GUILayout.Width(80f)))
+            {
                 RefreshInstalledMods();
+                if (!_browseFetching)
+                {
+                    _browseMods.Clear();
+                    _browseStatus = "";
+                    _statusMsg = "Refreshing installed mods and update info...";
+                    StartFetchBrowse();
+                }
+            }
             GUILayout.Space(6f);
+
+            if (_browseFetching)
+            {
+                GUILayout.Label("Checking repo for updates...",
+                    MakeLabelStyle(12, new Color(0.7f, 0.9f, 1f)));
+                GUILayout.Space(4f);
+            }
 
             if (_installedMods.Count == 0)
             {

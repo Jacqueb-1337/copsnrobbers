@@ -31,7 +31,7 @@ namespace CNRMods
         public static bool   IsMaster      = false;  // set by RedirectHook.OnEnteredRoom so MapLoader can pick team spawn
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "4.1.3";
+        public const  string Version = "4.1.30";
 
         // -- Mod version registry ? every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -53,6 +53,7 @@ namespace CNRMods
 
         private static bool _loaded = false;
         internal static readonly Queue<string> _pendingJoinPeerIds = new Queue<string>();
+        internal static readonly HashSet<string> _pendingJoinPeerIdSet = new HashSet<string>();
         internal static bool _gameKitJoinHookInstalled = false;
 
         // -- CNR event system ---------------------------------------------------
@@ -288,6 +289,176 @@ namespace CNRMods
             return nick;
         }
 
+        internal static bool IsResolvedPlayerName(string nick)
+        {
+            if (string.IsNullOrEmpty(nick)) return false;
+            string trimmed = nick.Trim();
+            if (trimmed.Length == 0) return false;
+            if (trimmed == "PlayerX" || trimmed == "New Player") return false;
+            return true;
+        }
+
+        internal static void QueueJoinPeerId(string peerId)
+        {
+            if (string.IsNullOrEmpty(peerId)) return;
+            int numericPeerId;
+            if (int.TryParse(peerId, out numericPeerId) && numericPeerId <= 0) return;
+            lock (_pendingJoinPeerIds)
+            {
+                if (_pendingJoinPeerIdSet.Contains(peerId)) return;
+                _pendingJoinPeerIds.Enqueue(peerId);
+                _pendingJoinPeerIdSet.Add(peerId);
+            }
+        }
+
+        internal static bool IsPlaceholderJoinMessage(string msg)
+        {
+            if (string.IsNullOrEmpty(msg)) return false;
+            return msg.IndexOf("New Player", StringComparison.OrdinalIgnoreCase) >= 0
+                && msg.IndexOf("Connected", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static bool IsTypedCnrMessage(string msg)
+        {
+            if (string.IsNullOrEmpty(msg)) return false;
+            int at = msg.IndexOf('@');
+            if (at <= 0) return false;
+            int msgType;
+            return int.TryParse(msg.Substring(0, at), out msgType);
+        }
+
+        internal static bool IsUnsafePlainJoinMessage(string msg)
+        {
+            if (string.IsNullOrEmpty(msg)) return false;
+            if (IsTypedCnrMessage(msg)) return false;
+            return msg.IndexOf("Connected", StringComparison.OrdinalIgnoreCase) >= 0
+                || msg.IndexOf("Disconnected", StringComparison.OrdinalIgnoreCase) >= 0
+                || msg.IndexOf("Enter Game", StringComparison.OrdinalIgnoreCase) >= 0
+                || msg.IndexOf("Leave Game", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static bool HasConnectMessage(System.Collections.IList msgs, string nick)
+        {
+            if (msgs == null || string.IsNullOrEmpty(nick)) return false;
+            string needle = nick + " Connected!";
+            for (int i = 0; i < msgs.Count; i++)
+            {
+                string msg = msgs[i] as string;
+                if (!string.IsNullOrEmpty(msg) && msg.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+            return false;
+        }
+
+        private static string ExtractJoinPeerId(string msg)
+        {
+            if (string.IsNullOrEmpty(msg)) return null;
+            Match m = Regex.Match(msg, @"New Player\s*\(\s*id-(-?\d+)\s*\)", RegexOptions.IgnoreCase);
+            if (m.Success) return m.Groups[1].Value;
+            m = Regex.Match(msg, @"New Player\s*\(\s*(-?\d+)\s*\)", RegexOptions.IgnoreCase);
+            if (m.Success) return m.Groups[1].Value;
+            return null;
+        }
+
+        internal static void SuppressUnresolvedJoinPlaceholders()
+        {
+            try
+            {
+                Type[] mgrTypes = new Type[2];
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (mgrTypes[0] == null) mgrTypes[0] = asm.GetType("CRMultiplayerManager");
+                    if (mgrTypes[1] == null) mgrTypes[1] = asm.GetType("CNRMultiplayerManager");
+                    if (mgrTypes[0] != null && mgrTypes[1] != null) break;
+                }
+
+                foreach (Type mgrType in mgrTypes)
+                {
+                    if (mgrType == null) continue;
+                    FieldInfo instField = mgrType.GetField("mInstance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (instField == null) continue;
+                    object mgr = instField.GetValue(null);
+                    if (mgr == null) continue;
+                    FieldInfo msgField = mgrType.GetField("mMessageList", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (msgField == null) continue;
+                    var msgs = msgField.GetValue(mgr) as System.Collections.IList;
+                    if (msgs == null) continue;
+
+                    bool removedAny = false;
+                    for (int i = msgs.Count - 1; i >= 0; i--)
+                    {
+                        string msg = msgs[i] as string;
+                        if (IsPlaceholderJoinMessage(msg))
+                        {
+                            string peerId = ExtractJoinPeerId(msg);
+                            if (!string.IsNullOrEmpty(peerId)) QueueJoinPeerId(peerId);
+                            msgs.RemoveAt(i);
+                            removedAny = true;
+                            continue;
+                        }
+                        if (IsUnsafePlainJoinMessage(msg))
+                        {
+                            msgs.RemoveAt(i);
+                            removedAny = true;
+                        }
+                    }
+                    if (removedAny) ClearVisibleJoinPlaceholderHudLines();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("SuppressUnresolvedJoinPlaceholders error: " + ex.Message);
+            }
+        }
+
+        private static void ClearVisibleJoinPlaceholderHudLines()
+        {
+            try
+            {
+                Type uiDataReaderType = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    uiDataReaderType = asm.GetType("UIDataReader");
+                    if (uiDataReaderType != null) break;
+                }
+                if (uiDataReaderType == null) return;
+
+                UnityEngine.Object[] readers = UnityEngine.Object.FindObjectsOfType(uiDataReaderType);
+                if (readers == null) return;
+                BindingFlags f = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                FieldInfo linesField = uiDataReaderType.GetField("fpsMsgLineCacheList", f);
+                FieldInfo countsField = uiDataReaderType.GetField("fpsMsgCountList", f);
+                if (linesField == null) return;
+
+                for (int r = 0; r < readers.Length; r++)
+                {
+                    object reader = readers[r];
+                    string[] lines = linesField.GetValue(reader) as string[];
+                    int[] counts = countsField != null ? countsField.GetValue(reader) as int[] : null;
+                    if (lines == null) continue;
+                    bool changed = false;
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        if (!IsPlaceholderJoinMessage(lines[i]) && !IsUnsafePlainJoinMessage(lines[i])) continue;
+                        lines[i] = string.Empty;
+                        if (counts != null && i < counts.Length) counts[i] = 0;
+                        changed = true;
+                    }
+                    if (!changed) continue;
+                    Component c = reader as Component;
+                    if (c != null)
+                    {
+                        UILabel lbl = c.GetComponent<UILabel>();
+                        if (lbl != null && (IsPlaceholderJoinMessage(lbl.text) || IsUnsafePlainJoinMessage(lbl.text))) lbl.text = string.Empty;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("ClearVisibleJoinPlaceholderHudLines error: " + ex.Message);
+            }
+        }
+
         // Replace the generic join feed once the real nickname has arrived.
         public static void FixJoinFeedNames()
         {
@@ -339,8 +510,8 @@ namespace CNRMods
 
                         string nick = ResolvePeerName(mgrType, mgr, peerId, others);
                         Log("FixJoinFeedNames: resolved nick='" + (nick ?? "null") + "'");
-                        if (string.IsNullOrEmpty(nick) || nick == "PlayerX" || nick == "New Player") continue;
-                        msgs[i] = nick + " Connected!";
+                        if (!IsResolvedPlayerName(nick)) continue;
+                        msgs[i] = FormatSystemMessage(mgrType, mgr, nick + " Connected!");
                         Log("FixJoinFeedNames: rewrote msg to '" + msgs[i] + "'");
                     }
                 }
@@ -349,6 +520,34 @@ namespace CNRMods
             {
                 Log("FixJoinFeedNames error: " + ex.Message);
             }
+        }
+
+        internal static string FormatSystemMessage(Type mgrType, object mgr, string text)
+        {
+            if (mgrType != null && mgr != null)
+            {
+                try
+                {
+                    MethodInfo parse = mgrType.GetMethod("ParseSendingMsgWithType",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (parse != null)
+                    {
+                        ParameterInfo[] ps = parse.GetParameters();
+                        if (ps != null && ps.Length >= 2 && ps[0].ParameterType.IsEnum)
+                        {
+                            object system = Enum.ToObject(ps[0].ParameterType, 3);
+                            object typed = parse.Invoke(mgr, new object[] { system, text });
+                            string s = typed as string;
+                            if (!string.IsNullOrEmpty(s)) return s;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log("FormatSystemMessage error: " + ex.Message);
+                }
+            }
+            return "3@0@" + text;
         }
 
         public static void Load()
@@ -371,11 +570,16 @@ namespace CNRMods
                 go.AddComponent<PackHook>();
                 go.AddComponent<SpeedHook>();
                 go.AddComponent<RegenHook>();
+                go.AddComponent<CNRXpRewardHook>();
                 go.AddComponent<QuickHandsHook>();
                 go.AddComponent<AmmoReserveHook>();
                 go.AddComponent<RapidFireHook>();
+                go.AddComponent<FireStatusSanitizerHook>();
                 go.AddComponent<NimbleHook>();
                 go.AddComponent<HitRegHook>();
+                go.AddComponent<HitMarkerHud>();
+                go.AddComponent<AimAssistHook>();
+                go.AddComponent<CNRSinglePlayerAIHook>();
                 go.AddComponent<FastVisualSyncHook>();
                 go.AddComponent<CNRPreJoinGate>();
                 GameObject.DontDestroyOnLoad(go);
@@ -656,6 +860,7 @@ namespace CNRMods
                 {
                     bool isNew = !PlayerVersions.ContainsKey(senderId);
                     PlayerVersions[senderId] = ver;
+                    ModEntry.QueueJoinPeerId(senderId.ToString());
                     if (isNew)
                     {
                         NeedMapBroadcast = true;   // master: re-broadcast mapUrl+version+skin
@@ -905,7 +1110,7 @@ namespace CNRMods
             payload[4] = mgr.myPlayerCharacterBody.rotation.eulerAngles.y;
             payload[5] = mgr.myPlayerCharacterGun.rotation.eulerAngles.x;
             payload[6] = speed;
-            payload[7] = (float)((int)mgr.myPlayerInfo.mStatus);
+            payload[7] = (float)((int)FireStatusSanitizerHook.GetOutboundStatus(mgr.myPlayerInfo.mStatus, speed));
             payload[8] = (float)((int)mgr.myPlayerInfo.mWeaponType);
             payload[9] = velocity.x;
             payload[10] = velocity.y;
@@ -1637,10 +1842,7 @@ namespace CNRMods
         {
             try
             {
-                lock (ModEntry._pendingJoinPeerIds)
-                {
-                    ModEntry._pendingJoinPeerIds.Enqueue(peerId);
-                }
+                ModEntry.QueueJoinPeerId(peerId);
                 ModEntry.Log("OnGameKitPeerConnected queued peerId=" + peerId);
             }
             catch (Exception ex)
@@ -1653,22 +1855,32 @@ namespace CNRMods
         {
             try
             {
-                while (true)
+                ModEntry.SuppressUnresolvedJoinPlaceholders();
+
+                int count = 0;
+                lock (ModEntry._pendingJoinPeerIds)
+                    count = ModEntry._pendingJoinPeerIds.Count;
+
+                for (int n = 0; n < count; n++)
                 {
                     string peerId = null;
                     lock (ModEntry._pendingJoinPeerIds)
                     {
                         if (ModEntry._pendingJoinPeerIds.Count == 0) break;
-                        peerId = ModEntry._pendingJoinPeerIds.Peek();
+                        peerId = ModEntry._pendingJoinPeerIds.Dequeue();
                     }
 
                     bool fixedOne = TryRewriteJoinMessage(peerId);
-                    if (!fixedOne) break;
-
                     lock (ModEntry._pendingJoinPeerIds)
                     {
-                        if (ModEntry._pendingJoinPeerIds.Count > 0 && ModEntry._pendingJoinPeerIds.Peek() == peerId)
-                            ModEntry._pendingJoinPeerIds.Dequeue();
+                        if (fixedOne)
+                        {
+                            ModEntry._pendingJoinPeerIdSet.Remove(peerId);
+                        }
+                        else
+                        {
+                            ModEntry._pendingJoinPeerIds.Enqueue(peerId);
+                        }
                     }
                 }
             }
@@ -1698,26 +1910,28 @@ namespace CNRMods
                 FieldInfo otherField = mgrType.GetField("otherPlayersInfoList", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (msgField == null || otherField == null) continue;
 
-                var msgs = msgField.GetValue(mgr) as List<string>;
+                var msgs = msgField.GetValue(mgr) as System.Collections.IList;
                 var others = otherField.GetValue(mgr) as System.Array;
                 if (msgs == null || others == null) continue;
 
                 string nick = ModEntry.ResolvePeerName(mgrType, mgr, peerId, others);
-                if (string.IsNullOrEmpty(nick) || nick == "PlayerX" || nick == "New Player") return false;
+                if (!ModEntry.IsResolvedPlayerName(nick)) return false;
 
                 for (int i = 0; i < msgs.Count; i++)
                 {
-                    string msg = msgs[i];
+                    string msg = msgs[i] as string;
                     if (string.IsNullOrEmpty(msg)) continue;
-                    if (msg == ("New Player(id-" + peerId + ") Connected!"))
+                    if (ModEntry.IsPlaceholderJoinMessage(msg) || ModEntry.IsUnsafePlainJoinMessage(msg))
                     {
-                        msgs[i] = nick + " Connected!";
-                        ModEntry.Log("TryRewriteJoinMessage: rewrote queued placeholder for peerId=" + peerId + " to '" + msgs[i] + "'");
-                        return true;
+                        msgs.RemoveAt(i);
+                        i--;
                     }
                 }
 
-                msgs.Add(nick + " Connected!");
+                if (ModEntry.HasConnectMessage(msgs, nick))
+                    return true;
+
+                msgs.Add(ModEntry.FormatSystemMessage(mgrType, mgr, nick + " Connected!"));
                 ModEntry.Log("TryRewriteJoinMessage: appended corrected join message for peerId=" + peerId);
                 return true;
             }
@@ -4664,6 +4878,7 @@ namespace CNRMods
     {
         public const int MaxSlots = 3;
         private const string SlotPrefix = "CNR_PerkSlot_";
+        private const string OwnedPrefix = "CNR_PerkOwned_";
         private const float ToughenedDamageMult = 0.80f;
         private const float EvasiveBoostSeconds = 2.0f;
         private const float EvasiveSpeedMult = 1.18f;
@@ -4697,11 +4912,41 @@ namespace CNRMods
 
         public static void SetSlot(int slot, string id)
         {
+            SetSlot(slot, id, true);
+        }
+
+        public static void SetSlot(int slot, string id, bool requestSync)
+        {
             if (slot < 0 || slot >= MaxSlots) return;
             id = id ?? "";
             if (id.Length == 0) PlayerPrefs.DeleteKey(SlotPrefix + slot);
-            else PlayerPrefs.SetString(SlotPrefix + slot, id);
+            else
+            {
+                PlayerPrefs.SetString(SlotPrefix + slot, id);
+                SetOwned(id, true, false);
+            }
             PlayerPrefs.Save();
+            if (requestSync) EconomyHook.RequestProgressionSync();
+        }
+
+        public static bool IsOwned(string id)
+        {
+            if (string.IsNullOrEmpty(id) || Find(id) == null) return false;
+            return PlayerPrefs.GetInt(OwnedPrefix + id, 0) == 1 || SlotOf(id) >= 0;
+        }
+
+        public static void SetOwned(string id, bool owned)
+        {
+            SetOwned(id, owned, true);
+        }
+
+        public static void SetOwned(string id, bool owned, bool requestSync)
+        {
+            if (string.IsNullOrEmpty(id) || Find(id) == null) return;
+            if (owned) PlayerPrefs.SetInt(OwnedPrefix + id, 1);
+            else PlayerPrefs.DeleteKey(OwnedPrefix + id);
+            PlayerPrefs.Save();
+            if (requestSync) EconomyHook.RequestProgressionSync();
         }
 
         public static bool HasPerk(string id)
@@ -4736,12 +4981,44 @@ namespace CNRMods
 
         public static bool RollMedicDrop()
         {
-            return HasPerk("medic") && UnityEngine.Random.Range(0f, 1f) < 0.25f;
+            return HasPerk("medic") && UnityEngine.Random.Range(0f, 1f) < 0.50f;
         }
 
         public static bool RollScavengerDrop()
         {
-            return HasPerk("scavenger") && UnityEngine.Random.Range(0f, 1f) < 0.25f;
+            return HasPerk("scavenger") && UnityEngine.Random.Range(0f, 1f) < 0.50f;
+        }
+
+        public static void TrySpawnKillDrops(Vector3 pos)
+        {
+            try
+            {
+                bool medic = RollMedicDrop();
+                bool scavenger = RollScavengerDrop();
+                ModEntry.Log("PerkDrops: medic=" + medic + " scavenger=" + scavenger + " pos=" + pos);
+                if (medic) SpawnSyncedPerkPack(pos, true);
+                if (scavenger) SpawnSyncedPerkPack(pos, false);
+            }
+            catch (Exception ex) { ModEntry.Log("PerkDrops err: " + ex.Message); }
+        }
+
+        private static void SpawnSyncedPerkPack(Vector3 pos, bool isHealth)
+        {
+            if (PhotonNetwork.room == null) return;
+            if (CnrEventBus.PackState == null) return;
+
+            string prefix = isHealth ? "cnr_hp_" : "cnr_pk_";
+            int id = isHealth ? 9000 : 8000;
+            while (CnrEventBus.PackState.ContainsKey(prefix + id)) id++;
+
+            string value = pos.x.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," +
+                           pos.y.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," +
+                           pos.z.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var ht = new Hashtable();
+            ht[prefix + id] = value;
+            CnrEventBus.PackState[prefix + id] = value;
+            ModEntry.RaiseCnrEvent(ht);
+            ModEntry.Log("PerkDrops: spawned " + (isHealth ? "health" : "ammo") + " id=" + id);
         }
 
         public static bool RollTrackerHit()
@@ -4842,6 +5119,18 @@ namespace CNRMods
         {
             return GetSlot(0) + "," + GetSlot(1) + "," + GetSlot(2);
         }
+
+        public static string PackOwned()
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < All.Length; i++)
+            {
+                if (!IsOwned(All[i].Id)) continue;
+                if (sb.Length > 0) sb.Append(",");
+                sb.Append(All[i].Id);
+            }
+            return sb.ToString();
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -4883,6 +5172,151 @@ namespace CNRMods
             string scene = Application.loadedLevelName ?? "";
             if (scene.StartsWith("FreeRun", StringComparison.OrdinalIgnoreCase)) return true;
             return scene == "CRScene1";
+        }
+    }
+
+    public class CNRXpRewardHook : MonoBehaviour
+    {
+        private const int ExtraXpPerPlayerKill = 3;
+        private const int AchievementXpBase = 8;
+        private const int AchievementXpPerLevel = 4;
+        private const int AchievementXpMax = 80;
+        private const string BaselineKey = "CNR_XP_AchievementBaselineDone";
+        private const string PaidPrefix = "CNR_XP_AchievementPaid_";
+        private static readonly string[] RewardPrefixes = new string[]
+        {
+            "MaxDeadOneRound_Got_Lv_",
+            "TotalTwoKill_Got_Lv_",
+            "TotalFourKill_Got_Lv_",
+            "TotalSixKill_Got_Lv_",
+            "TotalEightKill_Got_Lv_",
+            "TotalGoldLikeKill_Got_Lv_",
+            "TotalHeadshotKill_Got_Lv_",
+            "LocalMultiplayerKill_Got_Lv_",
+            "WorldwideMultiplayerKill_Got_Lv_",
+            "TotalStrongholdModeVictory_Got_Lv_",
+            "CharacterLevel_Got_Lv_",
+            "TotalKillingCompetitionModeVictory_Got_Lv_"
+        };
+
+        private int _lastKillCount = -1;
+        private float _nextPoll = 0f;
+
+        void Start()
+        {
+            BaselineExistingAchievementRewards();
+        }
+
+        void OnLevelWasLoaded(int level)
+        {
+            _lastKillCount = -1;
+            _nextPoll = 0f;
+            BaselineExistingAchievementRewards();
+        }
+
+        void Update()
+        {
+            float now = Time.realtimeSinceStartup;
+            if (now < _nextPoll) return;
+            _nextPoll = now + 0.5f;
+
+            AwardKillDeltaXp();
+            AwardNewAchievementRewardXp();
+        }
+
+        private void AwardKillDeltaXp()
+        {
+            try
+            {
+                CNRMultiplayerManager mgr = CNRMultiplayerManager.mInstance;
+                if (mgr == null || mgr.myPlayerInfo == null)
+                {
+                    _lastKillCount = -1;
+                    return;
+                }
+
+                int kills = mgr.myPlayerInfo.mKillNum;
+                if (_lastKillCount < 0)
+                {
+                    _lastKillCount = kills;
+                    return;
+                }
+
+                if (kills < _lastKillCount)
+                {
+                    _lastKillCount = kills;
+                    return;
+                }
+
+                int delta = kills - _lastKillCount;
+                if (delta <= 0) return;
+                _lastKillCount = kills;
+
+                AwardXp(delta * ExtraXpPerPlayerKill, "kill bonus");
+            }
+            catch { }
+        }
+
+        private void BaselineExistingAchievementRewards()
+        {
+            try
+            {
+                if (PlayerPrefs.GetInt(BaselineKey, 0) == 1) return;
+
+                for (int i = 0; i < RewardPrefixes.Length; i++)
+                {
+                    for (int lv = 1; lv <= 32; lv++)
+                    {
+                        string key = RewardPrefixes[i] + lv.ToString();
+                        if (PlayerPrefs.GetInt(key, 0) == 1)
+                            PlayerPrefs.SetInt(PaidPrefix + key, 1);
+                    }
+                }
+
+                PlayerPrefs.SetInt(BaselineKey, 1);
+                PlayerPrefs.Save();
+                ModEntry.Log("XPReward: achievement reward baseline initialized");
+            }
+            catch { }
+        }
+
+        private void AwardNewAchievementRewardXp()
+        {
+            try
+            {
+                if (PlayerPrefs.GetInt(BaselineKey, 0) != 1) return;
+
+                for (int i = 0; i < RewardPrefixes.Length; i++)
+                {
+                    for (int lv = 1; lv <= 32; lv++)
+                    {
+                        string key = RewardPrefixes[i] + lv.ToString();
+                        if (PlayerPrefs.GetInt(key, 0) != 1) continue;
+                        string paidKey = PaidPrefix + key;
+                        if (PlayerPrefs.GetInt(paidKey, 0) == 1) continue;
+
+                        PlayerPrefs.SetInt(paidKey, 1);
+                        int xp = Mathf.Clamp(AchievementXpBase + lv * AchievementXpPerLevel, 0, AchievementXpMax);
+                        AwardXp(xp, "achievement reward " + key);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static void AwardXp(int xp, string reason)
+        {
+            if (xp <= 0) return;
+            try
+            {
+                GrowthManagerKit.AddCharacterExp(xp);
+                EconomyHook.RequestProgressionSync();
+                ModEntry.Log("XPReward: +" + xp.ToString() + " XP (" + reason + ")");
+            }
+            catch (Exception ex)
+            {
+                ModEntry.Log("XPReward error: " + ex.Message);
+            }
         }
     }
 
@@ -7560,6 +7994,16 @@ namespace CNRMods
             if (_ecoScene == "MainMenu") StartCoroutine(EcoPatchDelay());
         }
 
+        public static void RequestProgressionSync()
+        {
+            try
+            {
+                var hook = (EconomyHook)(object)FindObjectOfType(typeof(EconomyHook));
+                if (hook != null && Ready) hook.StartCoroutine(hook.SyncProgression());
+            }
+            catch { }
+        }
+
         // -- Reconnect (called from Update when not Ready) ---------------------
         private IEnumerator ReconnectAttempt()
         {
@@ -7793,6 +8237,8 @@ namespace CNRMods
                     if (PlayerPrefs.GetInt("Skin_" + i, 0) == 1) owned++;
                 foreach (string ak in _armorKeys)
                     if (PlayerPrefs.GetInt(ak, 0) == 1) owned++;
+                foreach (var perk in CNRPerkSystem.All)
+                    if (CNRPerkSystem.IsOwned(perk.Id)) owned++;
             }
             catch { }
             return owned;
@@ -7889,6 +8335,15 @@ namespace CNRMods
                 if (PlayerPrefs.GetInt(ak, 0) == 1)
                     sb.Append("&au_").Append(ak).Append("=1");
 
+            // Perk ownership/equipped slots.  Ownership is explicit, but equipped
+            // perks are also treated as owned so older installs do not lose them.
+            foreach (var perk in CNRPerkSystem.All)
+                if (CNRPerkSystem.IsOwned(perk.Id))
+                    sb.Append("&pu_").Append(perk.Id).Append("=1");
+
+            for (int i = 0; i < CNRPerkSystem.MaxSlots; i++)
+                sb.Append("&perk_slot_").Append(i + 1).Append("=").Append(Uri.EscapeDataString(CNRPerkSystem.GetSlot(i)));
+
             // Equipped slots
             for (int i = 1; i <= 8; i++)
             {
@@ -7963,6 +8418,21 @@ namespace CNRMods
             {
                 string val = ModEntry.ParseJsonValue(json, "au_" + ak);
                 if (val == "1") PlayerPrefs.SetInt(ak, 1);
+            }
+
+            // Perk unlocks/equipped slots are part of account progression.  Server
+            // response uses union for owned perks and last-write-wins for slots.
+            foreach (var perk in CNRPerkSystem.All)
+            {
+                string val = ModEntry.ParseJsonValue(json, "pu_" + perk.Id);
+                if (val == "1") CNRPerkSystem.SetOwned(perk.Id, true, false);
+            }
+            for (int i = 0; i < CNRPerkSystem.MaxSlots; i++)
+            {
+                string id = ModEntry.ParseJsonStringValue(json, "perk_slot_" + (i + 1));
+                if (string.IsNullOrEmpty(id)) id = ModEntry.ParseJsonValue(json, "perk_slot_" + (i + 1));
+                if (string.IsNullOrEmpty(id) || CNRPerkSystem.Find(id) != null)
+                    CNRPerkSystem.SetSlot(i, id, false);
             }
 
             // Equipped slots / current skin / current armor are NOT written back from the
@@ -16263,6 +16733,8 @@ namespace CNRMods
         private const string AP_PRE  = "cnr_pk_";
         private System.Collections.Generic.Dictionary<int, GameObject> _apDict =
             new System.Collections.Generic.Dictionary<int, GameObject>();
+        private System.Collections.Generic.Dictionary<int, float> _apPickupReadyAt =
+            new System.Collections.Generic.Dictionary<int, float>();
         private System.Collections.Generic.List<int> _apSpawnOrder =
             new System.Collections.Generic.List<int>();
         private int   _apNextId     = 1;
@@ -16275,6 +16747,8 @@ namespace CNRMods
         private const string HP_PRE  = "cnr_hp_";
         private System.Collections.Generic.Dictionary<int, GameObject> _hpDict =
             new System.Collections.Generic.Dictionary<int, GameObject>();
+        private System.Collections.Generic.Dictionary<int, float> _hpPickupReadyAt =
+            new System.Collections.Generic.Dictionary<int, float>();
         private System.Collections.Generic.List<int> _hpSpawnOrder =
             new System.Collections.Generic.List<int>();
         private int   _hpNextId     = 1;
@@ -16282,6 +16756,10 @@ namespace CNRMods
         private float _hpPollTimer  = 0f;
         private string _hpHudMsg    = "";
         private float _hpHudTimer   = 0f;
+        private const float PERK_PACK_PICKUP_GRACE = 2.0f;
+        private const float PERK_DROP_PICKUP_GRACE = 5.0f;
+        private const float DEATH_PICKUP_BLOCK_SECONDS = 8.0f;
+        private float _localPickupBlockedUntil = 0f;
 
         private bool InGameScene { get { return Array.IndexOf(GameScenes, Application.loadedLevelName) >= 0; } }
 
@@ -16348,11 +16826,10 @@ namespace CNRMods
 
         private void AmmoPackUpdate()
         {
-            if (!_packsEnabled) return;
             if (!InGameScene)   return;
             if (PhotonNetwork.room == null) return;
 
-            if (PhotonNetwork.isMasterClient)
+            if (_packsEnabled && PhotonNetwork.isMasterClient)
             {
                 _apSpawnTimer += Time.deltaTime;
                 if (_apSpawnTimer >= PACK_INTERVAL)
@@ -16369,7 +16846,7 @@ namespace CNRMods
                 AmmoPackSync();
             }
 
-            GameObject player = GameObject.FindWithTag("Player");
+            GameObject player = CanLocalPickupPacks() ? GameObject.FindWithTag("Player") : null;
             if (player != null && _apDict.Count > 0)
             {
                 Vector3 pp   = player.transform.position;
@@ -16378,6 +16855,8 @@ namespace CNRMods
                 foreach (var kv in _apDict)
                 {
                     if (kv.Value == null) continue;
+                    float readyAt;
+                    if (_apPickupReadyAt.TryGetValue(kv.Key, out readyAt) && Time.realtimeSinceStartup < readyAt) continue;
                     float d = Vector3.Distance(pp, kv.Value.transform.position);
                     if (d < best) { best = d; pick = kv.Key; }
                 }
@@ -16393,11 +16872,10 @@ namespace CNRMods
 
         private void HealthPackUpdate()
         {
-            if (!_packsEnabled) return;
             if (!InGameScene)   return;
             if (PhotonNetwork.room == null) return;
 
-            if (PhotonNetwork.isMasterClient)
+            if (_packsEnabled && PhotonNetwork.isMasterClient)
             {
                 _hpSpawnTimer += Time.deltaTime;
                 if (_hpSpawnTimer >= PACK_INTERVAL)
@@ -16414,7 +16892,7 @@ namespace CNRMods
                 HealthPackSync();
             }
 
-            GameObject player = GameObject.FindWithTag("Player");
+            GameObject player = CanLocalPickupPacks() ? GameObject.FindWithTag("Player") : null;
             if (player != null && _hpDict.Count > 0)
             {
                 Vector3 pp   = player.transform.position;
@@ -16423,6 +16901,8 @@ namespace CNRMods
                 foreach (var kv in _hpDict)
                 {
                     if (kv.Value == null) continue;
+                    float readyAt;
+                    if (_hpPickupReadyAt.TryGetValue(kv.Key, out readyAt) && Time.realtimeSinceStartup < readyAt) continue;
                     float d = Vector3.Distance(pp, kv.Value.transform.position);
                     if (d < best) { best = d; pick = kv.Key; }
                 }
@@ -16511,20 +16991,10 @@ namespace CNRMods
         {
             if (_hpDict.ContainsKey(id)) return;
 
-            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            go.name = "CNRHealthPack_" + id;
-            go.transform.position   = pos + new Vector3(0f, 0.3f, 0f);
-            go.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
-            go.transform.rotation   = Quaternion.Euler(30f, 45f, 0f);
-
-            Renderer rend = go.GetComponent<Renderer>();
-            if (rend != null)
-                rend.material.color = new Color(0.85f, 0.15f, 0.15f);
-
-            Collider col = go.GetComponent<Collider>();
-            if (col != null) UnityEngine.Object.Destroy(col);
+            GameObject go = CNRVanillaPickupVisuals.CreateHealthPack("CNRHealthPack_" + id, pos);
 
             _hpDict[id] = go;
+            _hpPickupReadyAt[id] = Time.realtimeSinceStartup + GetPickupGraceForId(id);
             _hpSpawnOrder.Add(id);
             ModEntry.Log("HealthPackLocal spawn id=" + id + " pos=" + pos);
         }
@@ -16537,11 +17007,13 @@ namespace CNRMods
                 if (go != null) UnityEngine.Object.Destroy(go);
                 _hpDict.Remove(id);
             }
+            _hpPickupReadyAt.Remove(id);
             _hpSpawnOrder.Remove(id);
         }
 
         private void HealthPackPickup(int id)
         {
+            if (!CanLocalPickupPacks()) return;
             DespawnHealthPackLocal(id);
 
             if (PhotonNetwork.room != null)
@@ -16657,20 +17129,10 @@ namespace CNRMods
         {
             if (_apDict.ContainsKey(id)) return;
 
-            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            go.name = "CNRAmmoPack_" + id;
-            go.transform.position   = pos + new Vector3(0f, 0.3f, 0f);
-            go.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
-            go.transform.rotation   = Quaternion.Euler(30f, 45f, 0f);
-
-            Renderer rend = go.GetComponent<Renderer>();
-            if (rend != null)
-                rend.material.color = new Color(1f, 0.75f, 0f);
-
-            Collider col = go.GetComponent<Collider>();
-            if (col != null) UnityEngine.Object.Destroy(col);
+            GameObject go = CNRVanillaPickupVisuals.CreateAmmoPack("CNRAmmoPack_" + id, pos);
 
             _apDict[id] = go;
+            _apPickupReadyAt[id] = Time.realtimeSinceStartup + GetPickupGraceForId(id);
             _apSpawnOrder.Add(id);
             ModEntry.Log("AmmoPackLocal spawn id=" + id + " pos=" + pos);
         }
@@ -16683,11 +17145,13 @@ namespace CNRMods
                 if (go != null) UnityEngine.Object.Destroy(go);
                 _apDict.Remove(id);
             }
+            _apPickupReadyAt.Remove(id);
             _apSpawnOrder.Remove(id);
         }
 
         private void AmmoPackPickup(int id)
         {
+            if (!CanLocalPickupPacks()) return;
             DespawnPackLocal(id);
 
             if (PhotonNetwork.room != null)
@@ -16812,6 +17276,7 @@ namespace CNRMods
             foreach (var kv in _apDict)
                 if (kv.Value != null) UnityEngine.Object.Destroy(kv.Value);
             _apDict.Clear();
+            _apPickupReadyAt.Clear();
             _apSpawnOrder.Clear();
             _apSpawnTimer = 0f;
             _apPollTimer  = 0f;
@@ -16821,11 +17286,43 @@ namespace CNRMods
             foreach (var kv in _hpDict)
                 if (kv.Value != null) UnityEngine.Object.Destroy(kv.Value);
             _hpDict.Clear();
+            _hpPickupReadyAt.Clear();
             _hpSpawnOrder.Clear();
             _hpSpawnTimer = 0f;
             _hpPollTimer  = 0f;
             _hpHudTimer   = 0f;
             _hpHudMsg     = "";
+            _localPickupBlockedUntil = 0f;
+        }
+
+        private float GetPickupGraceForId(int id)
+        {
+            return id >= 8000 ? PERK_DROP_PICKUP_GRACE : PERK_PACK_PICKUP_GRACE;
+        }
+
+        private bool CanLocalPickupPacks()
+        {
+            try
+            {
+                PlayerLogic logic = PlayerLogic.mInstance;
+                if (logic == null) return false;
+                if (logic.bDied || logic.blood <= 0 || logic.mStatus == PlayerStatus.dead)
+                {
+                    _localPickupBlockedUntil = Time.realtimeSinceStartup + DEATH_PICKUP_BLOCK_SECONDS;
+                    return false;
+                }
+                if (Time.realtimeSinceStartup < _localPickupBlockedUntil)
+                    return false;
+
+                CNRMultiplayerManager mgr = CNRMultiplayerManager.mInstance;
+                if (mgr != null && mgr.myPlayerInfo != null)
+                {
+                    if (mgr.myPlayerInfo.mConnnectStatus != ConnectStatus.InGame) return false;
+                    if (mgr.myPlayerInfo.mStatus == PlayerStatus.dead) return false;
+                }
+                return true;
+            }
+            catch { return false; }
         }
     }
 
@@ -17549,6 +18046,169 @@ namespace CNRMods
     }
 
     // -------------------------------------------------------------------------
+    //  FIRE STATUS SANITIZER
+    //  Vanilla PlayerLogic marks the player as firing by raycasting every touch
+    //  against a scene object named FireButton. Multi-touch can accidentally hit
+    //  that object and advertise PlayerStatus.fire even when WeaponScript never
+    //  actually fired. Keep damage/local firing alone, but prevent bogus fire
+    //  status from reaching remote visual/audio playback.
+    // -------------------------------------------------------------------------
+    public class FireStatusSanitizerHook : MonoBehaviour
+    {
+        private const float FireStatusGrace = 0.28f;
+        private const float WalkSpeedThreshold = 0.12f;
+        private static float _sharedLastConfirmedFireAt = -10f;
+
+        private System.Type _weaponManagerType;
+        private Component _weaponManager;
+        private FieldInfo _fiBPlayer;
+        private FieldInfo _fiSelectedWeapon;
+        private object _lastWeapon;
+        private FieldInfo _fiNextFireTime;
+        private float _lastNextFireTime = float.NaN;
+        private float _lastConfirmedFireAt = -10f;
+        private Vector3 _lastPlayerPos;
+        private float _lastPlayerSampleAt;
+        private bool _hasPlayerSample;
+        private float _lastLogAt;
+
+        void OnLevelWasLoaded(int level)
+        {
+            _weaponManager = null;
+            _lastWeapon = null;
+            _fiNextFireTime = null;
+            _lastNextFireTime = float.NaN;
+            _lastConfirmedFireAt = -10f;
+            _hasPlayerSample = false;
+        }
+
+        void LateUpdate()
+        {
+            try
+            {
+                ObserveWeaponFireTime();
+                SanitizeLocalFireStatus();
+            }
+            catch { }
+        }
+
+        private void ObserveWeaponFireTime()
+        {
+            object weapon = GetSelectedLocalWeapon();
+            if (weapon == null) return;
+            if (!object.ReferenceEquals(weapon, _lastWeapon))
+            {
+                _lastWeapon = weapon;
+                _fiNextFireTime = null;
+                _lastNextFireTime = float.NaN;
+            }
+
+            if (_fiNextFireTime == null)
+                _fiNextFireTime = weapon.GetType().GetField("nextFireTime", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (_fiNextFireTime == null) return;
+
+            float nextFireTime = Convert.ToSingle(_fiNextFireTime.GetValue(weapon));
+            if (!float.IsNaN(_lastNextFireTime) && nextFireTime > _lastNextFireTime + 0.001f)
+            {
+                _lastConfirmedFireAt = Time.realtimeSinceStartup;
+                _sharedLastConfirmedFireAt = _lastConfirmedFireAt;
+            }
+            _lastNextFireTime = nextFireTime;
+        }
+
+        private void SanitizeLocalFireStatus()
+        {
+            PlayerLogic logic = PlayerLogic.mInstance;
+            if (logic == null) return;
+            if (logic.mStatus != PlayerStatus.fire && logic.mStatus != PlayerStatus.knifeFire) return;
+            if (Time.realtimeSinceStartup - _lastConfirmedFireAt <= FireStatusGrace) return;
+
+            PlayerStatus replacement = EstimateMoving() ? PlayerStatus.walk : PlayerStatus.idle;
+            logic.mStatus = replacement;
+
+            CNRMultiplayerManager mgr = CNRMultiplayerManager.mInstance;
+            if (mgr != null && mgr.myPlayerInfo != null)
+                mgr.myPlayerInfo.mStatus = replacement;
+
+            if (Time.realtimeSinceStartup - _lastLogAt > 2f)
+            {
+                _lastLogAt = Time.realtimeSinceStartup;
+                ModEntry.Log("FireStatusSanitizer: suppressed unconfirmed local fire status -> " + replacement);
+            }
+        }
+
+        private bool EstimateMoving()
+        {
+            PlayerLogic logic = PlayerLogic.mInstance;
+            if (logic == null) return false;
+            Vector3 pos = ((Component)logic).transform.position;
+            float now = Time.realtimeSinceStartup;
+            bool moving = false;
+            if (_hasPlayerSample)
+            {
+                float dt = Mathf.Max(0.001f, now - _lastPlayerSampleAt);
+                Vector3 delta = pos - _lastPlayerPos;
+                delta.y = 0f;
+                moving = (delta.magnitude / dt) > WalkSpeedThreshold;
+            }
+            _lastPlayerPos = pos;
+            _lastPlayerSampleAt = now;
+            _hasPlayerSample = true;
+            return moving;
+        }
+
+        private object GetSelectedLocalWeapon()
+        {
+            if (_weaponManager == null || !((Component)_weaponManager).gameObject.activeInHierarchy)
+            {
+                _weaponManager = null;
+                if (_weaponManagerType == null) _weaponManagerType = ResolveGameType("WeaponManager");
+                if (_weaponManagerType == null) return null;
+
+                Component[] managers = (Component[])FindObjectsOfType(_weaponManagerType);
+                if (managers == null) return null;
+                for (int i = 0; i < managers.Length; i++)
+                {
+                    Component c = managers[i];
+                    if (c == null) continue;
+                    if (_fiBPlayer == null || _fiSelectedWeapon == null)
+                    {
+                        _fiBPlayer = c.GetType().GetField("bPlayer");
+                        _fiSelectedWeapon = c.GetType().GetField("SelectedWeapon");
+                    }
+                    if (_fiBPlayer == null || _fiSelectedWeapon == null) return null;
+                    object bPlayer = _fiBPlayer.GetValue(c);
+                    if (bPlayer is bool && (bool)bPlayer)
+                    {
+                        _weaponManager = c;
+                        break;
+                    }
+                }
+            }
+            return (_weaponManager != null && _fiSelectedWeapon != null) ? _fiSelectedWeapon.GetValue(_weaponManager) : null;
+        }
+
+        private System.Type ResolveGameType(string typeName)
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                System.Type t = asm.GetType(typeName);
+                if (t != null) return t;
+            }
+            return null;
+        }
+
+        public static PlayerStatus GetOutboundStatus(PlayerStatus raw, float speed)
+        {
+            if (raw != PlayerStatus.fire && raw != PlayerStatus.knifeFire)
+                return raw;
+            if (Time.realtimeSinceStartup - _sharedLastConfirmedFireAt <= FireStatusGrace)
+                return raw;
+            return speed > WalkSpeedThreshold ? PlayerStatus.walk : PlayerStatus.idle;
+        }
+    }
+
+    // -------------------------------------------------------------------------
     //  HITREG HOOK ? fixes the onlinePlayerTag bug that silently blocks bullet
     //  damage in multiplayer.
     //
@@ -17658,6 +18318,469 @@ namespace CNRMods
         }
     }
 
+    // --------------------------------------------------------------------------
+    //  HITMARKER HUD - local visual/audio feedback when a shot damages a player
+    // --------------------------------------------------------------------------
+    public class HitMarkerHud : MonoBehaviour
+    {
+        private const float VisibleTime = 0.20f;
+        private const float AudioMinGap = 0.045f;
+        private static HitMarkerHud _instance;
+        private static float _showUntil;
+        private static float _lastAudioAt = -99f;
+        private static Texture2D _white;
+        private AudioSource _audio;
+        private AudioClip _tickClip;
+
+        void Awake()
+        {
+            _instance = this;
+            _white = Texture2D.whiteTexture;
+            try
+            {
+                _audio = gameObject.AddComponent<AudioSource>();
+                _audio.playOnAwake = false;
+                _audio.volume = 1.0f;
+                _audio.priority = 0;
+                Force2DAudio(_audio);
+                _tickClip = BuildTickClip();
+            }
+            catch (Exception ex)
+            {
+                ModEntry.Log("HitMarkerHud Awake error: " + ex.Message);
+            }
+        }
+
+        public static void Trigger()
+        {
+            float now = Time.realtimeSinceStartup;
+            _showUntil = now + VisibleTime;
+
+            if (_instance == null || _instance._audio == null || _instance._tickClip == null) return;
+            if (now - _lastAudioAt < AudioMinGap) return;
+            _lastAudioAt = now;
+
+            try
+            {
+                for (int i = 0; i < 6; i++)
+                    _instance._audio.PlayOneShot(_instance._tickClip, 3.0f);
+            }
+            catch { }
+        }
+
+        private static void Force2DAudio(AudioSource src)
+        {
+            if (src == null) return;
+            try
+            {
+                Type t = src.GetType();
+                PropertyInfo p = t.GetProperty("panLevel", BindingFlags.Instance | BindingFlags.Public);
+                if (p != null && p.CanWrite) p.SetValue(src, 0f, null);
+                p = t.GetProperty("spatialBlend", BindingFlags.Instance | BindingFlags.Public);
+                if (p != null && p.CanWrite) p.SetValue(src, 0f, null);
+                p = t.GetProperty("bypassEffects", BindingFlags.Instance | BindingFlags.Public);
+                if (p != null && p.CanWrite) p.SetValue(src, true, null);
+                p = t.GetProperty("ignoreListenerVolume", BindingFlags.Instance | BindingFlags.Public);
+                if (p != null && p.CanWrite) p.SetValue(src, true, null);
+            }
+            catch { }
+        }
+
+        private static AudioClip BuildTickClip()
+        {
+            const int rate = 44100;
+            const int samples = 617; // 14 ms, short transient instead of a beep
+            float[] data = new float[samples];
+            uint seed = 0x1234abcd;
+            for (int i = 0; i < samples; i++)
+            {
+                float t = (float)i / (float)rate;
+                float env = 1f - ((float)i / (float)samples);
+                env *= env * env * env;
+                seed = seed * 1664525u + 1013904223u;
+                float noise = (((seed >> 16) & 0xffff) / 32768f) - 1f;
+                float snap = i < 8 ? ((i & 1) == 0 ? 1f : -1f) : 0f;
+                float click = Mathf.Sign(Mathf.Sin(2f * Mathf.PI * 7200f * t));
+                float lowCrack = Mathf.Sign(Mathf.Sin(2f * Mathf.PI * 1150f * t));
+                float s = snap * 1.45f + click * 0.78f + lowCrack * 0.35f + noise * 0.55f;
+                data[i] = Mathf.Clamp(s * env, -1f, 1f);
+            }
+            AudioClip clip = AudioClip.Create("CNR_HitMarker_Tick", samples, 1, rate, false, false);
+            clip.SetData(data, 0);
+            return clip;
+        }
+
+        void OnGUI()
+        {
+            float now = Time.realtimeSinceStartup;
+            if (now > _showUntil) return;
+
+            float a = Mathf.Clamp01((_showUntil - now) / VisibleTime);
+            float scale = Mathf.Clamp(Screen.height / 720f, 0.85f, 1.7f);
+            float cx = Screen.width * 0.5f;
+            float cy = Screen.height * 0.5f;
+            float len = 28f * scale;
+            float thick = Mathf.Max(4f, 4f * scale);
+            float gap = 18f * scale;
+
+            Color prev = GUI.color;
+            int prevDepth = GUI.depth;
+            GUI.depth = -10000;
+            GUI.color = new Color(0f, 0f, 0f, 0.55f * a);
+
+            GUI.DrawTexture(new Rect(cx - gap - len - 1f, cy - thick * 0.5f - 1f, len + 2f, thick + 2f), _white);
+            GUI.DrawTexture(new Rect(cx + gap - 1f,       cy - thick * 0.5f - 1f, len + 2f, thick + 2f), _white);
+            GUI.DrawTexture(new Rect(cx - thick * 0.5f - 1f, cy - gap - len - 1f, thick + 2f, len + 2f), _white);
+            GUI.DrawTexture(new Rect(cx - thick * 0.5f - 1f, cy + gap - 1f,       thick + 2f, len + 2f), _white);
+
+            GUI.color = new Color(1f, 1f, 1f, 1f * a);
+
+            GUI.DrawTexture(new Rect(cx - gap - len, cy - thick * 0.5f, len, thick), _white);
+            GUI.DrawTexture(new Rect(cx + gap,       cy - thick * 0.5f, len, thick), _white);
+            GUI.DrawTexture(new Rect(cx - thick * 0.5f, cy - gap - len, thick, len), _white);
+            GUI.DrawTexture(new Rect(cx - thick * 0.5f, cy + gap,       thick, len), _white);
+
+            GUI.color = prev;
+            GUI.depth = prevDepth;
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    //  AIM ASSIST - end-of-frame camera nudge toward enemies near crosshair
+    // --------------------------------------------------------------------------
+    public class AimAssistHook : MonoBehaviour
+    {
+        private const float AssistRadiusScreenFrac = 0.160f;
+        private const float MaxAssistDistance = 65f;
+        private const float MinLookInput = 0.04f;
+        private const float MaxYawDegPerSec = 92f;
+        private const float MaxPitchDegPerSec = 68f;
+        private const float BaseStrength = 0.22f;
+        private const float AssistSmoothHz = 12f;
+        private const float AssistReleaseHz = 18f;
+        private const float VerticalAimOffset = 1.15f;
+        private const float CacheInterval = 0.75f;
+
+        private MonoBehaviour _sliderotate;
+        private FieldInfo _fiRotationX;
+        private FieldInfo _fiRotationY;
+        private FieldInfo _fiMinimumY;
+        private FieldInfo _fiMaximumY;
+        private FieldInfo _fiCamTransform;
+        private Transform _camTransform;
+        private Camera _cam;
+        private float _nextCacheAt;
+        private float _smoothedYawStep;
+        private float _smoothedPitchStep;
+        private int _logBudget = 5;
+
+        private static readonly string[] AxisNames = new string[]
+        {
+            "Mouse X", "Mouse Y",
+            "Joystick Axis 3", "Joystick Axis 4",
+            "Joystick Axis 5", "Joystick Axis 6",
+            "Joystick Axis 7", "Joystick Axis 8",
+            "3rd axis", "4th axis", "5th axis", "6th axis"
+        };
+
+        IEnumerator Start()
+        {
+            while (true)
+            {
+                yield return new WaitForEndOfFrame();
+                try { ApplyAimAssist(); }
+                catch (Exception ex)
+                {
+                    if (_logBudget > 0)
+                    {
+                        _logBudget--;
+                        ModEntry.Log("AimAssist error: " + ex.Message);
+                    }
+                }
+            }
+        }
+
+        private void ApplyAimAssist()
+        {
+            if (PlayerPrefs.GetInt("CNRMod_AimAssist", 1) == 0) return;
+            if (!IsLocalPlayerInGame()) { ReleaseAssistSmoothing(); return; }
+            if (!HasLookInput()) { ReleaseAssistSmoothing(); return; }
+            if (!EnsureCameraRig()) { ReleaseAssistSmoothing(); return; }
+
+            Vector3 targetPoint;
+            float targetDistance;
+            if (!TryFindBestTarget(out targetPoint, out targetDistance)) { ReleaseAssistSmoothing(); return; }
+
+            Vector3 toTarget = targetPoint - _cam.transform.position;
+            if (toTarget.sqrMagnitude < 0.01f) { ReleaseAssistSmoothing(); return; }
+
+            Quaternion desiredRot = Quaternion.LookRotation(toTarget.normalized);
+            Vector3 desiredEuler = desiredRot.eulerAngles;
+            float currentYaw = _sliderotate.transform.localEulerAngles.y;
+            float currentPitch = NormalizeAngle(_cam.transform.eulerAngles.x);
+            float desiredPitch = NormalizeAngle(desiredEuler.x);
+
+            float yawDelta = Mathf.DeltaAngle(currentYaw, desiredEuler.y);
+            float pitchDelta = Mathf.DeltaAngle(currentPitch, desiredPitch);
+            float distanceScore = ScreenDistanceScore(targetPoint);
+            if (distanceScore <= 0f) { ReleaseAssistSmoothing(); return; }
+
+            float dt = Time.deltaTime;
+            if (dt <= 0f || dt > 0.05f) dt = 0.016f;
+            float curvedScore = SmoothCurve01(distanceScore);
+            float strength = BaseStrength * curvedScore * DistanceAssistMultiplier(targetDistance);
+            float yawStep = Mathf.Clamp(yawDelta, -MaxYawDegPerSec * dt * strength, MaxYawDegPerSec * dt * strength);
+            float pitchStep = Mathf.Clamp(pitchDelta, -MaxPitchDegPerSec * dt * strength, MaxPitchDegPerSec * dt * strength);
+
+            float blend = 1f - Mathf.Exp(-AssistSmoothHz * dt);
+            _smoothedYawStep = Mathf.Lerp(_smoothedYawStep, yawStep, blend);
+            _smoothedPitchStep = Mathf.Lerp(_smoothedPitchStep, pitchStep, blend);
+
+            if (Mathf.Abs(_smoothedYawStep) < 0.0005f && Mathf.Abs(_smoothedPitchStep) < 0.0005f) return;
+            ApplyCameraDelta(_smoothedYawStep, _smoothedPitchStep);
+        }
+
+        private void ReleaseAssistSmoothing()
+        {
+            float dt = Time.deltaTime;
+            if (dt <= 0f || dt > 0.05f) dt = 0.016f;
+            float blend = 1f - Mathf.Exp(-AssistReleaseHz * dt);
+            _smoothedYawStep = Mathf.Lerp(_smoothedYawStep, 0f, blend);
+            _smoothedPitchStep = Mathf.Lerp(_smoothedPitchStep, 0f, blend);
+        }
+
+        private bool IsLocalPlayerInGame()
+        {
+            CNRMultiplayerManager mgr = CNRMultiplayerManager.mInstance;
+            if (mgr == null || mgr.myPlayerInfo == null) return false;
+            if (mgr.myPlayerInfo.mConnnectStatus != ConnectStatus.InGame) return false;
+            if (mgr.myPlayerInfo.mStatus == PlayerStatus.dead) return false;
+            return true;
+        }
+
+        private bool HasLookInput()
+        {
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch t = Input.GetTouch(i);
+                if (t.phase != TouchPhase.Moved) continue;
+                if (t.position.x < Screen.width * 0.5f) continue;
+                if (t.position.y > Screen.height * 0.72f) continue;
+                if (t.deltaPosition.sqrMagnitude > 0.25f) return true;
+            }
+
+            for (int i = 0; i < AxisNames.Length; i++)
+            {
+                try
+                {
+                    float v = Input.GetAxisRaw(AxisNames[i]);
+                    if (Mathf.Abs(v) >= MinLookInput) return true;
+                }
+                catch { }
+            }
+
+            return false;
+        }
+
+        private bool EnsureCameraRig()
+        {
+            float now = Time.realtimeSinceStartup;
+            if (_sliderotate != null && _cam != null && _camTransform != null && now < _nextCacheAt)
+                return true;
+
+            _nextCacheAt = now + CacheInterval;
+            _sliderotate = null;
+            _cam = Camera.main;
+            if (_cam == null)
+            {
+                Camera[] cams = (Camera[])FindObjectsOfType(typeof(Camera));
+                for (int i = 0; i < cams.Length; i++)
+                {
+                    Camera c = cams[i];
+                    if (c == null || !c.enabled) continue;
+                    string n = c.gameObject.name.ToLowerInvariant();
+                    if (n.Contains("ui") || n.Contains("ngui") || n.Contains("menu")) continue;
+                    _cam = c;
+                    break;
+                }
+            }
+
+            UnityEngine.Object[] all = Resources.FindObjectsOfTypeAll(typeof(MonoBehaviour));
+            for (int i = 0; i < all.Length; i++)
+            {
+                MonoBehaviour mb = all[i] as MonoBehaviour;
+                if (mb == null) continue;
+                if (mb.GetType().Name != "Sliderotate") continue;
+                if (!mb.gameObject.activeInHierarchy || !((Behaviour)mb).enabled) continue;
+                _sliderotate = mb;
+                break;
+            }
+            if (_sliderotate == null) return false;
+
+            Type t = _sliderotate.GetType();
+            BindingFlags f = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            _fiRotationX = t.GetField("rotationX", f);
+            _fiRotationY = t.GetField("rotationY", f);
+            _fiMinimumY = t.GetField("minimumY", f);
+            _fiMaximumY = t.GetField("maximumY", f);
+            _fiCamTransform = t.GetField("cameratransform", f);
+            _camTransform = _fiCamTransform != null ? _fiCamTransform.GetValue(_sliderotate) as Transform : null;
+            if (_camTransform == null && _cam != null) _camTransform = _cam.transform;
+
+            if (_logBudget > 0)
+            {
+                _logBudget--;
+                ModEntry.Log("AimAssist cache: sr=" + _sliderotate.gameObject.name
+                    + " cam=" + (_cam != null ? _cam.gameObject.name : "null")
+                    + " camT=" + (_camTransform != null ? _camTransform.name : "null"));
+            }
+
+            return _cam != null && _camTransform != null && _fiRotationX != null && _fiRotationY != null;
+        }
+
+        private bool TryFindBestTarget(out Vector3 targetPoint, out float targetDistance)
+        {
+            targetPoint = Vector3.zero;
+            targetDistance = 0f;
+            if (_cam == null) return false;
+
+            float radius = Mathf.Clamp(Screen.height * AssistRadiusScreenFrac, 80f, 180f);
+            Vector2 center = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+            float bestScore = 0f;
+            NetPlayerController[] npcs = (NetPlayerController[])FindObjectsOfType(typeof(NetPlayerController));
+            for (int i = 0; i < npcs.Length; i++)
+            {
+                NetPlayerController npc = npcs[i];
+                if (npc == null || npc.pInfo == null) continue;
+                if (npc.pInfo.mStatus == PlayerStatus.dead) continue;
+                if (npc.pInfo.mConnnectStatus != ConnectStatus.InGame) continue;
+                if (string.IsNullOrEmpty(npc.pInfo.mId) || npc.pInfo.mId == "null") continue;
+                if (IsSameTeam(npc.pInfo.mId)) continue;
+
+                Vector3 p = GetTargetPoint(npc);
+                Vector3 sp = _cam.WorldToScreenPoint(p);
+                if (sp.z <= 0f) continue;
+                float dist3 = Vector3.Distance(_cam.transform.position, p);
+                if (dist3 > MaxAssistDistance) continue;
+
+                Vector2 s2 = new Vector2(sp.x, sp.y);
+                float screenDist = Vector2.Distance(s2, center);
+                if (screenDist > radius) continue;
+                if (!HasLineOfSight(npc.transform, p)) continue;
+
+            float centerScore = 1f - (screenDist / radius);
+                float distScore = DistanceAssistMultiplier(dist3);
+                float score = centerScore * distScore;
+                if (score <= bestScore) continue;
+                bestScore = score;
+                targetPoint = p;
+                targetDistance = dist3;
+            }
+
+            return bestScore > 0f;
+        }
+
+        private static float DistanceAssistMultiplier(float dist)
+        {
+            // Close fights need much more angular help; far targets should retain only a faint pull.
+            float t = Mathf.Clamp01(dist / MaxAssistDistance);
+            return Mathf.Lerp(2.35f, 0.09f, Mathf.Pow(t, 1.35f));
+        }
+
+        private Vector3 GetTargetPoint(NetPlayerController npc)
+        {
+            Renderer[] rs = npc.GetComponentsInChildren<Renderer>();
+            bool hasBounds = false;
+            Bounds b = new Bounds(npc.transform.position, Vector3.zero);
+            for (int i = 0; i < rs.Length; i++)
+            {
+                Renderer r = rs[i];
+                if (r == null || !r.enabled) continue;
+                if (!hasBounds)
+                {
+                    b = r.bounds;
+                    hasBounds = true;
+                }
+                else
+                {
+                    b.Encapsulate(r.bounds);
+                }
+            }
+            if (hasBounds)
+                return new Vector3(b.center.x, b.center.y + b.extents.y * 0.18f, b.center.z);
+            return npc.transform.position + Vector3.up * VerticalAimOffset;
+        }
+
+        private bool HasLineOfSight(Transform targetRoot, Vector3 targetPoint)
+        {
+            try
+            {
+                RaycastHit hit;
+                Vector3 origin = _cam.transform.position;
+                Vector3 dir = targetPoint - origin;
+                float dist = dir.magnitude;
+                if (dist <= 0.01f) return false;
+                if (!Physics.Raycast(origin, dir / dist, out hit, dist, -1)) return true;
+                Transform h = hit.transform;
+                while (h != null)
+                {
+                    if (h == targetRoot) return true;
+                    h = h.parent;
+                }
+                return false;
+            }
+            catch { return true; }
+        }
+
+        private bool IsSameTeam(string targetId)
+        {
+            try
+            {
+                CNRMultiplayerManager mgr = CNRMultiplayerManager.mInstance;
+                return mgr != null && mgr.CheckIfInOneTeam(targetId);
+            }
+            catch { return false; }
+        }
+
+        private float ScreenDistanceScore(Vector3 worldPoint)
+        {
+            Vector3 sp = _cam.WorldToScreenPoint(worldPoint);
+            if (sp.z <= 0f) return 0f;
+            float radius = Mathf.Clamp(Screen.height * AssistRadiusScreenFrac, 80f, 180f);
+            float d = Vector2.Distance(new Vector2(sp.x, sp.y), new Vector2(Screen.width * 0.5f, Screen.height * 0.5f));
+            if (d > radius) return 0f;
+            float x = 1f - (d / radius);
+            return x;
+        }
+
+        private static float SmoothCurve01(float x)
+        {
+            x = Mathf.Clamp01(x);
+            return x * x * (3f - 2f * x);
+        }
+
+        private void ApplyCameraDelta(float yawStep, float pitchStep)
+        {
+            float yaw = _sliderotate.transform.localEulerAngles.y + yawStep;
+            float rotY = _fiRotationY != null ? (float)_fiRotationY.GetValue(_sliderotate) : -NormalizeAngle(_camTransform.localEulerAngles.x);
+            float minY = _fiMinimumY != null ? (float)_fiMinimumY.GetValue(_sliderotate) : -35f;
+            float maxY = _fiMaximumY != null ? (float)_fiMaximumY.GetValue(_sliderotate) : 35f;
+            rotY = Mathf.Clamp(rotY - pitchStep, minY, maxY);
+
+            _sliderotate.transform.localEulerAngles = new Vector3(0f, yaw, 0f);
+            _camTransform.localEulerAngles = new Vector3(0f - rotY, 0f, 0f);
+            if (_fiRotationX != null) _fiRotationX.SetValue(_sliderotate, yaw);
+            if (_fiRotationY != null) _fiRotationY.SetValue(_sliderotate, rotY);
+        }
+
+        private static float NormalizeAngle(float angle)
+        {
+            while (angle > 180f) angle -= 360f;
+            while (angle < -180f) angle += 360f;
+            return angle;
+        }
+    }
+
     // -----------------------------------------------------------------------------
     //  HitRegRelay ? component added to each NetPlayerController GO.
     //
@@ -17720,6 +18843,8 @@ namespace CNRMods
                     ModEntry.Log("HitReg: OnDamaged early exit target null");
                     return;
                 }
+
+                HitMarkerHud.Trigger();
 
                 bool trackerOn = CNRPerkSystem.HasPerk("tracker");
                 ModEntry.Log("HitReg: tracker perk=" + trackerOn.ToString() + " shooter=" + shooter + " target=" + target);
@@ -18063,10 +19188,7 @@ namespace CNRMods
                     if (victim != null)
                     {
                         Vector3 dropPos = victim.mPosition + Vector3.up * 0.25f;
-                        if (CNRPerkSystem.RollMedicDrop())
-                            SpawnPerkPack(dropPos, true);
-                        if (CNRPerkSystem.RollScavengerDrop())
-                            SpawnPerkPack(dropPos, false);
+                        CNRPerkSystem.TrySpawnKillDrops(dropPos);
                     }
                 }
             }
@@ -18087,7 +19209,7 @@ namespace CNRMods
             if (PhotonNetwork.room == null) return;
             if (CnrEventBus.PackState == null) return;
 
-            string prefix = isHealth ? "cnr_hp_" : "cnr_ap_";
+            string prefix = isHealth ? "cnr_hp_" : "cnr_pk_";
             int id = isHealth ? 9000 : 8000;
             while (CnrEventBus.PackState.ContainsKey(prefix + id)) id++;
 

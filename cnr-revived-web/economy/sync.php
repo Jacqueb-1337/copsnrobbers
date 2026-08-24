@@ -14,6 +14,8 @@
 //   wl_<WeaponName>           — upgrade level for each weapon (e.g. wl_AK=5)
 //   su_Skin_<N>               — 1 if skin unlocked (e.g. su_Skin_1=1)
 //   au_<ArmorName>            — 1 if armor unlocked (e.g. au_BodyArmor_1=1)
+//   pu_<PerkId>               — 1 if perk purchased/unlocked
+//   perk_slot_1 … perk_slot_3 — equipped perk slots
 //   eq_1 … eq_8               — equipped weapon slots (string, blank = empty)
 //   current_skin              — CurSettedSkinName
 //   current_armor             — CurSettedArmorName
@@ -56,6 +58,20 @@ foreach ($_POST as $k => $v) {
     }
 }
 
+// Perk unlocks (pu_<id>=1 params)
+$client_perks = [];
+foreach ($_POST as $k => $v) {
+    if (preg_match('/^pu_([A-Za-z0-9_]{1,32})$/', $k, $m) && (int)$v === 1) {
+        $client_perks[] = $m[1];
+    }
+}
+
+// Equipped perk slots perk_slot_1 … perk_slot_3
+$client_equipped_perks = [];
+for ($i = 1; $i <= 3; $i++) {
+    $client_equipped_perks[] = trim($_POST['perk_slot_' . $i] ?? '');
+}
+
 // Equipped slots eq_1 … eq_8
 $client_equipped = [];
 for ($i = 1; $i <= 8; $i++) {
@@ -75,6 +91,7 @@ if (!$srv) {
     $srv = [
         'level' => 1, 'exp' => 0,
         'weapon_levels' => '{}', 'skin_unlocks' => '[]', 'armor_unlocks' => '[]',
+        'perk_unlocks' => '[]', 'equipped_perks' => '[]',
         'equipped_slots' => '[]', 'current_skin' => 'Skin_1', 'current_armor' => '',
         'updated_at' => 0,
     ];
@@ -83,6 +100,7 @@ if (!$srv) {
 $srv_wl     = json_decode($srv['weapon_levels'] ?: '{}', true) ?: [];
 $srv_skins  = json_decode($srv['skin_unlocks']  ?: '[]', true) ?: [];
 $srv_armors = json_decode($srv['armor_unlocks'] ?: '[]', true) ?: [];
+$srv_perks  = json_decode(($srv['perk_unlocks'] ?? '') ?: '[]', true) ?: [];
 $srv_updated = (int)$srv['updated_at'];
 
 // ── Merge ────────────────────────────────────────────────────────────────────
@@ -96,7 +114,7 @@ foreach ($client_wl as $wname => $wlevel) {
     $merged_wl[$wname] = max((int)($merged_wl[$wname] ?? 0), $wlevel);
 }
 
-// Unlocks: union (skins and armors can only be gained, never lost)
+// Unlocks: union (skins, armors, and perks can only be gained, never lost)
 $merged_skins  = array_values(array_unique(array_merge(
     array_filter($srv_skins,  'is_string'),
     array_filter($client_skins, 'is_string')
@@ -105,17 +123,23 @@ $merged_armors = array_values(array_unique(array_merge(
     array_filter($srv_armors,  'is_string'),
     array_filter($client_armors, 'is_string')
 )));
+$merged_perks = array_values(array_unique(array_merge(
+    array_filter($srv_perks,  'is_string'),
+    array_filter($client_perks, 'is_string')
+)));
 
 // Equipped / current: last-write-wins based on updated_at
 if ($client_updated_at >= $srv_updated) {
     // Client has the newer equipped state
     $merged_equipped  = $client_equipped;
+    $merged_equipped_perks = $client_equipped_perks;
     $merged_c_skin    = $client_c_skin  ?: $srv['current_skin'];
     $merged_c_armor   = $client_c_armor;
     $new_updated_at   = $client_updated_at;
 } else {
     // Server has the newer equipped state
     $merged_equipped  = json_decode($srv['equipped_slots'] ?: '[]', true) ?: [];
+    $merged_equipped_perks = json_decode(($srv['equipped_perks'] ?? '') ?: '[]', true) ?: [];
     $merged_c_skin    = $srv['current_skin'];
     $merged_c_armor   = $srv['current_armor'];
     $new_updated_at   = $srv_updated;
@@ -123,19 +147,23 @@ if ($client_updated_at >= $srv_updated) {
 
 // Pad equipped to 8 slots
 while (count($merged_equipped) < 8) $merged_equipped[] = '';
+while (count($merged_equipped_perks) < 3) $merged_equipped_perks[] = '';
 
 // ── Persist merged state ─────────────────────────────────────────────────────
 $pdo->prepare("
     UPDATE account_progression
        SET level=?, exp=?, weapon_levels=?, skin_unlocks=?, armor_unlocks=?,
-           equipped_slots=?, current_skin=?, current_armor=?, updated_at=?
+           perk_unlocks=?, equipped_slots=?, equipped_perks=?,
+           current_skin=?, current_armor=?, updated_at=?
      WHERE account_id=?
 ")->execute([
     $merged_level, $merged_exp,
     json_encode($merged_wl),
     json_encode($merged_skins),
     json_encode($merged_armors),
+    json_encode($merged_perks),
     json_encode($merged_equipped),
+    json_encode($merged_equipped_perks),
     $merged_c_skin, $merged_c_armor,
     $new_updated_at,
     $account_id,
@@ -164,8 +192,16 @@ foreach ($merged_armors as $a) {
     if (preg_match('/^[A-Za-z0-9_]{1,32}$/', $a)) $resp['au_' . $a] = 1;
 }
 
+foreach ($merged_perks as $p) {
+    if (preg_match('/^[A-Za-z0-9_]{1,32}$/', $p)) $resp['pu_' . $p] = 1;
+}
+
 for ($i = 0; $i < 8; $i++) {
     $resp['eq_' . ($i + 1)] = $merged_equipped[$i] ?? '';
+}
+
+for ($i = 0; $i < 3; $i++) {
+    $resp['perk_slot_' . ($i + 1)] = $merged_equipped_perks[$i] ?? '';
 }
 
 ok($resp);

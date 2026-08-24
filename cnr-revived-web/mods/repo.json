@@ -306,11 +306,146 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "4.1.3",
+      "latestVersion": "4.1.30",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.3.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.30.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "4.1.30",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.30.dll",
+          "changelog": "Restored aim assist behavior to the pre-distance-accounting camera nudge model."
+        },
+        {
+          "version": "4.1.29",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.29.dll",
+          "changelog": "Extended aim-assist distance falloff so it remains active across longer sightlines without full close-range strength."
+        },
+        {
+          "version": "4.1.28",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.28.dll",
+          "changelog": "Slightly increased aim-assist pull while preserving distance falloff."
+        },
+        {
+          "version": "4.1.27",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.27.dll",
+          "changelog": "Fixed unresolved join messages blocking the CNR HUD message queue and restored kill-feed display."
+        },
+        {
+          "version": "4.1.26",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.26.dll",
+          "changelog": "Improved XP progression with CNR kill XP bonuses and XP for newly claimed achievement rewards."
+        },
+        {
+          "version": "4.1.25",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.25.dll",
+          "changelog": "Adjusted aim assist to account for angular error so far targets with tiny camera deltas no longer get overpowered lock-on. Assist now follows only a distance and angle-scaled fraction of the remaining yaw/pitch error."
+        },
+        {
+          "version": "4.1.24",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.24.dll",
+          "changelog": "Smoothed aim assist correction with a curved screen-distance response. Fixed authority join feed handling so unresolved placeholder messages are not removed before a resolved player name can replace them."
+        },
+        {
+          "version": "4.1.23",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.23.dll",
+          "changelog": "Rebuild deploy current aim assist tuning"
+        },
+        {
+          "version": "4.1.22",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.22.dll",
+          "changelog": "Retune aim assist with strong close range and steep long range falloff"
+        },
+        {
+          "version": "4.1.21",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.21.dll",
+          "changelog": "Rebuild and publish distance-scaled aim assist tuning"
+        },
+        {
+          "version": "4.1.20",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.20.dll",
+          "changelog": "Scale aim assist strength down with distance"
+        },
+        {
+          "version": "4.1.19",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.19.dll",
+          "changelog": "Widen aim assist acquisition range and reduce pull strength"
+        },
+        {
+          "version": "4.1.18",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.18.dll",
+          "changelog": "Increase medic and scavenger drop chances and make hitmarker sound a sharper tick"
+        },
+        {
+          "version": "4.1.17",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.17.dll",
+          "changelog": "Rebuild and publish aim assist update"
+        },
+        {
+          "version": "4.1.16",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.16.dll",
+          "changelog": "Add camera-delta aim assist for enemies near crosshair"
+        },
+        {
+          "version": "4.1.15",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.15.dll",
+          "changelog": "Make hitmarker tick much louder and force 2D playback"
+        },
+        {
+          "version": "4.1.14",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.14.dll",
+          "changelog": "Increase hitmarker size and tick volume"
+        },
+        {
+          "version": "4.1.13",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.13.dll",
+          "changelog": "Add hitmarker crosshair ticks and tick sound on confirmed player hits"
+        },
+        {
+          "version": "4.1.12",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.12.dll",
+          "changelog": "Clear vanilla New Player join placeholders from HUD chat cache"
+        },
+        {
+          "version": "4.1.11",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.11.dll",
+          "changelog": "Fix zombie weapon selection activation path and add fire-state diagnostics"
+        },
+        {
+          "version": "4.1.10",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.10.dll",
+          "changelog": "Suppress false remote fire status from multitouch and prevent dead players from auto-picking perk drop packs"
+        },
+        {
+          "version": "4.1.9",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.9.dll",
+          "changelog": "Suppress unresolved vanilla New Player join placeholders until real names resolve"
+        },
+        {
+          "version": "4.1.8",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.8.dll",
+          "changelog": "Add pickup grace period for Medic and Scavenger perk pack drops so they do not disappear immediately after spawning."
+        },
+        {
+          "version": "4.1.7",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.7.dll",
+          "changelog": "Fix zombie gun ammo/fire state, wall-buy hologram fallback visuals, and built-in map object sync for joining clients."
+        },
+        {
+          "version": "4.1.6",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.6.dll",
+          "changelog": "Fix zombie-mode leakage, Snow zombie map config lookup, zombie inventory enforcement, and Medic/Scavenger pack drops."
+        },
+        {
+          "version": "4.1.5",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.5.dll",
+          "changelog": "Sync owned and equipped perks through account progression."
+        },
+        {
+          "version": "4.1.4",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.4.dll",
+          "changelog": "Fixed zombies mode leaking into regular rooms by moving zombie Photon events off fast visual sync, validating zombie payloads, restoring vanilla weapon inventory after zombies, and routing zombie player damage through a targeted mod event."
+        },
         {
           "version": "4.1.3",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.3.dll",
@@ -2398,12 +2533,17 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.6.1",
+      "latestVersion": "1.6.2",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.6.1.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.6.2.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.6.2",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.6.2.dll",
+          "changelog": "Installed tab refresh now checks repo update metadata instead of only rescanning local DLLs."
+        },
         {
           "version": "1.6.1",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.6.1.dll",
@@ -2575,11 +2715,16 @@
       "id": "CNRZombieMod",
       "name": "CNR Zombie Mod",
       "description": "Multiplayer zombie test mod. Master client spawns real game enemies (SingleEnemyAI + model + animations + pathfinding) and syncs their positions via Photon event 198. All clients see the same NPCs moving in real time.",
-      "latestVersion": "0.8.53",
+      "latestVersion": "0.8.54",
       "filename": "CNRZombieMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.53.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.54.dll",
       "latestOnly": false,
       "versions": [
+        {
+          "version": "0.8.54",
+          "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.54.dll",
+          "changelog": "Move standalone zombie sync off Photon event 198 and ignore non-zombie fast visual packets; route zombie player damage through targeted zombie events."
+        },
         {
           "version": "0.8.53",
           "url": "https://play.jacqueb.me/mods/CNRZombieMod/CNRZombieMod-0.8.53.dll",

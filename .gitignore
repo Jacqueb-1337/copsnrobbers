@@ -9,3 +9,22 @@
 *.keystore
 *.jks
 *.cache
+# Local MCP / reverse-engineering scratch output
+/.mcp-*
+/.mcp_*
+/_ref*/
+/test_apk/_*
+/test_apk/*reference*
+
+# Root-level build/test transcripts
+/*.log
+/*.status
+/*.done
+
+# Generated build output
+**/obj/
+**/bin/Debug/
+/APK_Build_Active/bin/csc_build/
+/APK_Build_DEFUNCT/bin/csc_build/
+**/mod_loader/compiled/
+**/snapshot_before_hook_move/

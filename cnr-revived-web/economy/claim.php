@@ -92,9 +92,17 @@ if ($prog) {
     foreach ($armors as $a) {
         if (preg_match('/^[A-Za-z0-9_]{1,32}$/', $a)) $resp['au_' . $a] = 1;
     }
+    $perks = json_decode(($prog['perk_unlocks'] ?? '') ?: '[]', true) ?: [];
+    foreach ($perks as $p) {
+        if (preg_match('/^[A-Za-z0-9_]{1,32}$/', $p)) $resp['pu_' . $p] = 1;
+    }
     $equipped = json_decode($prog['equipped_slots'] ?: '[]', true) ?: [];
     for ($i = 0; $i < 8; $i++) {
         $resp['eq_' . ($i + 1)] = $equipped[$i] ?? '';
+    }
+    $equipped_perks = json_decode(($prog['equipped_perks'] ?? '') ?: '[]', true) ?: [];
+    for ($i = 0; $i < 3; $i++) {
+        $resp['perk_slot_' . ($i + 1)] = $equipped_perks[$i] ?? '';
     }
     $resp['level']        = (int)$prog['level'];
     $resp['exp']          = (int)$prog['exp'];
@@ -104,4 +112,3 @@ if ($prog) {
 }
 
 ok($resp);
-

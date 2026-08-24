@@ -133,6 +133,19 @@ namespace CNRMods
                 return false;
             }
 
+            string canonicalMode = GetRoomProp(room, CNRMatchMetadata.PropGameMode);
+            if (!string.IsNullOrEmpty(canonicalMode))
+            {
+                int expectedMode = CNRMatchMetadata.ExpectedVanillaMode(canonicalMode);
+                int advertisedMode;
+                string rawMode = GetRoomProp(room, "mode");
+                if (expectedMode < 0 || !int.TryParse(rawMode, out advertisedMode) || advertisedMode != expectedMode)
+                {
+                    reason = "Bad match state. Gamemode metadata does not match the authoritative room mode.";
+                    return false;
+                }
+            }
+
             string req = GetRoomProp(room, "cnrr");
             if (!ValidateRequirements(req, out reason))
             {
@@ -282,7 +295,13 @@ namespace CNRMods
             for (int i = 0; i < infos.Length; i++)
             {
                 CNRRoomInfo info = infos[i];
-                if (info == null || info.gameObject.GetComponent<CNRRoomJoinGuard>() != null) continue;
+                if (info == null) continue;
+
+                CNRRoomCardMetadata card = info.gameObject.GetComponent<CNRRoomCardMetadata>();
+                if (card == null) card = info.gameObject.AddComponent<CNRRoomCardMetadata>();
+                card.Original = info;
+
+                if (info.gameObject.GetComponent<CNRRoomJoinGuard>() != null) continue;
                 CNRRoomJoinGuard guard = info.gameObject.AddComponent<CNRRoomJoinGuard>();
                 guard.Gate = this;
                 guard.Original = info;
@@ -357,7 +376,25 @@ namespace CNRMods
                 props["cnrm"] = ModEntry.Version;
                 props["cnra"] = CNRCompatibility.GetLocalAppVersion();
                 props["cnrr"] = CNRCompatibility.PackRequirements();
-                string[] lobbyProps = new string[] { "map", "version", "mode", "cnrp", "cnrm", "cnra", "cnrr" };
+
+                string canonicalMode = CNRMatchMetadata.GetSelectedGameMode(msd);
+                props[CNRMatchMetadata.PropGameMode] = canonicalMode;
+                props[CNRMatchMetadata.PropMapId] = "";
+                props[CNRMatchMetadata.PropMapName] = "";
+                props[CNRMatchMetadata.PropMapThumb] = "";
+                string mapId, mapDisplayName, mapThumbUrl;
+                if (CNRMatchMetadata.TryGetSelectedCustomMap(out mapId, out mapDisplayName, out mapThumbUrl))
+                {
+                    props[CNRMatchMetadata.PropMapId] = mapId;
+                    props[CNRMatchMetadata.PropMapName] = mapDisplayName;
+                    props[CNRMatchMetadata.PropMapThumb] = mapThumbUrl;
+                }
+
+                string[] lobbyProps = new string[] {
+                    "map", "version", "mode", "cnrp", "cnrm", "cnra", "cnrr",
+                    CNRMatchMetadata.PropGameMode, CNRMatchMetadata.PropMapId,
+                    CNRMatchMetadata.PropMapName, CNRMatchMetadata.PropMapThumb
+                };
 
                 int maxPlayers = 8;
                 FieldInfo maxFi = typeof(MultiplayerSelectDirector).GetField("mWWMaxPlayersNum", BindingFlags.Instance | BindingFlags.NonPublic);

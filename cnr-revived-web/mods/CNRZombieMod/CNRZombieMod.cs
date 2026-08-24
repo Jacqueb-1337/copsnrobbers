@@ -16,7 +16,7 @@
 //                         singleton crashes in multiplayer scenes).  ZombieDriver
 //                         replaces it with a simple chase-only state for the test.
 //
-// Sync: master client broadcasts enemy transforms via Photon event 198 (float[]
+// Sync: master client broadcasts enemy transforms via Photon event 196 (float[]
 //   packed: id,x,y,z,rotY per enemy) every ~0.3 s.
 //   Non-master clients receive and lerp their local copies (AI disabled).
 //
@@ -37,8 +37,8 @@ namespace CNRZombieMod
     // ─────────────────────────────────────────────────────────────────────────
     public class ZombieModEntry
     {
-        public const  string Version = "0.8.53";
-        public const  byte   ZOMBIE_EVENT = 198;   // Photon custom event code (≠ CNRMod's 199)
+        public const  string Version = "0.8.54";
+        public const  byte   ZOMBIE_EVENT = 196;   // Photon custom event code; do not collide with CNRMod fast visual sync 198
         private const string LogPath      = "/storage/emulated/0/CNRMods/zombiemod.log";
         private static readonly string[] QuietPrefixes = new string[] {
             "ZAI[", "NavDebug", "EnemyRendererDump", "DumpEnemy3", "TryCachePrefab",
@@ -2043,6 +2043,10 @@ namespace CNRZombieMod
                     " keys=" + DumpKeys(ev.Parameters) + " " + GetAuthorityDebug());
                 var ht = ExtractZombiePayload(ev);
                 if (ht == null) return;
+                if (!HasZombieEventPayload(ht)) return;
+
+                if (ht.ContainsKey("zpdmg"))
+                    ApplyZombiePlayerDamageEvent(ht["zpdmg"]);
 
                 if (authority)
                 {
@@ -2100,6 +2104,7 @@ namespace CNRZombieMod
                     ZombieModEntry.Log("OnZombieEvent: client zhp=" + DumpValue(ht["zhp"]));
                     ApplyZombieHealthSync(NormalizeFloatArray(ht["zhp"]));
                 }
+                if (ht.ContainsKey("zpdmg")) return;
                 if (!ht.ContainsKey("zd")) return;
                 float[] data = NormalizeFloatArray(ht["zd"]);
                 if (data == null) return;
@@ -2120,6 +2125,15 @@ namespace CNRZombieMod
                 _hud = "[ZombieMod] Client — " + count + " zombies synced";
             }
             catch (Exception ex) { ZombieModEntry.Log("OnZombieEvent err: " + ex.Message); }
+        }
+
+        private bool HasZombieEventPayload(System.Collections.Hashtable ht)
+        {
+            if (ht == null) return false;
+            return ht.ContainsKey("zh") || ht.ContainsKey("pd") || ht.ContainsKey("kc") ||
+                   ht.ContainsKey("zk") || ht.ContainsKey("zhp") || ht.ContainsKey("gd") ||
+                   ht.ContainsKey("zs") || ht.ContainsKey("zpdown") || ht.ContainsKey("zv") ||
+                   ht.ContainsKey("zd") || ht.ContainsKey("zpdmg");
         }
 
         private System.Collections.Hashtable ExtractZombiePayload(EventData ev)
@@ -2341,6 +2355,23 @@ namespace CNRZombieMod
             catch (Exception ex) { ZombieModEntry.Log("ApplyLocalPlayerDamage err: " + ex.Message); }
         }
 
+        private void ApplyZombiePlayerDamageEvent(object raw)
+        {
+            try
+            {
+                System.Collections.IDictionary dict = raw as System.Collections.IDictionary;
+                if (dict == null) return;
+                string peerId = dict.Contains("peer") ? Convert.ToString(dict["peer"]) : "";
+                int damage = dict.Contains("dmg") ? Convert.ToInt32(dict["dmg"]) : 0;
+                if (damage <= 0 || string.IsNullOrEmpty(peerId)) return;
+                string localId = GetLocalPeerId();
+                if (string.IsNullOrEmpty(localId) || !string.Equals(localId, peerId, StringComparison.Ordinal)) return;
+                ZombieModEntry.Log("ZombieDamageEvent: applying local dmg=" + damage + " peer=" + peerId);
+                ApplyLocalPlayerDamage(damage);
+            }
+            catch (Exception ex) { ZombieModEntry.Log("ApplyZombiePlayerDamageEvent err: " + ex.Message); }
+        }
+
         public void ApplyPlayerDamageToPeer(string peerId, int damage)
         {
             if (damage <= 0 || string.IsNullOrEmpty(peerId))
@@ -2356,17 +2387,13 @@ namespace CNRZombieMod
                     return;
                 }
 
-                Type mgrType = FindType("CNRMultiplayerManager");
-                if (mgrType == null) return;
-                FieldInfo fiMgr = mgrType.GetField("mInstance", BindingFlags.Public | BindingFlags.Static);
-                object mgrInst = fiMgr != null ? fiMgr.GetValue(null) : null;
-                if (mgrInst == null) return;
-                MethodInfo send = mgrType.GetMethod("sendMessageToPeersAdapt", BindingFlags.Public | BindingFlags.Instance);
-                if (send == null) return;
-                object[] peers = new object[] { peerId };
-                string payload = GetLocalPeerId() + "@" + damage.ToString();
-                send.Invoke(mgrInst, new object[] { peers, "ExampleCharacter", "DamageToPlayerStrOnline", payload, false });
-                ZombieModEntry.Log("ZombieDamagePeer: peer=" + peerId + " dmg=" + damage);
+                var ht = new System.Collections.Hashtable();
+                ht["zpdmg"] = new System.Collections.Hashtable {
+                    { "peer", peerId },
+                    { "dmg", damage }
+                };
+                RaiseZombieEvent(ht, true);
+                ZombieModEntry.Log("ZombieDamagePeerEvent: peer=" + peerId + " dmg=" + damage);
             }
             catch (Exception ex) { ZombieModEntry.Log("ApplyPlayerDamageToPeer err: " + ex.Message); }
         }

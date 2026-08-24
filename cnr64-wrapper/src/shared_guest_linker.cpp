@@ -2555,6 +2555,9 @@ public:
             jit->SetCpsr(launch.cpsr);
             jit->SetFpscr(launch.fpscr);
 
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+            const auto worker_quantum_begin = std::chrono::steady_clock::now();
+#endif
             int slices_run = 0;
             std::size_t cooperative_yields = 0;
             for (; slices_run < max_slices_per_thread; ++slices_run) {
@@ -2612,6 +2615,18 @@ public:
                 jit->ClearHalt();
             }
 
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+            const std::uint64_t worker_quantum_us = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - worker_quantum_begin).count());
+            if (worker_quantum_us >= 100000u) {
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7PERF slow-worker thread=%u elapsed_us=%llu slices=%d yields=%zu pc=0x%08x lr=0x%08x last=%s",
+                                    current_thread_id_, static_cast<unsigned long long>(worker_quantum_us),
+                                    slices_run, cooperative_yields, jit->Regs()[15], jit->Regs()[14],
+                                    call_trace.empty() ? "-" : call_trace.back().c_str());
+            }
+#endif
             launch.regs = jit->Regs();
             launch.ext_regs = jit->ExtRegs();
             launch.cpsr = jit->Cpsr();
