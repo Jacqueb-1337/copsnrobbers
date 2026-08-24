@@ -359,15 +359,41 @@ if ($NoCommit) {
 if ($doCommit) {
     Push-Location (Join-Path $RootDir "cnr-revived-web")
     try {
-        $relCs   = $selectedCs.FullName.Substring((Join-Path $RootDir "cnr-revived-web\").Length)
         $relDll  = "mods/$ModBase/$ModBase.dll"
         $relVDll = "mods/$ModBase/$ModBase-$newVer.dll"
+
+        # Stage the exact same active source set used to create the versioned source
+        # snapshots above. Previously this block staged only $selectedCs (the primary
+        # ModBase.cs), leaving modified secondary sources out of the release commit.
+        $activeSourcePaths = @()
         $versionedSourcePaths = @()
-        foreach ($src in (Get-ChildItem -Path $ModCsDir -File -Filter "*.cs" | Where-Object { $_.Name -notmatch '-\d+\.\d+\.\d+\.cs$' } | Sort-Object Name)) {
+        foreach ($src in $modSourceFiles) {
+            $activeSourcePaths += ("mods/$ModBase/" + $src.Name)
             $versionedSourcePaths += ("mods/$ModBase/" + $src.BaseName + "-" + $newVer + ".cs")
         }
 
-        git add $relCs $relDll $relVDll @versionedSourcePaths "mods/repo.json" "mods/repo2.json" 2>&1 | Out-Null
+        $releasePaths = @($activeSourcePaths) + @($versionedSourcePaths) + @(
+            $relDll,
+            $relVDll,
+            "mods/repo.json",
+            "mods/repo2.json"
+        )
+        git add -- @releasePaths 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "git add failed while staging release files."
+            exit 1
+        }
+
+        # Release invariant: active sources must be fully staged before commit.
+        $unstagedActiveSources = @(git diff --name-only -- @activeSourcePaths)
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Failed to verify staged active source files."
+            exit 1
+        }
+        if ($unstagedActiveSources.Count -gt 0) {
+            Write-Err ("Release invariant failed: active source files remain unstaged: " + ($unstagedActiveSources -join ", "))
+            exit 1
+        }
         $commitMsg = "$ModBase $newVer"
         if ($Changelog -ne "") { $commitMsg += " -- $Changelog" }
         git commit -m $commitMsg
