@@ -225,6 +225,15 @@ if ($Bump -ne "none" -and -not $noVersion) {
 }
 
 # -- 5. Compile ---------------------------------------------------------------
+# Refuse to publish if the source version does not exactly match the release version.
+# This prevents a file named for a new release from containing the previous version.
+$verifySource = Get-Content $selectedCs.FullName -Raw
+$verifyMatch  = [regex]::Match($verifySource, '(?m)(?:public\s+const\s+string\s+Version\s*=\s*|Version\s*=\s*)"([0-9]+\.[0-9]+\.[0-9]+)"')
+if (-not $verifyMatch.Success -or $verifyMatch.Groups[1].Value -ne $newVer) {
+    $actual = if ($verifyMatch.Success) { $verifyMatch.Groups[1].Value } else { "<missing>" }
+    Write-Err "Release invariant failed: source reports $actual but release is $newVer."
+    exit 1
+}
 Write-Step "Compiling $ModBase.dll"
 
 & $BuildScript -ModFile $selectedCs.FullName -OutName $ModBase -NoDeploy
@@ -235,6 +244,16 @@ if ($LASTEXITCODE -ne 0) {
 
 $builtDll = Join-Path $BuildDir "bin\csc_build\$ModBase.dll"
 
+if (-not (Test-Path $builtDll)) {
+    Write-Err "Build output missing: $builtDll"
+    exit 1
+}
+$builtUnicode = [System.Text.Encoding]::Unicode.GetString([System.IO.File]::ReadAllBytes($builtDll))
+if (-not $builtUnicode.Contains($newVer)) {
+    Write-Err "Release invariant failed: built DLL does not contain version $newVer."
+    exit 1
+}
+
 # -- 6. Copy DLL to repo mods folder ------------------------------------------
 Write-Step "Copying DLL to repo"
 
@@ -244,6 +263,15 @@ Write-Ok "-> $OutDll"
 $versionedDll = Join-Path $ModCsDir "$ModBase-$newVer.dll"
 Copy-Item $builtDll $versionedDll -Force
 Write-Ok "-> $versionedDll"
+
+$builtHash = (Get-FileHash $builtDll -Algorithm SHA256).Hash
+$liveHash = (Get-FileHash $OutDll -Algorithm SHA256).Hash
+$versionedHash = (Get-FileHash $versionedDll -Algorithm SHA256).Hash
+if ($builtHash -ne $liveHash -or $builtHash -ne $versionedHash) {
+    Write-Err "Release invariant failed: published DLL hashes do not match the build output."
+    exit 1
+}
+Write-Ok "Verified published DLL hashes: $builtHash"
 
 # Also save versioned source .cs files for issue tracker diff feature.
 # This mirrors the compiler's multi-file behavior for a mod folder.
