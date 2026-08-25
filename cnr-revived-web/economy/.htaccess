@@ -1,3 +1,6 @@
+# Preserve Authorization for PHP-FPM/CGI so the admin API can receive Basic/Bearer auth.
+SetEnvIfNoCase Authorization "^(.*)$" HTTP_AUTHORIZATION=$1
+
 # Prevent direct access to database/auth helpers and environment secrets.
 <FilesMatch "^(?:_db\.php|_admin_auth\.php|\.env)$">
     Require all denied
