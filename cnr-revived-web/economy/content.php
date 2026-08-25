@@ -99,7 +99,7 @@ if (!$has_bussin) {
         'display_name'  => "Bussin'",
         'material_name' => 'bussin',
         'url'           => 'https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/economy/uploads/guns/bussin.json',
-        'hash'          => '9e3892c4e72f5ef2d005337204dcf853',
+        'hash'          => '11b84dd8d0b706dd5018420291b26184',
         'price'         => 1000,
     ];
 }
