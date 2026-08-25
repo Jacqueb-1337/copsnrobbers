@@ -159,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($act === 'add_content') {
         $cid   = preg_replace('/[^a-z0-9_\-]/i', '_', trim($_POST['content_id']   ?? ''));
-        $ctype = in_array($_POST['ctype'] ?? '', ['map','texture','data','skin','gun']) ? $_POST['ctype'] : 'map';
+        $ctype = in_array($_POST['ctype'] ?? '', ['map','dlcmap','texture','data','skin','gun']) ? $_POST['ctype'] : 'map';
         $cname = trim($_POST['cname'] ?? '');
         $curl  = trim($_POST['curl']  ?? '');
         $base  = trim($_POST['base_scene']    ?? 'FreeRun3_1');
@@ -176,7 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      VALUES (?,?,?,?,?,?,?,?,1,?,?)"
                 )->execute([$cid,$ctype,$cname,$curl,$base,$mat,$dkey,$sort,time(),$fhash]);
                 // Handle optional thumbnail upload for maps
-                if ($ctype === 'map' && isset($_FILES['thumb_file']) && $_FILES['thumb_file']['error'] === UPLOAD_ERR_OK) {
+                if (($ctype === 'map' || $ctype === 'dlcmap') && isset($_FILES['thumb_file']) && $_FILES['thumb_file']['error'] === UPLOAD_ERR_OK) {
                     $file    = $_FILES['thumb_file'];
                     $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
                     $mime    = mime_content_type($file['tmp_name']);
@@ -489,13 +489,13 @@ tr:hover td{background:rgba(255,255,255,.025)}
     <button class="pill active" onclick="filterContent('all',this)">All (<?= $total_content ?>)</button>
     <?php
     $tc = []; foreach ($content_items as $c) $tc[$c['type']] = ($tc[$c['type']] ?? 0) + 1;
-    $tl = ['map'=>'Maps','texture'=>'Textures','data'=>'Data','skin'=>'Skins','gun'=>'Guns'];
+    $tl = ['map'=>'Maps','dlcmap'=>'DLC Maps','texture'=>'Textures','data'=>'Data','skin'=>'Skins','gun'=>'Guns'];
     foreach ($tl as $k => $v): ?>
     <button class="pill" onclick="filterContent('<?= $k ?>',this)"><?= $v ?> (<?= $tc[$k] ?? 0 ?>)</button>
     <?php endforeach; ?>
   </div>
 
-  <?php foreach (['map','texture','data','skin','gun'] as $st):
+  <?php foreach (['map','dlcmap','texture','data','skin','gun'] as $st):
     $items = array_values(array_filter($content_items, fn($c) => $c['type'] === $st));
     if (!$items) continue; ?>
   <div class="content-section" data-type="<?= $st ?>">
@@ -509,7 +509,7 @@ tr:hover td{background:rgba(255,255,255,.025)}
       // pick preview image
       $preview = '';
       if ($st === 'skin')  $preview = $c['url'];
-      if ($st === 'map' && !empty($c['thumbnail_url'])) $preview = $c['thumbnail_url'];
+      if (($st === 'map' || $st === 'dlcmap') && !empty($c['thumbnail_url'])) $preview = $c['thumbnail_url'];
     ?>
     <div class="ci-item">
 
@@ -541,14 +541,14 @@ tr:hover td{background:rgba(255,255,255,.025)}
             <span class="hash-pill <?= $c['file_hash']?'ok':'miss' ?>" title="<?= $efh ?>"><?= $c['file_hash'] ? substr($c['file_hash'],0,8).'…' : 'no hash' ?></span>
             <button type="button" class="btn btn-sm btn-blue" onclick="syncHash('<?= $eid ?>','<?= $eurl ?>','file_hash',this)">Sync</button>
           </div>
-          <?php if ($st === 'map' && !empty($c['thumbnail_url'])): ?>
+          <?php if (($st === 'map' || $st === 'dlcmap') && !empty($c['thumbnail_url'])): ?>
           <!-- thumbnail hash -->
           <div class="hr">
             <span style="font-size:10px;color:var(--text2)">thumb:</span>
             <span class="hash-pill <?= $c['thumbnail_hash']?'ok':'miss' ?>" title="<?= $eth ?>"><?= $c['thumbnail_hash'] ? substr($c['thumbnail_hash'],0,8).'…' : 'no hash' ?></span>
             <button type="button" class="btn btn-sm btn-blue" onclick="syncHash('<?= $eid ?>','<?= htmlspecialchars($c['thumbnail_url'],ENT_QUOTES) ?>','thumbnail_hash',this)">Sync</button>
           </div>
-          <?php elseif ($st === 'map'): ?>
+          <?php elseif ($st === 'map' || $st === 'dlcmap'): ?>
           <form method="POST" enctype="multipart/form-data" style="display:flex;align-items:center;gap:4px;margin-top:4px">
             <input type="hidden" name="act" value="upload_thumbnail">
             <input type="hidden" name="content_id" value="<?= $eid ?>">
@@ -596,7 +596,7 @@ tr:hover td{background:rgba(255,255,255,.025)}
       <div class="fg">
         <label>Type</label>
         <select name="ctype" id="ctype-sel" onchange="updateAddForm()" style="max-width:140px;width:auto">
-          <option value="map">map</option><option value="texture">texture</option>
+          <option value="map">map</option><option value="dlcmap">dlcmap</option><option value="texture">texture</option>
           <option value="data">data</option><option value="skin">skin</option><option value="gun">gun</option>
         </select>
         <label>ID</label>
@@ -837,7 +837,8 @@ function copyText(t, btn) {
 function updateAddForm() {
   var t = document.getElementById('ctype-sel').value;
   var show = (id,v)=>{ var el=document.getElementById(id); if(el) el.style.display=v?'':'none'; };
-  show('add-thumb-lbl', t==='map'); show('add-thumb-row', t==='map');
+  var isMap = t==='map'||t==='dlcmap';
+  show('add-thumb-lbl', isMap); show('add-thumb-row', isMap);
   var mat = t==='texture'||t==='skin'||t==='gun';
   var key = t==='data'||t==='skin'||t==='gun';
   show('add-mat-lbl',mat); show('add-mat',mat);

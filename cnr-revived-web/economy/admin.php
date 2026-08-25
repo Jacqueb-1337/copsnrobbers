@@ -152,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($act === 'add_content') {
         $cid   = preg_replace('/[^a-z0-9_\-]/i', '_', trim($_POST['content_id']   ?? ''));
-        $ctype = in_array($_POST['ctype'] ?? '', ['map','texture','data','skin','gun']) ? $_POST['ctype'] : 'map';
+        $ctype = in_array($_POST['ctype'] ?? '', ['map','dlcmap','texture','data','skin','gun']) ? $_POST['ctype'] : 'map';
         $cname = trim($_POST['cname'] ?? '');
         $curl  = trim($_POST['curl']  ?? '');
         $base  = trim($_POST['base_scene']    ?? 'FreeRun3_1');

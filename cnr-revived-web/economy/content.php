@@ -24,6 +24,7 @@ $rows = $pdo->query(
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $maps     = [];
+$dlc_maps = [];
 $textures = [];
 $data     = [];
 $skins    = [];
@@ -33,6 +34,16 @@ foreach ($rows as $r) {
     switch ($r['type']) {
         case 'map':
             $maps[] = [
+                'id'             => $r['id'],
+                'name'           => $r['name'],
+                'url'            => $r['url'],
+                'thumbnail_url'  => $r['thumbnail_url']  ?? '',
+                'hash'           => $r['file_hash']      ?? '',
+                'thumbnail_hash' => $r['thumbnail_hash'] ?? '',
+            ];
+            break;
+        case 'dlcmap':
+            $dlc_maps[] = [
                 'id'             => $r['id'],
                 'name'           => $r['name'],
                 'url'            => $r['url'],
@@ -107,11 +118,11 @@ if (!$has_bussin) {
 // Temporary first-party DLC map used to exercise the new baked-map loader on real clients.
 // A real admin row with the same id wins once this moves out of the smoke-test phase.
 $has_dlc_loader_test = false;
-foreach ($maps as $m) {
+foreach ($dlc_maps as $m) {
     if (($m['id'] ?? '') === 'dlc_loader_test') { $has_dlc_loader_test = true; break; }
 }
 if (!$has_dlc_loader_test) {
-    $maps[] = [
+    $dlc_maps[] = [
         'id'             => 'dlc_loader_test',
         'name'           => '[TEST] DLC Loader Map',
         'url'            => 'https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/economy/uploads/maps/dlc_loader_test.json',
@@ -121,29 +132,14 @@ if (!$has_dlc_loader_test) {
     ];
 }
 
-// First real map exported from Minecraft through CNR Map Exporter.
-$has_test_minecraft_map = false;
-foreach ($maps as $m) {
-    if (($m['id'] ?? '') === 'test_minecraft_map') { $has_test_minecraft_map = true; break; }
-}
-if (!$has_test_minecraft_map) {
-    $maps[] = [
-        'id'             => 'test_minecraft_map',
-        'name'           => 'TestMinecraftMap',
-        'url'            => 'https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/economy/uploads/maps/TestMinecraftMap.json',
-        'thumbnail_url'  => '',
-        'hash'           => '19bf25d3db4e7e3737462031763a9819',
-        'thumbnail_hash' => '',
-    ];
-}
-
 // manifest_version is a hash of the public content so clients know when to re-sync.
-$version = substr(md5(json_encode([$rows, $maps, $guns])), 0, 12);
+$version = substr(md5(json_encode([$rows, $maps, $dlc_maps, $guns])), 0, 12);
 
 echo json_encode([
     'ok'               => true,
     'manifest_version' => $version,
     'maps'             => $maps,
+    'dlc_maps'         => $dlc_maps,
     'textures'         => $textures,
     'data'             => $data,
     'skins'            => $skins,

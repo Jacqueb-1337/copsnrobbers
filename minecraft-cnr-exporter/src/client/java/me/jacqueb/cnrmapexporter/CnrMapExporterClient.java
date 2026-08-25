@@ -28,9 +28,13 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.zip.GZIPOutputStream;
 
 public final class CnrMapExporterClient implements ClientModInitializer {
     private static final int CHUNK_SIZE = 16;
@@ -234,7 +238,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
 
         MapFile finish() throws Exception {
             MapFile out = new MapFile();
-            out.format="cnr-dlc-map"; out.version=1; out.id=name; out.name=name; out.source="minecraft-fabric-1.21.1";
+            out.format="cnr-dlc-map"; out.version=2; out.id=name; out.name=name; out.source="minecraft-fabric-1.21.1;compact-v2";
             out.blockScale=1f; out.origin=new float[]{0,0,0};
             out.atlas = atlas.toJson();
             out.chunks = new ArrayList<>();
@@ -299,7 +303,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         final ChunkKey key; final RenderBuilder opaque=new RenderBuilder(),cutout=new RenderBuilder(),transparent=new RenderBuilder(); final CollisionBuilder collision=new CollisionBuilder();
         ChunkBuilder(ChunkKey key){this.key=key;}
         RenderBuilder render(String s){return s.equals("transparent")?transparent:s.equals("cutout")?cutout:opaque;}
-        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaque=meshRender(opaque,atlas);j.cutout=meshRender(cutout,atlas);j.transparent=meshRender(transparent,atlas);j.collision=meshCollision(collision);return j; }
+        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaquePacked=packRender(opaque,atlas);j.cutoutPacked=packRender(cutout,atlas);j.transparentPacked=packRender(transparent,atlas);j.collisionBoxesPacked=packBoxes(collision);return j; }
     }
 
     private static List<MeshJson> meshRender(RenderBuilder src, Atlas atlas) {
@@ -307,23 +311,76 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         for(QuadDef q:src.quads){ if(m.vertexCount()+4>MAX_VERTICES_PER_PART){out.add(m.finish());m=new MeshAccumulator(true);} AtlasRect r=atlas.rects.get(q.texture); if(r==null) continue; float[] auv=new float[8]; for(int i=0;i<4;i++){ auv[i*2]=(r.x+q.uv[i*2]*r.w)/(float)atlas.image.getWidth(); auv[i*2+1]=1f-(r.y+q.uv[i*2+1]*r.h)/(float)atlas.image.getHeight(); } m.addQuad(q.p,auv); }
         if(m.vertexCount()>0)out.add(m.finish()); return out;
     }
-    private static List<MeshJson> meshCollision(CollisionBuilder src) {
-        List<MeshJson> out=new ArrayList<>(); MeshAccumulator m=new MeshAccumulator(false);
-        for(float[] b:src.boxes){ if(m.vertexCount()+24>MAX_VERTICES_PER_PART){out.add(m.finish());m=new MeshAccumulator(false);} m.addBox(b); }
-        if(m.vertexCount()>0)out.add(m.finish()); return out;
+
+    private static List<PackedBlob> packRender(RenderBuilder src, Atlas atlas) {
+        List<PackedBlob> out=new ArrayList<>();
+        for(MeshJson m:meshRender(src,atlas)) out.add(packMesh(m));
+        return out;
     }
+
+    private static PackedBlob packMesh(MeshJson m) {
+        int vc=m.vertices.length/3, ic=m.triangles.length, flags=m.uv.length>0?1:0;
+        if(vc>65535) throw new IllegalStateException("Packed mesh exceeds 65535 vertices");
+        int bytes=12 + m.vertices.length*4 + m.uv.length*4 + ic*2;
+        ByteBuffer b=ByteBuffer.allocate(bytes).order(ByteOrder.LITTLE_ENDIAN);
+        b.putInt(vc); b.putInt(ic); b.putInt(flags);
+        for(float f:m.vertices)b.putFloat(f);
+        for(float f:m.uv)b.putFloat(f);
+        for(int t:m.triangles)b.putShort((short)(t & 0xffff));
+        PackedBlob p=new PackedBlob(); p.encoding="cnrmesh-f32-u16-gzip-v1"; p.dataBase64=gzipBase64(b.array()); return p;
+    }
+
+    private static PackedBlob packBoxes(CollisionBuilder src) {
+        List<float[]> boxes=mergeCollisionBoxes(src.boxes);
+        ByteBuffer b=ByteBuffer.allocate(4+boxes.size()*24).order(ByteOrder.LITTLE_ENDIAN);
+        b.putInt(boxes.size());
+        for(float[] box:boxes)for(float f:box)b.putFloat(f);
+        PackedBlob p=new PackedBlob(); p.encoding="cnrboxes-f32-gzip-v1"; p.count=boxes.size(); p.dataBase64=gzipBase64(b.array()); return p;
+    }
+
+    private static String gzipBase64(byte[] raw) {
+        try {
+            ByteArrayOutputStream out=new ByteArrayOutputStream();
+            try(GZIPOutputStream gz=new GZIPOutputStream(out)){gz.write(raw);}
+            return Base64.getEncoder().encodeToString(out.toByteArray());
+        } catch(IOException ex) { throw new IllegalStateException("Could not gzip packed map data",ex); }
+    }
+
+    private static int q(float v){return Math.round(v*4096f);}
+    private static List<float[]> mergeCollisionBoxes(List<float[]> input) {
+        List<float[]> boxes=new ArrayList<>(); for(float[] b:input)boxes.add(Arrays.copyOf(b,6));
+        int previous=-1;
+        while(previous!=boxes.size()){
+            previous=boxes.size();
+            boxes=mergeAxis(boxes,0); boxes=mergeAxis(boxes,1); boxes=mergeAxis(boxes,2);
+        }
+        return boxes;
+    }
+    private static List<float[]> mergeAxis(List<float[]> boxes,int axis) {
+        int a=(axis+1)%3,b=(axis+2)%3;
+        Map<String,List<float[]>> groups=new LinkedHashMap<>();
+        for(float[] box:boxes){String k=q(box[a])+":"+q(box[a+3])+":"+q(box[b])+":"+q(box[b+3]);groups.computeIfAbsent(k,x->new ArrayList<>()).add(box);}
+        List<float[]> out=new ArrayList<>();
+        for(List<float[]> arr:groups.values()){
+            arr.sort(Comparator.comparingInt(x->q(x[axis])));
+            float[] cur=Arrays.copyOf(arr.get(0),6);
+            for(int i=1;i<arr.size();i++){float[] n=arr.get(i);if(q(cur[axis+3])==q(n[axis]))cur[axis+3]=n[axis+3];else{out.add(cur);cur=Arrays.copyOf(n,6);}}
+            out.add(cur);
+        }
+        return out;
+    }
+
     private static final class MeshAccumulator {
         final boolean uvEnabled; final List<Float> v=new ArrayList<>(),uv=new ArrayList<>(); final List<Integer> t=new ArrayList<>();
         MeshAccumulator(boolean uvEnabled){this.uvEnabled=uvEnabled;} int vertexCount(){return v.size()/3;}
         void addQuad(float[] p,float[] u){int b=vertexCount();for(float f:p)v.add(f);if(uvEnabled)for(float f:u)uv.add(f); t.add(b);t.add(b+1);t.add(b+2);t.add(b);t.add(b+2);t.add(b+3);}
-        void face(float[] p){addQuad(p,new float[8]);}
-        void addBox(float[] b){float x0=b[0],y0=b[1],z0=b[2],x1=b[3],y1=b[4],z1=b[5];face(new float[]{x0,y0,z0,x1,y0,z0,x1,y1,z0,x0,y1,z0});face(new float[]{x1,y0,z1,x0,y0,z1,x0,y1,z1,x1,y1,z1});face(new float[]{x0,y0,z1,x0,y0,z0,x0,y1,z0,x0,y1,z1});face(new float[]{x1,y0,z0,x1,y0,z1,x1,y1,z1,x1,y1,z0});face(new float[]{x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1});face(new float[]{x0,y0,z1,x1,y0,z1,x1,y0,z0,x0,y0,z0});}
         MeshJson finish(){MeshJson j=new MeshJson();j.vertices=new float[v.size()];for(int i=0;i<v.size();i++)j.vertices[i]=v.get(i);j.uv=uvEnabled?new float[uv.size()]:new float[0];if(uvEnabled)for(int i=0;i<uv.size();i++)j.uv[i]=uv.get(i);j.triangles=new int[t.size()];for(int i=0;i<t.size();i++)j.triangles[i]=t.get(i);return j;}
     }
 
     private static final class MapFile { String format,id,name,source; int version; float blockScale; float[] origin; AtlasJson atlas; List<ChunkJson> chunks; List<float[]> spawns; }
     private static final class AtlasJson { int width,height; String pngBase64; List<AtlasEntry> entries; }
     private static final class AtlasEntry { String id; int x,y,w,h; }
-    private static final class ChunkJson { int x,y,z; List<MeshJson> opaque,cutout,transparent,collision; }
+    private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; PackedBlob collisionBoxesPacked; }
+    private static final class PackedBlob { String encoding,dataBase64; int count; }
     private static final class MeshJson { float[] vertices,uv; int[] triangles; }
 }
