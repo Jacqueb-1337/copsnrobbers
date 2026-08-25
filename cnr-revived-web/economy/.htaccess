@@ -1,4 +1,4 @@
-# Prevent direct access to _db.php and admin config
-<Files "_db.php">
+# Prevent direct access to database/auth helpers and environment secrets.
+<FilesMatch "^(?:_db\.php|_admin_auth\.php|\.env)$">
     Require all denied
-</Files>
+</FilesMatch>

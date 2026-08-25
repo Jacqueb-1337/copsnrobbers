@@ -1,14 +1,6 @@
 <?php
-// admin.php — full admin dashboard with session-based login
-// To change the password, run:  php -r "echo password_hash('newpass', PASSWORD_DEFAULT);"
-// and replace the ADMIN_PASS_HASH constant below.
-
-define('ADMIN_PASS_HASH',
-    '\$2y\$10\$placeholderREPLACETHISHASHxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
-);
-// ^ Replace the above with your real hash. Default password is set via LOGIN below.
-// If hash is still the placeholder, we fall back to checking ADMIN_PASS_PLAIN.
-define('ADMIN_PASS_PLAIN', 'cnradmin');  // change this if you haven't set a hash yet
+// Full admin dashboard with session-based login.
+require_once __DIR__ . '/../_admin_auth.php';
 
 session_start();
 
@@ -20,12 +12,7 @@ unset($_SESSION['flash'], $_SESSION['flash_ok']);
 // ── Handle login / logout ────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['act'] ?? '') === 'login') {
     $attempt = $_POST['password'] ?? '';
-    $ok = false;
-    if (strpos(ADMIN_PASS_HASH, 'placeholder') === false) {
-        $ok = password_verify($attempt, ADMIN_PASS_HASH);
-    } else {
-        $ok = ($attempt === ADMIN_PASS_PLAIN);
-    }
+    $ok = cnr_admin_verify_password((string)$attempt);
     if ($ok) {
         session_regenerate_id(true);
         $_SESSION['cnr_admin'] = true;
