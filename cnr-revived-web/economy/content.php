@@ -121,6 +121,22 @@ if (!$has_dlc_loader_test) {
     ];
 }
 
+// First real map exported from Minecraft through CNR Map Exporter.
+$has_test_minecraft_map = false;
+foreach ($maps as $m) {
+    if (($m['id'] ?? '') === 'test_minecraft_map') { $has_test_minecraft_map = true; break; }
+}
+if (!$has_test_minecraft_map) {
+    $maps[] = [
+        'id'             => 'test_minecraft_map',
+        'name'           => 'TestMinecraftMap',
+        'url'            => 'https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/economy/uploads/maps/TestMinecraftMap.json',
+        'thumbnail_url'  => '',
+        'hash'           => '19bf25d3db4e7e3737462031763a9819',
+        'thumbnail_hash' => '',
+    ];
+}
+
 // manifest_version is a hash of the public content so clients know when to re-sync.
 $version = substr(md5(json_encode([$rows, $maps, $guns])), 0, 12);
 
