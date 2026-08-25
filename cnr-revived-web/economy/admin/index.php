@@ -145,6 +145,92 @@ function admin_store_content_upload(array $file, string $type, string $contentId
     ];
 }
 
+function admin_store_thumbnail_upload(array $file, string $contentId): array {
+    if ((int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) throw new RuntimeException('Thumbnail upload error (code ' . (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) . ').');
+    $size = (int)($file['size'] ?? 0);
+    if ($size <= 0) throw new RuntimeException('Thumbnail is empty.');
+    if ($size > 512 * 1024) throw new RuntimeException('Thumbnail exceeds 512 KB.');
+    if (!is_uploaded_file((string)$file['tmp_name'])) throw new RuntimeException('Thumbnail upload source is invalid.');
+
+    $mime = mime_content_type((string)$file['tmp_name']);
+    if (!in_array($mime, ['image/jpeg','image/png','image/gif','image/webp'], true)) throw new RuntimeException('Thumbnail must be jpg, png, gif, or webp.');
+
+    $dir = __DIR__ . '/../uploads/thumbnails/';
+    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) throw new RuntimeException('Could not create thumbnail directory.');
+    foreach (['jpg','png','gif','webp'] as $oldExt) {
+        $old = $dir . $contentId . '.' . $oldExt;
+        if (is_file($old)) @unlink($old);
+    }
+
+    if ($mime === 'image/jpeg' || $mime === 'image/png') {
+        $ext = $mime === 'image/png' ? 'png' : 'jpg';
+        $dest = $dir . $contentId . '.' . $ext;
+        if (!move_uploaded_file((string)$file['tmp_name'], $dest)) throw new RuntimeException('Could not move thumbnail into public storage.');
+    } else {
+        if (!function_exists('imagecreatefromstring') || !function_exists('imagepng')) throw new RuntimeException('Server image conversion support is unavailable; upload PNG or JPG instead.');
+        $raw = file_get_contents((string)$file['tmp_name']);
+        $img = $raw === false ? false : @imagecreatefromstring($raw);
+        if ($img === false) throw new RuntimeException('Could not decode thumbnail; upload PNG or JPG instead.');
+        $ext = 'png';
+        $dest = $dir . $contentId . '.png';
+        imagealphablending($img, true);
+        imagesavealpha($img, true);
+        $ok = imagepng($img, $dest, 6);
+        imagedestroy($img);
+        if (!$ok) throw new RuntimeException('Could not convert thumbnail to PNG.');
+    }
+
+    $hash = md5_file($dest);
+    if ($hash === false) throw new RuntimeException('Could not hash thumbnail.');
+    return [
+        'url' => 'https://play.jacqueb.me/economy/uploads/thumbnails/' . rawurlencode($contentId . '.' . $ext),
+        'hash' => strtolower($hash),
+        'size' => (int)filesize($dest),
+    ];
+}
+
+function admin_migrate_legacy_thumbnails(PDO $pdo): void {
+    $legacyDir = __DIR__ . '/uploads/thumbnails/';
+    if (!is_dir($legacyDir)) return;
+    $targetDir = __DIR__ . '/../uploads/thumbnails/';
+    if (!is_dir($targetDir) && !@mkdir($targetDir, 0755, true) && !is_dir($targetDir)) return;
+
+    foreach (glob($legacyDir . '*.{jpg,jpeg,png,gif,webp}', GLOB_BRACE) ?: [] as $legacy) {
+        $id = pathinfo($legacy, PATHINFO_FILENAME);
+        if ($id === '' || preg_replace('/[^a-z0-9_\-]/i', '_', $id) !== $id) continue;
+        $mime = @mime_content_type($legacy);
+        $ext = strtolower((string)pathinfo($legacy, PATHINFO_EXTENSION));
+        $destExt = $ext === 'jpeg' ? 'jpg' : $ext;
+        $dest = $targetDir . $id . '.' . $destExt;
+
+        if (($mime === 'image/gif' || $mime === 'image/webp') && function_exists('imagecreatefromstring') && function_exists('imagepng')) {
+            $raw = @file_get_contents($legacy);
+            $img = $raw === false ? false : @imagecreatefromstring($raw);
+            if ($img !== false) {
+                $destExt = 'png';
+                $dest = $targetDir . $id . '.png';
+                imagealphablending($img, true);
+                imagesavealpha($img, true);
+                if (@imagepng($img, $dest, 6)) @unlink($legacy);
+                imagedestroy($img);
+            }
+        } elseif (!is_file($dest)) {
+            if (!@rename($legacy, $dest) && @copy($legacy, $dest)) @unlink($legacy);
+        } else {
+            @unlink($legacy);
+        }
+
+        if (!is_file($dest)) continue;
+        $hash = @md5_file($dest);
+        if ($hash === false) continue;
+        $url = 'https://play.jacqueb.me/economy/uploads/thumbnails/' . rawurlencode($id . '.' . $destExt);
+        $pdo->prepare("UPDATE content_items SET thumbnail_url = ?, thumbnail_hash = ? WHERE id = ?")
+            ->execute([$url, strtolower($hash), $id]);
+    }
+}
+
+admin_migrate_legacy_thumbnails($pdo);
+
 // ── Handle POST actions ───────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $act = trim($_POST['act'] ?? '');
@@ -214,23 +300,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     "INSERT INTO content_items (id,type,name,url,base_scene,material_name,data_key,sort_order,enabled,created_at,file_hash)
                      VALUES (?,?,?,?,?,?,?,?,1,?,?)"
                 )->execute([$cid,$ctype,$cname,$curl,$base,$mat,$dkey,$sort,time(),$fhash]);
-                // Handle optional thumbnail upload for maps
+                // Handle optional thumbnail upload for maps. Legacy clients are safest
+                // with PNG/JPG, so GIF/WebP uploads are normalized to PNG server-side.
                 if (($ctype === 'map' || $ctype === 'dlcmap') && isset($_FILES['thumb_file']) && $_FILES['thumb_file']['error'] === UPLOAD_ERR_OK) {
-                    $file    = $_FILES['thumb_file'];
-                    $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
-                    $mime    = mime_content_type($file['tmp_name']);
-                    if (isset($allowed[$mime]) && $file['size'] <= 512 * 1024) {
-                        $ext        = $allowed[$mime];
-                        $upload_dir = __DIR__ . '/uploads/thumbnails/';
-                        if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-                        $dest = $upload_dir . $cid . '.' . $ext;
-                        if (move_uploaded_file($file['tmp_name'], $dest)) {
-                            $thumb_url  = 'https://play.jacqueb.me/economy/uploads/thumbnails/' . $cid . '.' . $ext;
-                            $thumb_hash = md5_file($dest);
-                            $pdo->prepare("UPDATE content_items SET thumbnail_url = ?, thumbnail_hash = ? WHERE id = ?")
-                                ->execute([$thumb_url, $thumb_hash, $cid]);
-                        }
-                    }
+                    $thumb = admin_store_thumbnail_upload($_FILES['thumb_file'], $cid);
+                    $pdo->prepare("UPDATE content_items SET thumbnail_url = ?, thumbnail_hash = ? WHERE id = ?")
+                        ->execute([$thumb['url'], $thumb['hash'], $cid]);
                 }
                 $flash = 'Content item "' . htmlspecialchars($cid) . '" added.';
                 flash_redirect($flash, true, 'content');
@@ -259,6 +334,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash_redirect('Upload error: ' . $e->getMessage(), false, 'content');
             }
         }
+    }
+
+    if ($act === 'update_content_name') {
+        $cid = preg_replace('/[^a-z0-9_\-]/i', '_', trim($_POST['content_id'] ?? ''));
+        $cname = trim($_POST['cname'] ?? '');
+        if ($cid === '' || $cname === '') {
+            flash_redirect('Item ID and display name are required.', false, 'content');
+        }
+        $pdo->prepare("UPDATE content_items SET name = ? WHERE id = ?")->execute([$cname, $cid]);
+        flash_redirect('Display name updated for "' . htmlspecialchars($cid) . '".', true, 'content');
     }
 
     if ($act === 'toggle_content') {
@@ -297,29 +382,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (!isset($_FILES['thumb_file']) || $_FILES['thumb_file']['error'] !== UPLOAD_ERR_OK) {
             flash_redirect('Upload error (code ' . ($_FILES['thumb_file']['error'] ?? 'none') . ').', false, 'content');
         } else {
-            $file    = $_FILES['thumb_file'];
-            $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
-            $mime    = mime_content_type($file['tmp_name']);
-            if (!isset($allowed[$mime]) || $file['size'] > 512 * 1024) {
-                flash_redirect('Invalid file type or too large (max 512 KB, jpg/png/gif/webp).', false, 'content');
-            } else {
-                $ext        = $allowed[$mime];
-                $upload_dir = __DIR__ . '/uploads/thumbnails/';
-                if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-                // Remove old thumbnail with any extension
-                foreach (['jpg','png','gif','webp'] as $e) {
-                    $old = $upload_dir . $cid . '.' . $e;
-                    if (file_exists($old)) unlink($old);
-                }
-                $dest = $upload_dir . $cid . '.' . $ext;
-                if (move_uploaded_file($file['tmp_name'], $dest)) {
-                    $thumb_url  = 'https://play.jacqueb.me/economy/uploads/thumbnails/' . $cid . '.' . $ext;
-                    $thumb_hash = md5_file($dest);
-                    $pdo->prepare("UPDATE content_items SET thumbnail_url = ?, thumbnail_hash = ? WHERE id = ?")->execute([$thumb_url, $thumb_hash, $cid]);
-                    flash_redirect('Thumbnail uploaded for "' . htmlspecialchars($cid) . '".', true, 'content');
-                } else {
-                    flash_redirect('File move failed (check server permissions).', false, 'content');
-                }
+            try {
+                $thumb = admin_store_thumbnail_upload($_FILES['thumb_file'], $cid);
+                $pdo->prepare("UPDATE content_items SET thumbnail_url = ?, thumbnail_hash = ? WHERE id = ?")
+                    ->execute([$thumb['url'], $thumb['hash'], $cid]);
+                flash_redirect('Thumbnail uploaded for "' . htmlspecialchars($cid) . '".', true, 'content');
+            } catch (Exception $e) {
+                flash_redirect('Thumbnail upload error: ' . $e->getMessage(), false, 'content');
             }
         }
     }
@@ -586,7 +655,12 @@ tr:hover td{background:rgba(255,255,255,.025)}
       <div class="ci-body">
         <div>
           <div class="ci-id"><?= htmlspecialchars($c['id']) ?></div>
-          <?php if ($c['name']): ?><div class="ci-name"><?= htmlspecialchars($c['name']) ?></div><?php endif; ?>
+          <form method="POST" style="display:flex;align-items:center;gap:4px;margin-top:3px">
+            <input type="hidden" name="act" value="update_content_name">
+            <input type="hidden" name="content_id" value="<?= $eid ?>">
+            <input type="text" name="cname" value="<?= htmlspecialchars($c['name'] ?? '', ENT_QUOTES) ?>" placeholder="Display name" style="width:150px;font-size:11px;padding:3px 5px">
+            <button class="btn btn-sm btn-blue" type="submit">Set name</button>
+          </form>
         </div>
         <div>
           <?php if ($st === 'texture'): ?><div class="ci-meta">mat: <?= htmlspecialchars($c['material_name']) ?></div><?php endif; ?>
