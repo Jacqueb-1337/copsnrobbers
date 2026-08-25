@@ -115,23 +115,6 @@ if (!$has_bussin) {
     ];
 }
 
-// Temporary first-party DLC map used to exercise the new baked-map loader on real clients.
-// A real admin row with the same id wins once this moves out of the smoke-test phase.
-$has_dlc_loader_test = false;
-foreach ($dlc_maps as $m) {
-    if (($m['id'] ?? '') === 'dlc_loader_test') { $has_dlc_loader_test = true; break; }
-}
-if (!$has_dlc_loader_test) {
-    $dlc_maps[] = [
-        'id'             => 'dlc_loader_test',
-        'name'           => '[TEST] DLC Loader Map',
-        'url'            => 'https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/economy/uploads/maps/dlc_loader_test.json',
-        'thumbnail_url'  => '',
-        'hash'           => 'f8804587f34291187e28b4ce53a64bbd',
-        'thumbnail_hash' => '',
-    ];
-}
-
 // manifest_version is a hash of the public content so clients know when to re-sync.
 $version = substr(md5(json_encode([$rows, $maps, $dlc_maps, $guns])), 0, 12);
 
