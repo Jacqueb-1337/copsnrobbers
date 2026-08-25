@@ -7,6 +7,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
@@ -23,12 +24,20 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.Level;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.level.lighting.LevelLightEngine;
+import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.AABB;
@@ -38,6 +47,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -53,6 +63,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
     private static final float PACKED_UV_SCALE = 65535f;
     private static BlockPos pos1;
     private static BlockPos pos2;
+    private static ExportJob activeExport;
 
     @Override
     public void onInitializeClient() {
@@ -86,8 +97,11 @@ public final class CnrMapExporterClient implements ClientModInitializer {
                         String name = StringArgumentType.getString(ctx, "name");
                         return exportSelection(ctx.getSource().getClient(), name, ctx.getSource()::sendFeedback);
                     })))
+                .then(ClientCommandManager.literal("cancel").executes(ctx -> cancelExport(ctx.getSource().getClient())))
+                .then(ClientCommandManager.literal("status").executes(ctx -> exportStatus(ctx.getSource().getClient())))
         ));
         WorldRenderEvents.AFTER_ENTITIES.register(CnrMapExporterClient::renderSelectionOutline);
+        ClientTickEvents.END_CLIENT_TICK.register(CnrMapExporterClient::tickExportJob);
     }
 
     private static int setPos(Minecraft client, boolean first) {
@@ -151,14 +165,14 @@ public final class CnrMapExporterClient implements ClientModInitializer {
 
     private interface Feedback { void send(Component text); }
 
-    private static final class ExportRuntimeException extends RuntimeException {
-        ExportRuntimeException(Throwable cause) { super(cause); }
-    }
-
     private static int exportSelection(Minecraft mc, String rawName, Feedback feedback) {
         if (mc.level == null || mc.player == null) return 0;
         if (pos1 == null || pos2 == null) {
             feedback.send(Component.literal("Set /cnr pos1 and /cnr pos2 first."));
+            return 0;
+        }
+        if (activeExport != null) {
+            feedback.send(Component.literal("A CNR export is already running. Use /cnr status or /cnr cancel."));
             return 0;
         }
 
@@ -166,27 +180,371 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         BlockPos min = new BlockPos(Math.min(pos1.getX(), pos2.getX()), Math.min(pos1.getY(), pos2.getY()), Math.min(pos1.getZ(), pos2.getZ()));
         BlockPos max = new BlockPos(Math.max(pos1.getX(), pos2.getX()), Math.max(pos1.getY(), pos2.getY()), Math.max(pos1.getZ(), pos2.getZ()));
         long volume = (long)(max.getX()-min.getX()+1) * (max.getY()-min.getY()+1) * (max.getZ()-min.getZ()+1);
-        feedback.send(Component.literal("CNR export started: " + volume + " block selection volume; scanning non-air blocks..."));
-        try {
-            ExportContext ctx = new ExportContext(mc, min, max, name);
-            ctx.collect();
-            Path outDir = mc.gameDirectory.toPath().resolve("cnr_exports");
-            Files.createDirectories(outDir);
-            Path out = outDir.resolve(name + ".json");
-            Files.writeString(out, new Gson().toJson(ctx.finish()));
-            feedback.send(Component.literal("CNR map exported: " + out.toAbsolutePath()));
-            feedback.send(Component.literal("Non-air blocks=" + ctx.nonAirBlockCount + " chunks=" + ctx.chunks.size() + " textures=" + ctx.textures.size() + " quads=" + ctx.renderQuadCount + " collision boxes=" + ctx.collisionBoxCount + " climbable boxes=" + ctx.climbableBoxCount + " Cops spawns=" + ctx.copSpawns.size() + " Robbers spawns=" + ctx.robberSpawns.size()));
-            return 1;
-        } catch (Throwable t) {
-            t.printStackTrace();
-            feedback.send(Component.literal("CNR export failed: " + t.getClass().getSimpleName() + ": " + t.getMessage()));
+        activeExport = new ExportJob(mc, min, max, name);
+        feedback.send(Component.literal("CNR export queued: " + volume + " block selection volume. The game will stay responsive; use /cnr status or /cnr cancel."));
+        return 1;
+    }
+
+    private static int cancelExport(Minecraft mc) {
+        if (activeExport == null) {
+            sendClientMessage(mc, "No CNR export is running.", false);
             return 0;
         }
+        if (activeExport.finalizing) {
+            sendClientMessage(mc, "CNR export is already finalizing the output file and cannot be cancelled safely.", false);
+            return 0;
+        }
+        activeExport.cancelled = true;
+        sendClientMessage(mc, "Cancelling CNR export...", false);
+        return 1;
+    }
+
+    private static int exportStatus(Minecraft mc) {
+        if (activeExport == null) {
+            sendClientMessage(mc, "No CNR export is running.", false);
+            return 0;
+        }
+        sendClientMessage(mc, activeExport.statusText(), false);
+        return 1;
+    }
+
+    private static void tickExportJob(Minecraft mc) {
+        ExportJob job = activeExport;
+        if (job == null) return;
+        job.tick(mc);
+        if (job.done && activeExport == job) activeExport = null;
+    }
+
+    private static void sendClientMessage(Minecraft mc, String text, boolean actionBar) {
+        if (mc != null && mc.player != null) mc.player.displayClientMessage(Component.literal(text), actionBar);
     }
 
     private static String sanitizeName(String s) {
         String n = s == null ? "minecraft_map" : s.replaceAll("[^A-Za-z0-9_-]", "_");
         return n.isBlank() ? "minecraft_map" : n;
+    }
+
+    private static final class ExportJob {
+        private static final long CLIENT_WORK_BUDGET_NS = 4_000_000L;
+        private static final long PROGRESS_INTERVAL_NS = 750_000_000L;
+
+        final Level initialClientLevel;
+        final ExportContext ctx;
+        final int minChunkX, maxChunkX, minChunkZ, maxChunkZ;
+        final int chunkColumns;
+        final long totalChunks;
+
+        long nextChunkIndex;
+        long completedChunks;
+        int currentBlockIndex;
+        long lastProgressNanos;
+        boolean cancelled;
+        boolean done;
+        boolean finalizing;
+        volatile boolean finalizationDone;
+        volatile boolean snapshotPending;
+        volatile ChunkSnapshot readySnapshot;
+        volatile Throwable asyncError;
+        volatile Throwable finalizationError;
+        volatile Path outputPath;
+        ChunkSnapshot currentSnapshot;
+
+        ExportJob(Minecraft mc, BlockPos min, BlockPos max, String name) {
+            this.initialClientLevel = mc.level;
+            this.ctx = new ExportContext(mc, min, max, name);
+            this.minChunkX = Math.floorDiv(min.getX(), 16);
+            this.maxChunkX = Math.floorDiv(max.getX(), 16);
+            this.minChunkZ = Math.floorDiv(min.getZ(), 16);
+            this.maxChunkZ = Math.floorDiv(max.getZ(), 16);
+            this.chunkColumns = maxChunkX - minChunkX + 1;
+            this.totalChunks = (long)chunkColumns * (maxChunkZ - minChunkZ + 1L);
+        }
+
+        void tick(Minecraft mc) {
+            if (done) return;
+            if (cancelled) {
+                sendClientMessage(mc, "CNR export cancelled after " + completedChunks + "/" + totalChunks + " chunks.", false);
+                done = true;
+                return;
+            }
+            if (mc.level == null || mc.level != initialClientLevel) {
+                fail(mc, new IllegalStateException("World changed while export was running."));
+                return;
+            }
+            if (asyncError != null) {
+                fail(mc, asyncError);
+                return;
+            }
+
+            if (finalizing) {
+                if (finalizationDone) {
+                    if (finalizationError != null) fail(mc, finalizationError);
+                    else {
+                        sendClientMessage(mc, "CNR map exported: " + outputPath.toAbsolutePath(), false);
+                        sendClientMessage(mc, "Non-air blocks=" + ctx.nonAirBlockCount + " chunks=" + ctx.chunks.size() + " textures=" + ctx.textureCountAtFinalize + " quads=" + ctx.renderQuadCount + " collision boxes=" + ctx.collisionBoxCount + " climbable boxes=" + ctx.climbableBoxCount + " Cops spawns=" + ctx.copSpawns.size() + " Robbers spawns=" + ctx.robberSpawns.size(), false);
+                        done = true;
+                    }
+                } else {
+                    maybeShowProgress(mc, "CNR export: finalizing and writing " + ctx.name + ".json...");
+                }
+                return;
+            }
+
+            if (currentSnapshot == null && readySnapshot != null) {
+                currentSnapshot = readySnapshot;
+                readySnapshot = null;
+                snapshotPending = false;
+                currentBlockIndex = 0;
+                if (ctx.nonAirBlockCount + currentSnapshot.blocks.size() > ExportContext.MAX_NON_AIR_BLOCKS) {
+                    fail(mc, new IllegalStateException("Selection contains more than 4,000,000 non-air blocks."));
+                    return;
+                }
+                ctx.acceptSpawnMarkers(currentSnapshot.markers);
+            }
+
+            long deadline = System.nanoTime() + CLIENT_WORK_BUDGET_NS;
+            while (currentSnapshot != null && currentBlockIndex < currentSnapshot.blocks.size()) {
+                BlockEntry entry = currentSnapshot.blocks.get(currentBlockIndex++);
+                try {
+                    ctx.processBlock(entry, currentSnapshot.view);
+                } catch (Throwable t) {
+                    fail(mc, t);
+                    return;
+                }
+                if ((currentBlockIndex & 31) == 0 && System.nanoTime() >= deadline) break;
+            }
+
+            if (currentSnapshot != null && currentBlockIndex >= currentSnapshot.blocks.size()) {
+                completedChunks++;
+                nextChunkIndex++;
+                currentSnapshot = null;
+                currentBlockIndex = 0;
+            }
+
+            if (nextChunkIndex >= totalChunks && currentSnapshot == null && readySnapshot == null && !snapshotPending) {
+                startFinalization(mc);
+                return;
+            }
+
+            if (currentSnapshot == null && readySnapshot == null && !snapshotPending && nextChunkIndex < totalChunks) {
+                requestNextSnapshot(mc);
+            }
+
+            maybeShowProgress(mc, statusText());
+        }
+
+        void requestNextSnapshot(Minecraft mc) {
+            int cx = minChunkX + (int)(nextChunkIndex % chunkColumns);
+            int cz = minChunkZ + (int)(nextChunkIndex / chunkColumns);
+            snapshotPending = true;
+
+            if (ctx.sourceLevel instanceof ServerLevel serverLevel && ctx.sourceLevel != mc.level) {
+                serverLevel.getServer().execute(() -> {
+                    if (cancelled || done) return;
+                    try {
+                        readySnapshot = ChunkSnapshot.capture(ctx, serverLevel, cx, cz, true);
+                    } catch (Throwable t) {
+                        asyncError = t;
+                    }
+                });
+            } else {
+                try {
+                    readySnapshot = ChunkSnapshot.capture(ctx, mc.level, cx, cz, false);
+                } catch (Throwable t) {
+                    asyncError = t;
+                }
+            }
+        }
+
+        void startFinalization(Minecraft mc) {
+            finalizing = true;
+            sendClientMessage(mc, "CNR export scan complete. Finalizing " + ctx.name + ".json in the background...", false);
+            Path outDir = mc.gameDirectory.toPath().resolve("cnr_exports");
+            Thread writerThread = new Thread(() -> {
+                try {
+                    ctx.textureCountAtFinalize = ctx.textures.size();
+                    ctx.atlas = Atlas.pack(ctx.textures.values());
+                    ctx.textures.clear();
+                    Files.createDirectories(outDir);
+                    Path out = outDir.resolve(ctx.name + ".json");
+                    try (BufferedWriter writer = Files.newBufferedWriter(out)) {
+                        new Gson().toJson(ctx.finish(), writer);
+                    }
+                    outputPath = out;
+                } catch (Throwable t) {
+                    finalizationError = t;
+                } finally {
+                    finalizationDone = true;
+                }
+            }, "CNR-Map-Exporter-Writer");
+            writerThread.setDaemon(true);
+            writerThread.start();
+        }
+
+        String statusText() {
+            double chunkProgress = completedChunks;
+            if (currentSnapshot != null && !currentSnapshot.blocks.isEmpty())
+                chunkProgress += Math.min(1.0, currentBlockIndex / (double)currentSnapshot.blocks.size());
+            int percent = totalChunks <= 0 ? 100 : (int)Math.min(100, Math.floor(chunkProgress * 100.0 / totalChunks));
+            return "CNR export " + percent + "% | chunks " + completedChunks + "/" + totalChunks + " | non-air " + ctx.nonAirBlockCount;
+        }
+
+        void maybeShowProgress(Minecraft mc, String text) {
+            long now = System.nanoTime();
+            if (now - lastProgressNanos < PROGRESS_INTERVAL_NS) return;
+            lastProgressNanos = now;
+            sendClientMessage(mc, text, true);
+        }
+
+        void fail(Minecraft mc, Throwable t) {
+            t.printStackTrace();
+            String message = t.getMessage();
+            sendClientMessage(mc, "CNR export failed: " + t.getClass().getSimpleName() + (message == null ? "" : ": " + message), false);
+            done = true;
+        }
+    }
+
+    private static final class BlockEntry {
+        final BlockPos pos;
+        final BlockState state;
+        BlockEntry(BlockPos pos, BlockState state) { this.pos = pos; this.state = state; }
+    }
+
+    private static final class SpawnMarker {
+        final UUID id;
+        final String team;
+        final float[] position;
+        SpawnMarker(UUID id, String team, float[] position) {
+            this.id = id; this.team = team; this.position = position;
+        }
+    }
+
+    private static final class ChunkSnapshot {
+        final List<BlockEntry> blocks;
+        final List<SpawnMarker> markers;
+        final SnapshotView view;
+
+        ChunkSnapshot(List<BlockEntry> blocks, List<SpawnMarker> markers, SnapshotView view) {
+            this.blocks = blocks; this.markers = markers; this.view = view;
+        }
+
+        static ChunkSnapshot capture(ExportContext ctx, Level level, int cx, int cz, boolean allowLoad) {
+            ChunkAccess chunk;
+            if (allowLoad) {
+                chunk = level.getChunk(cx, cz);
+            } else {
+                chunk = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
+                if (chunk == null)
+                    throw new IllegalStateException("Selection includes an unloaded multiplayer chunk at " + cx + ", " + cz + ". Load the selected area before exporting.");
+            }
+
+            int baseX = cx << 4;
+            int baseZ = cz << 4;
+            int x0 = Math.max(ctx.min.getX(), baseX);
+            int x1 = Math.min(ctx.max.getX(), baseX + 15);
+            int z0 = Math.max(ctx.min.getZ(), baseZ);
+            int z1 = Math.min(ctx.max.getZ(), baseZ + 15);
+            int y0 = Math.max(ctx.min.getY(), chunk.getMinBuildHeight());
+            int y1 = Math.min(ctx.max.getY(), chunk.getMinBuildHeight() + chunk.getHeight() - 1);
+
+            List<BlockEntry> blocks = new ArrayList<>();
+            List<SpawnMarker> markers = new ArrayList<>();
+            Map<Long, BlockState> states = new HashMap<>();
+            Map<Long, Biome> biomes = new HashMap<>();
+            Biome defaultBiome = null;
+
+            if (x0 <= x1 && y0 <= y1 && z0 <= z1) {
+                LevelChunkSection[] sections = chunk.getSections();
+                int chunkMinY = chunk.getMinBuildHeight();
+                for (int si = 0; si < sections.length; si++) {
+                    LevelChunkSection section = sections[si];
+                    int sectionY0 = chunkMinY + (si << 4);
+                    int sectionY1 = sectionY0 + 15;
+                    if (section == null || section.hasOnlyAir() || sectionY1 < y0 || sectionY0 > y1) continue;
+                    int sy0 = Math.max(y0, sectionY0);
+                    int sy1 = Math.min(y1, sectionY1);
+                    for (int y = sy0; y <= sy1; y++) {
+                        int ly = y - sectionY0;
+                        for (int z = z0; z <= z1; z++) {
+                            int lz = z - baseZ;
+                            for (int x = x0; x <= x1; x++) {
+                                BlockState state = section.getBlockState(x - baseX, ly, lz);
+                                if (state.isAir()) continue;
+                                BlockPos pos = new BlockPos(x, y, z);
+                                states.put(pos.asLong(), state);
+                                Biome biome = level.getBiome(pos).value();
+                                if (defaultBiome == null) defaultBiome = biome;
+                                biomes.put(pos.asLong(), biome);
+                                blocks.add(new BlockEntry(pos, state));
+                            }
+                        }
+                    }
+                }
+
+                captureHorizontalBorder(level, ctx, states, baseX - 1, z0, z1, y0, y1, true);
+                captureHorizontalBorder(level, ctx, states, baseX + 16, z0, z1, y0, y1, true);
+                captureHorizontalBorder(level, ctx, states, baseZ - 1, x0, x1, y0, y1, false);
+                captureHorizontalBorder(level, ctx, states, baseZ + 16, x0, x1, y0, y1, false);
+
+                AABB bounds = new AABB(x0, y0, z0, x1 + 1.0, y1 + 1.0, z1 + 1.0);
+                for (ArmorStand stand : level.getEntitiesOfClass(ArmorStand.class, bounds)) {
+                    if (stand == null || !stand.hasCustomName()) continue;
+                    Component customName = stand.getCustomName();
+                    String marker = customName == null ? "" : customName.getString().trim();
+                    if (!marker.equalsIgnoreCase("Cops") && !marker.equalsIgnoreCase("Robbers")) continue;
+                    markers.add(new SpawnMarker(stand.getUUID(), marker, new float[] {
+                        (float)(stand.getX() - ctx.min.getX()),
+                        (float)(stand.getY() - ctx.min.getY()),
+                        (float)(stand.getZ() - ctx.min.getZ())
+                    }));
+                }
+            }
+
+            return new ChunkSnapshot(blocks, markers,
+                new SnapshotView(states, biomes, defaultBiome, chunk.getMinBuildHeight(), chunk.getHeight()));
+        }
+
+        static void captureHorizontalBorder(Level level, ExportContext ctx, Map<Long, BlockState> states,
+                                            int fixed, int range0, int range1, int y0, int y1, boolean fixedX) {
+            if (fixedX && (fixed < ctx.min.getX() || fixed > ctx.max.getX())) return;
+            if (!fixedX && (fixed < ctx.min.getZ() || fixed > ctx.max.getZ())) return;
+            for (int y = y0; y <= y1; y++) {
+                for (int v = range0; v <= range1; v++) {
+                    BlockPos pos = fixedX ? new BlockPos(fixed, y, v) : new BlockPos(v, y, fixed);
+                    BlockState state = level.getBlockState(pos);
+                    if (!state.isAir()) states.put(pos.asLong(), state);
+                }
+            }
+        }
+    }
+
+    private static final class SnapshotView implements BlockAndTintGetter {
+        final Map<Long, BlockState> states;
+        final Map<Long, Biome> biomes;
+        final Biome defaultBiome;
+        final int minBuildHeight;
+        final int height;
+
+        SnapshotView(Map<Long, BlockState> states, Map<Long, Biome> biomes, Biome defaultBiome, int minBuildHeight, int height) {
+            this.states = states; this.biomes = biomes; this.defaultBiome = defaultBiome;
+            this.minBuildHeight = minBuildHeight; this.height = height;
+        }
+
+        @Override public BlockEntity getBlockEntity(BlockPos pos) { return null; }
+        @Override public BlockState getBlockState(BlockPos pos) {
+            BlockState state = states.get(pos.asLong());
+            return state == null ? Blocks.AIR.defaultBlockState() : state;
+        }
+        @Override public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
+        @Override public int getHeight() { return height; }
+        @Override public int getMinBuildHeight() { return minBuildHeight; }
+        @Override public float getShade(Direction direction, boolean shade) { return 1.0f; }
+        @Override public LevelLightEngine getLightEngine() { return null; }
+        @Override public int getBlockTint(BlockPos pos, ColorResolver resolver) {
+            Biome biome = biomes.get(pos.asLong());
+            if (biome == null) biome = defaultBiome;
+            return biome == null ? 0xFFFFFF : resolver.getColor(biome, pos.getX(), pos.getZ());
+        }
     }
 
     private static final class ExportContext {
@@ -199,6 +557,8 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         final Map<ChunkKey, ChunkBuilder> chunks = new LinkedHashMap<>();
         final List<float[]> copSpawns = new ArrayList<>();
         final List<float[]> robberSpawns = new ArrayList<>();
+        final Set<UUID> seenSpawnMarkers = new HashSet<>();
+        int textureCountAtFinalize;
         long nonAirBlockCount;
         long renderQuadCount;
         long collisionBoxCount;
@@ -217,68 +577,22 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             this.sourceLevel = level;
         }
 
-        void collect() throws Exception {
-            int minChunkX = Math.floorDiv(min.getX(), 16);
-            int maxChunkX = Math.floorDiv(max.getX(), 16);
-            int minChunkZ = Math.floorDiv(min.getZ(), 16);
-            int maxChunkZ = Math.floorDiv(max.getZ(), 16);
-
-            for (int cz = minChunkZ; cz <= maxChunkZ; cz++) {
-                for (int cx = minChunkX; cx <= maxChunkX; cx++) {
-                    ChunkAccess worldChunk;
-                    if (sourceLevel == mc.level) {
-                        worldChunk = mc.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
-                        if (worldChunk == null)
-                            throw new IllegalStateException("Selection includes unloaded multiplayer chunks. Load the whole selected area before exporting.");
-                    } else {
-                        worldChunk = sourceLevel.getChunk(cx, cz);
-                    }
-                    try {
-                        worldChunk.findBlocks(state -> !state.isAir(), (worldPos, state) -> {
-                            if (worldPos.getX() < min.getX() || worldPos.getX() > max.getX()
-                                || worldPos.getY() < min.getY() || worldPos.getY() > max.getY()
-                                || worldPos.getZ() < min.getZ() || worldPos.getZ() > max.getZ()) return;
-                            nonAirBlockCount++;
-                            if (nonAirBlockCount > MAX_NON_AIR_BLOCKS)
-                                throw new ExportRuntimeException(new IllegalStateException(
-                                    "Selection contains more than 4,000,000 non-air blocks."));
-                            int lx = worldPos.getX()-min.getX(), ly = worldPos.getY()-min.getY(), lz = worldPos.getZ()-min.getZ();
-                            ChunkBuilder chunk = chunkFor(lx,ly,lz);
-                            try {
-                                emitRenderModel(state, worldPos, lx,ly,lz, chunk);
-                                emitCollision(state, worldPos, lx,ly,lz, chunk);
-                                emitClimbable(state, worldPos, lx,ly,lz, chunk);
-                            } catch (Exception ex) {
-                                throw new ExportRuntimeException(ex);
-                            }
-                        });
-                    } catch (ExportRuntimeException ex) {
-                        if (ex.getCause() instanceof Exception) throw (Exception)ex.getCause();
-                        throw ex;
-                    }
-                }
-            }
-            collectSpawnMarkers();
-            atlas = Atlas.pack(textures.values());
+        void processBlock(BlockEntry entry, SnapshotView view) throws Exception {
+            nonAirBlockCount++;
+            int lx = entry.pos.getX() - min.getX();
+            int ly = entry.pos.getY() - min.getY();
+            int lz = entry.pos.getZ() - min.getZ();
+            ChunkBuilder chunk = chunkFor(lx, ly, lz);
+            emitRenderModel(entry.state, entry.pos, lx, ly, lz, chunk, view);
+            emitCollision(entry.state, entry.pos, lx, ly, lz, chunk, view);
+            emitClimbable(entry.state, entry.pos, lx, ly, lz, chunk, view);
         }
 
-        void collectSpawnMarkers() {
-            AABB bounds = new AABB(
-                min.getX(), min.getY(), min.getZ(),
-                max.getX() + 1.0, max.getY() + 1.0, max.getZ() + 1.0);
-            for (ArmorStand stand : sourceLevel.getEntitiesOfClass(ArmorStand.class, bounds)) {
-                if (stand == null || !stand.hasCustomName()) continue;
-                Component customName = stand.getCustomName();
-                String marker = customName == null ? "" : customName.getString().trim();
-                if (!marker.equalsIgnoreCase("Cops") && !marker.equalsIgnoreCase("Robbers")) continue;
-
-                float[] spawn = new float[] {
-                    (float)(stand.getX() - min.getX()),
-                    (float)(stand.getY() - min.getY()),
-                    (float)(stand.getZ() - min.getZ())
-                };
-                if (marker.equalsIgnoreCase("Cops")) copSpawns.add(spawn);
-                else robberSpawns.add(spawn);
+        void acceptSpawnMarkers(List<SpawnMarker> markers) {
+            for (SpawnMarker marker : markers) {
+                if (!seenSpawnMarkers.add(marker.id)) continue;
+                if (marker.team.equalsIgnoreCase("Cops")) copSpawns.add(marker.position);
+                else if (marker.team.equalsIgnoreCase("Robbers")) robberSpawns.add(marker.position);
             }
         }
 
@@ -290,22 +604,22 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             return chunks.computeIfAbsent(key, k -> new ChunkBuilder(k));
         }
 
-        void emitRenderModel(BlockState state, BlockPos worldPos, int lx, int ly, int lz, ChunkBuilder chunk) throws Exception {
+        void emitRenderModel(BlockState state, BlockPos worldPos, int lx, int ly, int lz, ChunkBuilder chunk, SnapshotView view) throws Exception {
             BakedModel model = mc.getBlockRenderer().getBlockModel(state);
             String layer = renderLayer(state);
             long seed = state.getSeed(worldPos);
 
             for (Direction dir : Direction.values()) {
                 BlockPos neighbor = worldPos.relative(dir);
-                if (!Block.shouldRenderFace(state, sourceLevel, worldPos, dir, neighbor)) continue;
+                if (!Block.shouldRenderFace(state, view, worldPos, dir, neighbor)) continue;
                 RandomSource random = RandomSource.create(seed);
-                for (BakedQuad q : model.getQuads(state, dir, random)) emitQuad(q, state, worldPos, lx,ly,lz, chunk, layer);
+                for (BakedQuad q : model.getQuads(state, dir, random)) emitQuad(q, state, worldPos, lx,ly,lz, chunk, layer, view);
             }
             RandomSource random = RandomSource.create(seed);
-            for (BakedQuad q : model.getQuads(state, null, random)) emitQuad(q, state, worldPos, lx,ly,lz, chunk, layer);
+            for (BakedQuad q : model.getQuads(state, null, random)) emitQuad(q, state, worldPos, lx,ly,lz, chunk, layer, view);
         }
 
-        void emitQuad(BakedQuad q, BlockState state, BlockPos worldPos, int lx, int ly, int lz, ChunkBuilder chunk, String layer) throws Exception {
+        void emitQuad(BakedQuad q, BlockState state, BlockPos worldPos, int lx, int ly, int lz, ChunkBuilder chunk, String layer, SnapshotView view) throws Exception {
             int[] packed = q.getVertices();
             if (packed == null || packed.length < 20 || packed.length % 4 != 0) return;
             int stride = packed.length / 4;
@@ -314,7 +628,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             int tint = 0xFFFFFF;
             if (q.isTinted()) {
                 try {
-                    int resolved = mc.getBlockColors().getColor(state, sourceLevel, worldPos, q.getTintIndex());
+                    int resolved = mc.getBlockColors().getColor(state, view, worldPos, q.getTintIndex());
                     if (resolved >= 0) tint = resolved & 0xFFFFFF;
                 } catch (Throwable ignored) { }
             }
@@ -372,8 +686,8 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             }
         }
 
-        void emitCollision(BlockState state, BlockPos pos, int lx, int ly, int lz, ChunkBuilder chunk) {
-            VoxelShape shape = state.getCollisionShape(sourceLevel, pos);
+        void emitCollision(BlockState state, BlockPos pos, int lx, int ly, int lz, ChunkBuilder chunk, SnapshotView view) {
+            VoxelShape shape = state.getCollisionShape(view, pos);
             if (shape == null || shape.isEmpty()) return;
             for (AABB box : shape.toAabbs()) {
                 chunk.collision.addBox(
@@ -383,9 +697,9 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             }
         }
 
-        void emitClimbable(BlockState state, BlockPos pos, int lx, int ly, int lz, ChunkBuilder chunk) {
+        void emitClimbable(BlockState state, BlockPos pos, int lx, int ly, int lz, ChunkBuilder chunk, SnapshotView view) {
             if (!state.is(BlockTags.CLIMBABLE)) return;
-            VoxelShape shape = state.getShape(sourceLevel, pos);
+            VoxelShape shape = state.getShape(view, pos);
             List<AABB> boxes = (shape == null || shape.isEmpty())
                 ? Collections.singletonList(new AABB(0, 0, 0, 1, 1, 1))
                 : shape.toAabbs();

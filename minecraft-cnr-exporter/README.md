@@ -50,6 +50,13 @@ Export it with:
 /cnr export shipment
 ```
 
+Exports run incrementally so large selections do not lock up the game. Check progress or cancel a running export with:
+
+```text
+/cnr status
+/cnr cancel
+```
+
 Exports are written to:
 
 ```text

@@ -38,6 +38,10 @@ Select any rectangular region using `/cnr pos1` and `/cnr pos2`, then run `/cnr 
 - Minecraft block collision exported for CNR physics
 - `Cops` and `Robbers` armor-stand spawn markers
 - Automatic export of blocks in `#minecraft:climbable`
+- Large exports run incrementally instead of blocking the render thread
+- Live progress via `/cnr status` and cancellation via `/cnr cancel`
+- Single-player chunk loading/scanning is scheduled through the integrated server thread
+- Expensive final packing/compression/JSON writing runs on a background writer thread
 - Single-player exports can read beyond current render distance through the integrated server world
 - Safe multiplayer behavior that refuses unloaded selected chunks instead of treating them as air
 
@@ -73,11 +77,11 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 - Source: https://github.com/Jacqueb-1337/copsnrobbers
 - Issues: https://github.com/Jacqueb-1337/copsnrobbers/issues
 
-## Version 0.1.2
+## Version 0.1.3
 
-**Version number:** `0.1.2`
+**Version number:** `0.1.3`
 
-**Version title:** `CNR Map Exporter 0.1.2`
+**Version title:** `CNR Map Exporter 0.1.3`
 
 **Version type:** Beta
 
@@ -85,12 +89,16 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 
 **Loader:** Fabric
 
-**Primary file:** `cnrmapexporter-0.1.2.jar`
+**Primary file:** `cnrmapexporter-0.1.3.jar`
 
 **Required dependency:** Fabric API
 
 **Changelog:**
 
+- Reworked large exports into an incremental pipeline so `/cnr export` no longer locks the render thread.
+- Added live progress with `/cnr status` and safe cancellation with `/cnr cancel`.
+- Single-player chunk snapshot work is scheduled on the integrated server thread, while client geometry work is time-budgeted per tick.
+- Atlas packing, compression, JSON serialization, and disk writing now finalize on a background writer thread.
 - Added sparse export scanning so air no longer counts toward the 4,000,000-block export limit.
 - Added climbable-block export using Minecraft's `#minecraft:climbable` tag.
 - Added Cops and Robbers armor-stand spawn markers.
@@ -112,7 +120,7 @@ Modrinth currently prohibits AI-generated or AI-assisted project icons. Use the 
 
 ## Before submitting for review
 
-- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.2.jar`.
+- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.3.jar`.
 - Mark Fabric API as a required dependency.
 - Set client environment to required and server environment to unsupported.
 - Add the project icon.
