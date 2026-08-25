@@ -3,9 +3,15 @@
   "id": "cnrmapexporter",
   "version": "${version}",
   "name": "CNR Map Exporter",
-  "description": "Exports Minecraft selections as self-contained CNR DLC map packages.",
+  "description": "Exports Minecraft builds and selections as compact Cops N Robbers DLC map packages, including textures, collision, spawns, and climbable surfaces.",
   "authors": ["Jacqueb"],
-  "license": "MIT",
+  "contact": {
+    "homepage": "https://play.jacqueb.me/",
+    "sources": "https://github.com/Jacqueb-1337/copsnrobbers",
+    "issues": "https://github.com/Jacqueb-1337/copsnrobbers/issues"
+  },
+  "license": "CC0-1.0",
+  "icon": "assets/cnrmapexporter/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": ["me.jacqueb.cnrmapexporter.CnrMapExporterClient"]
