@@ -102,6 +102,49 @@ function flash_redirect(string $msg, bool $ok = true, string $tab = ''): void {
     exit;
 }
 
+function admin_content_upload_bucket(string $type): string {
+    if ($type === 'map' || $type === 'dlcmap') return 'maps';
+    if ($type === 'gun') return 'guns';
+    if ($type === 'texture') return 'textures';
+    if ($type === 'skin') return 'skins';
+    if ($type === 'data') return 'data';
+    throw new RuntimeException('Unsupported content type.');
+}
+
+function admin_content_upload_extensions(string $type): array {
+    if ($type === 'map' || $type === 'dlcmap') return ['json','bin','dat','bytes','cnrmap','cnrpack'];
+    if ($type === 'gun') return ['json','bin','dat','bytes','cnrgun','cnrpack','png','jpg','jpeg','webp'];
+    if ($type === 'texture' || $type === 'skin') return ['png','jpg','jpeg','gif','webp','dds'];
+    if ($type === 'data') return ['json','bin','dat','bytes','txt','cnrpack'];
+    return [];
+}
+
+function admin_store_content_upload(array $file, string $type, string $contentId): array {
+    if ((int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) throw new RuntimeException('Upload error (code ' . (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) . ').');
+    $size = (int)($file['size'] ?? 0);
+    if ($size <= 0) throw new RuntimeException('Uploaded file is empty.');
+    if ($size > 64 * 1024 * 1024) throw new RuntimeException('Uploaded file exceeds 64 MB.');
+    if (!is_uploaded_file((string)$file['tmp_name'])) throw new RuntimeException('Upload source is invalid.');
+    $ext = strtolower((string)pathinfo((string)($file['name'] ?? ''), PATHINFO_EXTENSION));
+    if ($ext === '' || !in_array($ext, admin_content_upload_extensions($type), true)) throw new RuntimeException('File type .' . ($ext ?: '?') . ' is not allowed for ' . $type . '.');
+    $bucket = admin_content_upload_bucket($type);
+    $dir = __DIR__ . '/../uploads/' . $bucket . '/';
+    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) throw new RuntimeException('Could not create upload directory.');
+    foreach (admin_content_upload_extensions($type) as $oldExt) {
+        $old = $dir . $contentId . '.' . $oldExt;
+        if (is_file($old)) @unlink($old);
+    }
+    $dest = $dir . $contentId . '.' . $ext;
+    if (!move_uploaded_file((string)$file['tmp_name'], $dest)) throw new RuntimeException('Could not move uploaded file into content storage.');
+    $hash = md5_file($dest);
+    if ($hash === false) throw new RuntimeException('Could not hash uploaded file.');
+    return [
+        'url' => 'https://play.jacqueb.me/economy/uploads/' . rawurlencode($bucket) . '/' . rawurlencode($contentId . '.' . $ext),
+        'hash' => strtolower($hash),
+        'size' => (int)filesize($dest),
+    ];
+}
+
 // ── Handle POST actions ───────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $act = trim($_POST['act'] ?? '');
@@ -154,8 +197,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dkey  = trim($_POST['data_key']      ?? '');
         $sort  = (int)($_POST['sort_order']   ?? 0);
         $fhash = strtolower(preg_replace('/[^a-fA-F0-9]/', '', trim($_POST['file_hash'] ?? '')));
+        try {
+            if ($cid !== '' && isset($_FILES['content_file']) && (int)($_FILES['content_file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+                $stored = admin_store_content_upload($_FILES['content_file'], $ctype, $cid);
+                $curl = $stored['url'];
+                $fhash = $stored['hash'];
+            }
+        } catch (Exception $e) {
+            flash_redirect('Upload error: ' . $e->getMessage(), false, 'content');
+        }
         if ($cid === '' || $curl === '') {
-            flash_redirect('ID and URL are required.', false, 'content');
+            flash_redirect('ID and either a URL or uploaded file are required.', false, 'content');
         } else {
             try {
                 $pdo->prepare(
@@ -184,6 +236,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash_redirect($flash, true, 'content');
             } catch (Exception $e) {
                 flash_redirect('Error: ' . $e->getMessage(), false, 'content');
+            }
+        }
+    }
+
+    if ($act === 'upload_content') {
+        $cid = preg_replace('/[^a-z0-9_\-]/i', '_', trim($_POST['content_id'] ?? ''));
+        $stmt = $pdo->prepare("SELECT id,type FROM content_items WHERE id = ?");
+        $stmt->execute([$cid]);
+        $item = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$item) {
+            flash_redirect('Content item not found.', false, 'content');
+        } elseif (!isset($_FILES['content_file']) || (int)($_FILES['content_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            flash_redirect('Choose a file to upload.', false, 'content');
+        } else {
+            try {
+                $stored = admin_store_content_upload($_FILES['content_file'], (string)$item['type'], $cid);
+                $pdo->prepare("UPDATE content_items SET url = ?, file_hash = ? WHERE id = ?")
+                    ->execute([$stored['url'], $stored['hash'], $cid]);
+                flash_redirect('Uploaded ' . number_format($stored['size']) . ' bytes for "' . htmlspecialchars($cid) . '". MD5 updated automatically.', true, 'content');
+            } catch (Exception $e) {
+                flash_redirect('Upload error: ' . $e->getMessage(), false, 'content');
             }
         }
     }
@@ -549,6 +622,12 @@ tr:hover td{background:rgba(255,255,255,.025)}
       <!-- actions -->
       <div class="ci-actions">
         <span class="dot <?= $c['enabled']?'on':'off' ?>"></span>
+        <form method="POST" enctype="multipart/form-data" style="display:inline">
+          <input type="hidden" name="act" value="upload_content">
+          <input type="hidden" name="content_id" value="<?= $eid ?>">
+          <input type="file" name="content_file" id="cf-<?= $eid ?>" style="display:none" onchange="this.form.submit()">
+          <button type="button" class="btn btn-sm btn-blue" onclick="document.getElementById('cf-<?= $eid ?>').click()">Upload file</button>
+        </form>
         <form method="POST" style="display:inline">
           <input type="hidden" name="act" value="toggle_content">
           <input type="hidden" name="content_id" value="<?= $eid ?>">
@@ -592,7 +671,12 @@ tr:hover td{background:rgba(255,255,255,.025)}
         <input type="text" name="cname" placeholder="Snow Reimagined" maxlength="80">
         <label>URL</label>
         <div style="display:flex;gap:6px">
-          <input type="url" name="curl" id="add-curl" placeholder="https://…" required>
+          <input type="url" name="curl" id="add-curl" placeholder="https://… (or upload a file below)">
+        </div>
+        <label>Content file</label>
+        <div>
+          <input type="file" name="content_file" style="width:auto">
+          <span class="dim" style="margin-left:6px">Optional. Uploading a file overrides URL/hash and calculates MD5 automatically.</span>
         </div>
         <label>MD5 hash</label>
         <div style="display:flex;gap:6px;align-items:center">
