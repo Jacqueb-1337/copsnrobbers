@@ -20,6 +20,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.level.block.Block;
@@ -171,7 +172,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             Path out = outDir.resolve(name + ".json");
             Files.writeString(out, new Gson().toJson(ctx.finish()));
             feedback.send(Component.literal("CNR map exported: " + out.toAbsolutePath()));
-            feedback.send(Component.literal("Chunks=" + ctx.chunks.size() + " textures=" + ctx.textures.size() + " quads=" + ctx.renderQuadCount + " collision boxes=" + ctx.collisionBoxCount + " Cops spawns=" + ctx.copSpawns.size() + " Robbers spawns=" + ctx.robberSpawns.size()));
+            feedback.send(Component.literal("Chunks=" + ctx.chunks.size() + " textures=" + ctx.textures.size() + " quads=" + ctx.renderQuadCount + " collision boxes=" + ctx.collisionBoxCount + " climbable boxes=" + ctx.climbableBoxCount + " Cops spawns=" + ctx.copSpawns.size() + " Robbers spawns=" + ctx.robberSpawns.size()));
             return 1;
         } catch (Throwable t) {
             t.printStackTrace();
@@ -195,6 +196,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         final List<float[]> robberSpawns = new ArrayList<>();
         long renderQuadCount;
         long collisionBoxCount;
+        long climbableBoxCount;
         Atlas atlas;
 
         ExportContext(Minecraft mc, BlockPos min, BlockPos max, String name) {
@@ -212,6 +214,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
                         ChunkBuilder chunk = chunkFor(lx,ly,lz);
                         emitRenderModel(state, worldPos, lx,ly,lz, chunk);
                         emitCollision(state, worldPos, lx,ly,lz, chunk);
+                        emitClimbable(state, worldPos, lx,ly,lz, chunk);
                     }
                 }
             }
@@ -340,6 +343,20 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             }
         }
 
+        void emitClimbable(BlockState state, BlockPos pos, int lx, int ly, int lz, ChunkBuilder chunk) {
+            if (!state.is(BlockTags.CLIMBABLE)) return;
+            VoxelShape shape = state.getShape(mc.level, pos);
+            List<AABB> boxes = (shape == null || shape.isEmpty())
+                ? Collections.singletonList(new AABB(0, 0, 0, 1, 1, 1))
+                : shape.toAabbs();
+            for (AABB box : boxes) {
+                chunk.climbable.addBox(
+                    (float)box.minX + lx - chunk.key.x, (float)box.minY + ly - chunk.key.y, (float)box.minZ + lz - chunk.key.z,
+                    (float)box.maxX + lx - chunk.key.x, (float)box.maxY + ly - chunk.key.y, (float)box.maxZ + lz - chunk.key.z);
+                climbableBoxCount++;
+            }
+        }
+
         String renderLayer(BlockState state) {
             RenderType type = ItemBlockRenderTypes.getChunkRenderType(state);
             if (type == RenderType.translucent()) return "transparent";
@@ -409,10 +426,10 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         void addBox(float x0,float y0,float z0,float x1,float y1,float z1){ if(x1>x0&&y1>y0&&z1>z0) boxes.add(new float[]{x0,y0,z0,x1,y1,z1}); }
     }
     private static final class ChunkBuilder {
-        final ChunkKey key; final RenderBuilder opaque=new RenderBuilder(),cutout=new RenderBuilder(),transparent=new RenderBuilder(); final CollisionBuilder collision=new CollisionBuilder();
+        final ChunkKey key; final RenderBuilder opaque=new RenderBuilder(),cutout=new RenderBuilder(),transparent=new RenderBuilder(); final CollisionBuilder collision=new CollisionBuilder(),climbable=new CollisionBuilder();
         ChunkBuilder(ChunkKey key){this.key=key;}
         RenderBuilder render(String s){return s.equals("transparent")?transparent:s.equals("cutout")?cutout:opaque;}
-        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaquePacked=packRender(opaque,atlas);j.cutoutPacked=packRender(cutout,atlas);j.transparentPacked=packRender(transparent,atlas);j.collisionBoxesPacked=packBoxes(collision);return j; }
+        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaquePacked=packRender(opaque,atlas);j.cutoutPacked=packRender(cutout,atlas);j.transparentPacked=packRender(transparent,atlas);j.collisionBoxesPacked=packBoxes(collision);j.climbableBoxesPacked=packBoxes(climbable);return j; }
     }
 
     private static List<MeshJson> meshRender(RenderBuilder src, Atlas atlas) {
@@ -590,7 +607,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
     private static final class MapFile { String format,id,name,source; int version; float blockScale; float[] origin; AtlasJson atlas; List<ChunkJson> chunks; List<float[]> spawns,copSpawns,robberSpawns; }
     private static final class AtlasJson { int width,height; String pngBase64; List<AtlasEntry> entries; }
     private static final class AtlasEntry { String id; int x,y,w,h; }
-    private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; PackedBlob collisionBoxesPacked; }
+    private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; PackedBlob collisionBoxesPacked,climbableBoxesPacked; }
     private static final class PackedBlob { String encoding,dataBase64; int count,rawBytes; }
     private static final class MeshJson { float[] vertices,uv; int[] triangles; }
 }
