@@ -1,12 +1,17 @@
 package me.jacqueb.cnrmapexporter;
 
 import com.google.gson.Gson;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.resources.model.BakedModel;
@@ -15,13 +20,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.tags.BlockTags;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import javax.imageio.ImageIO;
@@ -47,8 +53,24 @@ public final class CnrMapExporterClient implements ClientModInitializer {
     public void onInitializeClient() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
             ClientCommandManager.literal("cnr")
-                .then(ClientCommandManager.literal("pos1").executes(ctx -> setPos(ctx.getSource().getClient(), true)))
-                .then(ClientCommandManager.literal("pos2").executes(ctx -> setPos(ctx.getSource().getClient(), false)))
+                .then(ClientCommandManager.literal("pos1")
+                    .executes(ctx -> setPos(ctx.getSource().getClient(), true))
+                    .then(ClientCommandManager.argument("x", StringArgumentType.word())
+                        .then(ClientCommandManager.argument("y", StringArgumentType.word())
+                            .then(ClientCommandManager.argument("z", StringArgumentType.word()).executes(ctx ->
+                                setPos(ctx.getSource().getClient(), true,
+                                    StringArgumentType.getString(ctx, "x"),
+                                    StringArgumentType.getString(ctx, "y"),
+                                    StringArgumentType.getString(ctx, "z")))))))
+                .then(ClientCommandManager.literal("pos2")
+                    .executes(ctx -> setPos(ctx.getSource().getClient(), false))
+                    .then(ClientCommandManager.argument("x", StringArgumentType.word())
+                        .then(ClientCommandManager.argument("y", StringArgumentType.word())
+                            .then(ClientCommandManager.argument("z", StringArgumentType.word()).executes(ctx ->
+                                setPos(ctx.getSource().getClient(), false,
+                                    StringArgumentType.getString(ctx, "x"),
+                                    StringArgumentType.getString(ctx, "y"),
+                                    StringArgumentType.getString(ctx, "z")))))))
                 .then(ClientCommandManager.literal("clear").executes(ctx -> {
                     pos1 = null; pos2 = null;
                     ctx.getSource().sendFeedback(Component.literal("CNR selection cleared."));
@@ -60,14 +82,60 @@ public final class CnrMapExporterClient implements ClientModInitializer {
                         return exportSelection(ctx.getSource().getClient(), name, ctx.getSource()::sendFeedback);
                     })))
         ));
+        WorldRenderEvents.AFTER_ENTITIES.register(CnrMapExporterClient::renderSelectionOutline);
     }
 
     private static int setPos(Minecraft client, boolean first) {
         if (client.player == null || client.level == null) return 0;
         BlockPos p = targetBlock(client);
+        return setPos(client, first, p);
+    }
+
+    private static int setPos(Minecraft client, boolean first, String x, String y, String z) {
+        if (client.player == null || client.level == null) return 0;
+        BlockPos base = client.player.blockPosition();
+        try {
+            BlockPos p = new BlockPos(
+                parseCoordinate(x, base.getX()),
+                parseCoordinate(y, base.getY()),
+                parseCoordinate(z, base.getZ()));
+            return setPos(client, first, p);
+        } catch (NumberFormatException ex) {
+            client.player.displayClientMessage(Component.literal("Invalid coordinates. Use numbers or relative values like ~, ~5, ~-3."), false);
+            return 0;
+        }
+    }
+
+    private static int setPos(Minecraft client, boolean first, BlockPos p) {
         if (first) pos1 = p.immutable(); else pos2 = p.immutable();
         client.player.displayClientMessage(Component.literal("CNR " + (first ? "pos1" : "pos2") + " = " + p.getX() + ", " + p.getY() + ", " + p.getZ()), false);
         return 1;
+    }
+
+    private static int parseCoordinate(String raw, int base) {
+        String value = raw == null ? "" : raw.trim();
+        if (value.startsWith("~")) {
+            String delta = value.substring(1);
+            return (int)Math.floor(base + (delta.isEmpty() ? 0.0 : Double.parseDouble(delta)));
+        }
+        return (int)Math.floor(Double.parseDouble(value));
+    }
+
+    private static void renderSelectionOutline(net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext context) {
+        if (pos1 == null || pos2 == null || context == null) return;
+        PoseStack matrices = context.matrixStack();
+        MultiBufferSource consumers = context.consumers();
+        if (matrices == null || consumers == null) return;
+
+        Vec3 camera = context.camera().getPosition();
+        double minX = Math.min(pos1.getX(), pos2.getX()) - camera.x;
+        double minY = Math.min(pos1.getY(), pos2.getY()) - camera.y;
+        double minZ = Math.min(pos1.getZ(), pos2.getZ()) - camera.z;
+        double maxX = Math.max(pos1.getX(), pos2.getX()) + 1.0 - camera.x;
+        double maxY = Math.max(pos1.getY(), pos2.getY()) + 1.0 - camera.y;
+        double maxZ = Math.max(pos1.getZ(), pos2.getZ()) + 1.0 - camera.z;
+        VertexConsumer lines = consumers.getBuffer(RenderType.lines());
+        LevelRenderer.renderLineBox(matrices, lines, new AABB(minX, minY, minZ, maxX, maxY, maxZ), 1.0f, 0.35f, 0.1f, 1.0f);
     }
 
     private static BlockPos targetBlock(Minecraft client) {
@@ -103,7 +171,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             Path out = outDir.resolve(name + ".json");
             Files.writeString(out, new Gson().toJson(ctx.finish()));
             feedback.send(Component.literal("CNR map exported: " + out.toAbsolutePath()));
-            feedback.send(Component.literal("Chunks=" + ctx.chunks.size() + " textures=" + ctx.textures.size() + " quads=" + ctx.renderQuadCount + " collision boxes=" + ctx.collisionBoxCount));
+            feedback.send(Component.literal("Chunks=" + ctx.chunks.size() + " textures=" + ctx.textures.size() + " quads=" + ctx.renderQuadCount + " collision boxes=" + ctx.collisionBoxCount + " Cops spawns=" + ctx.copSpawns.size() + " Robbers spawns=" + ctx.robberSpawns.size()));
             return 1;
         } catch (Throwable t) {
             t.printStackTrace();
@@ -123,6 +191,8 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         final String name;
         final Map<String, TextureDef> textures = new LinkedHashMap<>();
         final Map<ChunkKey, ChunkBuilder> chunks = new LinkedHashMap<>();
+        final List<float[]> copSpawns = new ArrayList<>();
+        final List<float[]> robberSpawns = new ArrayList<>();
         long renderQuadCount;
         long collisionBoxCount;
         Atlas atlas;
@@ -145,7 +215,28 @@ public final class CnrMapExporterClient implements ClientModInitializer {
                     }
                 }
             }
+            collectSpawnMarkers();
             atlas = Atlas.pack(textures.values());
+        }
+
+        void collectSpawnMarkers() {
+            AABB bounds = new AABB(
+                min.getX(), min.getY(), min.getZ(),
+                max.getX() + 1.0, max.getY() + 1.0, max.getZ() + 1.0);
+            for (ArmorStand stand : mc.level.getEntitiesOfClass(ArmorStand.class, bounds)) {
+                if (stand == null || !stand.hasCustomName()) continue;
+                Component customName = stand.getCustomName();
+                String marker = customName == null ? "" : customName.getString().trim();
+                if (!marker.equalsIgnoreCase("Cops") && !marker.equalsIgnoreCase("Robbers")) continue;
+
+                float[] spawn = new float[] {
+                    (float)(stand.getX() - min.getX()),
+                    (float)(stand.getY() - min.getY()),
+                    (float)(stand.getZ() - min.getZ())
+                };
+                if (marker.equalsIgnoreCase("Cops")) copSpawns.add(spawn);
+                else robberSpawns.add(spawn);
+            }
         }
 
         ChunkBuilder chunkFor(int x, int y, int z) {
@@ -264,38 +355,9 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             out.chunks = new ArrayList<>();
             for (ChunkBuilder c : chunks.values()) out.chunks.add(c.toJson(atlas));
             out.spawns = new ArrayList<>();
-            out.spawns.add(findSafeSpawn());
+            out.copSpawns = new ArrayList<>(copSpawns);
+            out.robberSpawns = new ArrayList<>(robberSpawns);
             return out;
-        }
-
-        float[] findSafeSpawn() {
-            int cx=(min.getX()+max.getX())/2, cz=(min.getZ()+max.getZ())/2;
-            int maxRadius=Math.max(max.getX()-min.getX(), max.getZ()-min.getZ());
-            for(int r=0;r<=maxRadius;r++) {
-                for(int x=cx-r;x<=cx+r;x++) for(int z=cz-r;z<=cz+r;z++) {
-                    if(Math.max(Math.abs(x-cx),Math.abs(z-cz))!=r) continue;
-                    if(x<min.getX()||x>max.getX()||z<min.getZ()||z>max.getZ()) continue;
-                    for(int y=max.getY()-3;y>=min.getY();y--) {
-                        BlockPos floor=new BlockPos(x,y,z);
-                        if(isSafeSpawnFloor(floor))
-                            return new float[]{x-min.getX()+0.5f,y-min.getY()+1.1f,z-min.getZ()+0.5f};
-                    }
-                }
-            }
-            int sx=Math.max(0,mc.player.blockPosition().getX()-min.getX());
-            int sy=Math.max(1,mc.player.blockPosition().getY()-min.getY()+5);
-            int sz=Math.max(0,mc.player.blockPosition().getZ()-min.getZ());
-            return new float[]{sx+0.5f,sy+0.1f,sz+0.5f};
-        }
-
-        boolean isSafeSpawnFloor(BlockPos floor) {
-            BlockState state=mc.level.getBlockState(floor);
-            if(state.isAir() || state.is(BlockTags.LEAVES)) return false;
-            VoxelShape shape=state.getCollisionShape(mc.level,floor);
-            if(shape==null || shape.isEmpty()) return false;
-            try { if(shape.bounds().maxY < 0.99) return false; } catch(Throwable ignored) { return false; }
-            for(int i=1;i<=3;i++) if(!mc.level.getBlockState(floor.above(i)).isAir()) return false;
-            return true;
         }
     }
 
@@ -525,7 +587,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         MeshJson finish(){MeshJson j=new MeshJson();j.vertices=new float[v.size()];for(int i=0;i<v.size();i++)j.vertices[i]=v.get(i);j.uv=uvEnabled?new float[uv.size()]:new float[0];if(uvEnabled)for(int i=0;i<uv.size();i++)j.uv[i]=uv.get(i);j.triangles=new int[t.size()];for(int i=0;i<t.size();i++)j.triangles[i]=t.get(i);return j;}
     }
 
-    private static final class MapFile { String format,id,name,source; int version; float blockScale; float[] origin; AtlasJson atlas; List<ChunkJson> chunks; List<float[]> spawns; }
+    private static final class MapFile { String format,id,name,source; int version; float blockScale; float[] origin; AtlasJson atlas; List<ChunkJson> chunks; List<float[]> spawns,copSpawns,robberSpawns; }
     private static final class AtlasJson { int width,height; String pngBase64; List<AtlasEntry> entries; }
     private static final class AtlasEntry { String id; int x,y,w,h; }
     private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; PackedBlob collisionBoxesPacked; }
