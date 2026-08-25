@@ -306,11 +306,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "4.1.61",
+      "latestVersion": "4.1.62",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.61.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.62.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "4.1.62",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.62.dll",
+          "changelog": "Fix DLC maps on old Android Mono with raw packed binary blobs, block room creation when DLC preparation fails, use lighting-independent DLC map materials, and update Minecraft exports with baked biome tint plus automatic safe spawn selection."
+        },
         {
           "version": "4.1.61",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.61.dll",

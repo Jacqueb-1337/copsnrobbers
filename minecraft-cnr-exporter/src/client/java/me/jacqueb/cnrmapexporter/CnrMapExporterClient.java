@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -28,13 +29,11 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.zip.GZIPOutputStream;
 
 public final class CnrMapExporterClient implements ClientModInitializer {
     private static final int CHUNK_SIZE = 16;
@@ -164,20 +163,28 @@ public final class CnrMapExporterClient implements ClientModInitializer {
                 BlockPos neighbor = worldPos.relative(dir);
                 if (!Block.shouldRenderFace(state, mc.level, worldPos, dir, neighbor)) continue;
                 RandomSource random = RandomSource.create(seed);
-                for (BakedQuad q : model.getQuads(state, dir, random)) emitQuad(q, lx,ly,lz, chunk, layer);
+                for (BakedQuad q : model.getQuads(state, dir, random)) emitQuad(q, state, worldPos, lx,ly,lz, chunk, layer);
             }
             RandomSource random = RandomSource.create(seed);
-            for (BakedQuad q : model.getQuads(state, null, random)) emitQuad(q, lx,ly,lz, chunk, layer);
+            for (BakedQuad q : model.getQuads(state, null, random)) emitQuad(q, state, worldPos, lx,ly,lz, chunk, layer);
         }
 
-        void emitQuad(BakedQuad q, int lx, int ly, int lz, ChunkBuilder chunk, String layer) throws Exception {
+        void emitQuad(BakedQuad q, BlockState state, BlockPos worldPos, int lx, int ly, int lz, ChunkBuilder chunk, String layer) throws Exception {
             int[] packed = q.getVertices();
             if (packed == null || packed.length < 20 || packed.length % 4 != 0) return;
             int stride = packed.length / 4;
             TextureAtlasSprite sprite = q.getSprite();
             ResourceLocation spriteId = sprite.contents().name();
-            String texId = spriteId.toString();
-            textures.computeIfAbsent(texId, id -> loadTexture(spriteId, sprite));
+            int tint = 0xFFFFFF;
+            if (q.isTinted()) {
+                try {
+                    int resolved = mc.getBlockColors().getColor(state, mc.level, worldPos, q.getTintIndex());
+                    if (resolved >= 0) tint = resolved & 0xFFFFFF;
+                } catch (Throwable ignored) { }
+            }
+            String texId = q.isTinted() ? (spriteId + "#tint_" + String.format("%06x", tint)) : spriteId.toString();
+            final int bakedTint = tint;
+            textures.computeIfAbsent(texId, id -> loadTexture(spriteId, sprite, texId, bakedTint));
 
             float[] p = new float[12];
             float[] uv = new float[8];
@@ -197,7 +204,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             renderQuadCount++;
         }
 
-        TextureDef loadTexture(ResourceLocation spriteId, TextureAtlasSprite sprite) {
+        TextureDef loadTexture(ResourceLocation spriteId, TextureAtlasSprite sprite, String texId, int tint) {
             try {
                 ResourceLocation png = ResourceLocation.fromNamespaceAndPath(spriteId.getNamespace(), "textures/" + spriteId.getPath() + ".png");
                 var res = mc.getResourceManager().getResource(png);
@@ -207,15 +214,26 @@ public final class CnrMapExporterClient implements ClientModInitializer {
                         if (source != null) {
                             int fw = Math.min(source.getWidth(), sprite.contents().width());
                             int fh = Math.min(source.getHeight(), sprite.contents().height());
-                            BufferedImage first = source.getSubimage(0,0,fw,fh);
-                            return new TextureDef(spriteId.toString(), copyImage(first));
+                            BufferedImage first = copyImage(source.getSubimage(0,0,fw,fh));
+                            if (tint != 0xFFFFFF) applyTint(first, tint);
+                            return new TextureDef(texId, first);
                         }
                     }
                 }
             } catch (Throwable ignored) { }
             BufferedImage missing = new BufferedImage(16,16,BufferedImage.TYPE_INT_ARGB);
             for (int y=0;y<16;y++) for(int x=0;x<16;x++) missing.setRGB(x,y,(((x>>2)^(y>>2))&1)==0?0xffff00ff:0xff101010);
-            return new TextureDef(spriteId.toString(), missing);
+            return new TextureDef(texId, missing);
+        }
+
+        void applyTint(BufferedImage image, int tint) {
+            int tr=(tint>>16)&255, tg=(tint>>8)&255, tb=tint&255;
+            for(int y=0;y<image.getHeight();y++) for(int x=0;x<image.getWidth();x++) {
+                int argb=image.getRGB(x,y), a=(argb>>>24)&255;
+                int r=(argb>>16)&255, g=(argb>>8)&255, b=argb&255;
+                r=r*tr/255; g=g*tg/255; b=b*tb/255;
+                image.setRGB(x,y,(a<<24)|(r<<16)|(g<<8)|b);
+            }
         }
 
         void emitCollision(BlockState state, BlockPos pos, int lx, int ly, int lz, ChunkBuilder chunk) {
@@ -244,11 +262,38 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             out.chunks = new ArrayList<>();
             for (ChunkBuilder c : chunks.values()) out.chunks.add(c.toJson(atlas));
             out.spawns = new ArrayList<>();
-            int sx = Math.max(0, mc.player.blockPosition().getX()-min.getX());
-            int sy = Math.max(1, mc.player.blockPosition().getY()-min.getY());
-            int sz = Math.max(0, mc.player.blockPosition().getZ()-min.getZ());
-            out.spawns.add(new float[]{sx+0.5f,sy+0.1f,sz+0.5f});
+            out.spawns.add(findSafeSpawn());
             return out;
+        }
+
+        float[] findSafeSpawn() {
+            int cx=(min.getX()+max.getX())/2, cz=(min.getZ()+max.getZ())/2;
+            int maxRadius=Math.max(max.getX()-min.getX(), max.getZ()-min.getZ());
+            for(int r=0;r<=maxRadius;r++) {
+                for(int x=cx-r;x<=cx+r;x++) for(int z=cz-r;z<=cz+r;z++) {
+                    if(Math.max(Math.abs(x-cx),Math.abs(z-cz))!=r) continue;
+                    if(x<min.getX()||x>max.getX()||z<min.getZ()||z>max.getZ()) continue;
+                    for(int y=max.getY()-3;y>=min.getY();y--) {
+                        BlockPos floor=new BlockPos(x,y,z);
+                        if(isSafeSpawnFloor(floor))
+                            return new float[]{x-min.getX()+0.5f,y-min.getY()+1.1f,z-min.getZ()+0.5f};
+                    }
+                }
+            }
+            int sx=Math.max(0,mc.player.blockPosition().getX()-min.getX());
+            int sy=Math.max(1,mc.player.blockPosition().getY()-min.getY()+5);
+            int sz=Math.max(0,mc.player.blockPosition().getZ()-min.getZ());
+            return new float[]{sx+0.5f,sy+0.1f,sz+0.5f};
+        }
+
+        boolean isSafeSpawnFloor(BlockPos floor) {
+            BlockState state=mc.level.getBlockState(floor);
+            if(state.isAir() || state.is(BlockTags.LEAVES)) return false;
+            VoxelShape shape=state.getCollisionShape(mc.level,floor);
+            if(shape==null || shape.isEmpty()) return false;
+            try { if(shape.bounds().maxY < 0.99) return false; } catch(Throwable ignored) { return false; }
+            for(int i=1;i<=3;i++) if(!mc.level.getBlockState(floor.above(i)).isAir()) return false;
+            return true;
         }
     }
 
@@ -327,7 +372,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         for(float f:m.vertices)b.putFloat(f);
         for(float f:m.uv)b.putFloat(f);
         for(int t:m.triangles)b.putShort((short)(t & 0xffff));
-        PackedBlob p=new PackedBlob(); p.encoding="cnrmesh-f32-u16-gzip-v1"; p.dataBase64=gzipBase64(b.array()); return p;
+        PackedBlob p=new PackedBlob(); p.encoding="cnrmesh-f32-u16-raw-v1"; p.dataBase64=Base64.getEncoder().encodeToString(b.array()); return p;
     }
 
     private static PackedBlob packBoxes(CollisionBuilder src) {
@@ -335,15 +380,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         ByteBuffer b=ByteBuffer.allocate(4+boxes.size()*24).order(ByteOrder.LITTLE_ENDIAN);
         b.putInt(boxes.size());
         for(float[] box:boxes)for(float f:box)b.putFloat(f);
-        PackedBlob p=new PackedBlob(); p.encoding="cnrboxes-f32-gzip-v1"; p.count=boxes.size(); p.dataBase64=gzipBase64(b.array()); return p;
-    }
-
-    private static String gzipBase64(byte[] raw) {
-        try {
-            ByteArrayOutputStream out=new ByteArrayOutputStream();
-            try(GZIPOutputStream gz=new GZIPOutputStream(out)){gz.write(raw);}
-            return Base64.getEncoder().encodeToString(out.toByteArray());
-        } catch(IOException ex) { throw new IllegalStateException("Could not gzip packed map data",ex); }
+        PackedBlob p=new PackedBlob(); p.encoding="cnrboxes-f32-raw-v1"; p.count=boxes.size(); p.dataBase64=Base64.getEncoder().encodeToString(b.array()); return p;
     }
 
     private static int q(float v){return Math.round(v*4096f);}
