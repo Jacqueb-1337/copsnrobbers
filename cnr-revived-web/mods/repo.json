@@ -306,11 +306,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "4.1.57",
+      "latestVersion": "4.1.58",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.57.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.58.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "4.1.58",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.58.dll",
+          "changelog": "Add the new baked DLC map loader and Minecraft exporter pipeline: prejoin map download/validation, embedded atlas + chunked render/collision meshes, legacy-loader isolation, official-room metadata routing, and remap vanilla spawn points to exported DLC spawns before Photon player creation."
+        },
         {
           "version": "4.1.57",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.1.57.dll",

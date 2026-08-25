@@ -1,0 +1,329 @@
+package me.jacqueb.cnrmapexporter;
+
+import com.google.gson.Gson;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.ItemBlockRenderTypes;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.shapes.VoxelShape;
+
+import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+
+public final class CnrMapExporterClient implements ClientModInitializer {
+    private static final int CHUNK_SIZE = 16;
+    private static final int MAX_VERTICES_PER_PART = 60000;
+    private static BlockPos pos1;
+    private static BlockPos pos2;
+
+    @Override
+    public void onInitializeClient() {
+        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
+            ClientCommandManager.literal("cnr")
+                .then(ClientCommandManager.literal("pos1").executes(ctx -> setPos(ctx.getSource().getClient(), true)))
+                .then(ClientCommandManager.literal("pos2").executes(ctx -> setPos(ctx.getSource().getClient(), false)))
+                .then(ClientCommandManager.literal("clear").executes(ctx -> {
+                    pos1 = null; pos2 = null;
+                    ctx.getSource().sendFeedback(Component.literal("CNR selection cleared."));
+                    return 1;
+                }))
+                .then(ClientCommandManager.literal("export")
+                    .then(ClientCommandManager.argument("name", StringArgumentType.word()).executes(ctx -> {
+                        String name = StringArgumentType.getString(ctx, "name");
+                        return exportSelection(ctx.getSource().getClient(), name, ctx.getSource()::sendFeedback);
+                    })))
+        ));
+    }
+
+    private static int setPos(Minecraft client, boolean first) {
+        if (client.player == null || client.level == null) return 0;
+        BlockPos p = targetBlock(client);
+        if (first) pos1 = p.immutable(); else pos2 = p.immutable();
+        client.player.displayClientMessage(Component.literal("CNR " + (first ? "pos1" : "pos2") + " = " + p.getX() + ", " + p.getY() + ", " + p.getZ()), false);
+        return 1;
+    }
+
+    private static BlockPos targetBlock(Minecraft client) {
+        HitResult hit = client.hitResult;
+        if (hit instanceof BlockHitResult bhr && hit.getType() == HitResult.Type.BLOCK) return bhr.getBlockPos();
+        return client.player.blockPosition();
+    }
+
+    private interface Feedback { void send(Component text); }
+
+    private static int exportSelection(Minecraft mc, String rawName, Feedback feedback) {
+        if (mc.level == null || mc.player == null) return 0;
+        if (pos1 == null || pos2 == null) {
+            feedback.send(Component.literal("Set /cnr pos1 and /cnr pos2 first."));
+            return 0;
+        }
+
+        String name = sanitizeName(rawName);
+        BlockPos min = new BlockPos(Math.min(pos1.getX(), pos2.getX()), Math.min(pos1.getY(), pos2.getY()), Math.min(pos1.getZ(), pos2.getZ()));
+        BlockPos max = new BlockPos(Math.max(pos1.getX(), pos2.getX()), Math.max(pos1.getY(), pos2.getY()), Math.max(pos1.getZ(), pos2.getZ()));
+        long volume = (long)(max.getX()-min.getX()+1) * (max.getY()-min.getY()+1) * (max.getZ()-min.getZ()+1);
+        if (volume > 4_000_000L) {
+            feedback.send(Component.literal("Selection is " + volume + " blocks. Limit is 4,000,000 per export."));
+            return 0;
+        }
+
+        feedback.send(Component.literal("CNR export started: " + volume + " selected blocks..."));
+        try {
+            ExportContext ctx = new ExportContext(mc, min, max, name);
+            ctx.collect();
+            Path outDir = mc.gameDirectory.toPath().resolve("cnr_exports");
+            Files.createDirectories(outDir);
+            Path out = outDir.resolve(name + ".json");
+            Files.writeString(out, new Gson().toJson(ctx.finish()));
+            feedback.send(Component.literal("CNR map exported: " + out.toAbsolutePath()));
+            feedback.send(Component.literal("Chunks=" + ctx.chunks.size() + " textures=" + ctx.textures.size() + " quads=" + ctx.renderQuadCount + " collision boxes=" + ctx.collisionBoxCount));
+            return 1;
+        } catch (Throwable t) {
+            t.printStackTrace();
+            feedback.send(Component.literal("CNR export failed: " + t.getClass().getSimpleName() + ": " + t.getMessage()));
+            return 0;
+        }
+    }
+
+    private static String sanitizeName(String s) {
+        String n = s == null ? "minecraft_map" : s.replaceAll("[^A-Za-z0-9_-]", "_");
+        return n.isBlank() ? "minecraft_map" : n;
+    }
+
+    private static final class ExportContext {
+        final Minecraft mc;
+        final BlockPos min, max;
+        final String name;
+        final Map<String, TextureDef> textures = new LinkedHashMap<>();
+        final Map<ChunkKey, ChunkBuilder> chunks = new LinkedHashMap<>();
+        long renderQuadCount;
+        long collisionBoxCount;
+        Atlas atlas;
+
+        ExportContext(Minecraft mc, BlockPos min, BlockPos max, String name) {
+            this.mc = mc; this.min = min; this.max = max; this.name = name;
+        }
+
+        void collect() throws Exception {
+            for (int y = min.getY(); y <= max.getY(); y++) {
+                for (int z = min.getZ(); z <= max.getZ(); z++) {
+                    for (int x = min.getX(); x <= max.getX(); x++) {
+                        BlockPos worldPos = new BlockPos(x,y,z);
+                        BlockState state = mc.level.getBlockState(worldPos);
+                        if (state.isAir()) continue;
+                        int lx = x-min.getX(), ly = y-min.getY(), lz = z-min.getZ();
+                        ChunkBuilder chunk = chunkFor(lx,ly,lz);
+                        emitRenderModel(state, worldPos, lx,ly,lz, chunk);
+                        emitCollision(state, worldPos, lx,ly,lz, chunk);
+                    }
+                }
+            }
+            atlas = Atlas.pack(textures.values());
+        }
+
+        ChunkBuilder chunkFor(int x, int y, int z) {
+            int cx = Math.floorDiv(x, CHUNK_SIZE) * CHUNK_SIZE;
+            int cy = Math.floorDiv(y, CHUNK_SIZE) * CHUNK_SIZE;
+            int cz = Math.floorDiv(z, CHUNK_SIZE) * CHUNK_SIZE;
+            ChunkKey key = new ChunkKey(cx,cy,cz);
+            return chunks.computeIfAbsent(key, k -> new ChunkBuilder(k));
+        }
+
+        void emitRenderModel(BlockState state, BlockPos worldPos, int lx, int ly, int lz, ChunkBuilder chunk) throws Exception {
+            BakedModel model = mc.getBlockRenderer().getBlockModel(state);
+            String layer = renderLayer(state);
+            long seed = state.getSeed(worldPos);
+
+            for (Direction dir : Direction.values()) {
+                BlockPos neighbor = worldPos.relative(dir);
+                if (!Block.shouldRenderFace(state, mc.level, worldPos, dir, neighbor)) continue;
+                RandomSource random = RandomSource.create(seed);
+                for (BakedQuad q : model.getQuads(state, dir, random)) emitQuad(q, lx,ly,lz, chunk, layer);
+            }
+            RandomSource random = RandomSource.create(seed);
+            for (BakedQuad q : model.getQuads(state, null, random)) emitQuad(q, lx,ly,lz, chunk, layer);
+        }
+
+        void emitQuad(BakedQuad q, int lx, int ly, int lz, ChunkBuilder chunk, String layer) throws Exception {
+            int[] packed = q.getVertices();
+            if (packed == null || packed.length < 20 || packed.length % 4 != 0) return;
+            int stride = packed.length / 4;
+            TextureAtlasSprite sprite = q.getSprite();
+            ResourceLocation spriteId = sprite.contents().name();
+            String texId = spriteId.toString();
+            textures.computeIfAbsent(texId, id -> loadTexture(spriteId, sprite));
+
+            float[] p = new float[12];
+            float[] uv = new float[8];
+            float u0 = sprite.getU0(), u1 = sprite.getU1(), v0 = sprite.getV0(), v1 = sprite.getV1();
+            float du = u1-u0, dv = v1-v0;
+            for (int i=0;i<4;i++) {
+                int o=i*stride;
+                p[i*3]   = Float.intBitsToFloat(packed[o])   + lx - chunk.key.x;
+                p[i*3+1] = Float.intBitsToFloat(packed[o+1]) + ly - chunk.key.y;
+                p[i*3+2] = Float.intBitsToFloat(packed[o+2]) + lz - chunk.key.z;
+                float au = Float.intBitsToFloat(packed[o+4]);
+                float av = Float.intBitsToFloat(packed[o+5]);
+                uv[i*2]   = Math.abs(du) < 1e-7f ? 0f : (au-u0)/du;
+                uv[i*2+1] = Math.abs(dv) < 1e-7f ? 0f : (av-v0)/dv;
+            }
+            chunk.render(layer).quads.add(new QuadDef(p,uv,texId));
+            renderQuadCount++;
+        }
+
+        TextureDef loadTexture(ResourceLocation spriteId, TextureAtlasSprite sprite) {
+            try {
+                ResourceLocation png = ResourceLocation.fromNamespaceAndPath(spriteId.getNamespace(), "textures/" + spriteId.getPath() + ".png");
+                var res = mc.getResourceManager().getResource(png);
+                if (res.isPresent()) {
+                    try (InputStream in = res.get().open()) {
+                        BufferedImage source = ImageIO.read(in);
+                        if (source != null) {
+                            int fw = Math.min(source.getWidth(), sprite.contents().width());
+                            int fh = Math.min(source.getHeight(), sprite.contents().height());
+                            BufferedImage first = source.getSubimage(0,0,fw,fh);
+                            return new TextureDef(spriteId.toString(), copyImage(first));
+                        }
+                    }
+                }
+            } catch (Throwable ignored) { }
+            BufferedImage missing = new BufferedImage(16,16,BufferedImage.TYPE_INT_ARGB);
+            for (int y=0;y<16;y++) for(int x=0;x<16;x++) missing.setRGB(x,y,(((x>>2)^(y>>2))&1)==0?0xffff00ff:0xff101010);
+            return new TextureDef(spriteId.toString(), missing);
+        }
+
+        void emitCollision(BlockState state, BlockPos pos, int lx, int ly, int lz, ChunkBuilder chunk) {
+            VoxelShape shape = state.getCollisionShape(mc.level, pos);
+            if (shape == null || shape.isEmpty()) return;
+            for (AABB box : shape.toAabbs()) {
+                chunk.collision.addBox(
+                    (float)box.minX + lx - chunk.key.x, (float)box.minY + ly - chunk.key.y, (float)box.minZ + lz - chunk.key.z,
+                    (float)box.maxX + lx - chunk.key.x, (float)box.maxY + ly - chunk.key.y, (float)box.maxZ + lz - chunk.key.z);
+                collisionBoxCount++;
+            }
+        }
+
+        String renderLayer(BlockState state) {
+            RenderType type = ItemBlockRenderTypes.getChunkRenderType(state);
+            if (type == RenderType.translucent()) return "transparent";
+            if (type == RenderType.cutout() || type == RenderType.cutoutMipped()) return "cutout";
+            return "opaque";
+        }
+
+        MapFile finish() throws Exception {
+            MapFile out = new MapFile();
+            out.format="cnr-dlc-map"; out.version=1; out.id=name; out.name=name; out.source="minecraft-fabric-1.21.1";
+            out.blockScale=1f; out.origin=new float[]{0,0,0};
+            out.atlas = atlas.toJson();
+            out.chunks = new ArrayList<>();
+            for (ChunkBuilder c : chunks.values()) out.chunks.add(c.toJson(atlas));
+            out.spawns = new ArrayList<>();
+            int sx = Math.max(0, mc.player.blockPosition().getX()-min.getX());
+            int sy = Math.max(1, mc.player.blockPosition().getY()-min.getY());
+            int sz = Math.max(0, mc.player.blockPosition().getZ()-min.getZ());
+            out.spawns.add(new float[]{sx+0.5f,sy+0.1f,sz+0.5f});
+            return out;
+        }
+    }
+
+    private static BufferedImage copyImage(BufferedImage src) {
+        BufferedImage out = new BufferedImage(src.getWidth(),src.getHeight(),BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g=out.createGraphics(); g.drawImage(src,0,0,null); g.dispose(); return out;
+    }
+
+    private record ChunkKey(int x,int y,int z) { }
+    private record QuadDef(float[] p,float[] uv,String texture) { }
+
+    private static final class TextureDef {
+        final String id; final BufferedImage image; AtlasRect rect;
+        TextureDef(String id, BufferedImage image) { this.id=id; this.image=image; }
+    }
+    private record AtlasRect(int x,int y,int w,int h) { }
+
+    private static final class Atlas {
+        final BufferedImage image; final Map<String,AtlasRect> rects;
+        Atlas(BufferedImage image, Map<String,AtlasRect> rects) { this.image=image; this.rects=rects; }
+
+        static Atlas pack(Collection<TextureDef> defs) {
+            List<TextureDef> list=new ArrayList<>(defs);
+            list.sort(Comparator.comparingInt((TextureDef d)->d.image.getHeight()).reversed());
+            for (int size : new int[]{256,512,1024,2048,4096,8192}) {
+                Map<String,AtlasRect> rects=new LinkedHashMap<>(); int x=1,y=1,rowH=0; boolean ok=true;
+                for(TextureDef d:list){ int w=d.image.getWidth()+2,h=d.image.getHeight()+2; if(w>size||h>size){ok=false;break;} if(x+w>size){x=1;y+=rowH;rowH=0;} if(y+h>size){ok=false;break;} AtlasRect r=new AtlasRect(x,y,d.image.getWidth(),d.image.getHeight()); d.rect=r;rects.put(d.id,r);x+=w;rowH=Math.max(rowH,h); }
+                if(!ok) continue;
+                BufferedImage atlas=new BufferedImage(size,size,BufferedImage.TYPE_INT_ARGB); Graphics2D g=atlas.createGraphics();
+                for(TextureDef d:list){ AtlasRect r=d.rect; g.drawImage(d.image,r.x,r.y,null); // one-pixel gutters
+                    g.drawImage(d.image,r.x,r.y-1,r.x+r.w,r.y,0,0,r.w,1,null); g.drawImage(d.image,r.x,r.y+r.h,r.x+r.w,r.y+r.h+1,0,r.h-1,r.w,r.h,null);
+                    g.drawImage(d.image,r.x-1,r.y,r.x,r.y+r.h,0,0,1,r.h,null); g.drawImage(d.image,r.x+r.w,r.y,r.x+r.w+1,r.y+r.h,r.w-1,0,r.w,r.h,null);
+                }
+                g.dispose(); return new Atlas(atlas,rects);
+            }
+            throw new IllegalStateException("Texture atlas exceeds 8192x8192");
+        }
+
+        AtlasJson toJson() throws Exception {
+            ByteArrayOutputStream bytes=new ByteArrayOutputStream(); ImageIO.write(image,"png",bytes);
+            AtlasJson j=new AtlasJson(); j.width=image.getWidth(); j.height=image.getHeight(); j.pngBase64=Base64.getEncoder().encodeToString(bytes.toByteArray());
+            j.entries=new ArrayList<>(); for(var e:rects.entrySet()){ AtlasEntry a=new AtlasEntry(); a.id=e.getKey(); AtlasRect r=e.getValue();a.x=r.x;a.y=r.y;a.w=r.w;a.h=r.h;j.entries.add(a);} return j;
+        }
+    }
+
+    private static final class RenderBuilder { final List<QuadDef> quads=new ArrayList<>(); }
+    private static final class CollisionBuilder {
+        final List<float[]> boxes=new ArrayList<>();
+        void addBox(float x0,float y0,float z0,float x1,float y1,float z1){ if(x1>x0&&y1>y0&&z1>z0) boxes.add(new float[]{x0,y0,z0,x1,y1,z1}); }
+    }
+    private static final class ChunkBuilder {
+        final ChunkKey key; final RenderBuilder opaque=new RenderBuilder(),cutout=new RenderBuilder(),transparent=new RenderBuilder(); final CollisionBuilder collision=new CollisionBuilder();
+        ChunkBuilder(ChunkKey key){this.key=key;}
+        RenderBuilder render(String s){return s.equals("transparent")?transparent:s.equals("cutout")?cutout:opaque;}
+        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaque=meshRender(opaque,atlas);j.cutout=meshRender(cutout,atlas);j.transparent=meshRender(transparent,atlas);j.collision=meshCollision(collision);return j; }
+    }
+
+    private static List<MeshJson> meshRender(RenderBuilder src, Atlas atlas) {
+        List<MeshJson> out=new ArrayList<>(); MeshAccumulator m=new MeshAccumulator(true);
+        for(QuadDef q:src.quads){ if(m.vertexCount()+4>MAX_VERTICES_PER_PART){out.add(m.finish());m=new MeshAccumulator(true);} AtlasRect r=atlas.rects.get(q.texture); if(r==null) continue; float[] auv=new float[8]; for(int i=0;i<4;i++){ auv[i*2]=(r.x+q.uv[i*2]*r.w)/(float)atlas.image.getWidth(); auv[i*2+1]=1f-(r.y+q.uv[i*2+1]*r.h)/(float)atlas.image.getHeight(); } m.addQuad(q.p,auv); }
+        if(m.vertexCount()>0)out.add(m.finish()); return out;
+    }
+    private static List<MeshJson> meshCollision(CollisionBuilder src) {
+        List<MeshJson> out=new ArrayList<>(); MeshAccumulator m=new MeshAccumulator(false);
+        for(float[] b:src.boxes){ if(m.vertexCount()+24>MAX_VERTICES_PER_PART){out.add(m.finish());m=new MeshAccumulator(false);} m.addBox(b); }
+        if(m.vertexCount()>0)out.add(m.finish()); return out;
+    }
+    private static final class MeshAccumulator {
+        final boolean uvEnabled; final List<Float> v=new ArrayList<>(),uv=new ArrayList<>(); final List<Integer> t=new ArrayList<>();
+        MeshAccumulator(boolean uvEnabled){this.uvEnabled=uvEnabled;} int vertexCount(){return v.size()/3;}
+        void addQuad(float[] p,float[] u){int b=vertexCount();for(float f:p)v.add(f);if(uvEnabled)for(float f:u)uv.add(f); t.add(b);t.add(b+1);t.add(b+2);t.add(b);t.add(b+2);t.add(b+3);}
+        void face(float[] p){addQuad(p,new float[8]);}
+        void addBox(float[] b){float x0=b[0],y0=b[1],z0=b[2],x1=b[3],y1=b[4],z1=b[5];face(new float[]{x0,y0,z0,x1,y0,z0,x1,y1,z0,x0,y1,z0});face(new float[]{x1,y0,z1,x0,y0,z1,x0,y1,z1,x1,y1,z1});face(new float[]{x0,y0,z1,x0,y0,z0,x0,y1,z0,x0,y1,z1});face(new float[]{x1,y0,z0,x1,y0,z1,x1,y1,z1,x1,y1,z0});face(new float[]{x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1});face(new float[]{x0,y0,z1,x1,y0,z1,x1,y0,z0,x0,y0,z0});}
+        MeshJson finish(){MeshJson j=new MeshJson();j.vertices=new float[v.size()];for(int i=0;i<v.size();i++)j.vertices[i]=v.get(i);j.uv=uvEnabled?new float[uv.size()]:new float[0];if(uvEnabled)for(int i=0;i<uv.size();i++)j.uv[i]=uv.get(i);j.triangles=new int[t.size()];for(int i=0;i<t.size();i++)j.triangles[i]=t.get(i);return j;}
+    }
+
+    private static final class MapFile { String format,id,name,source; int version; float blockScale; float[] origin; AtlasJson atlas; List<ChunkJson> chunks; List<float[]> spawns; }
+    private static final class AtlasJson { int width,height; String pngBase64; List<AtlasEntry> entries; }
+    private static final class AtlasEntry { String id; int x,y,w,h; }
+    private static final class ChunkJson { int x,y,z; List<MeshJson> opaque,cutout,transparent,collision; }
+    private static final class MeshJson { float[] vertices,uv; int[] triangles; }
+}

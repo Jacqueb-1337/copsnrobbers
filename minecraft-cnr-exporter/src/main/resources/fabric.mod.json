@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "cnrmapexporter",
+  "version": "${version}",
+  "name": "CNR Map Exporter",
+  "description": "Exports Minecraft selections as self-contained CNR DLC map packages.",
+  "authors": ["Jacqueb"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["me.jacqueb.cnrmapexporter.CnrMapExporterClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
