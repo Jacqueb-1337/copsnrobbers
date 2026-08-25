@@ -38,6 +38,8 @@ import java.util.*;
 public final class CnrMapExporterClient implements ClientModInitializer {
     private static final int CHUNK_SIZE = 16;
     private static final int MAX_VERTICES_PER_PART = 60000;
+    private static final float PACKED_POSITION_SCALE = 1024f;
+    private static final float PACKED_UV_SCALE = 65535f;
     private static BlockPos pos1;
     private static BlockPos pos2;
 
@@ -256,7 +258,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
 
         MapFile finish() throws Exception {
             MapFile out = new MapFile();
-            out.format="cnr-dlc-map"; out.version=2; out.id=name; out.name=name; out.source="minecraft-fabric-1.21.1;compact-v2";
+            out.format="cnr-dlc-map"; out.version=3; out.id=name; out.name=name; out.source="minecraft-fabric-1.21.1;compact-v3-q10-lz4";
             out.blockScale=1f; out.origin=new float[]{0,0,0};
             out.atlas = atlas.toJson();
             out.chunks = new ArrayList<>();
@@ -334,7 +336,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
 
         AtlasJson toJson() throws Exception {
             ByteArrayOutputStream bytes=new ByteArrayOutputStream(); ImageIO.write(image,"png",bytes);
-            AtlasJson j=new AtlasJson(); j.width=image.getWidth(); j.height=image.getHeight(); j.pngBase64=Base64.getEncoder().encodeToString(bytes.toByteArray());
+            AtlasJson j=new AtlasJson(); j.width=image.getWidth(); j.height=image.getHeight(); j.pngBase64=base64ForJson(bytes.toByteArray());
             j.entries=new ArrayList<>(); for(var e:rects.entrySet()){ AtlasEntry a=new AtlasEntry(); a.id=e.getKey(); AtlasRect r=e.getValue();a.x=r.x;a.y=r.y;a.w=r.w;a.h=r.h;j.entries.add(a);} return j;
         }
     }
@@ -364,23 +366,132 @@ public final class CnrMapExporterClient implements ClientModInitializer {
     }
 
     private static PackedBlob packMesh(MeshJson m) {
-        int vc=m.vertices.length/3, ic=m.triangles.length, flags=m.uv.length>0?1:0;
-        if(vc>65535) throw new IllegalStateException("Packed mesh exceeds 65535 vertices");
-        int bytes=12 + m.vertices.length*4 + m.uv.length*4 + ic*2;
+        int vc=m.vertices.length/3;
+        if(vc<=0 || vc>65535 || (vc&3)!=0) throw new IllegalStateException("Packed mesh vertex count must be a non-empty multiple of four and <= 65535");
+        if(m.uv.length!=vc*2) throw new IllegalStateException("Packed mesh UV count does not match its vertices");
+        if(!isImplicitQuadTriangles(m.triangles,vc)) throw new IllegalStateException("Packed mesh is not in exporter quad order");
+
+        int bytes=4 + m.vertices.length*2 + m.uv.length*2;
         ByteBuffer b=ByteBuffer.allocate(bytes).order(ByteOrder.LITTLE_ENDIAN);
-        b.putInt(vc); b.putInt(ic); b.putInt(flags);
-        for(float f:m.vertices)b.putFloat(f);
-        for(float f:m.uv)b.putFloat(f);
-        for(int t:m.triangles)b.putShort((short)(t & 0xffff));
-        PackedBlob p=new PackedBlob(); p.encoding="cnrmesh-f32-u16-raw-v1"; p.dataBase64=Base64.getEncoder().encodeToString(b.array()); return p;
+        b.putInt(vc);
+        for(float f:m.vertices)b.putShort(packPosition(f));
+        for(float f:m.uv)b.putShort(packUv(f));
+        return packBinary(b.array(), "cnrmesh-q10-u16-quads-raw-v1", "cnrmesh-q10-u16-quads-lz4-v1", 0);
     }
 
     private static PackedBlob packBoxes(CollisionBuilder src) {
         List<float[]> boxes=mergeCollisionBoxes(src.boxes);
-        ByteBuffer b=ByteBuffer.allocate(4+boxes.size()*24).order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer b=ByteBuffer.allocate(4+boxes.size()*12).order(ByteOrder.LITTLE_ENDIAN);
         b.putInt(boxes.size());
-        for(float[] box:boxes)for(float f:box)b.putFloat(f);
-        PackedBlob p=new PackedBlob(); p.encoding="cnrboxes-f32-raw-v1"; p.count=boxes.size(); p.dataBase64=Base64.getEncoder().encodeToString(b.array()); return p;
+        for(float[] box:boxes)for(float f:box)b.putShort(packPosition(f));
+        return packBinary(b.array(), "cnrboxes-q10-raw-v1", "cnrboxes-q10-lz4-v1", boxes.size());
+    }
+
+    private static short packPosition(float value) {
+        int q=Math.round(value*PACKED_POSITION_SCALE);
+        if(q<Short.MIN_VALUE || q>Short.MAX_VALUE) throw new IllegalStateException("Packed coordinate is outside q10 range: "+value);
+        return (short)q;
+    }
+
+    private static short packUv(float value) {
+        if(value < -0.0001f || value > 1.0001f) throw new IllegalStateException("Packed UV is outside normalized range: "+value);
+        float clamped=Math.max(0f,Math.min(1f,value));
+        return (short)(Math.round(clamped*PACKED_UV_SCALE) & 0xffff);
+    }
+
+    private static boolean isImplicitQuadTriangles(int[] triangles,int vertexCount) {
+        if(triangles==null || triangles.length!=(vertexCount/4)*6) return false;
+        int ti=0;
+        for(int v=0;v<vertexCount;v+=4) {
+            if(triangles[ti++]!=v || triangles[ti++]!=v+1 || triangles[ti++]!=v+2 || triangles[ti++]!=v || triangles[ti++]!=v+2 || triangles[ti++]!=v+3) return false;
+        }
+        return true;
+    }
+
+    private static PackedBlob packBinary(byte[] raw, String rawEncoding, String lz4Encoding, int count) {
+        byte[] compressed=lz4Compress(raw);
+        PackedBlob p=new PackedBlob();
+        p.count=count;
+        p.rawBytes=raw.length;
+        // Base64 grows either form by the same ratio, so compare the binary payloads.
+        // Keep tiny or incompressible parts raw instead of making them larger.
+        if(compressed.length + 4 < raw.length){
+            p.encoding=lz4Encoding;
+            p.dataBase64=base64ForJson(compressed);
+        }else{
+            p.encoding=rawEncoding;
+            p.dataBase64=base64ForJson(raw);
+        }
+        return p;
+    }
+
+    private static byte[] lz4Compress(byte[] src) {
+        if(src.length==0) return new byte[]{0};
+        int[] table=new int[1<<16];
+        Arrays.fill(table,-1);
+        ByteArrayOutputStream out=new ByteArrayOutputStream(src.length);
+        int anchor=0;
+        int i=0;
+        int limit=src.length-4;
+        while(i<=limit){
+            int h=lz4Hash(src,i);
+            int ref=table[h];
+            table[h]=i;
+            if(ref<0 || i-ref>65535 || !lz4Equal4(src,ref,i)){
+                i++;
+                continue;
+            }
+
+            int matchLength=4;
+            while(i+matchLength<src.length && src[ref+matchLength]==src[i+matchLength]) matchLength++;
+            int literalLength=i-anchor;
+            int encodedMatchLength=matchLength-4;
+            int token=(Math.min(literalLength,15)<<4) | Math.min(encodedMatchLength,15);
+            out.write(token);
+            if(literalLength>=15) writeLz4Length(out,literalLength-15);
+            out.write(src,anchor,literalLength);
+
+            int offset=i-ref;
+            out.write(offset & 255);
+            out.write((offset>>>8) & 255);
+            if(encodedMatchLength>=15) writeLz4Length(out,encodedMatchLength-15);
+
+            int end=i+matchLength;
+            for(int p=i+1;p<end && p<=limit;p++) table[lz4Hash(src,p)]=p;
+            i=end;
+            anchor=i;
+        }
+
+        int literalLength=src.length-anchor;
+        out.write(Math.min(literalLength,15)<<4);
+        if(literalLength>=15) writeLz4Length(out,literalLength-15);
+        out.write(src,anchor,literalLength);
+        return out.toByteArray();
+    }
+
+    private static int lz4Hash(byte[] src,int p) {
+        int v=(src[p]&255) | ((src[p+1]&255)<<8) | ((src[p+2]&255)<<16) | ((src[p+3]&255)<<24);
+        return (v * -1640531535) >>> 16;
+    }
+
+    private static boolean lz4Equal4(byte[] src,int a,int b) {
+        return src[a]==src[b] && src[a+1]==src[b+1] && src[a+2]==src[b+2] && src[a+3]==src[b+3];
+    }
+
+    private static void writeLz4Length(ByteArrayOutputStream out,int length) {
+        while(length>=255){ out.write(255); length-=255; }
+        out.write(length);
+    }
+
+    private static String base64ForJson(byte[] data) {
+        String encoded=Base64.getEncoder().encodeToString(data);
+        if(encoded.length()<=60) return encoded;
+        StringBuilder out=new StringBuilder(encoded.length()+encoded.length()/60+1);
+        for(int i=0;i<encoded.length();i+=60) {
+            if(i>0) out.append('\n');
+            out.append(encoded,i,Math.min(encoded.length(),i+60));
+        }
+        return out.toString();
     }
 
     private static int q(float v){return Math.round(v*4096f);}
@@ -418,6 +529,6 @@ public final class CnrMapExporterClient implements ClientModInitializer {
     private static final class AtlasJson { int width,height; String pngBase64; List<AtlasEntry> entries; }
     private static final class AtlasEntry { String id; int x,y,w,h; }
     private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; PackedBlob collisionBoxesPacked; }
-    private static final class PackedBlob { String encoding,dataBase64; int count; }
+    private static final class PackedBlob { String encoding,dataBase64; int count,rawBytes; }
     private static final class MeshJson { float[] vertices,uv; int[] triangles; }
 }
