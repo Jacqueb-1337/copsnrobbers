@@ -15,7 +15,7 @@ namespace CNRMods
         Recover
     }
 
-    internal class CNRArenaBotState
+    internal partial class CNRArenaBotState
     {
         public string Id;
         public TeamType Team;
@@ -75,7 +75,7 @@ namespace CNRMods
     // rendering, team counters, scoreboards and end-of-round rankings see them as
     // players. They deliberately do NOT consume Photon room slots, allowing a real
     // joiner to replace an AUTO bot without the room ever appearing full.
-    public class CNRArenaBotManager : MonoBehaviour
+    public partial class CNRArenaBotManager : MonoBehaviour
     {
         private const int BOT_ID_BASE = 9001;
         private const int MAX_BOTS = 14;       // vanilla scoreboards expose 7 rows per team
@@ -166,6 +166,7 @@ namespace CNRMods
             _nextVisualBindAt = 0f;
             _arenaNavScene = "";
             _nextArenaNavBakeAt = 0f;
+            ResetCommanderState();
             _botVisuals.Clear();
             _humanLastStatus.Clear();
             _humanLastBotAttacker.Clear();
@@ -208,6 +209,7 @@ namespace CNRMods
                     _nextReconcileAt = Time.realtimeSinceStartup + RECONCILE_INTERVAL;
                     ReconcileRoster(rules);
                 }
+                UpdateArenaCommander(rules);
                 if (AnyHumanInGame())
                 {
                     SimulateBots();
@@ -632,6 +634,7 @@ namespace CNRMods
                         bot.RecoverUntil = 0f;
                         bot.StuckRecoveries = 0;
                         bot.NavBlockedSteps = 0;
+                        bot.StrategicOrderRevision = -1;
                         bot.Behavior = CNRArenaBotBehavior.Patrol;
                     }
                     continue;
@@ -755,6 +758,7 @@ namespace CNRMods
             {
                 bot.NextAlertAt = now + BOT_ALERT_INTERVAL;
                 AlertNearbyBots(bot, targetId, targetPos);
+                ReportCommanderContact(bot, targetPos, 1.0f);
             }
 
             // Merge the later SingleEnemyAI behavior with our global zombie A* route.
@@ -1914,11 +1918,27 @@ namespace CNRMods
             if (bot == null) return;
             bot.Behavior = CNRArenaBotBehavior.Patrol;
 
+            Vector3 commanderTarget;
+            bool hasCommanderTarget = TryGetCommanderPatrolTarget(bot, out commanderTarget);
+            if (hasCommanderTarget)
+            {
+                Vector3 orderDelta = commanderTarget - bot.WanderTarget;
+                orderDelta.y = 0f;
+                if (orderDelta.sqrMagnitude > 1.25f * 1.25f)
+                    bot.NextWanderAt = 0f;
+            }
+
             if (now >= bot.NextWanderAt || bot.WanderDirection.sqrMagnitude < 0.01f)
             {
                 float routeDistance;
                 Vector3 patrolTarget;
-                if (!TryChoosePatrolDestination(bot, out patrolTarget, out routeDistance))
+                bool strategicPatrol = hasCommanderTarget;
+                if (strategicPatrol)
+                {
+                    patrolTarget = commanderTarget;
+                    routeDistance = Vector3.Distance(bot.Position, patrolTarget);
+                }
+                else if (!TryChoosePatrolDestination(bot, out patrolTarget, out routeDistance))
                 {
                     bot.WanderUntil = now;
                     bot.NextWanderAt = now + UnityEngine.Random.Range(0.35f, 0.85f);
@@ -1939,8 +1959,16 @@ namespace CNRMods
                 // patrol picks used to time out after a few seconds and immediately choose
                 // another heading, which looked like random left/right twitching.
                 float travelBudget = routeDistance / Mathf.Max(0.1f, WANDER_SPEED);
-                bot.WanderUntil = now + Mathf.Clamp(travelBudget * 1.8f + 3f, 5f, 32f);
-                bot.NextWanderAt = bot.WanderUntil + UnityEngine.Random.Range(0.25f, 1.0f);
+                if (strategicPatrol)
+                {
+                    bot.WanderUntil = now + Mathf.Clamp(travelBudget * 1.6f + 4f, 5f, 24f);
+                    bot.NextWanderAt = bot.WanderUntil;
+                }
+                else
+                {
+                    bot.WanderUntil = now + Mathf.Clamp(travelBudget * 1.8f + 3f, 5f, 32f);
+                    bot.NextWanderAt = bot.WanderUntil + UnityEngine.Random.Range(0.25f, 1.0f);
+                }
             }
 
             if (now > bot.WanderUntil)
@@ -2470,6 +2498,7 @@ namespace CNRMods
             float error = UnityEngine.Random.Range(0.6f, 2.2f);
             Vector3 cuePosition = attackerPosition +
                 new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * error;
+            ReportCommanderContact(bot, cuePosition, 1.35f);
 
             bool changed = bot.LastTargetId != attackerId;
             bot.LastTargetId = attackerId;
@@ -2629,6 +2658,7 @@ namespace CNRMods
             _humanLastStatus.Clear();
             _humanLastBotAttacker.Clear();
             _humanLastBotAttackAt.Clear();
+            ResetCommanderState();
         }
     }
 
