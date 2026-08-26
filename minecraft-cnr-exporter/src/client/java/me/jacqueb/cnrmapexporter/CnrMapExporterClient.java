@@ -632,7 +632,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             int tint = 0xFFFFFF;
             if (q.isTinted()) {
                 try {
-                    int resolved = mc.getBlockColors().getColor(state, view, worldPos, q.getTintIndex());
+                    int resolved = mc.getBlockColors().getColor(state, sourceLevel, worldPos, q.getTintIndex());
                     if (resolved >= 0) tint = resolved & 0xFFFFFF;
                 } catch (Throwable ignored) { }
             }

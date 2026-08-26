@@ -77,11 +77,11 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 - Source: https://github.com/Jacqueb-1337/copsnrobbers
 - Issues: https://github.com/Jacqueb-1337/copsnrobbers/issues
 
-## Version 0.1.5
+## Version 0.1.6
 
-**Version number:** `0.1.5`
+**Version number:** `0.1.6`
 
-**Version title:** `CNR Map Exporter 0.1.5`
+**Version title:** `CNR Map Exporter 0.1.6`
 
 **Version type:** Beta
 
@@ -89,17 +89,17 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 
 **Loader:** Fabric
 
-**Primary file:** `cnrmapexporter-0.1.5.jar`
+**Primary file:** `cnrmapexporter-0.1.6.jar`
 
 **Required dependency:** Fabric API
 
 **Changelog:**
 
-- Climbable blocks now export a full-block interaction volume so Minecraft ladders and vines reliably latch in CNR.
-- Minecraft barrier blocks remain a separate invisible collision channel for player-solid, projectile-pass-through behavior.
-- Large exports remain incremental and responsive with live progress, `/cnr status`, and `/cnr cancel`.
-- Air does not count toward the 4,000,000 non-air-block export limit.
-- Team spawn markers, packed LZ4 geometry, collision, and textures remain supported.
+- Fixed biome-tinted Minecraft textures exporting as grayscale/white after the non-blocking snapshot rewrite.
+- Grass, foliage, leaves, ferns, and other tinted block textures now resolve color from the real client world while geometry continues using the safe incremental snapshot.
+- Climbable blocks continue to export full-block interaction volumes for reliable CNR ladder/vine behavior.
+- Minecraft barrier blocks remain player-solid and projectile-pass-through.
+- Large exports remain incremental with packed LZ4 geometry, collision, team spawn markers, live progress, `/cnr status`, and `/cnr cancel`.
 
 ## Icon
 
@@ -115,7 +115,7 @@ Modrinth currently prohibits AI-generated or AI-assisted project icons. Use the 
 
 ## Before submitting for review
 
-- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.3.jar`.
+- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.6.jar`.
 - Mark Fabric API as a required dependency.
 - Set client environment to required and server environment to unsupported.
 - Add the project icon.

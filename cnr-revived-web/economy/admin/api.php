@@ -247,7 +247,7 @@ switch ($action) {
             'auth' => cnr_admin_api_token() !== '' ? ['bearer','basic'] : ['basic'],
             'actions' => [
                 'status','list_content','list_players','list_mail','list_transactions',
-                'send_mail','grant','add_content','upload_content','upload_thumbnail','upload_thumb',
+                'send_mail','grant','add_content','upload_content','upload_content_chunk','upload_thumbnail','upload_thumb',
                 'toggle_content','set_content_enabled','delete_content','reorder_content','set_price',
                 'update_hash','sync_hash','calc_hash'
             ],
@@ -365,6 +365,125 @@ switch ($action) {
             $thumb = api_store_thumbnail($pdo, $id, 'thumb_file');
         }
         api_ok(['content' => api_content_row($pdo, $id), 'thumbnail' => $thumb]);
+        break;
+
+    case 'upload_content_chunk':
+        $file = api_require_upload('chunk');
+        $type = api_content_type($params['ctype'] ?? $params['type'] ?? '');
+        $id = api_content_id($params['content_id'] ?? $params['id'] ?? '');
+        $existing = api_content_row($pdo, $id);
+        $replace = api_bool($params['replace'] ?? null, false);
+        if ($existing && !$replace) api_fail('Content ID already exists. Re-run with replace=1 to replace it.', 409);
+
+        $uploadId = trim((string)($params['upload_id'] ?? ''));
+        if (!preg_match('/^[a-zA-Z0-9_-]{8,80}$/', $uploadId)) api_fail('upload_id must be 8-80 letters, numbers, underscores, or hyphens.');
+        $chunkIndex = (int)($params['chunk_index'] ?? -1);
+        $chunkCount = (int)($params['chunk_count'] ?? 0);
+        if ($chunkCount < 1 || $chunkCount > 256 || $chunkIndex < 0 || $chunkIndex >= $chunkCount) api_fail('Invalid chunk_index/chunk_count.');
+
+        $originalName = trim((string)($params['filename'] ?? $params['file_name'] ?? ''));
+        if ($originalName === '') $originalName = $id . '.bin';
+        $ext = strtolower((string)pathinfo($originalName, PATHINFO_EXTENSION));
+        if ($ext === '') $ext = 'bin';
+        if (!in_array($ext, api_allowed_extensions($type), true)) api_fail('File extension .' . $ext . ' is not allowed for content type ' . $type . '.');
+
+        $chunkRoot = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'cnr_admin_upload_chunks' . DIRECTORY_SEPARATOR;
+        $sessionDir = $chunkRoot . $uploadId . DIRECTORY_SEPARATOR;
+        if (!is_dir($sessionDir) && !mkdir($sessionDir, 0700, true) && !is_dir($sessionDir)) api_fail('Could not create chunk upload session.', 500);
+        $metaPath = $sessionDir . 'meta.json';
+        $meta = ['id' => $id, 'type' => $type, 'count' => $chunkCount, 'ext' => $ext];
+        if (is_file($metaPath)) {
+            $existingMeta = json_decode((string)file_get_contents($metaPath), true);
+            if (!is_array($existingMeta) || $existingMeta !== $meta) api_fail('upload_id is already being used for a different upload.', 409);
+        } else {
+            if (file_put_contents($metaPath, json_encode($meta), LOCK_EX) === false) api_fail('Could not initialize chunk upload session.', 500);
+        }
+
+        $partPath = $sessionDir . sprintf('%06d.part', $chunkIndex);
+        if (!move_uploaded_file((string)$file['tmp_name'], $partPath)) api_fail('Could not store uploaded chunk.', 500);
+
+        $received = 0;
+        $totalBytes = 0;
+        for ($i = 0; $i < $chunkCount; $i++) {
+            $candidate = $sessionDir . sprintf('%06d.part', $i);
+            if (!is_file($candidate)) continue;
+            $received++;
+            $totalBytes += (int)filesize($candidate);
+        }
+        if ($totalBytes > 128 * 1024 * 1024) api_fail('Chunked upload exceeds the 128 MB API safety limit.', 413);
+        if ($received < $chunkCount) {
+            api_ok(['content_id' => $id, 'upload_id' => $uploadId, 'received_chunks' => $received, 'chunk_count' => $chunkCount, 'received_bytes' => $totalBytes, 'completed' => false]);
+        }
+
+        $bucket = api_storage_bucket($type);
+        $dir = __DIR__ . '/../uploads/' . $bucket . '/';
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) api_fail('Could not create upload directory.', 500);
+        $tempDest = $dir . '.' . $id . '.' . $uploadId . '.uploading';
+        $out = @fopen($tempDest, 'wb');
+        if (!$out) api_fail('Could not create assembled upload file.', 500);
+        $assembledBytes = 0;
+        try {
+            for ($i = 0; $i < $chunkCount; $i++) {
+                $candidate = $sessionDir . sprintf('%06d.part', $i);
+                if (!is_file($candidate)) throw new RuntimeException('Upload chunk disappeared during assembly.');
+                $in = @fopen($candidate, 'rb');
+                if (!$in) throw new RuntimeException('Could not read upload chunk.');
+                $copied = stream_copy_to_stream($in, $out);
+                fclose($in);
+                if ($copied === false) throw new RuntimeException('Could not assemble upload chunk.');
+                $assembledBytes += (int)$copied;
+                if ($assembledBytes > 128 * 1024 * 1024) throw new RuntimeException('Assembled upload exceeds the 128 MB API safety limit.');
+            }
+            fclose($out);
+        } catch (Throwable $e) {
+            if (is_resource($out)) fclose($out);
+            @unlink($tempDest);
+            api_fail($e->getMessage(), 500);
+        }
+
+        foreach (api_allowed_extensions($type) as $oldExt) {
+            $old = $dir . $id . '.' . $oldExt;
+            if (is_file($old)) @unlink($old);
+        }
+        $dest = $dir . $id . '.' . $ext;
+        if (!@rename($tempDest, $dest)) {
+            @unlink($dest);
+            if (!@rename($tempDest, $dest)) api_fail('Could not finalize assembled upload.', 500);
+        }
+        $hash = md5_file($dest);
+        if ($hash === false) api_fail('Could not hash assembled upload.', 500);
+        $stored = [
+            'path' => $dest,
+            'hash' => strtolower($hash),
+            'url' => api_public_base() . '/uploads/' . rawurlencode($bucket) . '/' . rawurlencode($id . '.' . $ext),
+            'size' => filesize($dest),
+            'extension' => $ext,
+        ];
+
+        $name = array_key_exists('cname', $params) || array_key_exists('name', $params)
+            ? trim((string)($params['cname'] ?? $params['name']))
+            : (string)($existing['name'] ?? $id);
+        $baseScene = array_key_exists('base_scene', $params) ? trim((string)$params['base_scene']) : (string)($existing['base_scene'] ?? 'FreeRun3_1');
+        $material = array_key_exists('material_name', $params) ? trim((string)$params['material_name']) : (string)($existing['material_name'] ?? '');
+        $dataKey = array_key_exists('data_key', $params) ? trim((string)$params['data_key']) : (string)($existing['data_key'] ?? '');
+        $sort = array_key_exists('sort_order', $params) || array_key_exists('price', $params)
+            ? (int)($params['sort_order'] ?? $params['price'])
+            : (int)($existing['sort_order'] ?? 0);
+        $enabled = array_key_exists('enabled', $params) ? (api_bool($params['enabled'], true) ? 1 : 0) : (int)($existing['enabled'] ?? 1);
+
+        if ($existing) {
+            $pdo->prepare('UPDATE content_items SET type=?,name=?,url=?,base_scene=?,material_name=?,data_key=?,sort_order=?,enabled=?,file_hash=? WHERE id=?')
+                ->execute([$type,$name,$stored['url'],$baseScene,$material,$dataKey,$sort,$enabled,$stored['hash'],$id]);
+        } else {
+            $pdo->prepare('INSERT INTO content_items (id,type,name,url,base_scene,material_name,data_key,sort_order,enabled,created_at,file_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+                ->execute([$id,$type,$name,$stored['url'],$baseScene,$material,$dataKey,$sort,$enabled,time(),$stored['hash']]);
+        }
+
+        for ($i = 0; $i < $chunkCount; $i++) @unlink($sessionDir . sprintf('%06d.part', $i));
+        @unlink($metaPath);
+        @rmdir($sessionDir);
+        api_ok(['content' => api_content_row($pdo, $id), 'file' => $stored, 'replaced' => (bool)$existing,
+            'upload_id' => $uploadId, 'received_chunks' => $chunkCount, 'chunk_count' => $chunkCount, 'completed' => true]);
         break;
 
     case 'upload_content':
