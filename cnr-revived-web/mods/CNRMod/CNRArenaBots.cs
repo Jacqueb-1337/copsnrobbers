@@ -104,6 +104,9 @@ namespace CNRMods
         private const int SQUAD_MAX_SIZE = 3;
         private const float SQUAD_LANE_SPACING = 4.25f;
         private const float SQUAD_REPORT_ERROR = 0.85f;
+        private const int ENGAGEMENT_PRIMARY_SLOTS = 2;
+        private const float ENGAGEMENT_ROTATION_SECONDS = 2.4f;
+        private const float ENGAGEMENT_SUPPRESSION_SPREAD = 3.2f;
         private const int NAV_SHORTCUT_LOOKAHEAD = 4;
         private const float TARGET_SWITCH_ADVANTAGE = 1.22f;
         private const float TARGET_CERTAINTY_FIRE = 0.62f;
@@ -862,7 +865,10 @@ namespace CNRMods
                 CanFireAtTarget(bot, targetPos, targetId, dist + 1f))
             {
                 bot.Status = PlayerStatus.fire;
-                bot.NextShotAt = now + UnityEngine.Random.Range(0.36f, 0.62f);
+                bool primaryEngager = IsPrimaryEngager(bot, targetId, now);
+                bot.NextShotAt = now + (primaryEngager
+                    ? UnityEngine.Random.Range(0.36f, 0.62f)
+                    : UnityEngine.Random.Range(0.48f, 0.78f));
                 bot.FireStatusUntil = now + 0.24f;
 
                 // Damage now follows the bot's visible aim instead of an invisible hit
@@ -1636,6 +1642,48 @@ namespace CNRMods
             return Mathf.Clamp01((nearest - 1.25f) / 4.0f);
         }
 
+        private bool IsPrimaryEngager(CNRArenaBotState bot, string targetId, float now)
+        {
+            if (bot == null || IsFreeForAllMode() || string.IsNullOrEmpty(targetId)) return true;
+
+            List<CNRArenaBotState> contenders = new List<CNRArenaBotState>();
+            for (int i = 0; i < _bots.Count; i++)
+            {
+                CNRArenaBotState member = _bots[i];
+                if (member == null || member.Team != bot.Team || member.Status == PlayerStatus.dead || member.Hp <= 0) continue;
+                if (member.LastTargetId != targetId || !HasFreshVisibleTarget(member, now)) continue;
+                contenders.Add(member);
+            }
+
+            if (contenders.Count <= ENGAGEMENT_PRIMARY_SLOTS) return true;
+            contenders.Sort(delegate(CNRArenaBotState a, CNRArenaBotState b)
+            {
+                return string.CompareOrdinal(a.Id, b.Id);
+            });
+
+            int botIndex = -1;
+            for (int i = 0; i < contenders.Count; i++)
+                if (contenders[i] == bot) { botIndex = i; break; }
+            if (botIndex < 0) return true;
+
+            int phase = Mathf.FloorToInt(now / ENGAGEMENT_ROTATION_SECONDS);
+            int start = (phase + StableTargetHash(targetId)) % contenders.Count;
+            int slots = Mathf.Min(ENGAGEMENT_PRIMARY_SLOTS, contenders.Count);
+            for (int i = 0; i < slots; i++)
+                if ((start + i) % contenders.Count == botIndex) return true;
+            return false;
+        }
+
+        private static int StableTargetHash(string targetId)
+        {
+            int numeric;
+            if (int.TryParse(targetId, out numeric)) return numeric & 0x7fffffff;
+            int hash = 17;
+            for (int i = 0; i < targetId.Length; i++)
+                hash = (hash * 31 + targetId[i]) & 0x7fffffff;
+            return hash;
+        }
+
         private Vector3 UpdateCombatAim(CNRArenaBotState bot, Vector3 targetPosition,
             float distance, bool moving, float now)
         {
@@ -1653,6 +1701,8 @@ namespace CNRMods
                 float spread = Mathf.Lerp(1.1f, 5.0f, rangeT);
                 spread += (1f - bot.TargetCertainty) * 3.5f;
                 if (moving) spread += 1.35f;
+                if (!IsPrimaryEngager(bot, bot.LastTargetId, now))
+                    spread += ENGAGEMENT_SUPPRESSION_SPREAD;
                 bot.AimErrorTarget = UnityEngine.Random.Range(-spread, spread);
                 bot.NextAimErrorAt = now + UnityEngine.Random.Range(AIM_ERROR_REFRESH_MIN, AIM_ERROR_REFRESH_MAX);
             }
