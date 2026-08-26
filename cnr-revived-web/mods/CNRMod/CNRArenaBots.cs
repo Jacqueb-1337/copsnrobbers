@@ -29,6 +29,7 @@ namespace CNRMods
         public PlayerStatus Status = PlayerStatus.idle;
         public float RespawnAt;
         public float NextShotAt;
+        public float FireStatusUntil;
         public float NextThinkAt;
         public float LastMovedAt;
         public Vector3 LastMoveSample;
@@ -41,6 +42,10 @@ namespace CNRMods
         public float CurrentTargetScore;
         public float TacticalScore = -1f;
         public float TacticalCommittedUntil;
+        public Vector3 AimDirection;
+        public float AimErrorDegrees;
+        public float AimErrorTarget;
+        public float NextAimErrorAt;
         public Vector3 WanderDirection;
         public Vector3 WanderTarget;
         public float WanderUntil;
@@ -103,6 +108,10 @@ namespace CNRMods
         private const int TACTICAL_CANDIDATE_COUNT = 6;
         private const float TACTICAL_SWITCH_ADVANTAGE = 1.18f;
         private const float TACTICAL_REACHED_DISTANCE = 0.95f;
+        private const float AIM_ERROR_CHANGE_RATE = 18f;
+        private const float AIM_TRACK_RATE = 8.0f;
+        private const float AIM_ERROR_REFRESH_MIN = 0.28f;
+        private const float AIM_ERROR_REFRESH_MAX = 0.58f;
 
         private static CNRArenaBotManager _instance;
         private static string _pendingPackedState;
@@ -501,6 +510,7 @@ namespace CNRMods
             bot.NavTarget = bot.Position;
             bot.NavWaypoint = bot.Position;
             bot.FacingDirection = bot.WanderDirection;
+            bot.AimDirection = bot.WanderDirection;
             bot.StrafeSign = (id & 1) == 0 ? 1 : -1;
             bot.TacticalTarget = bot.Position;
             FaceDirection(bot, bot.WanderDirection);
@@ -742,7 +752,7 @@ namespace CNRMods
                 Vector3 tacticalDelta = moveTarget - bot.Position;
                 tacticalDelta.y = 0f;
                 wantsMove = tacticalDelta.sqrMagnitude > TACTICAL_REACHED_DISTANCE * TACTICAL_REACHED_DISTANCE;
-                bot.Status = PlayerStatus.fire;
+                bot.Status = wantsMove ? PlayerStatus.walk : PlayerStatus.idle;
             }
 
             if (wantsMove)
@@ -763,16 +773,33 @@ namespace CNRMods
 
             // AIPath-style turning is gradual. In combat the body turns toward the enemy;
             // while searching/rushing through occluded geometry it follows the route.
-            Vector3 facingDir = visible ? dir : (move.sqrMagnitude > 0.01f ? move.normalized : GetBotForward(bot));
+            Vector3 facingDir = visible
+                ? UpdateCombatAim(bot, targetPos, dist, move.sqrMagnitude > 0.01f, now)
+                : (move.sqrMagnitude > 0.01f ? move.normalized : GetBotForward(bot));
             FaceDirection(bot, facingDir);
             Vector3 actualForward = GetBotForward(bot);
-            bot.GunRotation = Quaternion.identity;
+            if (visible)
+            {
+                float verticalAim = (targetPos.y + 0.9f) - (bot.Position.y + 1.15f);
+                float pitch = Mathf.Atan2(verticalAim, Mathf.Max(0.05f, dist)) * Mathf.Rad2Deg;
+                bot.GunRotation = Quaternion.Euler(pitch, 0f, 0f);
+            }
+            else
+            {
+                bot.GunRotation = Quaternion.identity;
+            }
             bot.FirePoint = bot.Position + new Vector3(0f, 1.15f, 0f) + actualForward * 0.45f;
 
             if (move.sqrMagnitude > 0.01f)
                 MoveBot(bot, move.normalized, speed * THINK_INTERVAL);
             else
                 bot.MoveVelocity = Vector3.MoveTowards(bot.MoveVelocity, Vector3.zero, BOT_ACCELERATION * THINK_INTERVAL);
+
+            // Keep the fire state alive long enough to cross at least one authoritative
+            // state broadcast. Otherwise a shot can begin and end between 0.20s packets,
+            // so remote clients never see the bot actually fire.
+            if (now < bot.FireStatusUntil)
+                bot.Status = PlayerStatus.fire;
 
             // Seeing a target is intentionally wider than being aimed at it. A bot may
             // notice something near the edge of its 110-degree vision cone, but it cannot
@@ -783,13 +810,20 @@ namespace CNRMods
             {
                 bot.Status = PlayerStatus.fire;
                 bot.NextShotAt = now + UnityEngine.Random.Range(0.36f, 0.62f);
+                bot.FireStatusUntil = now + 0.24f;
 
-                float rangeT = Mathf.InverseLerp(3f, 22f, dist);
-                float hitChance = Mathf.Lerp(0.84f, 0.52f, rangeT);
-                if (move.sqrMagnitude > 0.05f) hitChance -= 0.06f;
-                hitChance = Mathf.Clamp(hitChance, 0.42f, 0.88f);
+                // Damage now follows the bot's visible aim instead of an invisible hit
+                // percentage. At distance the target subtends a smaller angle, so the same
+                // amount of aim error naturally produces more misses.
+                float aimError = Vector3.Angle(actualForward, dir);
+                float effectiveError = aimError;
+                float hitTolerance = GetAimHitTolerance(dist);
 
-                if (UnityEngine.Random.value <= hitChance)
+                // Small recoil kick changes the next aim destination rather than rolling
+                // a totally independent accuracy result for every bullet.
+                bot.AimErrorTarget = Mathf.Clamp(bot.AimErrorTarget + UnityEngine.Random.Range(-0.9f, 0.9f), -9f, 9f);
+
+                if (effectiveError <= hitTolerance)
                 {
                     int damage = UnityEngine.Random.Range(12, 23);
                     if (targetBot != null)
@@ -1035,6 +1069,11 @@ namespace CNRMods
             bot.TacticalScore = -1f;
             bot.TacticalCommittedUntil = 0f;
             bot.NextRepositionAt = 0f;
+            bot.AimDirection = GetBotForward(bot);
+            bot.AimErrorDegrees = 0f;
+            bot.AimErrorTarget = 0f;
+            bot.NextAimErrorAt = 0f;
+            bot.FireStatusUntil = 0f;
             bot.NavPath = null;
             bot.NavPathIndex = 0;
             bot.NextNavRepathAt = 0f;
@@ -1161,6 +1200,10 @@ namespace CNRMods
             // not inherit a flank point that was chosen for somebody else.
             bot.TargetCertainty = 0.08f;
             bot.ReactionReadyAt = now + UnityEngine.Random.Range(TARGET_REACTION_MIN, TARGET_REACTION_MAX);
+            bot.AimDirection = GetBotForward(bot);
+            bot.AimErrorDegrees = UnityEngine.Random.Range(-7.5f, 7.5f);
+            bot.AimErrorTarget = bot.AimErrorDegrees;
+            bot.NextAimErrorAt = now;
             bot.TacticalTarget = bot.Position;
             bot.TacticalScore = -1f;
             bot.TacticalCommittedUntil = 0f;
@@ -1454,6 +1497,52 @@ namespace CNRMods
                 nearest = Mathf.Min(nearest, delta.magnitude);
             }
             return Mathf.Clamp01((nearest - 1.25f) / 4.0f);
+        }
+
+        private Vector3 UpdateCombatAim(CNRArenaBotState bot, Vector3 targetPosition,
+            float distance, bool moving, float now)
+        {
+            Vector3 ideal = targetPosition - bot.Position;
+            ideal.y = 0f;
+            if (ideal.sqrMagnitude <= 0.0001f) return GetBotForward(bot);
+            ideal.Normalize();
+
+            if (bot.AimDirection.sqrMagnitude <= 0.0001f)
+                bot.AimDirection = GetBotForward(bot);
+
+            if (now >= bot.NextAimErrorAt)
+            {
+                float rangeT = Mathf.Clamp01((distance - 3f) / 20f);
+                float spread = Mathf.Lerp(1.1f, 5.0f, rangeT);
+                spread += (1f - bot.TargetCertainty) * 3.5f;
+                if (moving) spread += 1.35f;
+                bot.AimErrorTarget = UnityEngine.Random.Range(-spread, spread);
+                bot.NextAimErrorAt = now + UnityEngine.Random.Range(AIM_ERROR_REFRESH_MIN, AIM_ERROR_REFRESH_MAX);
+            }
+
+            bot.AimErrorDegrees = Mathf.MoveTowards(bot.AimErrorDegrees, bot.AimErrorTarget,
+                AIM_ERROR_CHANGE_RATE * THINK_INTERVAL);
+            Vector3 desired = Quaternion.Euler(0f, bot.AimErrorDegrees, 0f) * ideal;
+            desired.y = 0f;
+            if (desired.sqrMagnitude > 0.0001f) desired.Normalize();
+
+            Vector3 current = bot.AimDirection;
+            current.y = 0f;
+            if (current.sqrMagnitude <= 0.0001f) current = GetBotForward(bot);
+            else current.Normalize();
+
+            bot.AimDirection = Vector3.Slerp(current, desired,
+                Mathf.Clamp01(AIM_TRACK_RATE * THINK_INTERVAL));
+            bot.AimDirection.y = 0f;
+            if (bot.AimDirection.sqrMagnitude <= 0.0001f) return ideal;
+            bot.AimDirection.Normalize();
+            return bot.AimDirection;
+        }
+
+        private static float GetAimHitTolerance(float distance)
+        {
+            float angularRadius = Mathf.Atan2(0.48f, Mathf.Max(1f, distance)) * Mathf.Rad2Deg;
+            return Mathf.Clamp(angularRadius * 1.30f, 1.15f, 6.0f);
         }
 
         private bool CanSeeTarget(CNRArenaBotState bot, Vector3 target, string targetId, float maxDistance)
