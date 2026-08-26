@@ -65,6 +65,7 @@ namespace CNRMods
         public float NextAlertAt;
         public int StrafeSign = 1;
         public int StuckRecoveries;
+        public int NavBlockedSteps;
         public float RecoverUntil;
         public CNRArenaBotBehavior Behavior = CNRArenaBotBehavior.Patrol;
     }
@@ -90,16 +91,18 @@ namespace CNRMods
         private const float NET_PLAYER_POSITION_Y_BIAS = 0.233f;
         private const float BOT_GROUND_EXTRA_LIFT = 0f;
         private const float BOT_VISION_HALF_ANGLE = 55f;
-        private const float WANDER_SPEED = 1.85f;
-        private const float NAV_REPATH_INTERVAL = 0.75f;
-        private const float NAV_FAILED_REPATH_DELAY = 0.35f;
-        private const float NAV_TARGET_REPATH_DISTANCE = 1.0f;
+        private const float BOT_WALK_SPEED = 6.0f;
+        private const float BOT_RUN_SPEED = 9.0f;
+        private const float WANDER_SPEED = BOT_WALK_SPEED;
+        private const float NAV_REPATH_INTERVAL = 1.0f;
+        private const float NAV_FAILED_REPATH_DELAY = 0.85f;
+        private const float NAV_TARGET_REPATH_DISTANCE = 2.0f;
         private const float NAV_HEIGHT_TOLERANCE = 1.15f;
         private const float NAV_CLIMB_RATE = 3.8f;
         private const float NAV_DESCEND_RATE = 7.0f;
         private const float BOT_TURN_RATE = 300f;
         private const float BOT_FIRE_HALF_ANGLE = 12f;
-        private const float BOT_ACCELERATION = 10.5f;
+        private const float BOT_ACCELERATION = 30f;
         private const float BOT_SEPARATION_RADIUS = 1.25f;
         private const float BOT_ALERT_RADIUS = 26f;
         private const float BOT_ALERT_INTERVAL = 1.0f;
@@ -628,6 +631,7 @@ namespace CNRMods
                         bot.TacticalTarget = bot.Position;
                         bot.RecoverUntil = 0f;
                         bot.StuckRecoveries = 0;
+                        bot.NavBlockedSteps = 0;
                         bot.Behavior = CNRArenaBotBehavior.Patrol;
                     }
                     continue;
@@ -742,7 +746,7 @@ namespace CNRMods
                 return;
             }
             Vector3 dir = flat / dist;
-            float speed = 3.4f;
+            float speed = BOT_RUN_SPEED;
             Vector3 move = Vector3.zero;
             Vector3 moveTarget = bot.Position;
             bool wantsMove = false;
@@ -773,6 +777,7 @@ namespace CNRMods
             else if (dist > 20f)
             {
                 bot.Behavior = CNRArenaBotBehavior.Rush;
+                speed = BOT_RUN_SPEED;
                 moveTarget = targetPos;
                 wantsMove = true;
                 bot.Status = PlayerStatus.walk;
@@ -835,14 +840,19 @@ namespace CNRMods
                 }
             }
 
+            Vector3 routeFacing = move;
+            if (routeFacing.sqrMagnitude > 0.01f) routeFacing.Normalize();
             if (move.sqrMagnitude > 0.01f)
                 move = ApplyLocalSeparation(bot, move.normalized);
 
-            // AIPath-style turning is gradual. In combat the body turns toward the enemy;
-            // while searching/rushing through occluded geometry it follows the route.
+            // Keep body steering separate from weapon accuracy. AimDirection intentionally
+            // wanders to produce believable misses; feeding that noise into BodyRotation
+            // made the whole character twitch left/right every few tenths of a second.
+            if (visible)
+                UpdateCombatAim(bot, targetPos, dist, move.sqrMagnitude > 0.01f, now);
             Vector3 facingDir = visible
-                ? UpdateCombatAim(bot, targetPos, dist, move.sqrMagnitude > 0.01f, now)
-                : (move.sqrMagnitude > 0.01f ? move.normalized : GetBotForward(bot));
+                ? dir
+                : (routeFacing.sqrMagnitude > 0.01f ? routeFacing : GetBotForward(bot));
             FaceDirection(bot, facingDir);
             Vector3 actualForward = GetBotForward(bot);
             if (visible)
@@ -882,10 +892,11 @@ namespace CNRMods
                     : UnityEngine.Random.Range(0.48f, 0.78f));
                 bot.FireStatusUntil = now + 0.24f;
 
-                // Damage now follows the bot's visible aim instead of an invisible hit
-                // percentage. At distance the target subtends a smaller angle, so the same
-                // amount of aim error naturally produces more misses.
-                float aimError = Vector3.Angle(actualForward, dir);
+                // Damage follows the bot's tracked AimDirection instead of an independent
+                // hit-chance roll. At distance the target subtends a smaller angle, so the
+                // same amount of aim error naturally produces more misses without making
+                // the entire body visibly oscillate with the accuracy noise.
+                float aimError = Vector3.Angle(bot.AimDirection, dir);
                 float effectiveError = aimError;
                 float hitTolerance = GetAimHitTolerance(dist);
 
@@ -926,9 +937,12 @@ namespace CNRMods
             Vector3 targetDelta = target - bot.NavTarget;
             targetDelta.y = 0f;
             bool pathMissing = bot.NavPath == null || bot.NavPath.Count == 0;
-            bool repath = (pathMissing && now >= bot.NextNavRepathAt) ||
-                (!pathMissing && (now >= bot.NextNavRepathAt ||
-                    targetDelta.sqrMagnitude >= NAV_TARGET_REPATH_DISTANCE * NAV_TARGET_REPATH_DISTANCE));
+            bool targetMoved = targetDelta.sqrMagnitude >= NAV_TARGET_REPATH_DISTANCE * NAV_TARGET_REPATH_DISTANCE;
+            // A valid route is reusable. Repath only when it is missing or the destination
+            // has moved meaningfully, and always respect the cooldown. The old condition
+            // rebuilt A* every ~0.75s even for a stationary destination and let moving
+            // targets bypass the cooldown entirely.
+            bool repath = now >= bot.NextNavRepathAt && (pathMissing || targetMoved);
             if (repath)
             {
                 bot.NavPath = CNRZombieMod.ZombieNavGrid.Query(fromGround, targetGround);
@@ -1047,16 +1061,25 @@ namespace CNRMods
                     }
                     else
                     {
-                        // Do not run a full A* query again on the very next 0.10s think.
-                        // A stuck bot used to hammer Query() ten times/sec here.
+                        // Do not run a full A* query again on the very next think. Repeated
+                        // blocked steps get progressively more breathing room, then use the
+                        // existing stuck recovery instead of grinding forever under an edge.
+                        bot.NavBlockedSteps++;
                         bot.NavPath = null;
                         bot.NavPathIndex = 0;
-                        bot.NextNavRepathAt = Time.realtimeSinceStartup + NAV_FAILED_REPATH_DELAY;
+                        bot.NextNavRepathAt = Time.realtimeSinceStartup + NAV_FAILED_REPATH_DELAY +
+                            Mathf.Min(1.5f, bot.NavBlockedSteps * 0.25f);
                         bot.MoveVelocity = Vector3.zero;
+                        if (bot.NavBlockedSteps >= 3)
+                        {
+                            bot.NavBlockedSteps = 0;
+                            RecoverStuckBot(bot, move, true);
+                        }
                         return;
                     }
                 }
 
+                bot.NavBlockedSteps = 0;
                 float dy = navCell.y - currentGroundY;
                 float maxUp = NAV_CLIMB_RATE * THINK_INTERVAL;
                 float maxDown = NAV_DESCEND_RATE * THINK_INTERVAL;
@@ -1090,6 +1113,7 @@ namespace CNRMods
                 bot.LastMoveSample = bot.Position;
                 bot.LastMovedAt = Time.realtimeSinceStartup;
                 bot.StuckRecoveries = 0;
+                bot.NavBlockedSteps = 0;
             }
             else if (Time.realtimeSinceStartup - bot.LastMovedAt > BOT_STUCK_SECONDS)
             {
@@ -1112,6 +1136,7 @@ namespace CNRMods
                 // Same spirit as the later AI: abandon a bad chase instead of endlessly
                 // grinding against one corner. Patrol will choose a fresh route next tick.
                 bot.StuckRecoveries = 0;
+                bot.NavBlockedSteps = 0;
                 ClearTargetMemory(bot);
                 bot.Behavior = CNRArenaBotBehavior.Patrol;
                 bot.NextWanderAt = 0f;
@@ -1872,21 +1897,12 @@ namespace CNRMods
                 flat.y = 0f;
                 if (flat.sqrMagnitude < 3f * 3f) continue;
 
-                List<Vector3> path = CNRZombieMod.ZombieNavGrid.Query(fromGround, snapped);
-                if (path == null || path.Count < 2) continue;
-
-                float length = 0f;
-                Vector3 previous = fromGround;
-                for (int i = 0; i < path.Count; i++)
-                {
-                    length += Vector3.Distance(previous, path[i]);
-                    previous = path[i];
-                }
-                if (length < 3f) continue;
-
+                // Candidate selection must stay cheap. Running A* here meant one patrol
+                // decision could issue up to twelve complete grid searches in a single
+                // frame. The chosen destination gets exactly one real route later.
                 target = snapped;
                 target.y += bodyOffset;
-                routeDistance = length;
+                routeDistance = flat.magnitude * 1.25f;
                 return true;
             }
             return false;
@@ -1954,9 +1970,11 @@ namespace CNRMods
                 }
                 moveDir = toTarget.normalized;
             }
+            Vector3 routeFacing = moveDir;
+            if (routeFacing.sqrMagnitude > 0.0001f) routeFacing.Normalize();
             moveDir = ApplyLocalSeparation(bot, moveDir);
             bot.WanderDirection = moveDir;
-            FaceDirection(bot, moveDir);
+            FaceDirection(bot, routeFacing.sqrMagnitude > 0.0001f ? routeFacing : moveDir);
             bot.GunRotation = Quaternion.identity;
             bot.FirePoint = bot.Position + new Vector3(0f, 1.15f, 0f) + moveDir * 0.45f;
             bot.Status = PlayerStatus.walk;
