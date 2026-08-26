@@ -702,6 +702,24 @@ namespace CNRMods
                 }
             }
 
+            if (!visible)
+            {
+                bool staleMemory = !bot.HasLastKnownTarget ||
+                    now - bot.LastTargetVisibleAt >= BOT_SOUND_REDIRECT_STALE_SECONDS;
+                if (staleMemory)
+                {
+                    string heardId;
+                    Vector3 heardPosition;
+                    float heardScore;
+                    if (TryHearHostileGunfire(bot, out heardId, out heardPosition, out heardScore))
+                    {
+                        SetAudibleThreat(bot, heardId, heardPosition, heardScore, now);
+                        targetId = heardId;
+                        targetPos = heardPosition;
+                    }
+                }
+            }
+
             if (visible)
             {
                 // Staying on the same enemy steadily improves identification certainty.
@@ -720,14 +738,28 @@ namespace CNRMods
                     float unseenFor = now - bot.LastTargetVisibleAt;
                     Vector3 toKnown = bot.LastKnownTargetPosition - bot.Position;
                     toKnown.y = 0f;
-                    if (unseenFor >= TARGET_MEMORY_SECONDS || toKnown.magnitude <= TARGET_REACHED_DISTANCE)
+                    if (unseenFor >= TARGET_MEMORY_SECONDS)
                     {
                         ClearTargetMemory(bot);
                         WanderBot(bot);
                         return;
                     }
+                    if (toKnown.magnitude <= TARGET_REACHED_DISTANCE)
+                    {
+                        Vector3 searchPoint;
+                        if (!TryAdvanceLostTargetSearch(bot, now, out searchPoint))
+                        {
+                            ClearTargetMemory(bot);
+                            WanderBot(bot);
+                            return;
+                        }
+                        targetPos = searchPoint;
+                    }
+                    else
+                    {
+                        targetPos = bot.LastKnownTargetPosition;
+                    }
                     targetId = bot.LastTargetId;
-                    targetPos = bot.LastKnownTargetPosition;
                     targetInfo = null;
                     targetBot = null;
                 }
@@ -1202,6 +1234,7 @@ namespace CNRMods
             bot.NextNavRepathAt = 0f;
             bot.WanderUntil = 0f;
             bot.NextWanderAt = 0f;
+            ResetExtendedPerception(bot);
         }
 
         private bool TryResolveEnemyTarget(CNRArenaBotState bot, string targetId, out PlayerInfo info, out CNRArenaBotState targetBot)
@@ -1312,6 +1345,7 @@ namespace CNRMods
             float score, float now)
         {
             bool changed = bot.LastTargetId != targetId;
+            ObserveVisibleTargetMotion(bot, targetId, targetPosition, now, changed);
             bot.LastTargetId = targetId;
             bot.LastKnownTargetPosition = targetPosition;
             bot.LastTargetVisibleAt = now;
