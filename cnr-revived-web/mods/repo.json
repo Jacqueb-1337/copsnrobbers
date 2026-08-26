@@ -1992,11 +1992,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and username/password account login, preview, merge, and sync controls.",
-      "latestVersion": "3.1.106",
+      "latestVersion": "3.1.107",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.106.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.107.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.107",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.107.dll",
+          "changelog": "Match client settings layout exactly to the Match Settings screen"
+        },
         {
           "version": "3.1.106",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.106.dll",
