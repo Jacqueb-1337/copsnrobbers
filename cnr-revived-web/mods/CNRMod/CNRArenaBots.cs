@@ -19,6 +19,9 @@ namespace CNRMods
     {
         public string Id;
         public TeamType Team;
+        public int SquadId = -1;
+        public int SquadSlot;
+        public int SquadSize = 1;
         public int Hp = 100;
         public int Kills;
         public int Deaths;
@@ -98,6 +101,9 @@ namespace CNRMods
         private const float BOT_ALERT_RADIUS = 26f;
         private const float BOT_ALERT_INTERVAL = 1.0f;
         private const float BOT_STUCK_SECONDS = 1.25f;
+        private const int SQUAD_MAX_SIZE = 3;
+        private const float SQUAD_LANE_SPACING = 4.25f;
+        private const float SQUAD_REPORT_ERROR = 0.85f;
         private const int NAV_SHORTCUT_LOOKAHEAD = 4;
         private const float TARGET_SWITCH_ADVANTAGE = 1.22f;
         private const float TARGET_CERTAINTY_FIRE = 0.62f;
@@ -403,6 +409,7 @@ namespace CNRMods
 
             ReconcileTeam(TeamType.Cop, desiredCop);
             ReconcileTeam(TeamType.Robber, desiredRobber);
+            RebuildSquadAssignments();
         }
 
         private bool AnyHumanInGame()
@@ -486,6 +493,52 @@ namespace CNRMods
                 if (bot == null) break;
                 _bots.Add(bot);
                 have++;
+            }
+        }
+
+        private void RebuildSquadAssignments()
+        {
+            if (IsFreeForAllMode())
+            {
+                for (int i = 0; i < _bots.Count; i++)
+                {
+                    _bots[i].SquadId = -1;
+                    _bots[i].SquadSlot = 0;
+                    _bots[i].SquadSize = 1;
+                }
+                return;
+            }
+
+            AssignTeamSquads(TeamType.Cop, 100);
+            AssignTeamSquads(TeamType.Robber, 200);
+        }
+
+        private void AssignTeamSquads(TeamType team, int squadBase)
+        {
+            List<CNRArenaBotState> members = new List<CNRArenaBotState>();
+            for (int i = 0; i < _bots.Count; i++)
+                if (_bots[i] != null && _bots[i].Team == team) members.Add(_bots[i]);
+
+            members.Sort(delegate(CNRArenaBotState a, CNRArenaBotState b)
+            {
+                return string.CompareOrdinal(a.Id, b.Id);
+            });
+
+            int cursor = 0;
+            int group = 0;
+            while (cursor < members.Count)
+            {
+                int size = Mathf.Min(SQUAD_MAX_SIZE, members.Count - cursor);
+                int squadId = squadBase + group;
+                for (int slot = 0; slot < size; slot++)
+                {
+                    CNRArenaBotState member = members[cursor + slot];
+                    member.SquadId = squadId;
+                    member.SquadSlot = slot;
+                    member.SquadSize = size;
+                }
+                cursor += size;
+                group++;
             }
         }
 
@@ -1285,9 +1338,9 @@ namespace CNRMods
 
         private void AlertNearbyBots(CNRArenaBotState source, string targetId, Vector3 seenPosition)
         {
-            // Port the later AI's nearby-enemy alert without turning it into telepathy.
-            // Teammates receive only the position the source actually saw and still have
-            // to turn, path there and acquire the target with their own vision cone.
+            // Nearby teammates can react to a fight normally. Squadmates additionally
+            // share a radio contact even when separated, but the report is deliberately
+            // approximate and never replaces a hostile the receiver can already see.
             if (source == null || string.IsNullOrEmpty(targetId) || IsFreeForAllMode()) return;
             float now = Time.realtimeSinceStartup;
             float radiusSq = BOT_ALERT_RADIUS * BOT_ALERT_RADIUS;
@@ -1295,16 +1348,26 @@ namespace CNRMods
             {
                 CNRArenaBotState other = _bots[i];
                 if (other == null || other == source || other.Team != source.Team || other.Status == PlayerStatus.dead) continue;
+
+                bool squadMate = source.SquadId >= 0 && other.SquadId == source.SquadId;
                 Vector3 delta = other.Position - source.Position;
                 delta.y = 0f;
-                if (delta.sqrMagnitude > radiusSq) continue;
-                if (other.HasLastKnownTarget && now - other.LastTargetVisibleAt < 0.35f) continue;
+                if (!squadMate && delta.sqrMagnitude > radiusSq) continue;
+                if (HasFreshVisibleTarget(other, now)) continue;
+
+                Vector3 reportedPosition = seenPosition;
+                if (squadMate)
+                {
+                    float reportAngle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+                    float reportError = UnityEngine.Random.Range(0.20f, SQUAD_REPORT_ERROR);
+                    reportedPosition += new Vector3(Mathf.Cos(reportAngle), 0f, Mathf.Sin(reportAngle)) * reportError;
+                }
 
                 other.LastTargetId = targetId;
-                other.LastKnownTargetPosition = seenPosition;
-                other.LastTargetVisibleAt = now - 0.25f;
+                other.LastKnownTargetPosition = reportedPosition;
+                other.LastTargetVisibleAt = now - (squadMate ? 0.45f : 0.25f);
                 other.HasLastKnownTarget = true;
-                other.TargetCertainty = 0.08f;
+                other.TargetCertainty = squadMate ? 0.05f : 0.08f;
                 other.ReactionReadyAt = now + UnityEngine.Random.Range(TARGET_REACTION_MIN, TARGET_REACTION_MAX);
                 other.CurrentTargetScore = 0f;
                 other.TacticalTarget = other.Position;
@@ -1316,6 +1379,19 @@ namespace CNRMods
                 other.NavPathIndex = 0;
                 other.NextNavRepathAt = 0f;
             }
+        }
+
+        private bool HasFreshVisibleTarget(CNRArenaBotState bot, float now)
+        {
+            if (bot == null || !bot.HasLastKnownTarget || string.IsNullOrEmpty(bot.LastTargetId)) return false;
+            if (now - bot.LastTargetVisibleAt > 0.35f) return false;
+
+            PlayerInfo targetInfo;
+            CNRArenaBotState targetBot;
+            if (!TryResolveEnemyTarget(bot, bot.LastTargetId, out targetInfo, out targetBot)) return false;
+            Vector3 targetPosition = targetBot != null ? targetBot.Position : targetInfo.mPosition;
+            float distance = Vector3.Distance(bot.Position, targetPosition);
+            return CanSeeTarget(bot, targetPosition, bot.LastTargetId, distance + 1f);
         }
 
         private Vector3 ApplyLocalSeparation(CNRArenaBotState bot, Vector3 desired)
@@ -1370,6 +1446,54 @@ namespace CNRMods
             separation += (away / dist) * (1f - dist / BOT_SEPARATION_RADIUS);
         }
 
+        private bool TryGetSquadLaneAnchor(CNRArenaBotState bot, Vector3 targetPosition, out Vector3 anchor)
+        {
+            anchor = bot != null ? bot.Position : targetPosition;
+            if (bot == null || bot.SquadId < 0 || bot.SquadSize <= 1 || IsFreeForAllMode()) return false;
+
+            Vector3 squadCenter = Vector3.zero;
+            int activeMembers = 0;
+            for (int i = 0; i < _bots.Count; i++)
+            {
+                CNRArenaBotState member = _bots[i];
+                if (member == null || member.SquadId != bot.SquadId || member.Status == PlayerStatus.dead || member.Hp <= 0) continue;
+                squadCenter += member.Position;
+                activeMembers++;
+            }
+            if (activeMembers <= 0) return false;
+            squadCenter /= activeMembers;
+
+            Vector3 forward = targetPosition - squadCenter;
+            forward.y = 0f;
+            if (forward.sqrMagnitude <= 0.01f)
+            {
+                forward = targetPosition - bot.Position;
+                forward.y = 0f;
+            }
+            if (forward.sqrMagnitude <= 0.01f) return false;
+            forward.Normalize();
+
+            float lane = 0f;
+            if (bot.SquadSize == 2)
+                lane = bot.SquadSlot == 0 ? -0.65f : 0.65f;
+            else if (bot.SquadSize > 2)
+                lane = (bot.SquadSlot / (float)(bot.SquadSize - 1)) * 2f - 1f;
+
+            Vector3 right = new Vector3(forward.z, 0f, -forward.x);
+            anchor = targetPosition - forward * 9.0f + right * (lane * SQUAD_LANE_SPACING);
+            anchor.y = targetPosition.y;
+            return true;
+        }
+
+        private float GetSquadLaneScore(CNRArenaBotState bot, Vector3 position, Vector3 targetPosition)
+        {
+            Vector3 anchor;
+            if (!TryGetSquadLaneAnchor(bot, targetPosition, out anchor)) return 1f;
+            Vector3 delta = position - anchor;
+            delta.y = 0f;
+            return 1f / (1f + delta.magnitude * 0.18f);
+        }
+
         private bool TryChooseTacticalCombatPosition(CNRArenaBotState bot, Vector3 targetPosition,
             string targetId, out Vector3 chosenPosition, out float chosenScore)
         {
@@ -1386,6 +1510,18 @@ namespace CNRMods
 
             if ((bot.TacticalTarget - bot.Position).sqrMagnitude > 0.35f * 0.35f &&
                 TryScoreTacticalPosition(bot, bot.TacticalTarget, targetPosition, targetId, out scored, out score) &&
+                score > chosenScore)
+            {
+                chosenPosition = scored;
+                chosenScore = score;
+            }
+
+            // Always test the bot's assigned squad lane directly. Random ring samples can
+            // still win if terrain makes the lane bad, but on open ground this gives a
+            // squad a stable left/center/right frontage instead of bunching on one point.
+            Vector3 laneAnchor;
+            if (TryGetSquadLaneAnchor(bot, targetPosition, out laneAnchor) &&
+                TryScoreTacticalPosition(bot, laneAnchor, targetPosition, targetId, out scored, out score) &&
                 score > chosenScore)
             {
                 chosenPosition = scored;
@@ -1466,6 +1602,7 @@ namespace CNRMods
             float rangeScore = 1f - Mathf.Clamp01(Mathf.Abs(targetDistance - 9.0f) / 9.0f);
             float routeScore = 1f / (1f + routeDistance * 0.07f);
             float spacingScore = GetFriendlyTacticalSpacingScore(bot, snappedBody);
+            float laneScore = GetSquadLaneScore(bot, snappedBody, targetPosition);
 
             Vector3 currentRadial = bot.Position - targetPosition;
             Vector3 candidateRadial = snappedBody - targetPosition;
@@ -1478,8 +1615,8 @@ namespace CNRMods
                 flankScore = Mathf.Abs(Mathf.Sin(flankAngle));
             }
 
-            score = rangeScore * 0.42f + routeScore * 0.23f +
-                spacingScore * 0.20f + flankScore * 0.15f;
+            score = rangeScore * 0.32f + routeScore * 0.20f +
+                spacingScore * 0.14f + flankScore * 0.12f + laneScore * 0.22f;
             return true;
         }
 
