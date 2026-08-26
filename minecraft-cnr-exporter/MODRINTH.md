@@ -77,11 +77,11 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 - Source: https://github.com/Jacqueb-1337/copsnrobbers
 - Issues: https://github.com/Jacqueb-1337/copsnrobbers/issues
 
-## Version 0.1.4
+## Version 0.1.5
 
-**Version number:** `0.1.4`
+**Version number:** `0.1.5`
 
-**Version title:** `CNR Map Exporter 0.1.4`
+**Version title:** `CNR Map Exporter 0.1.5`
 
 **Version type:** Beta
 
@@ -89,17 +89,17 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 
 **Loader:** Fabric
 
-**Primary file:** `cnrmapexporter-0.1.4.jar`
+**Primary file:** `cnrmapexporter-0.1.5.jar`
 
 **Required dependency:** Fabric API
 
 **Changelog:**
 
-- Minecraft barrier blocks now export as a separate bullet-pass-through collision channel.
-- Barriers remain invisible and physically solid, while CNRMod 4.2.4+ lets normal bullets pass through them.
+- Climbable blocks now export a full-block interaction volume so Minecraft ladders and vines reliably latch in CNR.
+- Minecraft barrier blocks remain a separate invisible collision channel for player-solid, projectile-pass-through behavior.
 - Large exports remain incremental and responsive with live progress, `/cnr status`, and `/cnr cancel`.
 - Air does not count toward the 4,000,000 non-air-block export limit.
-- Climbable blocks, team spawn markers, packed LZ4 geometry, collision, and textures remain supported.
+- Team spawn markers, packed LZ4 geometry, collision, and textures remain supported.
 
 ## Icon
 

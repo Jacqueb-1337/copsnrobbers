@@ -705,16 +705,15 @@ public final class CnrMapExporterClient implements ClientModInitializer {
 
         void emitClimbable(BlockState state, BlockPos pos, int lx, int ly, int lz, ChunkBuilder chunk, SnapshotView view) {
             if (!state.is(BlockTags.CLIMBABLE)) return;
-            VoxelShape shape = state.getShape(view, pos);
-            List<AABB> boxes = (shape == null || shape.isEmpty())
-                ? Collections.singletonList(new AABB(0, 0, 0, 1, 1, 1))
-                : shape.toAabbs();
-            for (AABB box : boxes) {
-                chunk.climbable.addBox(
-                    (float)box.minX + lx - chunk.key.x, (float)box.minY + ly - chunk.key.y, (float)box.minZ + lz - chunk.key.z,
-                    (float)box.maxX + lx - chunk.key.x, (float)box.maxY + ly - chunk.key.y, (float)box.maxZ + lz - chunk.key.z);
-                climbableBoxCount++;
-            }
+
+            // Interaction volume intentionally fills the whole Minecraft block cell.
+            // Ladders/vines render as very thin planes against a solid backing block;
+            // exporting that thin visual shape as a trigger leaves no room for a
+            // CharacterController to overlap it before the wall stops the player.
+            chunk.climbable.addBox(
+                lx - chunk.key.x, ly - chunk.key.y, lz - chunk.key.z,
+                lx - chunk.key.x + 1f, ly - chunk.key.y + 1f, lz - chunk.key.z + 1f);
+            climbableBoxCount++;
         }
 
         String renderLayer(BlockState state) {
