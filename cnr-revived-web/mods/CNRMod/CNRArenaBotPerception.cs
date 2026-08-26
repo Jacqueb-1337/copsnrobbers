@@ -10,12 +10,15 @@ namespace CNRMods
         public Vector3 SearchAnchor;
         public int SearchStep;
         public float LastHeardThreatAt;
+        public float LastSoundRouteAt;
     }
 
     public partial class CNRArenaBotManager
     {
         private const float BOT_GUNFIRE_HEARING_RADIUS = 30f;
         private const float BOT_SOUND_REDIRECT_STALE_SECONDS = 1.15f;
+        private const float BOT_SOUND_REROUTE_INTERVAL = 1.35f;
+        private const float BOT_SOUND_REROUTE_DISTANCE = 5.0f;
         private const int LOST_TARGET_SEARCH_STEPS = 3;
 
         private void ObserveVisibleTargetMotion(CNRArenaBotState bot, string targetId,
@@ -61,6 +64,7 @@ namespace CNRMods
             bot.SearchAnchor = Vector3.zero;
             bot.SearchStep = 0;
             bot.LastHeardThreatAt = 0f;
+            bot.LastSoundRouteAt = 0f;
         }
 
         private bool TryHearHostileGunfire(CNRArenaBotState bot, out string targetId,
@@ -134,12 +138,28 @@ namespace CNRMods
         {
             if (bot == null || string.IsNullOrEmpty(targetId)) return;
             bool changed = bot.LastTargetId != targetId;
+            Vector3 previousCue = bot.LastKnownTargetPosition;
             if (changed)
             {
                 bot.TargetVelocityEstimate = Vector3.zero;
                 bot.LastObservedTargetPosition = cuePosition;
                 bot.LastObservedTargetAt = 0f;
             }
+            else
+            {
+                // Repeated gunfire samples contain intentional positional error. Smooth the
+                // cue instead of making the navigation destination jump on every sample.
+                cuePosition = Vector3.Lerp(previousCue, cuePosition, 0.30f);
+            }
+
+            Vector3 cueDelta = cuePosition - previousCue;
+            cueDelta.y = 0f;
+            bool routeMissing = bot.NavPath == null || bot.NavPath.Count == 0;
+            bool rerouteReady = now - bot.LastSoundRouteAt >= BOT_SOUND_REROUTE_INTERVAL;
+            bool shouldReroute = changed ||
+                (rerouteReady && (routeMissing ||
+                    cueDelta.sqrMagnitude >= BOT_SOUND_REROUTE_DISTANCE * BOT_SOUND_REROUTE_DISTANCE));
+
             bot.LastTargetId = targetId;
             bot.LastKnownTargetPosition = cuePosition;
             // Keep this just outside HasFreshVisibleTarget's 0.35s window. Hearing gives
@@ -158,9 +178,18 @@ namespace CNRMods
             bot.TacticalTarget = bot.Position;
             bot.TacticalScore = -1f;
             bot.TacticalCommittedUntil = 0f;
-            bot.NavPath = null;
-            bot.NavPathIndex = 0;
-            bot.NextNavRepathAt = 0f;
+
+            // Hearing used to clear NavPath every time sustained gunfire refreshed the cue.
+            // That recreated the old A* storm during firefights. Only rebuild when the
+            // source changes or the smoothed cue has moved far enough, and never faster
+            // than the explicit sound reroute interval.
+            if (shouldReroute)
+            {
+                bot.NavPath = null;
+                bot.NavPathIndex = 0;
+                bot.NextNavRepathAt = 0f;
+                bot.LastSoundRouteAt = now;
+            }
             ReportCommanderContact(bot, cuePosition, 0.50f);
         }
 

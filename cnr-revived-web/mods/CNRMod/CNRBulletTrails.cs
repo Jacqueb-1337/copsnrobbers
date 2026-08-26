@@ -10,11 +10,12 @@ namespace CNRMods
     // the gun rather than the center of the screen.
     public class CNRBulletTrailSystem : MonoBehaviour
     {
-        private const float TracerLifetime = 0.10f;
+        private const float TracerLifetime = 1.00f;
+        private const float TracerStartAlpha = 0.80f;
         private const float TracerStartWidth = 0.032f;
         private const float TracerEndWidth = 0.010f;
-        private const float TemplateScanInterval = 0.50f;
-        private const float LiveFallbackScanInterval = 0.05f;
+        private const float TemplateScanInterval = 1.00f;
+        private const float LiveFallbackScanInterval = 0.40f;
         private const float WeaponMuzzleSettleTime = 0.30f;
         private const int VanillaBulletRayMask = 19;
 
@@ -403,12 +404,19 @@ namespace CNRMods
             line.useWorldSpace = true;
             line.SetVertexCount(2);
             line.SetWidth(TracerStartWidth, TracerEndWidth);
+            Color tracerColor = new Color(1f, 0.82f, 0.38f, TracerStartAlpha);
+            line.SetColors(tracerColor, tracerColor);
             line.SetPosition(0, start);
             line.SetPosition(1, end);
             line.enabled = true;
 
             CNRBulletTracerLifetime lifetime = lineObject.AddComponent<CNRBulletTracerLifetime>();
-            if (lifetime != null) lifetime.Lifetime = TracerLifetime;
+            if (lifetime != null)
+            {
+                lifetime.Lifetime = TracerLifetime;
+                lifetime.StartAlpha = TracerStartAlpha;
+                lifetime.Line = line;
+            }
             else UnityEngine.Object.Destroy(lineObject, TracerLifetime);
         }
 
@@ -416,8 +424,8 @@ namespace CNRMods
         {
             if (_tracerMaterial != null) return;
 
-            Shader shader = Shader.Find("Particles/Additive");
-            if (shader == null) shader = Shader.Find("Particles/Alpha Blended");
+            Shader shader = Shader.Find("Particles/Alpha Blended");
+            if (shader == null) shader = Shader.Find("Particles/Additive");
             if (shader == null) shader = Shader.Find("Unlit/Texture");
             if (shader == null) return;
 
@@ -430,7 +438,9 @@ namespace CNRMods
             _tracerMaterial = new Material(shader);
             _tracerMaterial.name = "CNR_BulletTracerMaterial";
             _tracerMaterial.mainTexture = _tracerTexture;
-            _tracerMaterial.color = new Color(1f, 0.82f, 0.38f, 0.95f);
+            // Per-tracer opacity/fade is driven through LineRenderer vertex colors.
+            // Keep the shared material fully opaque so one tracer never changes another.
+            _tracerMaterial.color = new Color(1f, 0.82f, 0.38f, 1f);
             _tracerMaterial.hideFlags = HideFlags.HideAndDontSave;
         }
     }
@@ -460,11 +470,26 @@ namespace CNRMods
 
     public class CNRBulletTracerLifetime : MonoBehaviour
     {
-        public float Lifetime = 0.10f;
+        public float Lifetime = 1.00f;
+        public float StartAlpha = 0.80f;
+        public LineRenderer Line;
+
+        private float _bornAt;
 
         private void Start()
         {
+            _bornAt = Time.time;
             UnityEngine.Object.Destroy(gameObject, Mathf.Max(0.01f, Lifetime));
+        }
+
+        private void Update()
+        {
+            if (Line == null) return;
+            float duration = Mathf.Max(0.01f, Lifetime);
+            float t = Mathf.Clamp01((Time.time - _bornAt) / duration);
+            float alpha = Mathf.Lerp(StartAlpha, 0f, t);
+            Color color = new Color(1f, 0.82f, 0.38f, alpha);
+            Line.SetColors(color, color);
         }
     }
 }

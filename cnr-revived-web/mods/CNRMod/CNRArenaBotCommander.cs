@@ -34,7 +34,7 @@ namespace CNRMods
     {
         // The commander is deliberately much slower than the individual brains. It only
         // answers "where should this squad be?"; perception/aim/movement remain 10 Hz.
-        private const float COMMANDER_INTERVAL = 1.0f;
+        private const float COMMANDER_INTERVAL = 0.65f;
         private const float COMMANDER_CONTACT_LIFETIME = 14.0f;
         private const float COMMANDER_CONTACT_MERGE_RADIUS = 6.0f;
         private const float COMMANDER_REPORT_INTERVAL = 0.80f;
@@ -60,6 +60,7 @@ namespace CNRMods
         private Vector3 _commanderRobberSpawn;
         private bool _commanderHasCopSpawn;
         private bool _commanderHasRobberSpawn;
+        private bool _commanderUpdateRobbers;
 
         private void ResetCommanderState()
         {
@@ -72,6 +73,7 @@ namespace CNRMods
             _commanderCenter = Vector3.zero;
             _commanderHasCopSpawn = false;
             _commanderHasRobberSpawn = false;
+            _commanderUpdateRobbers = false;
         }
 
         private void UpdateArenaCommander(CNRMatchSettingsData rules)
@@ -95,8 +97,13 @@ namespace CNRMods
             _nextCommanderAt = now + COMMANDER_INTERVAL;
 
             PruneCommanderHotspots(now);
-            AssignCommanderOrdersForTeam(TeamType.Cop, now);
-            AssignCommanderOrdersForTeam(TeamType.Robber, now);
+            // Split Commander work across ticks so both teams do not rescore their full
+            // strategic node/hotspot sets on the same rendered frame.
+            if (_commanderUpdateRobbers)
+                AssignCommanderOrdersForTeam(TeamType.Robber, now);
+            else
+                AssignCommanderOrdersForTeam(TeamType.Cop, now);
+            _commanderUpdateRobbers = !_commanderUpdateRobbers;
             PruneUnusedCommanderOrders();
         }
 
@@ -224,9 +231,8 @@ namespace CNRMods
             if (now < reporter.NextStrategicReportAt) return;
             reporter.NextStrategicReportAt = now + COMMANDER_REPORT_INTERVAL;
 
-            Vector3 projected;
-            if (TryProjectCommanderBodyPoint(hostilePosition, out projected)) hostilePosition = projected;
-
+            // Keep contacts as reported body-space positions. Projection is only needed
+            // once a squad actually consumes an order, not every time a sighting is stored.
             float mergeSq = COMMANDER_CONTACT_MERGE_RADIUS * COMMANDER_CONTACT_MERGE_RADIUS;
             CNRArenaStrategicHotspot nearest = null;
             float nearestSq = float.MaxValue;
@@ -374,13 +380,13 @@ namespace CNRMods
             {
                 CNRArenaStrategicHotspot spot = _commanderHotspots[i];
                 if (spot.KnowledgeTeam != team) continue;
-                Vector3 projected;
-                if (!TryProjectCommanderBodyPoint(spot.Position, out projected)) continue;
-                float candidateScore = ScoreCommanderDestination(team, squadId, squadCenter, projected, now);
+                // Hotspots are scoring hints, not path endpoints yet. Avoid repeatedly
+                // scanning nearby nav cells for every squad during every Commander pass.
+                float candidateScore = ScoreCommanderDestination(team, squadId, squadCenter, spot.Position, now);
                 if (candidateScore > score)
                 {
                     score = candidateScore;
-                    destination = projected;
+                    destination = spot.Position;
                 }
             }
             return score >= 0f;
