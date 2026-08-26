@@ -81,6 +81,8 @@ namespace CNRMods
         private const float RECONCILE_INTERVAL = 0.40f;
         private const float STATE_INTERVAL = 0.20f;
         private const float THINK_INTERVAL = 0.10f;
+        private const float INFO_INJECT_INTERVAL = 0.05f;
+        private const float VISUAL_BIND_INTERVAL = 1.25f;
         private const float RESPAWN_SECONDS = 3.0f;
         private const float TARGET_MEMORY_SECONDS = 5.0f;
         private const float TARGET_REACHED_DISTANCE = 1.15f;
@@ -90,6 +92,7 @@ namespace CNRMods
         private const float BOT_VISION_HALF_ANGLE = 55f;
         private const float WANDER_SPEED = 1.85f;
         private const float NAV_REPATH_INTERVAL = 0.75f;
+        private const float NAV_FAILED_REPATH_DELAY = 0.35f;
         private const float NAV_TARGET_REPATH_DISTANCE = 1.0f;
         private const float NAV_HEIGHT_TOLERANCE = 1.15f;
         private const float NAV_CLIMB_RATE = 3.8f;
@@ -136,6 +139,7 @@ namespace CNRMods
         private CNRMultiplayerManager _mgr;
         private float _nextReconcileAt;
         private float _nextStateAt;
+        private float _nextInfoInjectAt;
         private float _nextVisualBindAt;
         private string _scene = "";
         private string _arenaNavScene = "";
@@ -225,10 +229,14 @@ namespace CNRMods
                 if (IsCurrentMasterSender(sender)) ApplyPackedState(packed);
             }
 
-            InjectPlayerInfos();
+            if (Time.realtimeSinceStartup >= _nextInfoInjectAt)
+            {
+                _nextInfoInjectAt = Time.realtimeSinceStartup + INFO_INJECT_INTERVAL;
+                InjectPlayerInfos();
+            }
             if (Time.realtimeSinceStartup >= _nextVisualBindAt)
             {
-                _nextVisualBindAt = Time.realtimeSinceStartup + 0.35f;
+                _nextVisualBindAt = Time.realtimeSinceStartup + VISUAL_BIND_INTERVAL;
                 BindDamageReceivers();
             }
         }
@@ -555,6 +563,9 @@ namespace CNRMods
             bot.Position = FindSpawnPosition(team, null);
             bot.LastMoveSample = bot.Position;
             bot.LastMovedAt = Time.realtimeSinceStartup;
+            // Spread bot decisions across frames instead of making every new bot run its
+            // expensive perception/navigation tick on the same rendered frame.
+            bot.NextThinkAt = Time.realtimeSinceStartup + ((id - BOT_ID_BASE) % 10) * (THINK_INTERVAL / 10f);
             float angle = UnityEngine.Random.Range(0f, 360f) * Mathf.Deg2Rad;
             bot.WanderDirection = new Vector3(Mathf.Sin(angle), 0f, Mathf.Cos(angle));
             bot.WanderTarget = bot.Position;
@@ -914,8 +925,10 @@ namespace CNRMods
             float now = Time.realtimeSinceStartup;
             Vector3 targetDelta = target - bot.NavTarget;
             targetDelta.y = 0f;
-            bool repath = bot.NavPath == null || bot.NavPath.Count == 0 ||
-                now >= bot.NextNavRepathAt || targetDelta.sqrMagnitude >= NAV_TARGET_REPATH_DISTANCE * NAV_TARGET_REPATH_DISTANCE;
+            bool pathMissing = bot.NavPath == null || bot.NavPath.Count == 0;
+            bool repath = (pathMissing && now >= bot.NextNavRepathAt) ||
+                (!pathMissing && (now >= bot.NextNavRepathAt ||
+                    targetDelta.sqrMagnitude >= NAV_TARGET_REPATH_DISTANCE * NAV_TARGET_REPATH_DISTANCE));
             if (repath)
             {
                 bot.NavPath = CNRZombieMod.ZombieNavGrid.Query(fromGround, targetGround);
@@ -1016,10 +1029,32 @@ namespace CNRMods
                 Vector3 navCell;
                 if (!CNRZombieMod.ZombieNavGrid.TryGetWalkableAt(next, currentGroundY, NAV_HEIGHT_TOLERANCE, out navCell))
                 {
-                    bot.NavPath = null;
-                    bot.NavPathIndex = 0;
-                    bot.NextNavRepathAt = 0f;
-                    return;
+                    // A 0.5m grid is coarse enough that the exact projected step can land
+                    // one cell beside a narrow ramp/edge even though the A* route is valid.
+                    // Snap to an immediately-adjacent walkable cell before declaring the
+                    // route broken. This is especially important at flush ramp entrances.
+                    if (CNRZombieMod.ZombieNavGrid.TrySnapToWalkableNearHeight(
+                        next, 2, currentGroundY, NAV_HEIGHT_TOLERANCE, out navCell))
+                    {
+                        Vector3 towardCell = navCell - bot.Position;
+                        towardCell.y = 0f;
+                        if (towardCell.sqrMagnitude > 0.0001f)
+                        {
+                            towardCell.Normalize();
+                            next.x = bot.Position.x + towardCell.x * amount;
+                            next.z = bot.Position.z + towardCell.z * amount;
+                        }
+                    }
+                    else
+                    {
+                        // Do not run a full A* query again on the very next 0.10s think.
+                        // A stuck bot used to hammer Query() ten times/sec here.
+                        bot.NavPath = null;
+                        bot.NavPathIndex = 0;
+                        bot.NextNavRepathAt = Time.realtimeSinceStartup + NAV_FAILED_REPATH_DELAY;
+                        bot.MoveVelocity = Vector3.zero;
+                        return;
+                    }
                 }
 
                 float dy = navCell.y - currentGroundY;
@@ -1195,6 +1230,7 @@ namespace CNRMods
             {
                 CNRArenaBotState other = _bots[i];
                 if (other == null || other == bot || other.Status == PlayerStatus.dead || other.Hp <= 0) continue;
+                if (other.Id == bot.LastTargetId) continue; // already checked above
                 if (!IsFreeForAllMode() && other.Team == bot.Team) continue;
 
                 Vector3 delta = other.Position - bot.Position;
@@ -1213,6 +1249,7 @@ namespace CNRMods
             ref PlayerInfo bestInfo, ref CNRArenaBotState bestBot, ref float bestScore)
         {
             if (!IsValidHumanEnemy(bot, candidate)) return;
+            if (candidate.mId == bot.LastTargetId) return; // current target was already visibility-tested this think
             Vector3 delta = candidate.mPosition - bot.Position;
             float dist = delta.magnitude;
             if (!CanSeeTarget(bot, candidate.mPosition, candidate.mId, dist + 1f)) return;
@@ -1389,15 +1426,11 @@ namespace CNRMods
 
         private bool HasFreshVisibleTarget(CNRArenaBotState bot, float now)
         {
-            if (bot == null || !bot.HasLastKnownTarget || string.IsNullOrEmpty(bot.LastTargetId)) return false;
-            if (now - bot.LastTargetVisibleAt > 0.35f) return false;
-
-            PlayerInfo targetInfo;
-            CNRArenaBotState targetBot;
-            if (!TryResolveEnemyTarget(bot, bot.LastTargetId, out targetInfo, out targetBot)) return false;
-            Vector3 targetPosition = targetBot != null ? targetBot.Position : targetInfo.mPosition;
-            float distance = Vector3.Distance(bot.Position, targetPosition);
-            return CanSeeTarget(bot, targetPosition, bot.LastTargetId, distance + 1f);
+            // LastTargetVisibleAt is written only by an actual visibility success in the
+            // 10 Hz brain. Re-raycasting every squad/engagement query duplicated the same
+            // LOS work many times per frame and scaled roughly O(bot^2).
+            return bot != null && bot.HasLastKnownTarget && !string.IsNullOrEmpty(bot.LastTargetId) &&
+                now - bot.LastTargetVisibleAt <= 0.35f;
         }
 
         private Vector3 ApplyLocalSeparation(CNRArenaBotState bot, Vector3 desired)
@@ -1558,7 +1591,8 @@ namespace CNRMods
             snappedBody = candidateBody;
             score = -1f;
             bool navReady = _arenaNavScene == _scene && CNRZombieMod.ZombieNavGrid.Ready;
-            float routeDistance = 0f;
+            float routeDistance = Vector3.Distance(bot.Position, candidateBody);
+            float directRouteBias = 1f;
 
             if (navReady)
             {
@@ -1575,19 +1609,13 @@ namespace CNRMods
 
                 snappedBody = snappedGround;
                 snappedBody.y += bodyOffset;
-                Vector3 routeFlat = snappedBody - bot.Position;
-                routeFlat.y = 0f;
-                if (routeFlat.sqrMagnitude > 0.75f * 0.75f)
-                {
-                    List<Vector3> path = CNRZombieMod.ZombieNavGrid.Query(fromGround, snappedGround);
-                    if (path == null || path.Count < 2) return false;
-                    Vector3 previous = fromGround;
-                    for (int i = 0; i < path.Count; i++)
-                    {
-                        routeDistance += Vector3.Distance(previous, path[i]);
-                        previous = path[i];
-                    }
-                }
+                routeDistance = Vector3.Distance(bot.Position, snappedBody);
+
+                // Tactical scoring may evaluate 8+ positions at once. Running a complete
+                // A* query for every candidate was the main bot CPU spike. Candidate
+                // scoring is deliberately cheap; the one winning position gets a real A*
+                // route later in TryGetNavigationDirection().
+                directRouteBias = CanTravelDirectOnNav(fromGround, snappedGround) ? 1f : 0.72f;
             }
             else
             {
@@ -1606,7 +1634,7 @@ namespace CNRMods
                 return false;
 
             float rangeScore = 1f - Mathf.Clamp01(Mathf.Abs(targetDistance - 9.0f) / 9.0f);
-            float routeScore = 1f / (1f + routeDistance * 0.07f);
+            float routeScore = (1f / (1f + routeDistance * 0.07f)) * directRouteBias;
             float spacingScore = GetFriendlyTacticalSpacingScore(bot, snappedBody);
             float laneScore = GetSquadLaneScore(bot, snappedBody, targetPosition);
 
@@ -1646,31 +1674,25 @@ namespace CNRMods
         {
             if (bot == null || IsFreeForAllMode() || string.IsNullOrEmpty(targetId)) return true;
 
-            List<CNRArenaBotState> contenders = new List<CNRArenaBotState>();
+            // No allocations/sorts/raycasts here: this runs from the 10 Hz aiming path.
+            // Bot IDs are stable, so rank the contenders by ID in one pass.
+            int contenderCount = 0;
+            int botIndex = 0;
             for (int i = 0; i < _bots.Count; i++)
             {
                 CNRArenaBotState member = _bots[i];
                 if (member == null || member.Team != bot.Team || member.Status == PlayerStatus.dead || member.Hp <= 0) continue;
                 if (member.LastTargetId != targetId || !HasFreshVisibleTarget(member, now)) continue;
-                contenders.Add(member);
+                contenderCount++;
+                if (string.CompareOrdinal(member.Id, bot.Id) < 0) botIndex++;
             }
 
-            if (contenders.Count <= ENGAGEMENT_PRIMARY_SLOTS) return true;
-            contenders.Sort(delegate(CNRArenaBotState a, CNRArenaBotState b)
-            {
-                return string.CompareOrdinal(a.Id, b.Id);
-            });
-
-            int botIndex = -1;
-            for (int i = 0; i < contenders.Count; i++)
-                if (contenders[i] == bot) { botIndex = i; break; }
-            if (botIndex < 0) return true;
-
+            if (contenderCount <= ENGAGEMENT_PRIMARY_SLOTS) return true;
             int phase = Mathf.FloorToInt(now / ENGAGEMENT_ROTATION_SECONDS);
-            int start = (phase + StableTargetHash(targetId)) % contenders.Count;
-            int slots = Mathf.Min(ENGAGEMENT_PRIMARY_SLOTS, contenders.Count);
+            int start = (phase + StableTargetHash(targetId)) % contenderCount;
+            int slots = Mathf.Min(ENGAGEMENT_PRIMARY_SLOTS, contenderCount);
             for (int i = 0; i < slots; i++)
-                if ((start + i) % contenders.Count == botIndex) return true;
+                if ((start + i) % contenderCount == botIndex) return true;
             return false;
         }
 
@@ -1767,7 +1789,7 @@ namespace CNRMods
                 facing.y = 0f;
                 if (facing.sqrMagnitude > 0.0001f) return facing.normalized;
 
-                float yaw = bot.BodyRotation.eulerAngles.y - 90f;
+                float yaw = bot.BodyRotation.eulerAngles.y + 90f;
                 float rad = yaw * Mathf.Deg2Rad;
                 return new Vector3(Mathf.Sin(rad), 0f, Mathf.Cos(rad)).normalized;
             }
@@ -1798,9 +1820,11 @@ namespace CNRMods
             bot.FacingDirection = current;
 
             float yaw = Mathf.Atan2(current.x, current.z) * Mathf.Rad2Deg;
-            // Local players publish CharacterBody.rotation, whose model-forward axis is
-            // 90 degrees from gameplay forward. Preserve that exact vanilla convention.
-            bot.BodyRotation = Quaternion.Euler(0f, yaw + 90f, 0f);
+            // NetPlayerController.SetBodyRotation subtracts 90 degrees before applying
+            // mBodyRotation. These virtual bot prefabs visually face opposite the old
+            // +90 convention, so serialize yaw-90 while keeping FacingDirection itself
+            // in true gameplay-forward space.
+            bot.BodyRotation = Quaternion.Euler(0f, yaw - 90f, 0f);
         }
 
         private bool TryChoosePatrolDestination(CNRArenaBotState bot, out Vector3 target, out float routeDistance)
