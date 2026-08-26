@@ -90,6 +90,16 @@ function ConvertTo-FtpUriPath {
     return "/" + (($segments | ForEach-Object { [Uri]::EscapeDataString($_) }) -join "/")
 }
 
+function ConvertTo-CurlConfigValue {
+    param([string]$Value)
+
+    if ($null -eq $Value) { return "" }
+    if ($Value.Contains("`r") -or $Value.Contains("`n")) {
+        throw "FTP config values may not contain line breaks."
+    }
+    return $Value.Replace('\', '\\').Replace('"', '\"')
+}
+
 function Send-FtpFile {
     param(
         [string]$LocalPath,
@@ -101,51 +111,59 @@ function Send-FtpFile {
         throw "FTP upload source missing: $LocalPath"
     }
 
+    $curlCommand = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($null -eq $curlCommand) {
+        throw "curl.exe is required for direct FTP publishing but was not found."
+    }
+
     $remoteFile = $Config.remotePath.TrimEnd('/') + '/' + $RelativePath.Replace('\', '/').TrimStart('/')
     $uriPath = ConvertTo-FtpUriPath $remoteFile
     $uri = "ftp://$($Config.host):$($Config.port)$uriPath"
-    $fileInfo = Get-Item $LocalPath
+    $localForCurl = [System.IO.Path]::GetFullPath($LocalPath).Replace('\', '/')
+    $credential = ([string]$Config.username) + ':' + ([string]$Config.password)
     $maxAttempts = 4
+    $curlConfigPath = [System.IO.Path]::GetTempFileName()
 
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        try {
-            $request = [System.Net.FtpWebRequest][System.Net.WebRequest]::Create($uri)
-            $request.Method = [System.Net.WebRequestMethods+Ftp]::UploadFile
-            $request.Credentials = New-Object System.Net.NetworkCredential($Config.username, $Config.password)
-            $request.UseBinary = $true
-            $request.UsePassive = $true
-            $request.KeepAlive = $true
-            $request.EnableSsl = ($Config.protocol -eq "ftps")
-            $request.Timeout = 30000
-            $request.ReadWriteTimeout = 30000
-            $request.ContentLength = $fileInfo.Length
+    try {
+        $configLines = New-Object System.Collections.Generic.List[string]
+        $configLines.Add('silent')
+        $configLines.Add('show-error')
+        $configLines.Add('fail')
+        $configLines.Add('ftp-create-dirs')
+        $configLines.Add('ftp-skip-pasv-ip')
+        $configLines.Add('connect-timeout = 15')
+        $configLines.Add('max-time = 90')
+        $configLines.Add('retry = 2')
+        $configLines.Add('retry-delay = 1')
+        if ($Config.protocol -eq "ftps") { $configLines.Add('ssl-reqd') }
+        $configLines.Add('user = "' + (ConvertTo-CurlConfigValue $credential) + '"')
+        $configLines.Add('upload-file = "' + (ConvertTo-CurlConfigValue $localForCurl) + '"')
+        $configLines.Add('url = "' + (ConvertTo-CurlConfigValue $uri) + '"')
 
-            $inputStream = [System.IO.File]::OpenRead($LocalPath)
-            try {
-                $outputStream = $request.GetRequestStream()
-                try {
-                    $inputStream.CopyTo($outputStream)
-                } finally {
-                    $outputStream.Dispose()
+        [System.IO.File]::WriteAllLines(
+            $curlConfigPath,
+            $configLines.ToArray(),
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            $curlOutput = & $curlCommand.Source --config $curlConfigPath 2>&1
+            $curlExit = $LASTEXITCODE
+            if ($curlExit -eq 0) { return }
+
+            if ($attempt -ge $maxAttempts) {
+                $detail = (($curlOutput | Select-Object -Last 1) -join " ").Trim()
+                if ($detail -ne "") {
+                    throw "curl FTP upload failed with exit code $curlExit for $RelativePath`: $detail"
                 }
-            } finally {
-                $inputStream.Dispose()
+                throw "curl FTP upload failed with exit code $curlExit for $RelativePath"
             }
 
-            $response = [System.Net.FtpWebResponse]$request.GetResponse()
-            try {
-                if ([int]$response.StatusCode -lt 200 -or [int]$response.StatusCode -ge 300) {
-                    throw "FTP server returned $($response.StatusCode) for $RelativePath"
-                }
-            } finally {
-                $response.Dispose()
-            }
-            return
-        } catch {
-            if ($attempt -ge $maxAttempts) { throw }
             Write-Warn "FTP transfer retry $attempt/$maxAttempts for $RelativePath"
             Start-Sleep -Milliseconds (500 * $attempt)
         }
+    } finally {
+        Remove-Item $curlConfigPath -Force -ErrorAction SilentlyContinue
     }
 }
 function Update-RepoManifest {
@@ -206,7 +224,17 @@ function Update-RepoManifest {
     if (-not $vBumped)   { Write-Warn "latestVersion not found in $Label for $ModBase" }
     if (-not $vInserted) { Write-Warn "versions array not found in $Label for $ModBase" }
 
-    Set-Content -Path $Path -Value $outLines
+    $writeAttempts = 5
+    for ($writeAttempt = 1; $writeAttempt -le $writeAttempts; $writeAttempt++) {
+        try {
+            Set-Content -Path $Path -Value $outLines
+            break
+        } catch {
+            if ($writeAttempt -ge $writeAttempts) { throw }
+            Write-Warn "$Label is temporarily locked; retrying manifest write ($writeAttempt/$writeAttempts)..."
+            Start-Sleep -Milliseconds (300 * $writeAttempt)
+        }
+    }
     Write-Ok "$Label updated (id=$ModBase, version=$newVer)"
     return $true
 }
@@ -381,12 +409,12 @@ foreach ($src in $modSourceFiles) {
 Write-Step "repo manifest update"
 
 $doRepo = $false
-if ($Changelog -ne "") {
-    $doRepo = $true   # providing a changelog implies repo update
+if ($NoRepo) {
+    $doRepo = $false
+} elseif ($Changelog -ne "") {
+    $doRepo = $true   # providing a changelog implies repo update unless -NoRepo is explicit
 } elseif ($UpdateRepo) {
     $doRepo = $true
-} elseif ($NoRepo) {
-    $doRepo = $false
 } else {
     $ans = (Read-Host "  Update repo.json? [y/N]").Trim().ToLower()
     $doRepo = ($ans -eq "y" -or $ans -eq "yes")
