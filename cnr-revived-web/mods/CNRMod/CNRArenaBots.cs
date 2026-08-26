@@ -36,6 +36,11 @@ namespace CNRMods
         public Vector3 LastKnownTargetPosition;
         public float LastTargetVisibleAt;
         public bool HasLastKnownTarget;
+        public float TargetCertainty;
+        public float ReactionReadyAt;
+        public float CurrentTargetScore;
+        public float TacticalScore = -1f;
+        public float TacticalCommittedUntil;
         public Vector3 WanderDirection;
         public Vector3 WanderTarget;
         public float WanderUntil;
@@ -89,6 +94,15 @@ namespace CNRMods
         private const float BOT_ALERT_INTERVAL = 1.0f;
         private const float BOT_STUCK_SECONDS = 1.25f;
         private const int NAV_SHORTCUT_LOOKAHEAD = 4;
+        private const float TARGET_SWITCH_ADVANTAGE = 1.22f;
+        private const float TARGET_CERTAINTY_FIRE = 0.62f;
+        private const float TARGET_CERTAINTY_GAIN = 1.75f;
+        private const float TARGET_CERTAINTY_LOSS = 0.32f;
+        private const float TARGET_REACTION_MIN = 0.22f;
+        private const float TARGET_REACTION_MAX = 0.48f;
+        private const int TACTICAL_CANDIDATE_COUNT = 6;
+        private const float TACTICAL_SWITCH_ADVANTAGE = 1.18f;
+        private const float TACTICAL_REACHED_DISTANCE = 0.95f;
 
         private static CNRArenaBotManager _instance;
         private static string _pendingPackedState;
@@ -522,6 +536,7 @@ namespace CNRMods
                         bot.Status = PlayerStatus.idle;
                         bot.RespawnAt = 0f;
                         bot.Position = FindSpawnPosition(bot.Team, bot);
+                        ClearTargetMemory(bot);
                         bot.LastMoveSample = bot.Position;
                         bot.LastMovedAt = now;
                         bot.NavPath = null;
@@ -556,9 +571,11 @@ namespace CNRMods
             string targetId = bot.LastTargetId;
             bool visible = false;
 
-            // Keep the current target only while it is still a valid enemy. Its live
-            // position is consulted solely to test visibility; when occluded we pursue
-            // the last position actually seen, never the target's current x-ray position.
+            // Resolve the current hostile first, then compare it against every other
+            // visible hostile (human or bot). A new target must be meaningfully better
+            // before we switch, otherwise two similar enemies make the bot flicker back
+            // and forth every think tick.
+            float currentScore = -1f;
             if (!string.IsNullOrEmpty(targetId) && TryResolveEnemyTarget(bot, targetId, out targetInfo, out targetBot))
             {
                 Vector3 actual = targetBot != null ? targetBot.Position : targetInfo.mPosition;
@@ -566,42 +583,55 @@ namespace CNRMods
                 visible = CanSeeTarget(bot, actual, targetId, actualDist + 1f);
                 if (visible)
                 {
+                    PlayerStatus targetStatus = targetBot != null ? targetBot.Status : targetInfo.mStatus;
+                    currentScore = ScoreVisibleThreat(bot, actual, targetStatus, actualDist);
                     targetPos = actual;
-                    bot.LastKnownTargetPosition = actual;
-                    bot.LastTargetVisibleAt = now;
-                    bot.HasLastKnownTarget = true;
                 }
             }
-            else
+            else if (!string.IsNullOrEmpty(targetId))
             {
+                ClearTargetMemory(bot);
                 targetId = "";
-                bot.LastTargetId = "";
-                bot.HasLastKnownTarget = false;
                 targetInfo = null;
                 targetBot = null;
             }
 
-            // A visible enemy is allowed to replace a hidden remembered target. This
-            // keeps bots responsive to somebody who actually walks into view instead of
-            // tunnel-visioning through a wall toward stale information.
-            if (!visible)
+            PlayerInfo bestVisibleInfo;
+            CNRArenaBotState bestVisibleBot;
+            float bestVisibleScore;
+            FindBestVisibleEnemy(bot, out bestVisibleInfo, out bestVisibleBot, out bestVisibleScore);
+            if (bestVisibleBot != null || bestVisibleInfo != null)
             {
-                PlayerInfo visibleInfo;
-                CNRArenaBotState visibleBot;
-                FindNearestVisibleEnemy(bot, out visibleInfo, out visibleBot);
-                if (visibleBot != null || visibleInfo != null)
+                string bestId = bestVisibleBot != null ? bestVisibleBot.Id : bestVisibleInfo.mId;
+                bool sameTarget = visible && targetId == bestId;
+                bool shouldSwitch = !visible || sameTarget ||
+                    bestVisibleScore > currentScore * TARGET_SWITCH_ADVANTAGE;
+                if (shouldSwitch)
                 {
-                    targetBot = visibleBot;
-                    targetInfo = visibleInfo;
-                    targetId = visibleBot != null ? visibleBot.Id : visibleInfo.mId;
-                    targetPos = visibleBot != null ? visibleBot.Position : visibleInfo.mPosition;
-                    bot.LastTargetId = targetId;
-                    bot.LastKnownTargetPosition = targetPos;
-                    bot.LastTargetVisibleAt = now;
-                    bot.HasLastKnownTarget = true;
+                    targetBot = bestVisibleBot;
+                    targetInfo = bestVisibleInfo;
+                    targetId = bestId;
+                    targetPos = bestVisibleBot != null ? bestVisibleBot.Position : bestVisibleInfo.mPosition;
+                    SetVisibleTarget(bot, targetId, targetPos, bestVisibleScore, now);
                     visible = true;
+                    currentScore = bestVisibleScore;
                 }
-                else if (bot.HasLastKnownTarget && !string.IsNullOrEmpty(bot.LastTargetId))
+            }
+
+            if (visible)
+            {
+                // Staying on the same enemy steadily improves identification certainty.
+                // Switching to somebody else resets certainty/reaction time in
+                // SetVisibleTarget, so seeing multiple enemies never means instant aim.
+                SetVisibleTarget(bot, targetId, targetPos, currentScore, now);
+                UpdateVisibleTargetCertainty(bot, targetPos, Vector3.Distance(bot.Position, targetPos));
+            }
+            else
+            {
+                bot.TargetCertainty = Mathf.MoveTowards(bot.TargetCertainty, 0f,
+                    TARGET_CERTAINTY_LOSS * THINK_INTERVAL);
+
+                if (bot.HasLastKnownTarget && !string.IsNullOrEmpty(bot.LastTargetId))
                 {
                     float unseenFor = now - bot.LastTargetVisibleAt;
                     Vector3 toKnown = bot.LastKnownTargetPosition - bot.Position;
@@ -673,20 +703,45 @@ namespace CNRMods
             else
             {
                 bot.Behavior = CNRArenaBotBehavior.Attack;
-                if (now >= bot.NextRepositionAt ||
-                    (bot.TacticalTarget - bot.Position).sqrMagnitude <= 0.8f * 0.8f)
+
+                // Pick real combat positions instead of blindly alternating left/right.
+                // The current position and held tactical destination are scored alongside
+                // new ring candidates. Once a destination is chosen, hysteresis keeps it
+                // until a replacement is substantially better.
+                if (now >= bot.NextRepositionAt && now >= bot.TacticalCommittedUntil)
                 {
-                    bot.NextRepositionAt = now + 1.10f + UnityEngine.Random.Range(0f, 0.55f);
-                    bot.StrafeSign = -bot.StrafeSign;
-                    Vector3 away = -dir;
-                    Vector3 side = new Vector3(-away.z, 0f, away.x) * bot.StrafeSign;
-                    if (dist < 6.5f)
-                        bot.TacticalTarget = bot.Position + away * 5.5f + side * 2.0f;
-                    else
-                        bot.TacticalTarget = bot.Position + side * 4.0f + away * 0.75f;
+                    Vector3 candidate;
+                    float candidateScore;
+                    if (TryChooseTacticalCombatPosition(bot, targetPos, targetId, out candidate, out candidateScore))
+                    {
+                        Vector3 heldPosition = bot.TacticalTarget;
+                        float heldScore = bot.TacticalScore;
+                        bool heldValid = bot.TacticalScore >= 0f &&
+                            TryScoreTacticalPosition(bot, bot.TacticalTarget, targetPos, targetId,
+                                out heldPosition, out heldScore);
+                        bool shouldChange = !heldValid || candidateScore > heldScore * TACTICAL_SWITCH_ADVANTAGE;
+                        if (shouldChange)
+                        {
+                            bot.TacticalTarget = candidate;
+                            bot.TacticalScore = candidateScore;
+                            bot.TacticalCommittedUntil = now + UnityEngine.Random.Range(1.45f, 2.25f);
+                            bot.NavPath = null;
+                            bot.NavPathIndex = 0;
+                            bot.NextNavRepathAt = 0f;
+                        }
+                        else
+                        {
+                            bot.TacticalTarget = heldPosition;
+                            bot.TacticalScore = heldScore;
+                        }
+                    }
+                    bot.NextRepositionAt = now + UnityEngine.Random.Range(2.0f, 2.8f);
                 }
+
                 moveTarget = bot.TacticalTarget;
-                wantsMove = true;
+                Vector3 tacticalDelta = moveTarget - bot.Position;
+                tacticalDelta.y = 0f;
+                wantsMove = tacticalDelta.sqrMagnitude > TACTICAL_REACHED_DISTANCE * TACTICAL_REACHED_DISTANCE;
                 bot.Status = PlayerStatus.fire;
             }
 
@@ -723,6 +778,7 @@ namespace CNRMods
             // notice something near the edge of its 110-degree vision cone, but it cannot
             // shoot until its authoritative facing has turned to within 12 degrees.
             if (visible && dist <= 22f && now >= bot.NextShotAt &&
+                bot.TargetCertainty >= TARGET_CERTAINTY_FIRE && now >= bot.ReactionReadyAt &&
                 CanFireAtTarget(bot, targetPos, targetId, dist + 1f))
             {
                 bot.Status = PlayerStatus.fire;
@@ -972,6 +1028,13 @@ namespace CNRMods
             bot.LastKnownTargetPosition = Vector3.zero;
             bot.LastTargetVisibleAt = 0f;
             bot.HasLastKnownTarget = false;
+            bot.TargetCertainty = 0f;
+            bot.ReactionReadyAt = 0f;
+            bot.CurrentTargetScore = 0f;
+            bot.TacticalTarget = bot.Position;
+            bot.TacticalScore = -1f;
+            bot.TacticalCommittedUntil = 0f;
+            bot.NextRepositionAt = 0f;
             bot.NavPath = null;
             bot.NavPathIndex = 0;
             bot.NextNavRepathAt = 0f;
@@ -1008,6 +1071,119 @@ namespace CNRMods
                 }
             }
             return false;
+        }
+
+        private void FindBestVisibleEnemy(CNRArenaBotState bot, out PlayerInfo bestInfo, out CNRArenaBotState bestBot, out float bestScore)
+        {
+            bestInfo = null;
+            bestBot = null;
+            bestScore = -1f;
+
+            if (_mgr != null && _mgr.myPlayerInfo != null)
+                ConsiderVisibleHumanThreat(bot, _mgr.myPlayerInfo, ref bestInfo, ref bestBot, ref bestScore);
+
+            PlayerInfo[] others = _mgr != null ? _mgr.otherPlayersInfoList : null;
+            if (others != null)
+            {
+                for (int i = 0; i < others.Length; i++)
+                {
+                    PlayerInfo p = others[i];
+                    if (p == null || IsBotId(p.mId)) continue;
+                    ConsiderVisibleHumanThreat(bot, p, ref bestInfo, ref bestBot, ref bestScore);
+                }
+            }
+
+            for (int i = 0; i < _bots.Count; i++)
+            {
+                CNRArenaBotState other = _bots[i];
+                if (other == null || other == bot || other.Status == PlayerStatus.dead || other.Hp <= 0) continue;
+                if (!IsFreeForAllMode() && other.Team == bot.Team) continue;
+
+                Vector3 delta = other.Position - bot.Position;
+                float dist = delta.magnitude;
+                if (!CanSeeTarget(bot, other.Position, other.Id, dist + 1f)) continue;
+                float score = ScoreVisibleThreat(bot, other.Position, other.Status, dist);
+                if (score <= bestScore) continue;
+
+                bestScore = score;
+                bestInfo = null;
+                bestBot = other;
+            }
+        }
+
+        private void ConsiderVisibleHumanThreat(CNRArenaBotState bot, PlayerInfo candidate,
+            ref PlayerInfo bestInfo, ref CNRArenaBotState bestBot, ref float bestScore)
+        {
+            if (!IsValidHumanEnemy(bot, candidate)) return;
+            Vector3 delta = candidate.mPosition - bot.Position;
+            float dist = delta.magnitude;
+            if (!CanSeeTarget(bot, candidate.mPosition, candidate.mId, dist + 1f)) return;
+
+            float score = ScoreVisibleThreat(bot, candidate.mPosition, candidate.mStatus, dist);
+            if (score <= bestScore) return;
+            bestScore = score;
+            bestInfo = candidate;
+            bestBot = null;
+        }
+
+        private float ScoreVisibleThreat(CNRArenaBotState observer, Vector3 position, PlayerStatus status, float distance)
+        {
+            Vector3 flat = position - observer.Position;
+            flat.y = 0f;
+            float facing = 1f;
+            if (flat.sqrMagnitude > 0.001f)
+            {
+                float minDot = Mathf.Cos(BOT_VISION_HALF_ANGLE * Mathf.Deg2Rad);
+                float dot = Vector3.Dot(GetBotForward(observer), flat.normalized);
+                facing = Mathf.InverseLerp(minDot, 1f, dot);
+            }
+
+            float distanceScore = Mathf.Lerp(1f, 0.35f, Mathf.Clamp01(distance / 35f));
+            float score = distanceScore * 0.72f + facing * 0.28f;
+            if (status == PlayerStatus.fire) score += 0.08f;
+            return score;
+        }
+
+        private void SetVisibleTarget(CNRArenaBotState bot, string targetId, Vector3 targetPosition,
+            float score, float now)
+        {
+            bool changed = bot.LastTargetId != targetId;
+            bot.LastTargetId = targetId;
+            bot.LastKnownTargetPosition = targetPosition;
+            bot.LastTargetVisibleAt = now;
+            bot.HasLastKnownTarget = true;
+            bot.CurrentTargetScore = score;
+
+            if (!changed) return;
+
+            // A new hostile must actually be noticed before the bot can shoot. Target
+            // changes also invalidate the old combat destination so the new enemy does
+            // not inherit a flank point that was chosen for somebody else.
+            bot.TargetCertainty = 0.08f;
+            bot.ReactionReadyAt = now + UnityEngine.Random.Range(TARGET_REACTION_MIN, TARGET_REACTION_MAX);
+            bot.TacticalTarget = bot.Position;
+            bot.TacticalScore = -1f;
+            bot.TacticalCommittedUntil = 0f;
+            bot.NextRepositionAt = 0f;
+            bot.NavPath = null;
+            bot.NavPathIndex = 0;
+            bot.NextNavRepathAt = 0f;
+        }
+
+        private void UpdateVisibleTargetCertainty(CNRArenaBotState bot, Vector3 targetPosition, float distance)
+        {
+            Vector3 flat = targetPosition - bot.Position;
+            flat.y = 0f;
+            float centrality = 1f;
+            if (flat.sqrMagnitude > 0.001f)
+            {
+                float minDot = Mathf.Cos(BOT_VISION_HALF_ANGLE * Mathf.Deg2Rad);
+                centrality = Mathf.InverseLerp(minDot, 1f,
+                    Vector3.Dot(GetBotForward(bot), flat.normalized));
+            }
+            float rangeFactor = Mathf.Lerp(1f, 0.55f, Mathf.Clamp01(distance / 30f));
+            float gain = TARGET_CERTAINTY_GAIN * Mathf.Lerp(0.55f, 1f, centrality) * rangeFactor;
+            bot.TargetCertainty = Mathf.MoveTowards(bot.TargetCertainty, 1f, gain * THINK_INTERVAL);
         }
 
         private void FindNearestVisibleEnemy(CNRArenaBotState bot, out PlayerInfo bestInfo, out CNRArenaBotState bestBot)
@@ -1085,6 +1261,13 @@ namespace CNRMods
                 other.LastKnownTargetPosition = seenPosition;
                 other.LastTargetVisibleAt = now - 0.25f;
                 other.HasLastKnownTarget = true;
+                other.TargetCertainty = 0.08f;
+                other.ReactionReadyAt = now + UnityEngine.Random.Range(TARGET_REACTION_MIN, TARGET_REACTION_MAX);
+                other.CurrentTargetScore = 0f;
+                other.TacticalTarget = other.Position;
+                other.TacticalScore = -1f;
+                other.TacticalCommittedUntil = 0f;
+                other.NextRepositionAt = 0f;
                 other.Behavior = CNRArenaBotBehavior.Search;
                 other.NavPath = null;
                 other.NavPathIndex = 0;
@@ -1142,6 +1325,135 @@ namespace CNRMods
             if (sq <= 0.0001f || sq >= radiusSq) return;
             float dist = Mathf.Sqrt(sq);
             separation += (away / dist) * (1f - dist / BOT_SEPARATION_RADIUS);
+        }
+
+        private bool TryChooseTacticalCombatPosition(CNRArenaBotState bot, Vector3 targetPosition,
+            string targetId, out Vector3 chosenPosition, out float chosenScore)
+        {
+            chosenPosition = bot.Position;
+            chosenScore = -1f;
+
+            Vector3 scored;
+            float score;
+            if (TryScoreTacticalPosition(bot, bot.Position, targetPosition, targetId, out scored, out score))
+            {
+                chosenPosition = scored;
+                chosenScore = score;
+            }
+
+            if ((bot.TacticalTarget - bot.Position).sqrMagnitude > 0.35f * 0.35f &&
+                TryScoreTacticalPosition(bot, bot.TacticalTarget, targetPosition, targetId, out scored, out score) &&
+                score > chosenScore)
+            {
+                chosenPosition = scored;
+                chosenScore = score;
+            }
+
+            float baseAngle = UnityEngine.Random.Range(0f, 360f) * Mathf.Deg2Rad;
+            for (int i = 0; i < TACTICAL_CANDIDATE_COUNT; i++)
+            {
+                float ring = 7.0f + (i % 3) * 2.0f;
+                float angle = baseAngle + ((Mathf.PI * 2f) * i / TACTICAL_CANDIDATE_COUNT);
+                Vector3 candidate = targetPosition + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * ring;
+                candidate.y = targetPosition.y;
+
+                if (!TryScoreTacticalPosition(bot, candidate, targetPosition, targetId, out scored, out score))
+                    continue;
+                if (score <= chosenScore) continue;
+                chosenPosition = scored;
+                chosenScore = score;
+            }
+
+            return chosenScore >= 0f;
+        }
+
+        private bool TryScoreTacticalPosition(CNRArenaBotState bot, Vector3 candidateBody,
+            Vector3 targetPosition, string targetId, out Vector3 snappedBody, out float score)
+        {
+            snappedBody = candidateBody;
+            score = -1f;
+            bool navReady = _arenaNavScene == _scene && CNRZombieMod.ZombieNavGrid.Ready;
+            float routeDistance = 0f;
+
+            if (navReady)
+            {
+                float bodyOffset = GetBodyGroundOffset() + BOT_GROUND_EXTRA_LIFT;
+                Vector3 fromGround = bot.Position;
+                fromGround.y -= bodyOffset;
+                Vector3 candidateGround = candidateBody;
+                candidateGround.y -= bodyOffset;
+
+                Vector3 snappedGround;
+                if (!CNRZombieMod.ZombieNavGrid.TrySnapToWalkableNearHeight(
+                    candidateGround, 7, candidateGround.y, NAV_HEIGHT_TOLERANCE * 1.5f, out snappedGround))
+                    return false;
+
+                snappedBody = snappedGround;
+                snappedBody.y += bodyOffset;
+                Vector3 routeFlat = snappedBody - bot.Position;
+                routeFlat.y = 0f;
+                if (routeFlat.sqrMagnitude > 0.75f * 0.75f)
+                {
+                    List<Vector3> path = CNRZombieMod.ZombieNavGrid.Query(fromGround, snappedGround);
+                    if (path == null || path.Count < 2) return false;
+                    Vector3 previous = fromGround;
+                    for (int i = 0; i < path.Count; i++)
+                    {
+                        routeDistance += Vector3.Distance(previous, path[i]);
+                        previous = path[i];
+                    }
+                }
+            }
+            else
+            {
+                Vector3 grounded;
+                if (TryProjectToWorldGround(candidateBody, out grounded))
+                    snappedBody.y = grounded.y + GetBodyGroundOffset() + BOT_GROUND_EXTRA_LIFT;
+                routeDistance = Vector3.Distance(bot.Position, snappedBody);
+            }
+
+            Vector3 toTarget = targetPosition - snappedBody;
+            toTarget.y = 0f;
+            float targetDistance = toTarget.magnitude;
+            if (targetDistance < 3.75f || targetDistance > 19.5f) return false;
+            if (!HasLineOfSight(snappedBody + new Vector3(0f, 1.15f, 0f),
+                targetPosition + new Vector3(0f, 0.9f, 0f), targetId, targetDistance + 1f))
+                return false;
+
+            float rangeScore = 1f - Mathf.Clamp01(Mathf.Abs(targetDistance - 9.0f) / 9.0f);
+            float routeScore = 1f / (1f + routeDistance * 0.07f);
+            float spacingScore = GetFriendlyTacticalSpacingScore(bot, snappedBody);
+
+            Vector3 currentRadial = bot.Position - targetPosition;
+            Vector3 candidateRadial = snappedBody - targetPosition;
+            currentRadial.y = 0f;
+            candidateRadial.y = 0f;
+            float flankScore = 0.5f;
+            if (currentRadial.sqrMagnitude > 0.01f && candidateRadial.sqrMagnitude > 0.01f)
+            {
+                float flankAngle = Vector3.Angle(currentRadial, candidateRadial) * Mathf.Deg2Rad;
+                flankScore = Mathf.Abs(Mathf.Sin(flankAngle));
+            }
+
+            score = rangeScore * 0.42f + routeScore * 0.23f +
+                spacingScore * 0.20f + flankScore * 0.15f;
+            return true;
+        }
+
+        private float GetFriendlyTacticalSpacingScore(CNRArenaBotState bot, Vector3 position)
+        {
+            if (IsFreeForAllMode()) return 1f;
+            float nearest = 6f;
+            for (int i = 0; i < _bots.Count; i++)
+            {
+                CNRArenaBotState other = _bots[i];
+                if (other == null || other == bot || other.Team != bot.Team ||
+                    other.Status == PlayerStatus.dead || other.Hp <= 0) continue;
+                Vector3 delta = other.Position - position;
+                delta.y = 0f;
+                nearest = Mathf.Min(nearest, delta.magnitude);
+            }
+            return Mathf.Clamp01((nearest - 1.25f) / 4.0f);
         }
 
         private bool CanSeeTarget(CNRArenaBotState bot, Vector3 target, string targetId, float maxDistance)
