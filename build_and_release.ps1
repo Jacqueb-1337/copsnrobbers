@@ -22,6 +22,7 @@
 #   -Device <string>      adb device serial (e.g. 192.168.1.5:5555).
 #   -Commit               Auto-answer yes to "git commit+push?" prompt.
 #   -NoCommit             Auto-answer no  to "git commit+push?" prompt.
+#   -NoFtp                Skip direct FTP publish (FTP is enabled by default).
 
 param(
     [string]$ModName    = "",
@@ -34,7 +35,8 @@ param(
     [switch]$NoDeploy,
     [string]$Device     = "",
     [switch]$Commit,
-    [switch]$NoCommit
+    [switch]$NoCommit,
+    [switch]$NoFtp
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,12 +51,103 @@ $RepoJson2   = Join-Path $ModsDir "repo2.json"
 $BuildScript = Join-Path $BuildDir "build_mod.ps1"
 $BaseUrl     = "https://play.jacqueb.me/mods"
 $BaseUrl2    = "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods"
+$FtpConfigPath = Join-Path $RootDir ".vscode\sftp.json"
 
 # -- Helpers ------------------------------------------------------------------
 function Write-Step { param($msg) Write-Host "`n-- $msg" -ForegroundColor Cyan }
 function Write-Ok   { param($msg) Write-Host "   $msg" -ForegroundColor Green }
 function Write-Warn { param($msg) Write-Host "   WARN: $msg" -ForegroundColor Yellow }
 function Write-Err  { param($msg) Write-Host "   ERROR: $msg" -ForegroundColor Red }
+
+function Get-FtpPublishConfig {
+    if (-not (Test-Path $FtpConfigPath)) {
+        throw "FTP config not found: $FtpConfigPath"
+    }
+
+    $profiles = @(Get-Content $FtpConfigPath -Raw | ConvertFrom-Json)
+    $ftpProfile = $profiles | Where-Object { $_.protocol -eq "ftp" -or $_.protocol -eq "ftps" } | Select-Object -First 1
+    if ($null -eq $ftpProfile) {
+        throw "No FTP/FTPS profile found in $FtpConfigPath"
+    }
+
+    foreach ($required in @("host", "username", "password", "context", "remotePath")) {
+        if (-not $ftpProfile.$required) {
+            throw "FTP config is missing required field '$required'."
+        }
+    }
+
+    if (-not $ftpProfile.port) {
+        $ftpProfile | Add-Member -NotePropertyName port -NotePropertyValue 21
+    }
+    return $ftpProfile
+}
+
+function ConvertTo-FtpUriPath {
+    param([string]$Path)
+
+    $segments = $Path.Replace('\', '/').Split('/') | Where-Object { $_ -ne "" }
+    if ($segments.Count -eq 0) { return "/" }
+    return "/" + (($segments | ForEach-Object { [Uri]::EscapeDataString($_) }) -join "/")
+}
+
+function Send-FtpFile {
+    param(
+        [string]$LocalPath,
+        [string]$RelativePath,
+        $Config
+    )
+
+    if (-not (Test-Path $LocalPath -PathType Leaf)) {
+        throw "FTP upload source missing: $LocalPath"
+    }
+
+    $remoteFile = $Config.remotePath.TrimEnd('/') + '/' + $RelativePath.Replace('\', '/').TrimStart('/')
+    $uriPath = ConvertTo-FtpUriPath $remoteFile
+    $uri = "ftp://$($Config.host):$($Config.port)$uriPath"
+    $fileInfo = Get-Item $LocalPath
+    $maxAttempts = 4
+
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            $request = [System.Net.FtpWebRequest][System.Net.WebRequest]::Create($uri)
+            $request.Method = [System.Net.WebRequestMethods+Ftp]::UploadFile
+            $request.Credentials = New-Object System.Net.NetworkCredential($Config.username, $Config.password)
+            $request.UseBinary = $true
+            $request.UsePassive = $true
+            $request.KeepAlive = $true
+            $request.EnableSsl = ($Config.protocol -eq "ftps")
+            $request.Timeout = 30000
+            $request.ReadWriteTimeout = 30000
+            $request.ContentLength = $fileInfo.Length
+
+            $inputStream = [System.IO.File]::OpenRead($LocalPath)
+            try {
+                $outputStream = $request.GetRequestStream()
+                try {
+                    $inputStream.CopyTo($outputStream)
+                } finally {
+                    $outputStream.Dispose()
+                }
+            } finally {
+                $inputStream.Dispose()
+            }
+
+            $response = [System.Net.FtpWebResponse]$request.GetResponse()
+            try {
+                if ([int]$response.StatusCode -lt 200 -or [int]$response.StatusCode -ge 300) {
+                    throw "FTP server returned $($response.StatusCode) for $RelativePath"
+                }
+            } finally {
+                $response.Dispose()
+            }
+            return
+        } catch {
+            if ($attempt -ge $maxAttempts) { throw }
+            Write-Warn "FTP transfer retry $attempt/$maxAttempts for $RelativePath"
+            Start-Sleep -Milliseconds (500 * $attempt)
+        }
+    }
+}
 function Update-RepoManifest {
     param(
         [string]$Path,
@@ -404,6 +497,53 @@ if ($doCommit) {
     }
 } else {
     Write-Warn "Skipping git commit."
+}
+
+# -- 10. Direct FTP publish ---------------------------------------------------
+Write-Step "Direct FTP publish"
+
+if ($NoFtp) {
+    Write-Warn "Skipping direct FTP publish."
+} else {
+    try {
+        $ftpConfig = Get-FtpPublishConfig
+        $ftpContextRoot = (Join-Path $RootDir ([string]$ftpConfig.context)).TrimEnd('\')
+
+        # Upload payloads first and manifests last so clients never observe a manifest
+        # that points at a DLL which has not reached the server yet.
+        $ftpPayloadFiles = @($OutDll, $versionedDll)
+        foreach ($src in $modSourceFiles) {
+            $ftpPayloadFiles += $src.FullName
+            $ftpPayloadFiles += (Join-Path $ModCsDir ($src.BaseName + "-" + $newVer + ".cs"))
+        }
+        $ftpPayloadFiles = @($ftpPayloadFiles | Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -Unique)
+
+        foreach ($localPath in $ftpPayloadFiles) {
+            $fullLocalPath = [System.IO.Path]::GetFullPath($localPath)
+            if (-not $fullLocalPath.StartsWith($ftpContextRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Refusing FTP upload outside configured context: $fullLocalPath"
+            }
+            $relativePath = $fullLocalPath.Substring($ftpContextRoot.Length).TrimStart([char[]]"\/")
+            Send-FtpFile -LocalPath $fullLocalPath -RelativePath $relativePath -Config $ftpConfig
+            Write-Ok "FTP -> $relativePath"
+        }
+
+        foreach ($manifestPath in @($RepoJson2, $RepoJson)) {
+            if (-not (Test-Path $manifestPath -PathType Leaf)) { continue }
+            $fullLocalPath = [System.IO.Path]::GetFullPath($manifestPath)
+            if (-not $fullLocalPath.StartsWith($ftpContextRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Refusing FTP upload outside configured context: $fullLocalPath"
+            }
+            $relativePath = $fullLocalPath.Substring($ftpContextRoot.Length).TrimStart([char[]]"\/")
+            Send-FtpFile -LocalPath $fullLocalPath -RelativePath $relativePath -Config $ftpConfig
+            Write-Ok "FTP -> $relativePath"
+        }
+
+        Write-Ok "Direct FTP publish complete."
+    } catch {
+        Write-Err ("Direct FTP publish failed: " + $_.Exception.Message)
+        exit 1
+    }
 }
 
 Write-Step "Done"
