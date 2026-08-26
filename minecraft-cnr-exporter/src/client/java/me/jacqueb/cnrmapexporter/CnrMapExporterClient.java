@@ -281,7 +281,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
                     if (finalizationError != null) fail(mc, finalizationError);
                     else {
                         sendClientMessage(mc, "CNR map exported: " + outputPath.toAbsolutePath(), false);
-                        sendClientMessage(mc, "Non-air blocks=" + ctx.nonAirBlockCount + " chunks=" + ctx.chunks.size() + " textures=" + ctx.textureCountAtFinalize + " quads=" + ctx.renderQuadCount + " collision boxes=" + ctx.collisionBoxCount + " climbable boxes=" + ctx.climbableBoxCount + " Cops spawns=" + ctx.copSpawns.size() + " Robbers spawns=" + ctx.robberSpawns.size(), false);
+                        sendClientMessage(mc, "Non-air blocks=" + ctx.nonAirBlockCount + " chunks=" + ctx.chunks.size() + " textures=" + ctx.textureCountAtFinalize + " quads=" + ctx.renderQuadCount + " collision boxes=" + ctx.collisionBoxCount + " bullet-pass boxes=" + ctx.bulletPassThroughBoxCount + " climbable boxes=" + ctx.climbableBoxCount + " Cops spawns=" + ctx.copSpawns.size() + " Robbers spawns=" + ctx.robberSpawns.size(), false);
                         done = true;
                     }
                 } else {
@@ -562,6 +562,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         long nonAirBlockCount;
         long renderQuadCount;
         long collisionBoxCount;
+        long bulletPassThroughBoxCount;
         long climbableBoxCount;
         Atlas atlas;
 
@@ -583,8 +584,11 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             int ly = entry.pos.getY() - min.getY();
             int lz = entry.pos.getZ() - min.getZ();
             ChunkBuilder chunk = chunkFor(lx, ly, lz);
-            emitRenderModel(entry.state, entry.pos, lx, ly, lz, chunk, view);
-            emitCollision(entry.state, entry.pos, lx, ly, lz, chunk, view);
+            boolean bulletPassThrough = entry.state.is(Blocks.BARRIER);
+            if (!bulletPassThrough)
+                emitRenderModel(entry.state, entry.pos, lx, ly, lz, chunk, view);
+            emitCollision(entry.state, entry.pos, lx, ly, lz, chunk, view,
+                bulletPassThrough ? chunk.bulletPassThrough : chunk.collision, bulletPassThrough);
             emitClimbable(entry.state, entry.pos, lx, ly, lz, chunk, view);
         }
 
@@ -686,14 +690,16 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             }
         }
 
-        void emitCollision(BlockState state, BlockPos pos, int lx, int ly, int lz, ChunkBuilder chunk, SnapshotView view) {
+        void emitCollision(BlockState state, BlockPos pos, int lx, int ly, int lz, ChunkBuilder chunk, SnapshotView view,
+                           CollisionBuilder target, boolean bulletPassThrough) {
             VoxelShape shape = state.getCollisionShape(view, pos);
             if (shape == null || shape.isEmpty()) return;
             for (AABB box : shape.toAabbs()) {
-                chunk.collision.addBox(
+                target.addBox(
                     (float)box.minX + lx - chunk.key.x, (float)box.minY + ly - chunk.key.y, (float)box.minZ + lz - chunk.key.z,
                     (float)box.maxX + lx - chunk.key.x, (float)box.maxY + ly - chunk.key.y, (float)box.maxZ + lz - chunk.key.z);
-                collisionBoxCount++;
+                if (bulletPassThrough) bulletPassThroughBoxCount++;
+                else collisionBoxCount++;
             }
         }
 
@@ -780,10 +786,10 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         void addBox(float x0,float y0,float z0,float x1,float y1,float z1){ if(x1>x0&&y1>y0&&z1>z0) boxes.add(new float[]{x0,y0,z0,x1,y1,z1}); }
     }
     private static final class ChunkBuilder {
-        final ChunkKey key; final RenderBuilder opaque=new RenderBuilder(),cutout=new RenderBuilder(),transparent=new RenderBuilder(); final CollisionBuilder collision=new CollisionBuilder(),climbable=new CollisionBuilder();
+        final ChunkKey key; final RenderBuilder opaque=new RenderBuilder(),cutout=new RenderBuilder(),transparent=new RenderBuilder(); final CollisionBuilder collision=new CollisionBuilder(),bulletPassThrough=new CollisionBuilder(),climbable=new CollisionBuilder();
         ChunkBuilder(ChunkKey key){this.key=key;}
         RenderBuilder render(String s){return s.equals("transparent")?transparent:s.equals("cutout")?cutout:opaque;}
-        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaquePacked=packRender(opaque,atlas);j.cutoutPacked=packRender(cutout,atlas);j.transparentPacked=packRender(transparent,atlas);j.collisionBoxesPacked=packBoxes(collision);j.climbableBoxesPacked=packBoxes(climbable);return j; }
+        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaquePacked=packRender(opaque,atlas);j.cutoutPacked=packRender(cutout,atlas);j.transparentPacked=packRender(transparent,atlas);j.collisionBoxesPacked=packBoxes(collision);j.bulletPassThroughBoxesPacked=packBoxes(bulletPassThrough);j.climbableBoxesPacked=packBoxes(climbable);return j; }
     }
 
     private static List<MeshJson> meshRender(RenderBuilder src, Atlas atlas) {
@@ -961,7 +967,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
     private static final class MapFile { String format,id,name,source; int version; float blockScale; float[] origin; AtlasJson atlas; List<ChunkJson> chunks; List<float[]> spawns,copSpawns,robberSpawns; }
     private static final class AtlasJson { int width,height; String pngBase64; List<AtlasEntry> entries; }
     private static final class AtlasEntry { String id; int x,y,w,h; }
-    private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; PackedBlob collisionBoxesPacked,climbableBoxesPacked; }
+    private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; PackedBlob collisionBoxesPacked,bulletPassThroughBoxesPacked,climbableBoxesPacked; }
     private static final class PackedBlob { String encoding,dataBase64; int count,rawBytes; }
     private static final class MeshJson { float[] vertices,uv; int[] triangles; }
 }

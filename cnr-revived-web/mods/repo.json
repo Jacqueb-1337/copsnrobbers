@@ -306,11 +306,26 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "4.2.3",
+      "latestVersion": "4.2.4",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.3.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.4.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "4.2.4",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.4.dll",
+          "changelog": "Make Minecraft barriers pass through bullets and weapon projectiles"
+        },
+        {
+          "version": "4.2.4",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.4.dll",
+          "changelog": "Make Minecraft barriers pass through bullets and weapon projectiles"
+        },
+        {
+          "version": "4.2.4",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.4.dll",
+          "changelog": "Make Minecraft barriers bullet-pass-through"
+        },
         {
           "version": "4.2.3",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.3.dll",

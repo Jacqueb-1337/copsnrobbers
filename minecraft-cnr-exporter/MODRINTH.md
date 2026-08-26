@@ -77,11 +77,11 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 - Source: https://github.com/Jacqueb-1337/copsnrobbers
 - Issues: https://github.com/Jacqueb-1337/copsnrobbers/issues
 
-## Version 0.1.3
+## Version 0.1.4
 
-**Version number:** `0.1.3`
+**Version number:** `0.1.4`
 
-**Version title:** `CNR Map Exporter 0.1.3`
+**Version title:** `CNR Map Exporter 0.1.4`
 
 **Version type:** Beta
 
@@ -89,22 +89,17 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 
 **Loader:** Fabric
 
-**Primary file:** `cnrmapexporter-0.1.3.jar`
+**Primary file:** `cnrmapexporter-0.1.4.jar`
 
 **Required dependency:** Fabric API
 
 **Changelog:**
 
-- Reworked large exports into an incremental pipeline so `/cnr export` no longer locks the render thread.
-- Added live progress with `/cnr status` and safe cancellation with `/cnr cancel`.
-- Single-player chunk snapshot work is scheduled on the integrated server thread, while client geometry work is time-budgeted per tick.
-- Atlas packing, compression, JSON serialization, and disk writing now finalize on a background writer thread.
-- Added sparse export scanning so air no longer counts toward the 4,000,000-block export limit.
-- Added climbable-block export using Minecraft's `#minecraft:climbable` tag.
-- Added Cops and Robbers armor-stand spawn markers.
-- Added large-selection support in single-player through the integrated server world.
-- Multiplayer exports now reject unloaded selected chunks instead of silently exporting them as air.
-- Compact CNR map output includes packed LZ4 geometry, collision, textures, and climbable volumes.
+- Minecraft barrier blocks now export as a separate bullet-pass-through collision channel.
+- Barriers remain invisible and physically solid, while CNRMod 4.2.4+ lets normal bullets pass through them.
+- Large exports remain incremental and responsive with live progress, `/cnr status`, and `/cnr cancel`.
+- Air does not count toward the 4,000,000 non-air-block export limit.
+- Climbable blocks, team spawn markers, packed LZ4 geometry, collision, and textures remain supported.
 
 ## Icon
 

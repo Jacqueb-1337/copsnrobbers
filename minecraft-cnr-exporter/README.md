@@ -76,6 +76,10 @@ Their positions are exported as team spawn locations. If no markers are present,
 
 Blocks included in Minecraft's `#minecraft:climbable` tag are exported as climbable volumes. This includes vanilla ladders and vines, and can also include modded blocks that correctly use the tag.
 
+## Barrier blocks
+
+Minecraft barrier blocks are exported as invisible solid collision, but in a separate bullet-pass-through collision channel. With CNRMod 4.2.4 or newer, players cannot walk through barriers while normal bullets can pass through them.
+
 ## Large and sparse selections
 
 The export limit is based on **non-air blocks**, not the raw rectangular selection volume. Large regions containing mostly air can therefore be exported without wasting the limit on empty space.
@@ -91,6 +95,7 @@ The exporter produces compact CNR DLC map JSON containing:
 - block render geometry and texture atlas data
 - packed LZ4 mesh data
 - block collision volumes
+- bullet-pass-through barrier collision volumes
 - climbable volumes
 - Cops and Robbers spawn markers
 - map metadata used by CNRMod
