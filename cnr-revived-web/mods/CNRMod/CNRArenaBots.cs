@@ -2174,12 +2174,18 @@ namespace CNRMods
             CNRArenaBotState bot = FindBot(botId);
             if (bot == null || bot.Status == PlayerStatus.dead || bot.Hp <= 0) return;
             CNRArenaBotState attackerBot = !string.IsNullOrEmpty(attackerBotId) ? FindBot(attackerBotId) : null;
+            PlayerInfo attackerInfo = null;
             if (attackerBot != null && !IsFreeForAllMode() && attackerBot.Team == bot.Team) return;
             if (attackerBot == null && attackerActorId > 0)
             {
-                PlayerInfo attackerInfo = FindHumanByActor(attackerActorId);
+                attackerInfo = FindHumanByActor(attackerActorId);
                 if (attackerInfo != null && !IsFreeForAllMode() && attackerInfo.mTeam == bot.Team) return;
             }
+
+            if (attackerBot != null)
+                RegisterDamageThreat(bot, attackerBot.Id, attackerBot.Position);
+            else if (attackerInfo != null)
+                RegisterDamageThreat(bot, attackerInfo.mId, attackerInfo.mPosition);
 
             bot.Hp -= Mathf.Max(1, damage);
             if (bot.Hp > 0) return;
@@ -2206,6 +2212,54 @@ namespace CNRMods
                 else SendKillCredit(attackerActorId, bot.Id, damage);
             }
             BroadcastState();
+        }
+
+        private void RegisterDamageThreat(CNRArenaBotState bot, string attackerId, Vector3 attackerPosition)
+        {
+            if (bot == null || string.IsNullOrEmpty(attackerId)) return;
+            float now = Time.realtimeSinceStartup;
+
+            // Do not make damage magically interrupt a target the bot is actively seeing.
+            // If its current target is hidden/stale, however, being shot is a strong enough
+            // sensory cue to redirect the search toward the attacker.
+            PlayerInfo currentInfo;
+            CNRArenaBotState currentBot;
+            if (!string.IsNullOrEmpty(bot.LastTargetId) &&
+                TryResolveEnemyTarget(bot, bot.LastTargetId, out currentInfo, out currentBot))
+            {
+                Vector3 currentPosition = currentBot != null ? currentBot.Position : currentInfo.mPosition;
+                float currentDistance = Vector3.Distance(bot.Position, currentPosition);
+                if (bot.LastTargetId != attackerId &&
+                    CanSeeTarget(bot, currentPosition, bot.LastTargetId, currentDistance + 1f))
+                    return;
+            }
+
+            // A hit tells the victim where the threat roughly came from, not the attacker's
+            // exact network coordinate. Add a little horizontal uncertainty so this never
+            // becomes x-ray tracking through walls.
+            float angle = UnityEngine.Random.Range(0f, 360f) * Mathf.Deg2Rad;
+            float error = UnityEngine.Random.Range(0.6f, 2.2f);
+            Vector3 cuePosition = attackerPosition +
+                new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * error;
+
+            bool changed = bot.LastTargetId != attackerId;
+            bot.LastTargetId = attackerId;
+            bot.LastKnownTargetPosition = cuePosition;
+            bot.LastTargetVisibleAt = now;
+            bot.HasLastKnownTarget = true;
+            bot.TargetCertainty = Mathf.Max(bot.TargetCertainty, 0.30f);
+            bot.ReactionReadyAt = changed
+                ? now + UnityEngine.Random.Range(0.12f, 0.25f)
+                : Mathf.Min(bot.ReactionReadyAt, now + 0.12f);
+            bot.CurrentTargetScore = Mathf.Max(bot.CurrentTargetScore, 0.35f);
+            bot.Behavior = CNRArenaBotBehavior.Search;
+            bot.TacticalTarget = bot.Position;
+            bot.TacticalScore = -1f;
+            bot.TacticalCommittedUntil = 0f;
+            bot.NextRepositionAt = 0f;
+            bot.NavPath = null;
+            bot.NavPathIndex = 0;
+            bot.NextNavRepathAt = 0f;
         }
 
         private PlayerInfo FindHumanByActor(int actorId)
