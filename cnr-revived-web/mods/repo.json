@@ -2081,6 +2081,7 @@
       "filename": "CNRDevSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRDevSettingsMod/CNRDevSettingsMod-1.0.0.dll",
       "latestOnly": false,
+      "minVersion": "",
       "dependencies": [
         {
           "kind": "mod",
