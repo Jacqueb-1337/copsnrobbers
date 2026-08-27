@@ -2074,14 +2074,44 @@
       ]
     },
     {
+      "id": "CNRDevSettingsMod",
+      "name": "CNR Developer Settings",
+      "description": "Adds a DEV tab to CNR Settings with FPS display, selectable verbose diagnostics, and placeholders for additional developer/debug tools.",
+      "latestVersion": "1.0.0",
+      "filename": "CNRDevSettingsMod.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRDevSettingsMod/CNRDevSettingsMod-1.0.0.dll",
+      "latestOnly": true,
+      "dependencies": [
+        {
+          "kind": "mod",
+          "id": "CNRSettingsMod",
+          "filename": "CNRSettingsMod.dll",
+          "minVersion": "3.1.108",
+          "latestOnly": true
+        }
+      ],
+      "versions": [
+        {
+          "version": "1.0.0",
+          "url": "https://play.jacqueb.me/mods/CNRDevSettingsMod/CNRDevSettingsMod-1.0.0.dll",
+          "changelog": "Initial DEV tab with SHOW FPS and selectable per-file verbose diagnostics for frame timing, hitches, memory/GC, scene/load activity, and Unity logs."
+        }
+      ]
+    },
+    {
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and username/password account login, preview, merge, and sync controls.",
-      "latestVersion": "3.1.107",
+      "latestVersion": "3.1.108",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.107.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.108.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.108",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.108.dll",
+          "changelog": "Add external settings-tab registration API for CNRDevSettingsMod DEV diagnostics tab."
+        },
         {
           "version": "3.1.107",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.107.dll",
