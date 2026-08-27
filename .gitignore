@@ -28,3 +28,13 @@
 /APK_Build_DEFUNCT/bin/csc_build/
 **/mod_loader/compiled/
 **/snapshot_before_hook_move/
+
+# Root-level diagnostic snapshots generated during local testing
+/_*.txt
+/_*.log
+/_*.exit
+/_*.json
+/_*.png
+/_*.dll
+/_*.b64
+/_*.part*

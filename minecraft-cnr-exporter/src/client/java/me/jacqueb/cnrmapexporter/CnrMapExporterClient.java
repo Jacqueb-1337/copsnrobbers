@@ -695,6 +695,15 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             renderQuadCount++;
         }
 
+        boolean isKnownBiomeTintSprite(ResourceLocation spriteId) {
+            String path = spriteId == null ? "" : spriteId.getPath().toLowerCase(Locale.ROOT);
+            return path.contains("lily_pad") ||
+                   path.contains("leaves") || path.contains("vine") ||
+                   path.contains("grass_block_top") || path.contains("grass_block_side_overlay") ||
+                   path.contains("short_grass") || path.contains("tall_grass") ||
+                   path.contains("fern") || path.endsWith("/grass");
+        }
+
         int fallbackMinecraftTint(ResourceLocation spriteId) {
             String path = spriteId == null ? "" : spriteId.getPath().toLowerCase(Locale.ROOT);
             if (path.contains("water")) return 0x3F76E4;
@@ -702,7 +711,9 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             if (path.contains("spruce_leaves")) return 0x619961;
             if (path.contains("birch_leaves")) return 0x80A755;
             if (path.contains("leaves") || path.contains("vine")) return 0x77AB2F;
-            if (path.contains("grass") || path.contains("fern")) return 0x91BD59;
+            if (path.contains("grass_block_top") || path.contains("grass_block_side_overlay") ||
+                path.contains("short_grass") || path.contains("tall_grass") ||
+                path.contains("fern") || path.endsWith("/grass")) return 0x91BD59;
             return 0xFFFFFF;
         }
 
@@ -712,18 +723,24 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             int stride = packed.length / 4;
             TextureAtlasSprite sprite = q.getSprite();
             ResourceLocation spriteId = sprite.contents().name();
+            boolean knownBiomeTint = isKnownBiomeTintSprite(spriteId);
+            boolean shouldTint = q.isTinted() || knownBiomeTint;
             int tint = 0xFFFFFF;
-            if (q.isTinted()) {
+            if (shouldTint) {
                 int resolved = -1;
                 try {
                     // Resolve against the captured biome-aware snapshot. Using the live/server
                     // Level here can return no tint while export work is running off the render
                     // path, which is how Raid ended up with #tint_ffffff vegetation.
-                    resolved = mc.getBlockColors().getColor(state, view, worldPos, q.getTintIndex());
+                    if (q.isTinted()) resolved = mc.getBlockColors().getColor(state, view, worldPos, q.getTintIndex());
                 } catch (Throwable ignored) { }
-                tint = resolved >= 0 ? (resolved & 0xFFFFFF) : fallbackMinecraftTint(spriteId);
+                int resolvedRgb = resolved >= 0 ? (resolved & 0xFFFFFF) : -1;
+                if (resolvedRgb >= 0 && (!knownBiomeTint || resolvedRgb != 0xFFFFFF))
+                    tint = resolvedRgb;
+                else
+                    tint = fallbackMinecraftTint(spriteId);
             }
-            String texId = q.isTinted() ? (spriteId + "#tint_" + String.format("%06x", tint)) : spriteId.toString();
+            String texId = shouldTint ? (spriteId + "#tint_" + String.format("%06x", tint)) : spriteId.toString();
             final int bakedTint = tint;
             textures.computeIfAbsent(texId, id -> loadTexture(spriteId, sprite, texId, bakedTint));
 

@@ -77,6 +77,28 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 - Source: https://github.com/Jacqueb-1337/copsnrobbers
 - Issues: https://github.com/Jacqueb-1337/copsnrobbers/issues
 
+## Version 0.1.9
+
+**Version number:** `0.1.9`
+
+**Version title:** `CNR Map Exporter 0.1.9`
+
+**Version type:** Beta
+
+**Game version:** 1.21.1
+
+**Loader:** Fabric
+
+**Primary file:** `cnrmapexporter-0.1.9.jar`
+
+**Required dependency:** Fabric API
+
+**Changelog:**
+
+- Biome-tinted grass, foliage, vines, and lily pads now receive a default Minecraft tint even if the baked quad incorrectly reports itself as untinted.
+- A failed biome lookup that returns pure white no longer suppresses the known fallback tint for vegetation.
+- Water gameplay-volume export from 0.1.8 remains unchanged.
+
 ## Version 0.1.8
 
 **Version number:** `0.1.8`
@@ -114,7 +136,7 @@ Modrinth currently prohibits AI-generated or AI-assisted project icons. Use the 
 
 ## Before submitting for review
 
-- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.8.jar`.
+- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.9.jar`.
 - Mark Fabric API as a required dependency.
 - Set client environment to required and server environment to unsupported.
 - Add the project icon.
