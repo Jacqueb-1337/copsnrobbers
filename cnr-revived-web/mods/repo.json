@@ -306,11 +306,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "4.2.34",
+      "latestVersion": "4.2.35",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.34.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.35.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "4.2.35",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.35.dll",
+          "changelog": "Water swimming now activates whenever the upper 90% of the player's hitbox overlaps any registered water volume, bypasses grounded-only vanilla jump logic, and fully replaces vanilla vertical movement while submerged so deep water can no longer drag the player to the bottom."
+        },
         {
           "version": "4.2.34",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.34.dll",
