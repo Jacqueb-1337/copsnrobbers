@@ -18773,10 +18773,12 @@ namespace CNRMods
 
             string sprite = _gunIconSprite != null ? _gunIconSprite.spriteName : null;
             float mobility = GetWeaponMobility(sprite);
-            float target = BaseMoveSpeed * mobility * CNRPerkSystem.GetEvasiveSpeedMult() * CNRPerkSystem.GetLightweightSpeedMult() * CNRMinecraftWaterController.LocalHorizontalSpeedMultiplier;
+            bool knife = GetWeaponClass(sprite) == "knife";
+            float momentumBonus = UpdateKnifeMomentum(knife);
+            float speedScale = CNRPerkSystem.GetEvasiveSpeedMult() * CNRPerkSystem.GetLightweightSpeedMult() * CNRMinecraftWaterController.LocalHorizontalSpeedMultiplier;
+            float target = (BaseMoveSpeed * mobility + momentumBonus) * speedScale;
 
             _fiMoveSpeed.SetValue(_joyCtrl, target);
-            UpdateKnifeMomentum(GetWeaponClass(sprite) == "knife");
 
             _dbgTimer += Time.deltaTime;
             if (sprite != _lastSprite || _dbgTimer >= 5f)
@@ -18789,7 +18791,7 @@ namespace CNRMods
             }
         }
 
-        private void UpdateKnifeMomentum(bool knife)
+        private float UpdateKnifeMomentum(bool knife)
         {
             if (_characterController == null || !_characterController.gameObject.activeInHierarchy)
             {
@@ -18801,7 +18803,7 @@ namespace CNRMods
             {
                 _knifeForwardMomentum = Mathf.MoveTowards(
                     _knifeForwardMomentum, 0f, KnifeUnequippedDrag * Time.deltaTime);
-                return;
+                return 0f;
             }
 
             float forwardInput = 0f;
@@ -18826,21 +18828,14 @@ namespace CNRMods
                 float drag = grounded ? KnifeGroundReleaseDrag : KnifeAirReleaseDrag;
                 _knifeForwardMomentum = Mathf.MoveTowards(
                     _knifeForwardMomentum, 0f, drag * Time.deltaTime);
+                return 0f;
             }
-        }
 
-        void LateUpdate()
-        {
-            if (Mathf.Abs(_knifeForwardMomentum) < 0.001f) return;
-            if (_characterController == null || !_characterController.gameObject.activeInHierarchy) return;
-
-            Vector3 forward = _characterController.transform.forward;
-            forward.y = 0f;
-            if (forward.sqrMagnitude < 0.001f) return;
-            forward.Normalize();
-
-            float waterScale = CNRMinecraftWaterController.LocalHorizontalSpeedMultiplier;
-            _characterController.Move(forward * (_knifeForwardMomentum * waterScale * Time.deltaTime));
+            // Momentum only changes the normal movement speed while the player is
+            // actively moving in the same signed direction. JoyStickController still
+            // owns all actual motion, stopping, collision response and jump timing.
+            if (_knifeForwardMomentum * forwardInput <= 0f) return 0f;
+            return Mathf.Abs(_knifeForwardMomentum);
         }
 
         private static float GetWeaponMobility(string sprite)
