@@ -38,6 +38,7 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.AABB;
@@ -545,6 +546,12 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             if (biome == null) biome = defaultBiome;
             return biome == null ? 0xFFFFFF : resolver.getColor(biome, pos.getX(), pos.getZ());
         }
+
+        int getWaterTint(BlockPos pos) {
+            Biome biome = biomes.get(pos.asLong());
+            if (biome == null) biome = defaultBiome;
+            return biome == null ? 0x3F76E4 : biome.getWaterColor();
+        }
     }
 
     private static final class ExportContext {
@@ -585,8 +592,12 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             int lz = entry.pos.getZ() - min.getZ();
             ChunkBuilder chunk = chunkFor(lx, ly, lz);
             boolean bulletPassThrough = entry.state.is(Blocks.BARRIER);
-            if (!bulletPassThrough)
+            if (!bulletPassThrough) {
                 emitRenderModel(entry.state, entry.pos, lx, ly, lz, chunk, view);
+                FluidState fluid = entry.state.getFluidState();
+                if (fluid != null && !fluid.isEmpty())
+                    emitFluid(fluid, entry.pos, lx, ly, lz, chunk, view);
+            }
             emitCollision(entry.state, entry.pos, lx, ly, lz, chunk, view,
                 bulletPassThrough ? chunk.bulletPassThrough : chunk.collision, bulletPassThrough);
             emitClimbable(entry.state, entry.pos, lx, ly, lz, chunk, view);
@@ -623,6 +634,77 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             for (BakedQuad q : model.getQuads(state, null, random)) emitQuad(q, state, worldPos, lx,ly,lz, chunk, layer, view);
         }
 
+        void emitFluid(FluidState fluid, BlockPos worldPos, int lx, int ly, int lz, ChunkBuilder chunk, SnapshotView view) {
+            boolean water = isWater(fluid);
+            boolean lava = isLava(fluid);
+            if (!water && !lava) return;
+
+            int tint = water ? view.getWaterTint(worldPos) : 0xFFFFFF;
+            ResourceLocation spriteId = ResourceLocation.withDefaultNamespace(water ? "block/water_still" : "block/lava_still");
+            String texId = spriteId + "#tint_" + String.format("%06x", tint & 0xFFFFFF);
+            final int bakedTint = tint & 0xFFFFFF;
+            textures.computeIfAbsent(texId, id -> loadStandaloneTexture(spriteId, texId, bakedTint));
+
+            float x0 = lx - chunk.key.x;
+            float y0 = ly - chunk.key.y;
+            float z0 = lz - chunk.key.z;
+            float x1 = x0 + 1f;
+            float z1 = z0 + 1f;
+            float height = fluid.getHeight(view, worldPos);
+            if (height <= 0.001f || height > 1f) height = 1f;
+            float y1 = y0 + height;
+
+            RenderBuilder target = chunk.transparent;
+            if (!sameFluidKind(view.getFluidState(worldPos.above()), water, lava))
+                addFluidQuad(target, texId, new float[]{x0,y1,z0, x0,y1,z1, x1,y1,z1, x1,y1,z0});
+            if (!sameFluidKind(view.getFluidState(worldPos.north()), water, lava))
+                addFluidQuad(target, texId, new float[]{x0,y0,z0, x0,y1,z0, x1,y1,z0, x1,y0,z0});
+            if (!sameFluidKind(view.getFluidState(worldPos.south()), water, lava))
+                addFluidQuad(target, texId, new float[]{x1,y0,z1, x1,y1,z1, x0,y1,z1, x0,y0,z1});
+            if (!sameFluidKind(view.getFluidState(worldPos.west()), water, lava))
+                addFluidQuad(target, texId, new float[]{x0,y0,z1, x0,y1,z1, x0,y1,z0, x0,y0,z0});
+            if (!sameFluidKind(view.getFluidState(worldPos.east()), water, lava))
+                addFluidQuad(target, texId, new float[]{x1,y0,z0, x1,y1,z0, x1,y1,z1, x1,y0,z1});
+        }
+
+        boolean isWater(FluidState fluid) {
+            return fluid != null && (fluid.getType() == Fluids.WATER || fluid.getType() == Fluids.FLOWING_WATER);
+        }
+
+        boolean isLava(FluidState fluid) {
+            return fluid != null && (fluid.getType() == Fluids.LAVA || fluid.getType() == Fluids.FLOWING_LAVA);
+        }
+
+        boolean sameFluidKind(FluidState fluid, boolean water, boolean lava) {
+            return (water && isWater(fluid)) || (lava && isLava(fluid));
+        }
+
+        void addFluidQuad(RenderBuilder target, String texId, float[] p) {
+            float[] uv = new float[]{0f,0f, 0f,1f, 1f,1f, 1f,0f};
+            target.quads.add(new QuadDef(p, uv, texId));
+            renderQuadCount++;
+
+            // Liquids need to remain visible from inside the volume as well. Export the
+            // reverse winding too instead of changing the shared transparent material's
+            // culling behavior for every glass/cutout surface in a DLC map.
+            float[] back = new float[]{
+                p[9],p[10],p[11], p[6],p[7],p[8], p[3],p[4],p[5], p[0],p[1],p[2]
+            };
+            target.quads.add(new QuadDef(back, uv, texId));
+            renderQuadCount++;
+        }
+
+        int fallbackMinecraftTint(ResourceLocation spriteId) {
+            String path = spriteId == null ? "" : spriteId.getPath().toLowerCase(Locale.ROOT);
+            if (path.contains("water")) return 0x3F76E4;
+            if (path.contains("lily_pad")) return 0x208030;
+            if (path.contains("spruce_leaves")) return 0x619961;
+            if (path.contains("birch_leaves")) return 0x80A755;
+            if (path.contains("leaves") || path.contains("vine")) return 0x77AB2F;
+            if (path.contains("grass") || path.contains("fern")) return 0x91BD59;
+            return 0xFFFFFF;
+        }
+
         void emitQuad(BakedQuad q, BlockState state, BlockPos worldPos, int lx, int ly, int lz, ChunkBuilder chunk, String layer, SnapshotView view) throws Exception {
             int[] packed = q.getVertices();
             if (packed == null || packed.length < 20 || packed.length % 4 != 0) return;
@@ -631,10 +713,14 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             ResourceLocation spriteId = sprite.contents().name();
             int tint = 0xFFFFFF;
             if (q.isTinted()) {
+                int resolved = -1;
                 try {
-                    int resolved = mc.getBlockColors().getColor(state, sourceLevel, worldPos, q.getTintIndex());
-                    if (resolved >= 0) tint = resolved & 0xFFFFFF;
+                    // Resolve against the captured biome-aware snapshot. Using the live/server
+                    // Level here can return no tint while export work is running off the render
+                    // path, which is how Raid ended up with #tint_ffffff vegetation.
+                    resolved = mc.getBlockColors().getColor(state, view, worldPos, q.getTintIndex());
                 } catch (Throwable ignored) { }
+                tint = resolved >= 0 ? (resolved & 0xFFFFFF) : fallbackMinecraftTint(spriteId);
             }
             String texId = q.isTinted() ? (spriteId + "#tint_" + String.format("%06x", tint)) : spriteId.toString();
             final int bakedTint = tint;
@@ -669,6 +755,30 @@ public final class CnrMapExporterClient implements ClientModInitializer {
                             int fw = Math.min(source.getWidth(), sprite.contents().width());
                             int fh = Math.min(source.getHeight(), sprite.contents().height());
                             BufferedImage first = copyImage(source.getSubimage(0,0,fw,fh));
+                            if (tint != 0xFFFFFF) applyTint(first, tint);
+                            return new TextureDef(texId, first);
+                        }
+                    }
+                }
+            } catch (Throwable ignored) { }
+            BufferedImage missing = new BufferedImage(16,16,BufferedImage.TYPE_INT_ARGB);
+            for (int y=0;y<16;y++) for(int x=0;x<16;x++) missing.setRGB(x,y,(((x>>2)^(y>>2))&1)==0?0xffff00ff:0xff101010);
+            return new TextureDef(texId, missing);
+        }
+
+        TextureDef loadStandaloneTexture(ResourceLocation spriteId, String texId, int tint) {
+            try {
+                ResourceLocation png = ResourceLocation.fromNamespaceAndPath(spriteId.getNamespace(), "textures/" + spriteId.getPath() + ".png");
+                var res = mc.getResourceManager().getResource(png);
+                if (res.isPresent()) {
+                    try (InputStream in = res.get().open()) {
+                        BufferedImage source = ImageIO.read(in);
+                        if (source != null) {
+                            // Animated fluid textures are vertical strips. Export the first square
+                            // frame; CNR's baked map format is static and intentionally has no
+                            // texture-animation runtime dependency.
+                            int frame = Math.max(1, Math.min(source.getWidth(), source.getHeight()));
+                            BufferedImage first = copyImage(source.getSubimage(0, 0, frame, frame));
                             if (tint != 0xFFFFFF) applyTint(first, tint);
                             return new TextureDef(texId, first);
                         }

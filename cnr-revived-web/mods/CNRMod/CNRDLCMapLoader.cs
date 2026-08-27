@@ -9,11 +9,22 @@ using UnityEngine;
 namespace CNRMods
 {
     [Serializable]
+    internal class CNRDLCMapAtlasEntry
+    {
+        public string id = "";
+        public int x;
+        public int y;
+        public int w;
+        public int h;
+    }
+
+    [Serializable]
     internal class CNRDLCMapAtlas
     {
         public int width;
         public int height;
         public string pngBase64 = "";
+        public CNRDLCMapAtlasEntry[] entries = new CNRDLCMapAtlasEntry[0];
     }
 
     [Serializable]
@@ -1329,6 +1340,7 @@ namespace CNRMods
                 _atlasTexture = new Texture2D(2, 2, TextureFormat.ARGB32, false);
                 _atlasTexture.name = "CNRDLCMapAtlas";
                 if (!_atlasTexture.LoadImage(_preparedAtlasPng)) throw new Exception("atlas PNG could not be decoded");
+                ApplyDefaultMinecraftTintFallback(_atlasTexture, _prepared.atlas);
                 _atlasTexture.filterMode = FilterMode.Point;
                 _atlasTexture.wrapMode = TextureWrapMode.Clamp;
 
@@ -1420,6 +1432,86 @@ namespace CNRMods
             }
 
             ModEntry.Log("DLCMap lighting: disabled inherited lights=" + disabledLights + " ambient=0.44 key=0.34");
+        }
+
+        private static void ApplyDefaultMinecraftTintFallback(Texture2D atlasTexture, CNRDLCMapAtlas atlas)
+        {
+            if (atlasTexture == null || atlas == null || atlas.entries == null || atlas.entries.Length == 0) return;
+
+            int changed = 0;
+            for (int i = 0; i < atlas.entries.Length; i++)
+            {
+                CNRDLCMapAtlasEntry entry = atlas.entries[i];
+                if (entry == null || string.IsNullOrEmpty(entry.id) || entry.w <= 0 || entry.h <= 0) continue;
+
+                Color tint;
+                if (!TryGetDefaultMinecraftTint(entry.id, out tint)) continue;
+
+                // Exporter atlas coordinates are top-left based; Unity's GetPixels/SetPixels
+                // use a bottom-left origin. Include the one-pixel atlas gutter so bilinear
+                // sampling never pulls an untinted white edge into the block texture.
+                int x0 = Mathf.Clamp(entry.x - 1, 0, atlasTexture.width);
+                int x1 = Mathf.Clamp(entry.x + entry.w + 1, 0, atlasTexture.width);
+                int top0 = Mathf.Clamp(entry.y - 1, 0, atlasTexture.height);
+                int top1 = Mathf.Clamp(entry.y + entry.h + 1, 0, atlasTexture.height);
+                int y0 = atlasTexture.height - top1;
+                int w = x1 - x0;
+                int h = top1 - top0;
+                if (w <= 0 || h <= 0) continue;
+
+                try
+                {
+                    Color[] pixels = atlasTexture.GetPixels(x0, y0, w, h);
+                    for (int p = 0; p < pixels.Length; p++)
+                    {
+                        Color c = pixels[p];
+                        c.r *= tint.r;
+                        c.g *= tint.g;
+                        c.b *= tint.b;
+                        pixels[p] = c;
+                    }
+                    atlasTexture.SetPixels(x0, y0, w, h, pixels);
+                    changed++;
+                }
+                catch (Exception ex)
+                {
+                    ModEntry.Log("DLCMap: default Minecraft tint fallback failed for " + entry.id + ": " + ex.Message);
+                }
+            }
+
+            if (changed > 0)
+            {
+                atlasTexture.Apply(false, false);
+                ModEntry.Log("DLCMap: applied default Minecraft tint fallback to " + changed + " atlas entries");
+            }
+        }
+
+        private static bool TryGetDefaultMinecraftTint(string textureId, out Color tint)
+        {
+            tint = Color.white;
+            if (string.IsNullOrEmpty(textureId)) return false;
+
+            string id = textureId.ToLowerInvariant();
+            int tintMarker = id.IndexOf("#tint_");
+            if (tintMarker >= 0 && id.IndexOf("#tint_ffffff") < 0)
+                return false; // A real tint was supplied and baked by the exporter.
+
+            if (id.IndexOf("spruce_leaves") >= 0) tint = Rgb24(0x619961);
+            else if (id.IndexOf("birch_leaves") >= 0) tint = Rgb24(0x80A755);
+            else if (id.IndexOf("lily_pad") >= 0) tint = Rgb24(0x208030);
+            else if (id.IndexOf("water_still") >= 0 || id.IndexOf("water_flow") >= 0) tint = Rgb24(0x3F76E4);
+            else if (id.IndexOf("leaves") >= 0 || id.IndexOf("vine") >= 0) tint = Rgb24(0x77AB2F);
+            else if (id.IndexOf("grass_block_top") >= 0 || id.IndexOf("grass_block_side_overlay") >= 0 ||
+                     id.IndexOf("short_grass") >= 0 || id.IndexOf("tall_grass") >= 0 ||
+                     id.IndexOf("fern") >= 0) tint = Rgb24(0x91BD59);
+            else return false;
+
+            return true;
+        }
+
+        private static Color Rgb24(int rgb)
+        {
+            return new Color(((rgb >> 16) & 255) / 255f, ((rgb >> 8) & 255) / 255f, (rgb & 255) / 255f, 1f);
         }
 
         private static void BuildMaterials()

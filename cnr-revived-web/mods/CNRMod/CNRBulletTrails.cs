@@ -10,7 +10,7 @@ namespace CNRMods
     // the gun rather than the center of the screen.
     public class CNRBulletTrailSystem : MonoBehaviour
     {
-        private const float TracerLifetime = 1.00f;
+        private const float TracerLifetime = 0.50f;
         private const float TracerStartAlpha = 0.80f;
         private const float TracerStartWidth = 0.032f;
         private const float TracerEndWidth = 0.010f;
