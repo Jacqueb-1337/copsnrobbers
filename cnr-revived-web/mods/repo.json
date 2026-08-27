@@ -306,11 +306,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "4.2.31",
+      "latestVersion": "4.2.32",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.31.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.32.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "4.2.32",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.32.dll",
+          "changelog": "Replaced vanilla's hardcoded 1000-damage headshots with weapon-specific damage multipliers; fixed deep Minecraft water surface detection and made surface bobbing trigger at the player's head instead of near full-body exit."
+        },
         {
           "version": "4.2.31",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.31.dll",
