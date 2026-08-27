@@ -1568,8 +1568,6 @@ namespace CNRMods
         private const float BussinFallCompensation = 0.85f;
         private const float BussinFallCompensationCap = 24.0f;
         private const float BussinFallFullCompImpulse = 6.0f;
-        private const float KnifeBackhopGain = 0.45f;
-        private const float KnifeBackhopReleaseDrag = 12.0f;
         private const float BussinReloadAudioGuard = 0.15f;
 
         private WeaponManager _weaponManager;
@@ -1584,11 +1582,9 @@ namespace CNRMods
         private GameObject _bussinBulletTemplate;
         private readonly Dictionary<Renderer, bool> _hidden = new Dictionary<Renderer, bool>();
         private bool _rifleOverrideActive;
-        private bool _wasGrounded;
         private float _nextWeaponScan;
         private Vector3 _bussinHorizontalVelocity = Vector3.zero;
         private float _bussinFallbackVerticalVelocity;
-        private Vector3 _knifeBackhopBonusVelocity = Vector3.zero;
         private Component _settingsJumpHook;
         private FieldInfo _settingsOwnJumpVelY;
         private FieldInfo _settingsOwnJumpActive;
@@ -1597,7 +1593,6 @@ namespace CNRMods
         private void Start()
         {
             CNRDLCWeaponSystem.ClearMarkerIfDonorMissing();
-            _wasGrounded = true;
             // Decode the HUD PNG before the player starts switching weapons so the
             // first Bussin frame never waits on disk/base64/Texture2D creation.
             CNRDLCWeaponThumbnail.GetHudOrCreate();
@@ -1649,7 +1644,6 @@ namespace CNRMods
                 }
             }
 
-            UpdateKnifeMovement();
         }
 
         private bool IsBussinSelectedSlot()
@@ -1685,7 +1679,7 @@ namespace CNRMods
             CharacterController cc = FindLocalCharacterController();
             if (cc == null) return;
 
-            Vector3 extra = _bussinHorizontalVelocity + _knifeBackhopBonusVelocity;
+            Vector3 extra = _bussinHorizontalVelocity;
             if (Mathf.Abs(_bussinFallbackVerticalVelocity) > 0.01f)
                 extra.y += _bussinFallbackVerticalVelocity;
 
@@ -2295,62 +2289,6 @@ namespace CNRMods
             _placeholderWeapon = null;
             _weaponManager = null;
             _bussinSlotIndex = -1;
-        }
-
-        private void UpdateKnifeMovement()
-        {
-            CharacterController cc = FindLocalCharacterController();
-            if (cc == null) return;
-
-            VCAnalogJoystickBase stick = VCAnalogJoystickBase.GetInstance("stick");
-            bool knife = IsActiveLocalKnife();
-            bool grounded = cc.isGrounded;
-            bool backing = false;
-            Vector3 backwardInputWorld = Vector3.zero;
-
-            if (stick != null)
-            {
-                Vector3 localInput = new Vector3(stick.AxisX, 0f, stick.AxisY);
-                backing = stick.AxisY < -0.25f && localInput.sqrMagnitude > 0.05f;
-                if (backing)
-                {
-                    backwardInputWorld = cc.transform.TransformDirection(localInput);
-                    backwardInputWorld.y = 0f;
-                    if (backwardInputWorld.sqrMagnitude > 0.001f) backwardInputWorld.Normalize();
-                }
-            }
-
-            // SettingsMod's held-jump logic launches in LateUpdate, so CNR sees the
-            // CharacterController transition from grounded -> airborne on the following
-            // Update. Each genuine backward knife hop adds a small uncapped-by-vanilla
-            // bonus, reproducing the intended Portal-style backward bhop quirk.
-            if (_wasGrounded && !grounded && knife && backing && backwardInputWorld.sqrMagnitude > 0.001f)
-            {
-                float nextBonus = _knifeBackhopBonusVelocity.magnitude + KnifeBackhopGain;
-                _knifeBackhopBonusVelocity = backwardInputWorld * nextBonus;
-                ModEntry.Log("CNR knife backhop bonus=" + nextBonus);
-            }
-
-            if (!knife || !backing)
-                _knifeBackhopBonusVelocity = Vector3.MoveTowards(
-                    _knifeBackhopBonusVelocity, Vector3.zero, KnifeBackhopReleaseDrag * Time.deltaTime);
-            else if (_knifeBackhopBonusVelocity.sqrMagnitude > 0.001f && backwardInputWorld.sqrMagnitude > 0.001f)
-                _knifeBackhopBonusVelocity = backwardInputWorld * _knifeBackhopBonusVelocity.magnitude;
-
-            _wasGrounded = grounded;
-        }
-
-        private static bool IsActiveLocalKnife()
-        {
-            WeaponScript[] weapons = (WeaponScript[])Resources.FindObjectsOfTypeAll(typeof(WeaponScript));
-            for (int i = 0; i < weapons.Length; i++)
-            {
-                WeaponScript ws = weapons[i];
-                if (ws == null || !ws.gameObject.activeInHierarchy) continue;
-                if (ws.transform.root == null || ws.transform.root.tag != "Player") continue;
-                if (ws.GunType == WeaponScript.gunType.KNIFE) return true;
-            }
-            return false;
         }
 
         private static WeaponManager FindLocalWeaponManager()

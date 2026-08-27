@@ -18717,14 +18717,30 @@ namespace CNRMods
         private const float MinigunMobility     = 0.74f;
         private const float LauncherMobility    = 0.70f;
         private const float ThrowableMobility   = 1.00f;
+        private const float KnifeMomentumAcceleration = 0.80f;
+        private const float KnifeForwardMomentumCap = 0.85f;
+        private const float KnifeGroundMomentumDrag = 0.55f;
+        private const float KnifeAirMomentumDrag = 0.05f;
+        private const float KnifeGroundReleaseDrag = 4.00f;
+        private const float KnifeAirReleaseDrag = 0.35f;
+        private const float KnifeUnequippedDrag = 12.0f;
+        private const float KnifeMomentumInputDeadzone = 0.20f;
 
         private MonoBehaviour _joyCtrl      = null;
         private FieldInfo     _fiMoveSpeed  = null;
         private UISprite      _gunIconSprite = null;
+        private CharacterController _characterController = null;
+        private float         _knifeForwardMomentum = 0f;
         private float         _dbgTimer     = 0f;
         private string        _lastSprite   = null;
 
-        void OnLevelWasLoaded(int level) { _joyCtrl = null; _gunIconSprite = null; }
+        void OnLevelWasLoaded(int level)
+        {
+            _joyCtrl = null;
+            _gunIconSprite = null;
+            _characterController = null;
+            _knifeForwardMomentum = 0f;
+        }
 
         void Update()
         {
@@ -18760,6 +18776,7 @@ namespace CNRMods
             float target = BaseMoveSpeed * mobility * CNRPerkSystem.GetEvasiveSpeedMult() * CNRPerkSystem.GetLightweightSpeedMult() * CNRMinecraftWaterController.LocalHorizontalSpeedMultiplier;
 
             _fiMoveSpeed.SetValue(_joyCtrl, target);
+            UpdateKnifeMomentum(GetWeaponClass(sprite) == "knife");
 
             _dbgTimer += Time.deltaTime;
             if (sprite != _lastSprite || _dbgTimer >= 5f)
@@ -18771,6 +18788,61 @@ namespace CNRMods
                 _dbgTimer   = 0f;
             }
         }
+
+        private void UpdateKnifeMomentum(bool knife)
+        {
+            if (_characterController == null || !_characterController.gameObject.activeInHierarchy)
+            {
+                GameObject pg = GameObject.FindWithTag("Player");
+                _characterController = pg != null ? pg.GetComponent<CharacterController>() : null;
+            }
+
+            if (!knife)
+            {
+                _knifeForwardMomentum = Mathf.MoveTowards(
+                    _knifeForwardMomentum, 0f, KnifeUnequippedDrag * Time.deltaTime);
+                return;
+            }
+
+            float forwardInput = 0f;
+            VCAnalogJoystickBase stick = VCAnalogJoystickBase.GetInstance("stick");
+            if (stick != null) forwardInput = stick.AxisY;
+
+            bool hasForwardInput = Mathf.Abs(forwardInput) >= KnifeMomentumInputDeadzone;
+            bool grounded = _characterController != null && _characterController.isGrounded;
+
+            if (hasForwardInput)
+            {
+                _knifeForwardMomentum += forwardInput * KnifeMomentumAcceleration * Time.deltaTime;
+                if (_knifeForwardMomentum > KnifeForwardMomentumCap)
+                    _knifeForwardMomentum = KnifeForwardMomentumCap;
+
+                float drag = grounded ? KnifeGroundMomentumDrag : KnifeAirMomentumDrag;
+                _knifeForwardMomentum = Mathf.MoveTowards(
+                    _knifeForwardMomentum, 0f, drag * Time.deltaTime);
+            }
+            else
+            {
+                float drag = grounded ? KnifeGroundReleaseDrag : KnifeAirReleaseDrag;
+                _knifeForwardMomentum = Mathf.MoveTowards(
+                    _knifeForwardMomentum, 0f, drag * Time.deltaTime);
+            }
+        }
+
+        void LateUpdate()
+        {
+            if (Mathf.Abs(_knifeForwardMomentum) < 0.001f) return;
+            if (_characterController == null || !_characterController.gameObject.activeInHierarchy) return;
+
+            Vector3 forward = _characterController.transform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f) return;
+            forward.Normalize();
+
+            float waterScale = CNRMinecraftWaterController.LocalHorizontalSpeedMultiplier;
+            _characterController.Move(forward * (_knifeForwardMomentum * waterScale * Time.deltaTime));
+        }
+
         private static float GetWeaponMobility(string sprite)
         {
             string cls = GetWeaponClass(sprite);
