@@ -62,6 +62,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
     private static final int MAX_VERTICES_PER_PART = 60000;
     private static final float PACKED_POSITION_SCALE = 1024f;
     private static final float PACKED_UV_SCALE = 65535f;
+    private static final float PACKED_TILED_UV_SCALE = 1024f;
     private static BlockPos pos1;
     private static BlockPos pos2;
     private static ExportJob activeExport;
@@ -653,7 +654,13 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             float height = fluid.getHeight(view, worldPos);
             if (height <= 0.001f || height > 1f) height = 1f;
             float y1 = y0 + height;
-            if (water) chunk.water.addBox(x0, y0, z0, x1, y1, z1);
+            if (water) {
+                // A submerged Minecraft water cell is gameplay-full-height when water is
+                // directly above it. Keep only the top cell's real fluid height so deep
+                // pools form one continuous swimming column with no artificial gaps.
+                float gameplayY1 = sameFluidKind(view.getFluidState(worldPos.above()), true, false) ? y0 + 1f : y1;
+                chunk.water.addBox(x0, y0, z0, x1, gameplayY1, z1);
+            }
 
             RenderBuilder target = chunk.transparent;
             if (!sameFluidKind(view.getFluidState(worldPos.above()), water, lava) && !blocksFluidFace(view, worldPos.above()))
@@ -858,7 +865,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
 
         MapFile finish() throws Exception {
             MapFile out = new MapFile();
-            out.format="cnr-dlc-map"; out.version=3; out.id=name; out.name=name; out.source="minecraft-fabric-1.21.1;compact-v3-q10-lz4";
+            out.format="cnr-dlc-map"; out.version=4; out.id=name; out.name=name; out.source="minecraft-fabric-1.21.1;compact-v4-greedy-tiled-q10-lz4";
             out.blockScale=1f; out.origin=new float[]{0,0,0};
             out.atlas = atlas.toJson();
             out.chunks = new ArrayList<>();
@@ -921,7 +928,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         final ChunkKey key; final RenderBuilder opaque=new RenderBuilder(),cutout=new RenderBuilder(),transparent=new RenderBuilder(); final CollisionBuilder collision=new CollisionBuilder(),bulletPassThrough=new CollisionBuilder(),climbable=new CollisionBuilder(),water=new CollisionBuilder();
         ChunkBuilder(ChunkKey key){this.key=key;}
         RenderBuilder render(String s){return s.equals("transparent")?transparent:s.equals("cutout")?cutout:opaque;}
-        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaquePacked=packRender(opaque,atlas);j.cutoutPacked=packRender(cutout,atlas);j.transparentPacked=packRender(transparent,atlas);j.collisionBoxesPacked=packBoxes(collision);j.bulletPassThroughBoxesPacked=packBoxes(bulletPassThrough);j.climbableBoxesPacked=packBoxes(climbable);j.waterBoxesPacked=packBoxes(water);return j; }
+        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaqueTiled=packTiledRender(opaque);j.cutoutTiled=packTiledRender(cutout);j.transparentTiled=packTiledRender(transparent);j.collisionBoxesPacked=packBoxes(collision);j.bulletPassThroughBoxesPacked=packBoxes(bulletPassThrough);j.climbableBoxesPacked=packBoxes(climbable);j.waterBoxesPacked=packBoxes(water);return j; }
     }
 
     private static List<MeshJson> meshRender(RenderBuilder src, Atlas atlas) {
@@ -934,6 +941,149 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         List<PackedBlob> out=new ArrayList<>();
         for(MeshJson m:meshRender(src,atlas)) out.add(packMesh(m));
         return out;
+    }
+
+    private static final class GreedyFace {
+        QuadDef quad; int planeAxis,axisA,axisB,planeQ,normalSign,minA,minB; boolean uAlongA,vAlongA; String groupKey;
+    }
+
+    private static List<TiledRenderGroup> packTiledRender(RenderBuilder src) {
+        List<QuadDef> merged=greedyMergeRenderQuads(src.quads);
+        Map<String,List<QuadDef>> byTexture=new LinkedHashMap<>();
+        for(QuadDef q:merged) byTexture.computeIfAbsent(q.texture,x->new ArrayList<>()).add(q);
+        List<TiledRenderGroup> out=new ArrayList<>();
+        for(var e:byTexture.entrySet()) {
+            TiledRenderGroup g=new TiledRenderGroup(); g.texture=e.getKey(); g.packed=new ArrayList<>();
+            MeshAccumulator m=new MeshAccumulator(true);
+            for(QuadDef q:e.getValue()) {
+                if(m.vertexCount()+4>MAX_VERTICES_PER_PART){g.packed.add(packTiledMesh(m.finish()));m=new MeshAccumulator(true);}
+                m.addQuad(q.p,q.uv);
+            }
+            if(m.vertexCount()>0)g.packed.add(packTiledMesh(m.finish()));
+            if(!g.packed.isEmpty())out.add(g);
+        }
+        return out;
+    }
+
+    private static List<QuadDef> greedyMergeRenderQuads(List<QuadDef> input) {
+        List<QuadDef> out=new ArrayList<>();
+        Map<String,List<GreedyFace>> groups=new LinkedHashMap<>();
+        for(QuadDef raw:input) {
+            float[] uv=Arrays.copyOf(raw.uv,raw.uv.length);
+            for(int i=1;i<uv.length;i+=2)uv[i]=1f-uv[i]; // atlas image top-left -> standalone Unity bottom-left
+            QuadDef qd=new QuadDef(Arrays.copyOf(raw.p,raw.p.length),uv,raw.texture);
+            GreedyFace f=parseGreedyFace(qd);
+            if(f==null){out.add(qd);continue;}
+            groups.computeIfAbsent(f.groupKey,x->new ArrayList<>()).add(f);
+        }
+
+        for(List<GreedyFace> faces:groups.values()) {
+            Map<Long,GreedyFace> cells=new HashMap<>();
+            for(GreedyFace f:faces) {
+                long k=greedyCellKey(f.minA,f.minB);
+                if(cells.containsKey(k)) out.add(f.quad); else cells.put(k,f);
+            }
+            List<GreedyFace> ordered=new ArrayList<>(cells.values());
+            ordered.sort((a,b)->a.minB!=b.minB?Integer.compare(a.minB,b.minB):Integer.compare(a.minA,b.minA));
+            Set<Long> used=new HashSet<>();
+            for(GreedyFace seed:ordered) {
+                long seedKey=greedyCellKey(seed.minA,seed.minB); if(used.contains(seedKey))continue;
+                int width=1;
+                while(cells.containsKey(greedyCellKey(seed.minA+width,seed.minB))&&!used.contains(greedyCellKey(seed.minA+width,seed.minB)))width++;
+                int height=1;
+                while(true) {
+                    int row=seed.minB+height; boolean full=true;
+                    for(int x=0;x<width;x++) {
+                        long k=greedyCellKey(seed.minA+x,row);
+                        if(!cells.containsKey(k)||used.contains(k)){full=false;break;}
+                    }
+                    if(!full)break; height++;
+                }
+                for(int y=0;y<height;y++)for(int x=0;x<width;x++)used.add(greedyCellKey(seed.minA+x,seed.minB+y));
+                out.add(buildMergedQuad(seed,width,height));
+            }
+        }
+        return out;
+    }
+
+    private static GreedyFace parseGreedyFace(QuadDef qd) {
+        if(qd==null||qd.p==null||qd.p.length!=12||qd.uv==null||qd.uv.length!=8)return null;
+        int plane=-1;
+        for(int axis=0;axis<3;axis++) {
+            int base=q(qd.p[axis]); boolean same=true;
+            for(int v=1;v<4;v++)if(Math.abs(q(qd.p[v*3+axis])-base)>2){same=false;break;}
+            if(same){if(plane>=0)return null;plane=axis;}
+        }
+        if(plane<0)return null;
+        int a=plane==0?1:0, b=plane==2?1:2;
+        if(plane==1){a=0;b=2;}
+        float minAf=Float.MAX_VALUE,maxAf=-Float.MAX_VALUE,minBf=Float.MAX_VALUE,maxBf=-Float.MAX_VALUE;
+        for(int v=0;v<4;v++){float av=qd.p[v*3+a],bv=qd.p[v*3+b];minAf=Math.min(minAf,av);maxAf=Math.max(maxAf,av);minBf=Math.min(minBf,bv);maxBf=Math.max(maxBf,bv);}
+        if(Math.abs((maxAf-minAf)-1f)>0.001f||Math.abs((maxBf-minBf)-1f)>0.001f)return null;
+        int minA=Math.round(minAf),minB=Math.round(minBf);
+        if(Math.abs(minAf-minA)>0.001f||Math.abs(minBf-minB)>0.001f)return null;
+
+        int[] cornerUv=new int[]{-1,-1,-1,-1};
+        for(int v=0;v<4;v++) {
+            float av=qd.p[v*3+a],bv=qd.p[v*3+b];
+            int ab=Math.abs(av-minAf)<0.001f?0:(Math.abs(av-maxAf)<0.001f?1:-1);
+            int bb=Math.abs(bv-minBf)<0.001f?0:(Math.abs(bv-maxBf)<0.001f?1:-1);
+            if(ab<0||bb<0)return null;
+            float u=qd.uv[v*2],vv=qd.uv[v*2+1];
+            int ub=Math.abs(u)<0.001f?0:(Math.abs(u-1f)<0.001f?1:-1);
+            int vb=Math.abs(vv)<0.001f?0:(Math.abs(vv-1f)<0.001f?1:-1);
+            if(ub<0||vb<0)return null;
+            int ci=(ab<<1)|bb; if(cornerUv[ci]>=0)return null; cornerUv[ci]=(ub<<1)|vb;
+        }
+        boolean uAlongA=((cornerUv[0]>>1)!=(cornerUv[2]>>1))&&((cornerUv[1]>>1)!=(cornerUv[3]>>1))&&((cornerUv[0]>>1)==(cornerUv[1]>>1));
+        boolean uAlongB=((cornerUv[0]>>1)!=(cornerUv[1]>>1))&&((cornerUv[2]>>1)!=(cornerUv[3]>>1))&&((cornerUv[0]>>1)==(cornerUv[2]>>1));
+        boolean vAlongA=((cornerUv[0]&1)!=(cornerUv[2]&1))&&((cornerUv[1]&1)!=(cornerUv[3]&1))&&((cornerUv[0]&1)==(cornerUv[1]&1));
+        boolean vAlongB=((cornerUv[0]&1)!=(cornerUv[1]&1))&&((cornerUv[2]&1)!=(cornerUv[3]&1))&&((cornerUv[0]&1)==(cornerUv[2]&1));
+        if(!(uAlongA^uAlongB)||!(vAlongA^vAlongB)||uAlongA==vAlongA)return null;
+
+        float ax=qd.p[3]-qd.p[0],ay=qd.p[4]-qd.p[1],az=qd.p[5]-qd.p[2];
+        float bx=qd.p[6]-qd.p[0],by=qd.p[7]-qd.p[1],bz=qd.p[8]-qd.p[2];
+        float nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+        float n=plane==0?nx:(plane==1?ny:nz); if(Math.abs(n)<1e-6f)return null;
+        int normal=n>0?1:-1;
+        String orient=cornerUv[0]+","+cornerUv[1]+","+cornerUv[2]+","+cornerUv[3];
+        GreedyFace f=new GreedyFace();f.quad=qd;f.planeAxis=plane;f.axisA=a;f.axisB=b;f.planeQ=q(qd.p[plane]);f.normalSign=normal;f.minA=minA;f.minB=minB;f.uAlongA=uAlongA;f.vAlongA=vAlongA;
+        f.groupKey=qd.texture+"|"+plane+"|"+f.planeQ+"|"+normal+"|"+orient;
+        return f;
+    }
+
+    private static QuadDef buildMergedQuad(GreedyFace f,int width,int height) {
+        float[] p=Arrays.copyOf(f.quad.p,12), uv=Arrays.copyOf(f.quad.uv,8);
+        float minA=f.minA,maxA=f.minA+width,minB=f.minB,maxB=f.minB+height;
+        float seedMinA=Float.MAX_VALUE,seedMaxA=-Float.MAX_VALUE,seedMinB=Float.MAX_VALUE,seedMaxB=-Float.MAX_VALUE;
+        for(int v=0;v<4;v++){seedMinA=Math.min(seedMinA,f.quad.p[v*3+f.axisA]);seedMaxA=Math.max(seedMaxA,f.quad.p[v*3+f.axisA]);seedMinB=Math.min(seedMinB,f.quad.p[v*3+f.axisB]);seedMaxB=Math.max(seedMaxB,f.quad.p[v*3+f.axisB]);}
+        float uRepeat=f.uAlongA?width:height, vRepeat=f.vAlongA?width:height;
+        for(int v=0;v<4;v++) {
+            int po=v*3,uo=v*2;
+            boolean highA=Math.abs(f.quad.p[po+f.axisA]-seedMaxA)<0.001f;
+            boolean highB=Math.abs(f.quad.p[po+f.axisB]-seedMaxB)<0.001f;
+            p[po+f.axisA]=highA?maxA:minA; p[po+f.axisB]=highB?maxB:minB;
+            uv[uo]=f.quad.uv[uo]>0.5f?uRepeat:0f; uv[uo+1]=f.quad.uv[uo+1]>0.5f?vRepeat:0f;
+        }
+        return new QuadDef(p,uv,f.quad.texture);
+    }
+
+    private static long greedyCellKey(int a,int b){return ((long)a<<32)^(b&0xffffffffL);}
+
+    private static PackedBlob packTiledMesh(MeshJson m) {
+        int vc=m.vertices.length/3;
+        if(vc<=0||vc>65535||(vc&3)!=0)throw new IllegalStateException("Tiled mesh vertex count is invalid");
+        int bytes=4+m.vertices.length*2+m.uv.length*2;
+        ByteBuffer b=ByteBuffer.allocate(bytes).order(ByteOrder.LITTLE_ENDIAN); b.putInt(vc);
+        for(float f:m.vertices)b.putShort(packPosition(f));
+        for(float f:m.uv)b.putShort(packTiledUv(f));
+        return packBinary(b.array(),"cnrmesh-q10-uvq10-quads-raw-v1","cnrmesh-q10-uvq10-quads-lz4-v1",0);
+    }
+
+    private static short packTiledUv(float value) {
+        int q=Math.round(value*PACKED_TILED_UV_SCALE);
+        if(q<Short.MIN_VALUE||q>Short.MAX_VALUE)throw new IllegalStateException("Tiled UV is outside q10 range: "+value);
+        return (short)q;
     }
 
     private static PackedBlob packMesh(MeshJson m) {
@@ -1099,7 +1249,8 @@ public final class CnrMapExporterClient implements ClientModInitializer {
     private static final class MapFile { String format,id,name,source; int version; float blockScale; float[] origin; AtlasJson atlas; List<ChunkJson> chunks; List<float[]> spawns,copSpawns,robberSpawns; }
     private static final class AtlasJson { int width,height; String pngBase64; List<AtlasEntry> entries; }
     private static final class AtlasEntry { String id; int x,y,w,h; }
-    private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; PackedBlob collisionBoxesPacked,bulletPassThroughBoxesPacked,climbableBoxesPacked,waterBoxesPacked; }
+    private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; List<TiledRenderGroup> opaqueTiled,cutoutTiled,transparentTiled; PackedBlob collisionBoxesPacked,bulletPassThroughBoxesPacked,climbableBoxesPacked,waterBoxesPacked; }
+    private static final class TiledRenderGroup { String texture; List<PackedBlob> packed; }
     private static final class PackedBlob { String encoding,dataBase64; int count,rawBytes; }
     private static final class MeshJson { float[] vertices,uv; int[] triangles; }
 }

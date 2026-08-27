@@ -77,6 +77,29 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 - Source: https://github.com/Jacqueb-1337/copsnrobbers
 - Issues: https://github.com/Jacqueb-1337/copsnrobbers/issues
 
+## Version 0.1.11
+
+**Version number:** `0.1.11`
+
+**Version title:** `CNR Map Exporter 0.1.11`
+
+**Version type:** Beta
+
+**Game version:** 1.21.1
+
+**Loader:** Fabric
+
+**Primary file:** `cnrmapexporter-0.1.11.jar`
+
+**Required dependency:** Fabric API
+
+**Changelog:**
+
+- Export format v4 now greedily merges compatible 1x1 coplanar block faces into larger tiled quads while preserving the original Minecraft texture repeat rate.
+- Large flat floors, walls, and ceilings can collapse from thousands of quads to only a handful, reducing map file size, decoded geometry, and render triangle count.
+- Irregular/non-cube geometry is only merged when the resulting surface is exactly equivalent; otherwise it remains unchanged.
+- Existing water face culling, packed collision, climbables, barriers, biome tinting, and water gameplay metadata remain supported.
+
 ## Version 0.1.10
 
 **Version number:** `0.1.10`
@@ -157,7 +180,7 @@ Modrinth currently prohibits AI-generated or AI-assisted project icons. Use the 
 
 ## Before submitting for review
 
-- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.10.jar`.
+- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.11.jar`.
 - Mark Fabric API as a required dependency.
 - Set client environment to required and server environment to unsupported.
 - Add the project icon.
