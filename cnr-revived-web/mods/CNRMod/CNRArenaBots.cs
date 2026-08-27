@@ -93,6 +93,7 @@ namespace CNRMods
         private const float BOT_VISION_HALF_ANGLE = 55f;
         private const float BOT_WALK_SPEED = 6.0f;
         private const float BOT_RUN_SPEED = 9.0f;
+        private const float BOT_SWIM_SPEED = 4.5f;
         private const float WANDER_SPEED = BOT_WALK_SPEED;
         private const float NAV_REPATH_INTERVAL = 1.0f;
         private const float NAV_FAILED_REPATH_DELAY = 0.85f;
@@ -1057,6 +1058,9 @@ namespace CNRMods
             // virtual bot simulation so corners, stairs and avoidance transitions are
             // smooth even though the authority is PlayerInfo-based.
             float requestedSpeed = amount / THINK_INTERVAL;
+            float currentWaterSurface;
+            if (CNRMinecraftWaterRegistry.TryGetSurface(bot.Position, out currentWaterSurface) && currentWaterSurface > bot.Position.y - 0.20f)
+                requestedSpeed = Mathf.Min(requestedSpeed, BOT_SWIM_SPEED);
             Vector3 desiredVelocity = desired * requestedSpeed;
             bot.MoveVelocity = Vector3.MoveTowards(bot.MoveVelocity, desiredVelocity, BOT_ACCELERATION * THINK_INTERVAL);
             Vector3 move = bot.MoveVelocity;
@@ -1116,10 +1120,25 @@ namespace CNRMods
                 }
 
                 bot.NavBlockedSteps = 0;
-                float dy = navCell.y - currentGroundY;
-                float maxUp = NAV_CLIMB_RATE * THINK_INTERVAL;
-                float maxDown = NAV_DESCEND_RATE * THINK_INTERVAL;
-                next.y = bot.Position.y + Mathf.Clamp(dy, -maxDown, maxUp);
+                float waterSurface;
+                bool swimming = CNRMinecraftWaterRegistry.TryGetSurface(
+                    new Vector3(next.x, currentGroundY + 0.25f, next.z), out waterSurface) &&
+                    waterSurface - currentGroundY >= 0.75f;
+                if (swimming)
+                {
+                    // Virtual PlayerInfo uses a body/root position above the feet. Ride just
+                    // under the fluid surface so remote clients see a believable swimming
+                    // height instead of the bot walking along the pool floor.
+                    float swimBodyY = waterSurface - 0.30f;
+                    next.y = Mathf.MoveTowards(bot.Position.y, swimBodyY, 3.5f * THINK_INTERVAL);
+                }
+                else
+                {
+                    float dy = navCell.y - currentGroundY;
+                    float maxUp = NAV_CLIMB_RATE * THINK_INTERVAL;
+                    float maxDown = NAV_DESCEND_RATE * THINK_INTERVAL;
+                    next.y = bot.Position.y + Mathf.Clamp(dy, -maxDown, maxUp);
+                }
             }
             else
             {

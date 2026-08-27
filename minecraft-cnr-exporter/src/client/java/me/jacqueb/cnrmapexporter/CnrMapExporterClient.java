@@ -653,6 +653,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             float height = fluid.getHeight(view, worldPos);
             if (height <= 0.001f || height > 1f) height = 1f;
             float y1 = y0 + height;
+            if (water) chunk.water.addBox(x0, y0, z0, x1, y1, z1);
 
             RenderBuilder target = chunk.transparent;
             if (!sameFluidKind(view.getFluidState(worldPos.above()), water, lava))
@@ -895,10 +896,10 @@ public final class CnrMapExporterClient implements ClientModInitializer {
         void addBox(float x0,float y0,float z0,float x1,float y1,float z1){ if(x1>x0&&y1>y0&&z1>z0) boxes.add(new float[]{x0,y0,z0,x1,y1,z1}); }
     }
     private static final class ChunkBuilder {
-        final ChunkKey key; final RenderBuilder opaque=new RenderBuilder(),cutout=new RenderBuilder(),transparent=new RenderBuilder(); final CollisionBuilder collision=new CollisionBuilder(),bulletPassThrough=new CollisionBuilder(),climbable=new CollisionBuilder();
+        final ChunkKey key; final RenderBuilder opaque=new RenderBuilder(),cutout=new RenderBuilder(),transparent=new RenderBuilder(); final CollisionBuilder collision=new CollisionBuilder(),bulletPassThrough=new CollisionBuilder(),climbable=new CollisionBuilder(),water=new CollisionBuilder();
         ChunkBuilder(ChunkKey key){this.key=key;}
         RenderBuilder render(String s){return s.equals("transparent")?transparent:s.equals("cutout")?cutout:opaque;}
-        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaquePacked=packRender(opaque,atlas);j.cutoutPacked=packRender(cutout,atlas);j.transparentPacked=packRender(transparent,atlas);j.collisionBoxesPacked=packBoxes(collision);j.bulletPassThroughBoxesPacked=packBoxes(bulletPassThrough);j.climbableBoxesPacked=packBoxes(climbable);return j; }
+        ChunkJson toJson(Atlas atlas){ ChunkJson j=new ChunkJson();j.x=key.x;j.y=key.y;j.z=key.z;j.opaquePacked=packRender(opaque,atlas);j.cutoutPacked=packRender(cutout,atlas);j.transparentPacked=packRender(transparent,atlas);j.collisionBoxesPacked=packBoxes(collision);j.bulletPassThroughBoxesPacked=packBoxes(bulletPassThrough);j.climbableBoxesPacked=packBoxes(climbable);j.waterBoxesPacked=packBoxes(water);return j; }
     }
 
     private static List<MeshJson> meshRender(RenderBuilder src, Atlas atlas) {
@@ -1076,7 +1077,7 @@ public final class CnrMapExporterClient implements ClientModInitializer {
     private static final class MapFile { String format,id,name,source; int version; float blockScale; float[] origin; AtlasJson atlas; List<ChunkJson> chunks; List<float[]> spawns,copSpawns,robberSpawns; }
     private static final class AtlasJson { int width,height; String pngBase64; List<AtlasEntry> entries; }
     private static final class AtlasEntry { String id; int x,y,w,h; }
-    private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; PackedBlob collisionBoxesPacked,bulletPassThroughBoxesPacked,climbableBoxesPacked; }
+    private static final class ChunkJson { int x,y,z; List<PackedBlob> opaquePacked,cutoutPacked,transparentPacked; PackedBlob collisionBoxesPacked,bulletPassThroughBoxesPacked,climbableBoxesPacked,waterBoxesPacked; }
     private static final class PackedBlob { String encoding,dataBase64; int count,rawBytes; }
     private static final class MeshJson { float[] vertices,uv; int[] triangles; }
 }

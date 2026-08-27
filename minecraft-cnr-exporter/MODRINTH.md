@@ -77,11 +77,11 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 - Source: https://github.com/Jacqueb-1337/copsnrobbers
 - Issues: https://github.com/Jacqueb-1337/copsnrobbers/issues
 
-## Version 0.1.7
+## Version 0.1.8
 
-**Version number:** `0.1.7`
+**Version number:** `0.1.8`
 
-**Version title:** `CNR Map Exporter 0.1.7`
+**Version title:** `CNR Map Exporter 0.1.8`
 
 **Version type:** Beta
 
@@ -89,17 +89,16 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 
 **Loader:** Fabric
 
-**Primary file:** `cnrmapexporter-0.1.7.jar`
+**Primary file:** `cnrmapexporter-0.1.8.jar`
 
 **Required dependency:** Fabric API
 
 **Changelog:**
 
-- Added exported water and lava geometry instead of silently dropping Minecraft fluids.
-- Water now uses the source biome's Minecraft water tint; a vanilla default color is used only when biome tint data is unavailable.
-- Biome-tinted grass, foliage, leaves, vines, and ferns now resolve against the captured biome-aware export snapshot.
-- Added vanilla Minecraft fallback tint colors when an export cannot supply a resolved tint.
-- Existing collision, climbables, barriers, packed LZ4 geometry, team spawn markers, and incremental export behavior remain unchanged.
+- Water now exports compact gameplay volumes in addition to its transparent render geometry.
+- Adjacent water blocks are merged before packing, avoiding thousands of runtime water objects on large maps.
+- CNR can use the exported volumes for classic upright swimming, surface bobbing, and water-aware AI navigation.
+- Existing biome water tint, vegetation tint fallback, collision, climbables, barriers, packed LZ4 geometry, and incremental export behavior remain unchanged.
 
 ## Icon
 
@@ -115,7 +114,7 @@ Modrinth currently prohibits AI-generated or AI-assisted project icons. Use the 
 
 ## Before submitting for review
 
-- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.7.jar`.
+- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.8.jar`.
 - Mark Fabric API as a required dependency.
 - Set client environment to required and server environment to unsupported.
 - Add the project icon.

@@ -57,12 +57,14 @@ namespace CNRMods
         [NonSerialized] public float[][] decodedCollisionBoxes;
         [NonSerialized] public float[][] decodedBulletPassThroughBoxes;
         [NonSerialized] public float[][] decodedClimbableBoxes;
+        [NonSerialized] public float[][] decodedWaterBoxes;
         public CNRDLCPackedBlob[] opaquePacked = new CNRDLCPackedBlob[0];
         public CNRDLCPackedBlob[] cutoutPacked = new CNRDLCPackedBlob[0];
         public CNRDLCPackedBlob[] transparentPacked = new CNRDLCPackedBlob[0];
         public CNRDLCPackedBlob collisionBoxesPacked;
         public CNRDLCPackedBlob bulletPassThroughBoxesPacked;
         public CNRDLCPackedBlob climbableBoxesPacked;
+        public CNRDLCPackedBlob waterBoxesPacked;
     }
 
     [Serializable]
@@ -106,11 +108,11 @@ namespace CNRMods
             for (int m = 0; m < mine.Length; m++)
             {
                 Collider projectileCollider = mine[m];
-                if (projectileCollider == null) continue;
+                if (projectileCollider == null || !projectileCollider.enabled || !projectileCollider.gameObject.activeInHierarchy) continue;
                 for (int b = 0; b < barriers.Count; b++)
                 {
                     Collider barrier = barriers[b];
-                    if (barrier == null) continue;
+                    if (barrier == null || !barrier.enabled || !barrier.gameObject.activeInHierarchy) continue;
                     try { Physics.IgnoreCollision(projectileCollider, barrier); }
                     catch { }
                 }
@@ -129,7 +131,8 @@ namespace CNRMods
         private static readonly List<Collider> _barriers = new List<Collider>();
         private static CNRDLCProjectilePassThrough _activeOwner;
 
-        private int _nextScanFrame;
+        private float _nextLiveProjectileScanAt;
+        private bool _projectilePrefabsConfigured;
         private Type _weaponScriptType;
         private Type _weaponSyncType;
         private Type _projectileType;
@@ -161,15 +164,16 @@ namespace CNRMods
         void Start()
         {
             ConfigurePlayerCollision();
-            ConfigureProjectiles();
+            ConfigureProjectilePrefabs();
+            ConfigureLiveProjectiles();
+            _nextLiveProjectileScanAt = Time.time + 2.0f;
         }
 
         void Update()
         {
-            if (Time.frameCount < _nextScanFrame) return;
-            _nextScanFrame = Time.frameCount + 15;
-            ConfigurePlayerCollision();
-            ConfigureProjectiles();
+            if (Time.time < _nextLiveProjectileScanAt) return;
+            _nextLiveProjectileScanAt = Time.time + 2.0f;
+            ConfigureLiveProjectiles();
         }
 
         void OnDestroy()
@@ -206,8 +210,9 @@ namespace CNRMods
             catch (Exception ex) { ModEntry.Log("DLCMap barrier/player collision warning: " + ex.Message); }
         }
 
-        private void ConfigureProjectiles()
+        private void ConfigureProjectilePrefabs()
         {
+            if (_projectilePrefabsConfigured) return;
             try
             {
                 if (_weaponScriptType == null) _weaponScriptType = ResolveGameType("WeaponScript");
@@ -254,27 +259,39 @@ namespace CNRMods
                     }
                 }
 
-                // Fallback for projectiles already alive before their weapon prefab
-                // was discovered. Their native layer/tag/damage behavior is preserved.
-                if (_projectileType != null)
+                _projectilePrefabsConfigured = true;
+            }
+            catch (Exception ex) { ModEntry.Log("DLCMap projectile/barrier prefab scan warning: " + ex.Message); }
+        }
+
+        private void ConfigureLiveProjectiles()
+        {
+            try
+            {
+                if (_projectileType == null) _projectileType = ResolveGameType("Projectile");
+                if (_projectileType == null) return;
+
+                // Very sparse safety fallback. Normal spawned projectiles inherit the
+                // ignore component from their prefab, so there is no reason to rescan
+                // every few frames.
+                UnityEngine.Object[] live = FindObjectsOfType(_projectileType);
+                for (int i = 0; i < live.Length; i++)
                 {
-                    UnityEngine.Object[] live = FindObjectsOfType(_projectileType);
-                    for (int i = 0; i < live.Length; i++)
-                    {
-                        Component c = live[i] as Component;
-                        if (c != null) EnsureProjectileIgnore(c.gameObject);
-                    }
+                    Component c = live[i] as Component;
+                    if (c != null) EnsureProjectileIgnore(c.gameObject);
                 }
             }
-            catch (Exception ex) { ModEntry.Log("DLCMap projectile/barrier scan warning: " + ex.Message); }
+            catch (Exception ex) { ModEntry.Log("DLCMap live projectile/barrier scan warning: " + ex.Message); }
         }
 
         private static void EnsureProjectileIgnore(GameObject go)
         {
             if (go == null) return;
             CNRDLCProjectileBarrierIgnore ignore = go.GetComponent<CNRDLCProjectileBarrierIgnore>();
-            if (ignore == null) ignore = go.AddComponent<CNRDLCProjectileBarrierIgnore>();
-            if (ignore != null) ignore.ApplyNow();
+            if (ignore != null) return;
+
+            ignore = go.AddComponent<CNRDLCProjectileBarrierIgnore>();
+            if (ignore != null && go.activeInHierarchy) ignore.ApplyNow();
         }
     }
 
@@ -303,6 +320,8 @@ namespace CNRMods
         private GameObject _jumpButton;
         private Camera _jumpUiCamera;
         private int _contactLogBudget = 8;
+
+        internal bool IsClimbing { get { return _wasOnClimbable; } }
 
         void Awake()
         {
@@ -615,6 +634,395 @@ namespace CNRMods
         }
     }
 
+    internal static class CNRMinecraftWaterRegistry
+    {
+        private const float BucketSize = 16f;
+        private static readonly Dictionary<long, List<Bounds>> _buckets = new Dictionary<long, List<Bounds>>();
+        private static int _volumeCount;
+
+        internal static int VolumeCount { get { return _volumeCount; } }
+
+        internal static void Clear()
+        {
+            _buckets.Clear();
+            _volumeCount = 0;
+        }
+
+        internal static void Register(Bounds bounds)
+        {
+            if (bounds.size.x <= 0f || bounds.size.y <= 0f || bounds.size.z <= 0f) return;
+
+            int minX = Mathf.FloorToInt((bounds.min.x - 0.001f) / BucketSize);
+            int maxX = Mathf.FloorToInt((bounds.max.x + 0.001f) / BucketSize);
+            int minZ = Mathf.FloorToInt((bounds.min.z - 0.001f) / BucketSize);
+            int maxZ = Mathf.FloorToInt((bounds.max.z + 0.001f) / BucketSize);
+            for (int x = minX; x <= maxX; x++)
+            {
+                for (int z = minZ; z <= maxZ; z++)
+                {
+                    long key = BucketKey(x, z);
+                    List<Bounds> list;
+                    if (!_buckets.TryGetValue(key, out list))
+                    {
+                        list = new List<Bounds>();
+                        _buckets[key] = list;
+                    }
+                    list.Add(bounds);
+                }
+            }
+            _volumeCount++;
+        }
+
+        internal static bool TryGetSurface(Vector3 point, out float surfaceY)
+        {
+            surfaceY = float.MinValue;
+            List<Bounds> list;
+            if (!_buckets.TryGetValue(BucketKeyFor(point.x, point.z), out list)) return false;
+
+            const float edgeSlop = 0.04f;
+            bool found = false;
+            for (int i = 0; i < list.Count; i++)
+            {
+                Bounds b = list[i];
+                if (point.x < b.min.x - edgeSlop || point.x > b.max.x + edgeSlop ||
+                    point.z < b.min.z - edgeSlop || point.z > b.max.z + edgeSlop) continue;
+                // Keep stacked pools/fountains independent: only consider water near the
+                // supplied vertical position rather than blindly selecting the highest
+                // water column sharing this X/Z coordinate.
+                if (point.y < b.min.y - 0.50f || point.y > b.max.y + 1.50f) continue;
+                if (!found || b.max.y > surfaceY) surfaceY = b.max.y;
+                found = true;
+            }
+            return found;
+        }
+
+        internal static bool HasWaterAbove(Vector3 groundPoint, float minimumDepth)
+        {
+            List<Bounds> list;
+            if (!_buckets.TryGetValue(BucketKeyFor(groundPoint.x, groundPoint.z), out list)) return false;
+
+            const float edgeSlop = 0.04f;
+            for (int i = 0; i < list.Count; i++)
+            {
+                Bounds b = list[i];
+                if (groundPoint.x < b.min.x - edgeSlop || groundPoint.x > b.max.x + edgeSlop ||
+                    groundPoint.z < b.min.z - edgeSlop || groundPoint.z > b.max.z + edgeSlop) continue;
+                if (b.min.y > groundPoint.y + 0.50f) continue;
+                if (b.max.y - groundPoint.y >= minimumDepth) return true;
+            }
+            return false;
+        }
+
+        private static long BucketKeyFor(float x, float z)
+        {
+            return BucketKey(Mathf.FloorToInt(x / BucketSize), Mathf.FloorToInt(z / BucketSize));
+        }
+
+        private static long BucketKey(int x, int z)
+        {
+            unchecked { return ((long)x << 32) ^ (uint)z; }
+        }
+    }
+
+    internal class CNRMinecraftWaterController : MonoBehaviour
+    {
+        // Classic/pre-1.13 Minecraft feel: upright player, strong water slowdown,
+        // neutral surface bobbing, and holding Jump swims upward until the player
+        // breaks the surface. No modern crawl/swim pose or diving state.
+        private const float HorizontalSpeedRatio = 0.51f;
+        private const float SwimSubmersionThreshold = 0.30f;
+        private const float MaxSinkSpeed = 0.55f;
+        private const float MaxRiseSpeed = 1.85f;
+        private const float NeutralSubmersion = 0.72f;
+        private const float BobSubmersionAmplitude = 0.025f;
+        private const float BobFrequency = 2.2f;
+        private const float SinkResponse = 3.5f;
+        private const float RiseResponse = 7.5f;
+
+        private static bool _localPlayerInWater;
+        internal static float LocalHorizontalSpeedMultiplier
+        {
+            get { return _localPlayerInWater ? HorizontalSpeedRatio : 1f; }
+        }
+
+        internal float blockScale = 1f;
+
+        private readonly HashSet<int> _jumpTouchIds = new HashSet<int>();
+        private CharacterController _controller;
+        private FPScontroller _fps;
+        private CNRMinecraftLadderController _ladder;
+        private Vector3 _lastPosition;
+        private bool _hasLastPosition;
+        private bool _wasSwimming;
+        private float _verticalSpeed;
+        private float _jumpHeldUntil;
+        private GameObject _jumpButton;
+        private Camera _jumpUiCamera;
+
+        void Awake()
+        {
+            CacheComponents();
+            _lastPosition = transform.position;
+            _hasLastPosition = true;
+        }
+
+        void OnEnable()
+        {
+            _jumpTouchIds.Clear();
+            _lastPosition = transform.position;
+            _hasLastPosition = true;
+            _wasSwimming = false;
+            _verticalSpeed = 0f;
+            _jumpHeldUntil = -1f;
+            _jumpButton = null;
+            _jumpUiCamera = null;
+            _localPlayerInWater = false;
+        }
+
+        void OnDisable()
+        {
+            _jumpTouchIds.Clear();
+            RestoreNormalGravity();
+            _wasSwimming = false;
+            _localPlayerInWater = false;
+        }
+
+        internal void ResetForMap(float scale)
+        {
+            blockScale = scale > 0f ? scale : 1f;
+            _jumpTouchIds.Clear();
+            _lastPosition = transform.position;
+            _hasLastPosition = true;
+            _wasSwimming = false;
+            _verticalSpeed = 0f;
+            _jumpHeldUntil = -1f;
+            _jumpButton = null;
+            _jumpUiCamera = null;
+            _localPlayerInWater = false;
+            RestoreNormalGravity();
+        }
+
+        void LateUpdate()
+        {
+            CacheComponents();
+            Vector3 now = transform.position;
+            if (!_hasLastPosition)
+            {
+                _lastPosition = now;
+                _hasLastPosition = true;
+                return;
+            }
+
+            float surfaceY;
+            if (_controller == null || !TryGetWaterSurface(out surfaceY))
+            {
+                LeaveWater(now);
+                return;
+            }
+
+            Bounds body = _controller.bounds;
+            float bodyHeight = Mathf.Max(body.size.y, 0.1f);
+            float submersion = Mathf.Clamp01((surfaceY - body.min.y) / bodyHeight);
+            _localPlayerInWater = submersion > 0.05f;
+
+            // Let the ladder controller own movement when a water volume surrounds a
+            // ladder. The water slowdown remains, but the two vertical controllers do
+            // not fight over the player's Y movement.
+            if ((_ladder != null && _ladder.IsClimbing) || submersion < SwimSubmersionThreshold)
+            {
+                if (_wasSwimming) RestoreNormalGravity();
+                _wasSwimming = false;
+                _lastPosition = now;
+                return;
+            }
+
+            float scale = blockScale > 0f ? blockScale : 1f;
+            float dt = Mathf.Max(Time.deltaTime, 0.0001f);
+
+            if (!_wasSwimming)
+            {
+                _verticalSpeed = (_fps != null && _fps.movement != null) ? _fps.movement.velocity.y : 0f;
+                _verticalSpeed = Mathf.Clamp(_verticalSpeed, -MaxSinkSpeed * scale, MaxRiseSpeed * scale);
+            }
+
+            bool jumpHeld = DetectJumpIntent();
+            float targetVertical;
+            if (jumpHeld)
+            {
+                targetVertical = MaxRiseSpeed * scale;
+            }
+            else
+            {
+                // Old-style upright swimming: settle naturally near the surface rather
+                // than sinking to the bottom. A tiny moving equilibrium gives the familiar
+                // Minecraft-ish idle bob without introducing a modern crawl/swim state.
+                float targetSubmersion = NeutralSubmersion + Mathf.Sin(Time.time * BobFrequency) * BobSubmersionAmplitude;
+                float surfaceError = submersion - targetSubmersion;
+                targetVertical = Mathf.Clamp(surfaceError * 2.2f * scale, -MaxSinkSpeed * scale, MaxSinkSpeed * scale);
+            }
+            float response = (jumpHeld ? RiseResponse : SinkResponse) * scale;
+            _verticalSpeed = Mathf.MoveTowards(_verticalSpeed, targetVertical, response * dt);
+
+            if (_fps != null)
+            {
+                _fps.grounded = false;
+                if (_fps.movement != null)
+                {
+                    _fps.movement.enableGravity = false;
+                    Vector3 velocity = _fps.movement.velocity;
+                    velocity.y = _verticalSpeed;
+                    _fps.movement.velocity = velocity;
+                }
+            }
+
+            // Vanilla CNR/legacy input already moved the CharacterController earlier in
+            // the frame. Replace only the resulting vertical delta with our water delta.
+            // This keeps horizontal collision/steering from the normal controller while
+            // removing its gravity/jump arc inside sufficiently deep water.
+            Vector3 rawDelta = now - _lastPosition;
+            float teleportGuard = Mathf.Max(4f * scale, 4f);
+            if (rawDelta.sqrMagnitude <= teleportGuard * teleportGuard && _controller.enabled)
+            {
+                float wantedY = _verticalSpeed * dt;
+                float correctionY = wantedY - rawDelta.y;
+                if (Mathf.Abs(correctionY) > 0.00001f)
+                    _controller.Move(new Vector3(0f, correctionY, 0f));
+            }
+
+            _wasSwimming = true;
+            _lastPosition = transform.position;
+        }
+
+        private void LeaveWater(Vector3 now)
+        {
+            _jumpTouchIds.Clear();
+            _localPlayerInWater = false;
+            if (_wasSwimming)
+            {
+                RestoreNormalGravity();
+                if (_fps != null && _fps.movement != null)
+                {
+                    Vector3 velocity = _fps.movement.velocity;
+                    velocity.y = _verticalSpeed;
+                    _fps.movement.velocity = velocity;
+                }
+            }
+            _wasSwimming = false;
+            _lastPosition = now;
+        }
+
+        private bool DetectJumpIntent()
+        {
+            bool held = _fps != null && _fps.inputJump;
+            try { if (Input.GetButton("Jump")) held = true; }
+            catch { }
+            if (DetectHudJumpTouch()) held = true;
+
+            try
+            {
+                if (PlayerPrefs.GetInt("OnJump", 0) == 1)
+                {
+                    _jumpHeldUntil = Time.time + 0.16f;
+                    PlayerPrefs.SetInt("OnJump", 0);
+                }
+            }
+            catch { }
+
+            if (held) _jumpHeldUntil = Time.time + 0.12f;
+            return held || Time.time <= _jumpHeldUntil;
+        }
+
+        private bool DetectHudJumpTouch()
+        {
+            try
+            {
+                CacheJumpUi();
+                if (_jumpButton == null || _jumpUiCamera == null) return false;
+
+                bool held = false;
+                for (int i = 0; i < Input.touchCount; i++)
+                {
+                    Touch touch = Input.GetTouch(i);
+                    if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+                    {
+                        _jumpTouchIds.Remove(touch.fingerId);
+                        continue;
+                    }
+                    if (_jumpTouchIds.Contains(touch.fingerId))
+                    {
+                        held = true;
+                        continue;
+                    }
+                    if (touch.phase != TouchPhase.Began) continue;
+
+                    Ray ray = _jumpUiCamera.ScreenPointToRay(touch.position);
+                    RaycastHit hit;
+                    if (!Physics.Raycast(ray, out hit, 100f) || hit.collider == null) continue;
+                    Transform t = hit.collider.transform;
+                    Transform jump = _jumpButton.transform;
+                    while (t != null)
+                    {
+                        if (t == jump)
+                        {
+                            _jumpTouchIds.Add(touch.fingerId);
+                            held = true;
+                            break;
+                        }
+                        t = t.parent;
+                    }
+                }
+                return held;
+            }
+            catch { return false; }
+        }
+
+        private void CacheJumpUi()
+        {
+            if (_jumpButton == null)
+            {
+                _jumpButton = GameObject.Find("Image Button(Jump)");
+                if (_jumpButton == null) _jumpButton = GameObject.Find("Button(Jump)");
+            }
+            if (_jumpUiCamera != null || _jumpButton == null) return;
+
+            UICamera[] uiCameras = (UICamera[])UnityEngine.Object.FindObjectsOfType(typeof(UICamera));
+            Camera fallback = null;
+            for (int i = 0; i < uiCameras.Length; i++)
+            {
+                if (uiCameras[i] == null) continue;
+                Camera cam = uiCameras[i].GetComponent<Camera>();
+                if (cam == null) continue;
+                if (fallback == null) fallback = cam;
+                if ((cam.cullingMask & (1 << _jumpButton.layer)) != 0)
+                {
+                    _jumpUiCamera = cam;
+                    return;
+                }
+            }
+            _jumpUiCamera = fallback;
+        }
+
+        private void CacheComponents()
+        {
+            if (_controller == null) _controller = GetComponent<CharacterController>();
+            if (_fps == null) _fps = GetComponent<FPScontroller>();
+            if (_ladder == null) _ladder = GetComponent<CNRMinecraftLadderController>();
+        }
+
+        private bool TryGetWaterSurface(out float surfaceY)
+        {
+            surfaceY = float.MinValue;
+            if (_controller == null) return false;
+            return CNRMinecraftWaterRegistry.TryGetSurface(_controller.bounds.center, out surfaceY);
+        }
+
+        private void RestoreNormalGravity()
+        {
+            if (_fps != null && _fps.movement != null) _fps.movement.enableGravity = true;
+        }
+
+    }
+
     internal class CNRDLCMapLoader : MonoBehaviour
     {
         internal const string Format = "cnr-dlc-map";
@@ -719,6 +1127,7 @@ namespace CNRMods
             _prepared = null;
             _preparedAtlasPng = null;
             _preparedPath = "";
+            CNRMinecraftWaterRegistry.Clear();
             try
             {
                 PlayerPrefs.DeleteKey(PrefActive);
@@ -832,6 +1241,8 @@ namespace CNRMods
                 chunk.decodedBulletPassThroughBoxes = decodedBoxes;
                 if (!DecodeCollisionBoxes(chunk.climbableBoxesPacked, out decodedBoxes, out reason)) return false;
                 chunk.decodedClimbableBoxes = decodedBoxes;
+                if (!DecodeCollisionBoxes(chunk.waterBoxesPacked, out decodedBoxes, out reason)) return false;
+                chunk.decodedWaterBoxes = decodedBoxes;
                 chunk.collision = new CNRDLCMeshData[0];
             }
             return true;
@@ -859,6 +1270,7 @@ namespace CNRMods
                     MirrorBoxesZ(chunk.decodedCollisionBoxes);
                     MirrorBoxesZ(chunk.decodedBulletPassThroughBoxes);
                     MirrorBoxesZ(chunk.decodedClimbableBoxes);
+                    MirrorBoxesZ(chunk.decodedWaterBoxes);
                 }
             }
 
@@ -1329,6 +1741,13 @@ namespace CNRMods
                 minecraftLadder.ResetForMap(_prepared.blockScale);
                 if (addedMinecraftLadder)
                     ModEntry.Log("DLCMap: attached Minecraft-style climbable controller to local player");
+
+                CNRMinecraftWaterController swimming = player.GetComponent<CNRMinecraftWaterController>();
+                bool addedSwimming = swimming == null;
+                if (swimming == null) swimming = player.AddComponent<CNRMinecraftWaterController>();
+                swimming.ResetForMap(_prepared.blockScale);
+                if (addedSwimming)
+                    ModEntry.Log("DLCMap: attached Minecraft-style swimming controller to local player");
             }
             if (cc != null) cc.enabled = false;
 
@@ -1345,6 +1764,7 @@ namespace CNRMods
                 _atlasTexture.wrapMode = TextureWrapMode.Clamp;
 
                 BuildMaterials();
+                CNRMinecraftWaterRegistry.Clear();
                 _mapRoot = new GameObject("CNRDLCMapRoot");
                 _mapRoot.transform.position = OriginVector(_prepared.origin);
                 _mapRoot.AddComponent<CNRDLCProjectilePassThrough>();
@@ -1354,6 +1774,7 @@ namespace CNRMods
                 int collisionParts = 0;
                 int bulletPassThroughParts = 0;
                 int climbableParts = 0;
+                int waterParts = 0;
                 for (int i = 0; i < _prepared.chunks.Length; i++)
                 {
                     CNRDLCMapChunk chunk = _prepared.chunks[i];
@@ -1375,17 +1796,24 @@ namespace CNRMods
                         bulletPassThroughParts += BuildBulletPassThroughBoxes(chunkRoot, chunk.decodedBulletPassThroughBoxes);
                     if (chunk.decodedClimbableBoxes != null && chunk.decodedClimbableBoxes.Length > 0)
                         climbableParts += BuildClimbableBoxes(chunkRoot, chunk.decodedClimbableBoxes);
+                    if (chunk.decodedWaterBoxes != null && chunk.decodedWaterBoxes.Length > 0)
+                        waterParts += BuildWaterBoxes(chunkRoot, chunk.decodedWaterBoxes);
 
                     // Chunked meshes keep creation bounded; construction stays synchronous here
                     // because this legacy C# compiler cannot yield inside a try/catch body.
                 }
+
+                // Water volumes change the path cost map. Invalidate any nav grid that may
+                // have baked before the DLC scene finished so the next bot/zombie bake sees
+                // the merged water volumes exactly once.
+                if (waterParts > 0) CNRZombieMod.ZombieNavGrid.Invalidate();
 
                 // Keep donor collision alive until the DLC collision is complete. If the
                 // custom build fails, the bootstrap scene remains a safe fallback instead of
                 // dropping the player into an empty world.
                 StripBootstrapGeometry();
 
-                ModEntry.Log("DLCMap built: chunks=" + _prepared.chunks.Length + " renderParts=" + renderParts + " collisionParts=" + collisionParts + " bulletPassThrough=" + bulletPassThroughParts + " climbables=" + climbableParts);
+                ModEntry.Log("DLCMap built: chunks=" + _prepared.chunks.Length + " renderParts=" + renderParts + " collisionParts=" + collisionParts + " bulletPassThrough=" + bulletPassThroughParts + " climbables=" + climbableParts + " waterVolumes=" + waterParts);
             }
             catch (Exception ex)
             {
@@ -1668,6 +2096,32 @@ namespace CNRMods
                 trigger.size = new Vector3(sx, sy, sz);
                 trigger.isTrigger = true;
                 go.AddComponent<CNRMinecraftClimbableVolume>();
+                made++;
+            }
+            return made;
+        }
+
+        private static int BuildWaterBoxes(GameObject parent, float[][] boxes)
+        {
+            if (parent == null || boxes == null || boxes.Length == 0) return 0;
+
+            // Water is gameplay metadata, not solid physics. Register the exporter's
+            // already-merged bounds directly instead of creating trigger colliders. This
+            // keeps large pools essentially free in PhysX and gives players/bots/nav the
+            // same fast spatial lookup.
+            Vector3 scale = parent.transform.lossyScale;
+            int made = 0;
+            for (int i = 0; i < boxes.Length; i++)
+            {
+                float[] b = boxes[i];
+                if (b == null || b.Length < 6) continue;
+                float sx = b[3] - b[0], sy = b[4] - b[1], sz = b[5] - b[2];
+                if (sx <= 0f || sy <= 0f || sz <= 0f) continue;
+
+                Vector3 localCenter = new Vector3((b[0] + b[3]) * 0.5f, (b[1] + b[4]) * 0.5f, (b[2] + b[5]) * 0.5f);
+                Vector3 worldCenter = parent.transform.TransformPoint(localCenter);
+                Vector3 worldSize = new Vector3(Mathf.Abs(sx * scale.x), Mathf.Abs(sy * scale.y), Mathf.Abs(sz * scale.z));
+                CNRMinecraftWaterRegistry.Register(new Bounds(worldCenter, worldSize));
                 made++;
             }
             return made;

@@ -6731,12 +6731,14 @@ namespace CNRZombieMod
         private const float MAX_LINK_SLOPE = 0.9f;
         private const float PARTIAL_REACH_CELLS = 6.0f;
         private const float ENDPOINT_HEIGHT_TOLERANCE = 1.45f;
+        private const float WATER_TRAVERSAL_COST = 3.0f;
 
         private static bool _ready;
         private static int _walkableCount;
         private static float _minX;
         private static float _minZ;
         private static readonly byte[] _walk = new byte[N * N];
+        private static readonly byte[] _water = new byte[N * N];
         private static readonly float[] _height = new float[N * N];
         private static readonly float[] _g = new float[N * N];
         private static readonly int[] _parent = new int[N * N];
@@ -6746,6 +6748,11 @@ namespace CNRZombieMod
 
         public static bool Ready { get { return _ready; } }
         public static int WalkableCount { get { return _walkableCount; } }
+
+        public static void Invalidate()
+        {
+            _ready = false;
+        }
 
         public static bool TrySnapToWalkable(Vector3 pos, int maxR, out Vector3 world)
         {
@@ -6784,9 +6791,10 @@ namespace CNRZombieMod
             _minX = center.x - HALF;
             _minZ = center.z - HALF;
             Array.Clear(_walk, 0, _walk.Length);
+            Array.Clear(_water, 0, _water.Length);
             Array.Clear(_height, 0, _height.Length);
 
-            int walk = 0, blocked = 0, noGround = 0;
+            int walk = 0, blocked = 0, noGround = 0, water = 0;
             for (int z = 0; z < N; z++)
             {
                 for (int x = 0; x < N; x++)
@@ -6805,6 +6813,11 @@ namespace CNRZombieMod
                         continue;
                     }
                     _walk[idx] = 1;
+                    if (CNRMods.CNRMinecraftWaterRegistry.HasWaterAbove(hit.point, 0.35f))
+                    {
+                        _water[idx] = 1;
+                        water++;
+                    }
                     walk++;
                 }
             }
@@ -6812,7 +6825,7 @@ namespace CNRZombieMod
             _walkableCount = walk;
             _ready = walk > 0;
             ZombieModEntry.Log("ZombieNavGrid: baked walk=" + walk + " blocked=" + blocked +
-                " noGround=" + noGround + " cell=" + CELL + " maxClimb=" + MAX_CLIMB);
+                " noGround=" + noGround + " water=" + water + " cell=" + CELL + " maxClimb=" + MAX_CLIMB);
         }
 
         public static List<Vector3> Query(Vector3 from, Vector3 to)
@@ -6900,6 +6913,7 @@ namespace CNRZombieMod
                             }
 
                             float stepCost = Mathf.Sqrt((dx * step) * (dx * step) + (dz * step) * (dz * step));
+                            if (_water[ni] != 0) stepCost *= WATER_TRAVERSAL_COST;
                             float ng = _g[cur] + stepCost;
                             if (_gen[ni] != gen || ng < _g[ni])
                             {

@@ -18733,7 +18733,7 @@ namespace CNRMods
 
             string sprite   = _gunIconSprite != null ? _gunIconSprite.spriteName : null;
             bool   hasMelee = sprite == "BallisticKnife" || sprite == "GingerbreadKnife";
-            float  target   = BaseMoveSpeed * (hasMelee ? MeleeSpeedMult : 1f) * CNRPerkSystem.GetEvasiveSpeedMult() * CNRPerkSystem.GetLightweightSpeedMult();
+            float  target   = BaseMoveSpeed * (hasMelee ? MeleeSpeedMult : 1f) * CNRPerkSystem.GetEvasiveSpeedMult() * CNRPerkSystem.GetLightweightSpeedMult() * CNRMinecraftWaterController.LocalHorizontalSpeedMultiplier;
 
             _fiMoveSpeed.SetValue(_joyCtrl, target);
 
