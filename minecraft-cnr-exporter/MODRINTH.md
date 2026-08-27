@@ -77,6 +77,27 @@ This mod is client-side only and does not need to be installed on a Minecraft se
 - Source: https://github.com/Jacqueb-1337/copsnrobbers
 - Issues: https://github.com/Jacqueb-1337/copsnrobbers/issues
 
+## Version 0.1.10
+
+**Version number:** `0.1.10`
+
+**Version title:** `CNR Map Exporter 0.1.10`
+
+**Version type:** Beta
+
+**Game version:** 1.21.1
+
+**Loader:** Fabric
+
+**Primary file:** `cnrmapexporter-0.1.10.jar`
+
+**Required dependency:** Fabric API
+
+**Changelog:**
+
+- Water rendering now culls faces that are flush against full solid neighboring blocks, eliminating water/terrain z-fighting around pools.
+- Water gameplay volumes and the 0.1.9 biome-tint fallback remain unchanged.
+
 ## Version 0.1.9
 
 **Version number:** `0.1.9`
@@ -136,7 +157,7 @@ Modrinth currently prohibits AI-generated or AI-assisted project icons. Use the 
 
 ## Before submitting for review
 
-- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.9.jar`.
+- Upload the primary JAR from `build/libs/cnrmapexporter-0.1.10.jar`.
 - Mark Fabric API as a required dependency.
 - Set client environment to required and server environment to unsupported.
 - Add the project icon.

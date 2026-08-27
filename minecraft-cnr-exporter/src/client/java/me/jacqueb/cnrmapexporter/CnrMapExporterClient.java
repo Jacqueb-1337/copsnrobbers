@@ -656,15 +656,15 @@ public final class CnrMapExporterClient implements ClientModInitializer {
             if (water) chunk.water.addBox(x0, y0, z0, x1, y1, z1);
 
             RenderBuilder target = chunk.transparent;
-            if (!sameFluidKind(view.getFluidState(worldPos.above()), water, lava))
+            if (!sameFluidKind(view.getFluidState(worldPos.above()), water, lava) && !blocksFluidFace(view, worldPos.above()))
                 addFluidQuad(target, texId, new float[]{x0,y1,z0, x0,y1,z1, x1,y1,z1, x1,y1,z0});
-            if (!sameFluidKind(view.getFluidState(worldPos.north()), water, lava))
+            if (!sameFluidKind(view.getFluidState(worldPos.north()), water, lava) && !blocksFluidFace(view, worldPos.north()))
                 addFluidQuad(target, texId, new float[]{x0,y0,z0, x0,y1,z0, x1,y1,z0, x1,y0,z0});
-            if (!sameFluidKind(view.getFluidState(worldPos.south()), water, lava))
+            if (!sameFluidKind(view.getFluidState(worldPos.south()), water, lava) && !blocksFluidFace(view, worldPos.south()))
                 addFluidQuad(target, texId, new float[]{x1,y0,z1, x1,y1,z1, x0,y1,z1, x0,y0,z1});
-            if (!sameFluidKind(view.getFluidState(worldPos.west()), water, lava))
+            if (!sameFluidKind(view.getFluidState(worldPos.west()), water, lava) && !blocksFluidFace(view, worldPos.west()))
                 addFluidQuad(target, texId, new float[]{x0,y0,z1, x0,y1,z1, x0,y1,z0, x0,y0,z0});
-            if (!sameFluidKind(view.getFluidState(worldPos.east()), water, lava))
+            if (!sameFluidKind(view.getFluidState(worldPos.east()), water, lava) && !blocksFluidFace(view, worldPos.east()))
                 addFluidQuad(target, texId, new float[]{x1,y0,z0, x1,y1,z0, x1,y1,z1, x1,y0,z1});
         }
 
@@ -678,6 +678,11 @@ public final class CnrMapExporterClient implements ClientModInitializer {
 
         boolean sameFluidKind(FluidState fluid, boolean water, boolean lava) {
             return (water && isWater(fluid)) || (lava && isLava(fluid));
+        }
+
+        boolean blocksFluidFace(SnapshotView view, BlockPos pos) {
+            BlockState state = view.getBlockState(pos);
+            return state != null && state.isSolidRender(view, pos);
         }
 
         void addFluidQuad(RenderBuilder target, String texId, float[] p) {
