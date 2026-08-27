@@ -2080,14 +2080,14 @@
       "latestVersion": "1.0.0",
       "filename": "CNRDevSettingsMod.dll",
       "latestUrl": "https://play.jacqueb.me/mods/CNRDevSettingsMod/CNRDevSettingsMod-1.0.0.dll",
-      "latestOnly": true,
+      "latestOnly": false,
       "dependencies": [
         {
           "kind": "mod",
           "id": "CNRSettingsMod",
           "filename": "CNRSettingsMod.dll",
           "minVersion": "3.1.108",
-          "latestOnly": true
+          "latestOnly": false
         }
       ],
       "versions": [
