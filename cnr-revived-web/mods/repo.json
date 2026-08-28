@@ -2138,6 +2138,11 @@
       ],
       "versions": [
         {
+          "version": "3.1.110",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.110.dll",
+          "changelog": "Fixed KBM mouse fire latching and right-click aim being mistaken for Android Back/Escape."
+        },
+        {
           "version": "1.0.1",
           "url": "https://play.jacqueb.me/mods/CNRDevSettingsMod/CNRDevSettingsMod-1.0.1.dll",
           "changelog": "Added a speed meter, scalable developer overlay rows, and native Settings UI integration."
@@ -2153,9 +2158,9 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and username/password account login, preview, merge, and sync controls.",
-      "latestVersion": "3.1.109",
+      "latestVersion": "3.1.110",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.109.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.110.dll",
       "latestOnly": true,
       "versions": [
         {
