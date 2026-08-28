@@ -1,2 +1,2 @@
 @echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0pv7test.ps1" %*
+powershell.exe -NoProfile -File "%~dp0pv7test.ps1" %*

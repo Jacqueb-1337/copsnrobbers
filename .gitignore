@@ -42,3 +42,6 @@
 # ProjectV7 rapid-test output
 /cnr64-wrapper/devtools/pv7test-runs/
 /cnr64-wrapper/devtools/pv7test-baseline.json
+/cnr64-wrapper/devtools/pv7test-next-plugin.json
+/cnr64-wrapper/devtools/pv7test-last-deploy.json
+/cnr64-wrapper/devtools/pv7test-last-run.json
