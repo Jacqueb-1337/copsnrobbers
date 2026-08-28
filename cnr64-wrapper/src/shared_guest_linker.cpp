@@ -16,6 +16,8 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <map>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -67,6 +69,8 @@ namespace {
 constexpr std::uint32_t kMainBase = 0x00100000;
 constexpr std::uint32_t kUnityBase = 0x01000000;
 constexpr std::uint32_t kMonoBase = 0x03000000;
+constexpr std::uint32_t kMonoMetadataDecodeRow = kMonoBase + 0x001c4310u;
+constexpr std::uint32_t kMonoMetadataDecodeRowCol = kMonoBase + 0x001c4520u;
 constexpr std::uint32_t kReturnStub = 0x00008000;
 constexpr std::uint32_t kJniAttachStub = 0x00008100;
 constexpr std::uint32_t kJniFindClassStub = 0x00008110;
@@ -229,6 +233,8 @@ constexpr std::uint32_t kSvcUnwindRaiseProbe = 0x00fff102;
 constexpr std::uint32_t kSvcBsearchReturn = 0x00fff103;
 constexpr std::uint32_t kSvcQsortReturn = 0x00fff104;
 constexpr std::uint32_t kSvcSignalReturn = 0x00fff105;
+constexpr std::uint32_t kSvcMonoMetadataDecodeRow = 0x00fff106;
+constexpr std::uint32_t kSvcMonoMetadataDecodeRowCol = 0x00fff107;
 constexpr std::uint32_t kSvcJniUnknownBase = 0x00ffe000;
 constexpr std::uint32_t kJniEnvFunctionCount = 236;
 constexpr std::uint32_t kThunkStubStart = 0x00010000;
@@ -1161,6 +1167,67 @@ public:
         thread_exit_requested_ = false;
     }
 
+    bool FastMonoMetadataDecodeRow(bool single_column) {
+        if (!jit) return false;
+        const std::uint32_t table = jit->Regs()[0];
+        const std::uint32_t row_index = jit->Regs()[1];
+        if (!Fits(table, 12u)) return false;
+
+        const std::uint32_t row_info = Read<std::uint32_t>(table + 4u);
+        const std::uint32_t encoding = Read<std::uint32_t>(table + 8u);
+        const std::uint32_t row_count = row_info & 0x00ffffffu;
+        const std::uint32_t row_size = row_info >> 24;
+        const std::uint32_t column_count = encoding >> 24;
+        if (row_index >= row_count || row_size == 0u || column_count == 0u || column_count > 12u)
+            return false;
+
+        const std::uint32_t row_base = Read<std::uint32_t>(table);
+        const std::uint64_t row64 = static_cast<std::uint64_t>(row_base) +
+                                    static_cast<std::uint64_t>(row_index) * row_size;
+        if (row64 > UINT32_MAX || !Fits(static_cast<std::uint32_t>(row64), row_size)) return false;
+        std::uint32_t cursor = static_cast<std::uint32_t>(row64);
+
+        auto read_column = [&](std::uint32_t column, std::uint32_t& value) -> bool {
+            const std::uint32_t width = ((encoding >> (column * 2u)) & 3u) + 1u;
+            if (width == 1u) {
+                if (!Fits(cursor, 1u)) return false;
+                value = Read<std::uint8_t>(cursor);
+            } else if (width == 2u) {
+                if (!Fits(cursor, 2u)) return false;
+                value = Read<std::uint16_t>(cursor);
+            } else if (width == 4u) {
+                if (!Fits(cursor, 4u)) return false;
+                value = Read<std::uint32_t>(cursor);
+            } else {
+                return false;
+            }
+            cursor += width;
+            return true;
+        };
+
+        if (single_column) {
+            const std::uint32_t wanted_column = jit->Regs()[2];
+            if (wanted_column >= column_count) return false;
+            std::uint32_t value = 0u;
+            for (std::uint32_t column = 0; column <= wanted_column; ++column) {
+                if (!read_column(column, value)) return false;
+            }
+            jit->Regs()[0] = value;
+            ++mono_metadata_decode_row_col_fast_calls_;
+            return true;
+        }
+
+        const std::uint32_t output = jit->Regs()[2];
+        const std::uint32_t output_columns = jit->Regs()[3];
+        if (output_columns != column_count || !Fits(output, column_count * 4u)) return false;
+        for (std::uint32_t column = 0; column < column_count; ++column) {
+            std::uint32_t value = 0u;
+            if (!read_column(column, value) || !Write32(memory_, output + column * 4u, value)) return false;
+        }
+        ++mono_metadata_decode_row_fast_calls_;
+        return true;
+    }
+
     void CallSVC(std::uint32_t swi) override {
         if (swi == 0) {
             const std::uint32_t svc_pc = jit ? jit->Regs()[15] : 0;
@@ -1259,6 +1326,19 @@ public:
 #endif
             failed = true;
             fault_pc = kUnityBase + 0x00939fd0u;
+            jit->HaltExecution();
+            return;
+        }
+        if (jit && (swi == kSvcMonoMetadataDecodeRow || swi == kSvcMonoMetadataDecodeRowCol)) {
+            const bool single_column = swi == kSvcMonoMetadataDecodeRowCol;
+            if (FastMonoMetadataDecodeRow(single_column)) return;
+#if defined(__ANDROID__)
+            __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                "PV7 mono metadata fastpath rejected svc=0x%06x r0=0x%08x r1=%u r2=0x%08x r3=%u lr=0x%08x",
+                                swi, jit->Regs()[0], jit->Regs()[1], jit->Regs()[2], jit->Regs()[3], jit->Regs()[14]);
+#endif
+            failed = true;
+            fault_pc = single_column ? kMonoMetadataDecodeRowCol : kMonoMetadataDecodeRow;
             jit->HaltExecution();
             return;
         }
@@ -1798,6 +1878,19 @@ private:
             __android_log_print(ANDROID_LOG_INFO, "CNR64HOTPATCH", "%s", message);
 #endif
         };
+        context.find_cond_waiter_thread = [](void* opaque, std::uint32_t cond) -> std::uint32_t {
+            auto* self = static_cast<BootstrapEnvironment*>(opaque);
+            if (!self) return 0u;
+            for (const auto& waiter : self->guest_cond_waits_) {
+                if (static_cast<std::uint32_t>(waiter.first) == cond && !waiter.second.signaled)
+                    return static_cast<std::uint32_t>(waiter.first >> 32);
+            }
+            return 0u;
+        };
+        context.prefer_guest_thread = [](void* opaque, std::uint32_t thread_id) {
+            auto* self = static_cast<BootstrapEnvironment*>(opaque);
+            if (self) self->preferred_guest_thread_id_ = thread_id;
+        };
 
         std::string detail;
         const int result = hotpatch_runtime_.DispatchPlugins(context, detail);
@@ -1918,12 +2011,89 @@ private:
         return true;
     }
 
+    void AddFreeBlock(std::uint32_t address, std::size_t size) {
+        if (size == 0 || address < kGuestHeapStart || address >= kGuestHeapEnd) return;
+        std::uint64_t end64 = static_cast<std::uint64_t>(address) + size;
+        if (end64 > kGuestHeapEnd) end64 = kGuestHeapEnd;
+        std::uint32_t end = static_cast<std::uint32_t>(end64);
+
+        auto next = free_blocks_.lower_bound(address);
+        if (next != free_blocks_.begin()) {
+            auto previous = next;
+            --previous;
+            const std::uint64_t previous_end =
+                static_cast<std::uint64_t>(previous->first) + previous->second;
+            if (previous_end >= address) {
+                address = previous->first;
+                end = static_cast<std::uint32_t>(std::max<std::uint64_t>(end, previous_end));
+                free_blocks_.erase(previous);
+            }
+        }
+        next = free_blocks_.lower_bound(address);
+        while (next != free_blocks_.end() && next->first <= end) {
+            const std::uint64_t next_end =
+                static_cast<std::uint64_t>(next->first) + next->second;
+            end = static_cast<std::uint32_t>(std::max<std::uint64_t>(end, next_end));
+            next = free_blocks_.erase(next);
+        }
+        free_blocks_[address] = static_cast<std::size_t>(end - address);
+
+        // If the highest free block reaches the bump pointer, return that whole tail
+        // to the bump allocator as well. This keeps short-lived large allocations from
+        // permanently ratcheting heap_next_ toward the main guest stack.
+        for (;;) {
+            auto tail = free_blocks_.lower_bound(heap_next_);
+            if (tail == free_blocks_.begin()) break;
+            --tail;
+            const std::uint64_t tail_end = static_cast<std::uint64_t>(tail->first) + tail->second;
+            if (tail_end != heap_next_) break;
+            heap_next_ = tail->first;
+            free_blocks_.erase(tail);
+        }
+    }
+
+    bool FreeAllocation(std::uint32_t address) {
+        if (!address) return true;
+        const auto allocation = allocations_.find(address);
+        if (allocation == allocations_.end()) return false;
+        const std::size_t requested = allocation->second;
+        allocations_.erase(allocation);
+        const std::size_t reserved = static_cast<std::size_t>(
+            AlignUp(static_cast<std::uint32_t>(std::max<std::size_t>(requested, 1u)), 16u));
+        AddFreeBlock(address, reserved);
+        return true;
+    }
+
     std::uint32_t Allocate(std::size_t size, std::uint32_t alignment = 16) {
         if (size == 0) size = 1;
+        if (alignment == 0) alignment = 1;
+        if (size > static_cast<std::size_t>(kGuestHeapEnd - kGuestHeapStart)) return 0;
+        const std::uint32_t reserved = AlignUp(static_cast<std::uint32_t>(size), 16u);
+
+        // First fit from recycled guest blocks. Free blocks include allocation padding,
+        // so an aligned subrange can safely be split into prefix and suffix fragments.
+        for (auto block = free_blocks_.begin(); block != free_blocks_.end(); ++block) {
+            const std::uint32_t block_start = block->first;
+            const std::uint64_t block_end = static_cast<std::uint64_t>(block_start) + block->second;
+            const std::uint32_t aligned = AlignUp(block_start, alignment);
+            const std::uint64_t allocation_end = static_cast<std::uint64_t>(aligned) + reserved;
+            if (allocation_end > block_end) continue;
+
+            const std::size_t prefix = static_cast<std::size_t>(aligned - block_start);
+            const std::size_t suffix = static_cast<std::size_t>(block_end - allocation_end);
+            free_blocks_.erase(block);
+            if (prefix) AddFreeBlock(block_start, prefix);
+            if (suffix) AddFreeBlock(static_cast<std::uint32_t>(allocation_end), suffix);
+            allocations_[aligned] = size;
+            if (allocation_trace.size() < 32) allocation_trace.emplace_back(aligned, size);
+            std::memset(memory_.data() + aligned, 0, size);
+            return aligned;
+        }
+
         const std::uint32_t aligned = AlignUp(heap_next_, alignment);
-        const std::uint64_t end = static_cast<std::uint64_t>(aligned) + size;
+        const std::uint64_t end = static_cast<std::uint64_t>(aligned) + reserved;
         if (end > kGuestHeapEnd) return 0;
-        heap_next_ = AlignUp(static_cast<std::uint32_t>(end), 16);
+        heap_next_ = static_cast<std::uint32_t>(end);
         allocations_[aligned] = size;
         if (allocation_trace.size() < 32) allocation_trace.emplace_back(aligned, size);
         std::memset(memory_.data() + aligned, 0, size);
@@ -2491,6 +2661,60 @@ public:
         const std::size_t thread_count_at_entry = guest_thread_launches_.size();
         std::size_t inspected = 0;
 
+        // A live compatibility experiment may nominate the guest thread that should
+        // receive the next cooperative quantum. This mirrors the normal OS behavior
+        // where a thread explicitly awakened by a synchronization primitive is made
+        // runnable immediately instead of waiting for a full round-robin scan.
+        if (preferred_guest_thread_id_ != 0u && !guest_thread_launches_.empty()) {
+            const auto preferred = std::find_if(
+                guest_thread_launches_.begin(), guest_thread_launches_.end(),
+                [&](const GuestThreadLaunch& item) {
+                    return item.id == preferred_guest_thread_id_ && !item.finished;
+                });
+            if (preferred != guest_thread_launches_.end())
+                guest_thread_pump_cursor_ = static_cast<std::size_t>(
+                    std::distance(guest_thread_launches_.begin(), preferred));
+            preferred_guest_thread_id_ = 0u;
+        }
+
+        // A blocked compatibility thunk is already represented by the saved guest PC
+        // plus its argument registers. Do not spend a Dynarmic quantum re-entering a
+        // wait that cannot possibly complete yet; the thread becomes runnable again
+        // as soon as the object it is waiting on changes state.
+        auto blocked_wait_is_ready = [&](const GuestThreadLaunch& launch) -> bool {
+            if (!launch.started) return true;
+
+
+            auto at_stub = [&](const char* symbol) -> bool {
+                const auto stub = name_to_stub_.find(symbol);
+                return stub != name_to_stub_.end() && launch.regs[15] == stub->second;
+            };
+            auto wait_key = [&](std::uint32_t object) -> std::uint64_t {
+                return (static_cast<std::uint64_t>(launch.id) << 32) | object;
+            };
+
+            if (at_stub("pthread_cond_wait") || at_stub("pthread_cond_timedwait") ||
+                at_stub("pthread_cond_timedwait_monotonic_np")) {
+                const std::uint32_t cond = launch.regs[0];
+                const std::uint32_t mutex_address = launch.regs[1];
+                const auto wait = guest_cond_waits_.find(wait_key(cond));
+                if (wait == guest_cond_waits_.end()) return true;
+                const auto cond_state = guest_conds_.find(cond);
+                const std::uint64_t generation = cond_state == guest_conds_.end()
+                    ? 0u : cond_state->second.broadcast_generation;
+                const bool broadcasted = generation != wait->second.broadcast_generation;
+                const bool timed_out = wait->second.timed &&
+                    std::chrono::system_clock::now() >= wait->second.deadline;
+                if (!broadcasted && !wait->second.signaled && !timed_out) return false;
+                if (timed_out && !broadcasted && !wait->second.signaled) return true;
+                const auto mutex = guest_mutexes_.find(mutex_address);
+                return mutex == guest_mutexes_.end() || mutex->second.owner == 0u ||
+                       mutex->second.owner == launch.id;
+            }
+
+            return true;
+        };
+
         // Round-robin across the guest thread table. Starting from element zero on
         // every cooperative yield can permanently starve later-created threads when
         // the runnable set is larger than max_threads (FMOD commonly exposes this).
@@ -2503,6 +2727,7 @@ public:
             ++inspected;
             auto& launch = guest_thread_launches_[launch_index];
             if (launch.finished || launch.start < kMainBase || launch.start >= kGuestHeapStart) continue;
+            if (!blocked_wait_is_ready(launch)) continue;
 
             if (!launch.started) {
                 launch.started = true;
@@ -2568,9 +2793,21 @@ public:
                     ? Read<std::uint32_t>(watched_write_address) : 0u;
                 const std::uint32_t watched_pc_before = jit->Regs()[15];
                 const std::uint32_t watched_lr_before = jit->Regs()[14];
+                const auto worker_slice_begin = std::chrono::steady_clock::now();
 #endif
                 const auto halt_reason = jit->Run();
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                const std::uint64_t worker_slice_us = static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - worker_slice_begin).count());
+                if (current_thread_id_ == unity_preload_thread_id_ && worker_slice_us >= 20000u) {
+                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                        "PV7PERF preload-slice us=%llu slice=%d pc_before=0x%08x lr_before=0x%08x pc_after=0x%08x lr_after=0x%08x ticks_left=%lld last=%s",
+                                        static_cast<unsigned long long>(worker_slice_us), slices_run,
+                                        watched_pc_before, watched_lr_before, jit->Regs()[15], jit->Regs()[14],
+                                        static_cast<long long>(ticks_left),
+                                        call_trace.empty() ? "-" : call_trace.back().c_str());
+                }
                 if (watched_write_address != 0) {
                     const std::uint32_t watched_after = Read<std::uint32_t>(watched_write_address);
                     if (watched_before != watched_after && watched_write_count < 64u) {
@@ -2958,6 +3195,7 @@ public:
             return true;
         }
         if (name == "free") {
+            FreeAllocation(Arg(0));
             Ret(0);
             return true;
         }
@@ -2969,19 +3207,22 @@ public:
                 return true;
             }
             if (new_size == 0) {
+                FreeAllocation(old_ptr);
                 Ret(0);
                 return true;
             }
+            const auto old = allocations_.find(old_ptr);
+            const std::size_t old_size = old != allocations_.end() ? old->second : 0u;
             const std::uint32_t fresh = Allocate(new_size);
             if (!fresh) {
                 Ret(0);
                 return true;
             }
-            const auto old = allocations_.find(old_ptr);
-            if (old != allocations_.end() && Fits(old_ptr, old->second)) {
+            if (old_size && Fits(old_ptr, old_size)) {
                 std::memcpy(memory_.data() + fresh, memory_.data() + old_ptr,
-                            std::min<std::size_t>(old->second, new_size));
+                            std::min<std::size_t>(old_size, new_size));
             }
+            FreeAllocation(old_ptr);
             Ret(fresh);
             return true;
         }
@@ -3438,11 +3679,24 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "munmap" || name == "madvise") { Ret(0); return true; }
+        if (name == "munmap") {
+            // mmap() allocations are tracked by their returned base address, so release
+            // the whole mapping when the legacy runtime unmaps it. The length is advisory
+            // here because this compatibility layer does not support partial unmaps yet.
+            FreeAllocation(Arg(0));
+            Ret(0);
+            return true;
+        }
+        if (name == "madvise") { Ret(0); return true; }
         if (name == "mremap") {
-            const std::uint32_t fresh = Allocate(Arg(2), 4096);
-            if (fresh && Arg(0) && Fits(Arg(0), std::min(Arg(1), Arg(2))))
-                std::memcpy(memory_.data() + fresh, memory_.data() + Arg(0), std::min(Arg(1), Arg(2)));
+            const std::uint32_t old_ptr = Arg(0);
+            const std::size_t old_size = Arg(1);
+            const std::size_t new_size = Arg(2);
+            const std::uint32_t fresh = Allocate(new_size, 4096);
+            if (fresh && old_ptr && Fits(old_ptr, std::min(old_size, new_size)))
+                std::memcpy(memory_.data() + fresh, memory_.data() + old_ptr,
+                            std::min(old_size, new_size));
+            if (fresh) FreeAllocation(old_ptr);
             Ret(fresh ? fresh : 0xffffffffu);
             return true;
         }
@@ -3476,9 +3730,26 @@ public:
             if (Arg(0)) Write32(memory_, Arg(0), thread_id);
             guest_thread_launches_.push_back({thread_id, Arg(2), Arg(3), false});
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+            const std::uint32_t thread_start = Arg(2);
+            const std::uint32_t thread_arg = Arg(3);
+            std::uint32_t wrapped_arg = 0u;
+            std::uint32_t wrapped_start = 0u;
+            std::uint32_t wrapped_name_ptr = 0u;
+            std::string wrapped_name;
+            // Unity 4.x commonly creates native workers through its generic thread
+            // trampoline at 0x01312574. The trampoline stores the real callback and
+            // callback argument at +20/+16 and the prctl(PR_SET_NAME) string at +32.
+            if (thread_start == 0x01312574u && Fits(thread_arg + 36u, 4u)) {
+                Read32(memory_, thread_arg + 16u, wrapped_arg);
+                Read32(memory_, thread_arg + 20u, wrapped_start);
+                Read32(memory_, thread_arg + 32u, wrapped_name_ptr);
+                wrapped_name = ReadCString(wrapped_name_ptr, 96u);
+                if (wrapped_name == "UnityPreload") unity_preload_thread_id_ = thread_id;
+            }
             __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
-                                "PV7SYNC pthread_create creator=%u id=%u start=0x%08x arg=0x%08x",
-                                current_thread_id_, thread_id, Arg(2), Arg(3));
+                                "PV7SYNC pthread_create creator=%u id=%u start=0x%08x arg=0x%08x wrapped_start=0x%08x wrapped_arg=0x%08x wrapped_name='%s'",
+                                current_thread_id_, thread_id, thread_start, thread_arg,
+                                wrapped_start, wrapped_arg, wrapped_name.c_str());
 #endif
             if (jit) {
                 // Let the newly-created guest thread reach its initial wait point
@@ -5141,6 +5412,10 @@ public:
     };
     std::uint32_t next_thread_id_ = 2;
     std::uint32_t current_thread_id_ = 1;
+    std::uint32_t preferred_guest_thread_id_ = 0;
+    std::uint32_t unity_preload_thread_id_ = 0;
+    std::uint64_t mono_metadata_decode_row_fast_calls_ = 0;
+    std::uint64_t mono_metadata_decode_row_col_fast_calls_ = 0;
     bool cooperative_yield_requested_ = false;
     bool thread_exit_requested_ = false;
     std::vector<GuestThreadLaunch> guest_thread_launches_;
@@ -5183,6 +5458,7 @@ public:
 #endif
     std::unordered_map<std::uint64_t, std::chrono::system_clock::time_point> guest_sem_deadlines_;
     std::unordered_map<std::uint32_t, std::size_t> allocations_;
+    std::map<std::uint32_t, std::size_t> free_blocks_;
     std::unordered_map<std::uint32_t, std::uint32_t> tls_values_;
     std::unordered_map<std::uint32_t, GuestJumpContext> jump_contexts_;
     std::unordered_map<std::uint32_t, GuestSignalAction> guest_signal_actions_;
@@ -5282,11 +5558,43 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
     }
     report << "    Managed assemblies path: " << managed_dir << "\n";
 
+    // These two Mono metadata readers are pure, extremely hot during UnityPreload,
+    // and this exact legacy libmono build spends millions of guest instructions in
+    // them. Replace only the verified ARM prologues with SVC+BX LR stubs so the
+    // compatibility layer can perform the same little-endian row decode natively.
+    std::uint32_t mono_decode_row_word0 = 0u, mono_decode_row_word1 = 0u;
+    std::uint32_t mono_decode_col_word0 = 0u, mono_decode_col_word1 = 0u;
+    const bool mono_metadata_prologues_match =
+        Read32(memory, kMonoMetadataDecodeRow, mono_decode_row_word0) &&
+        Read32(memory, kMonoMetadataDecodeRow + 4u, mono_decode_row_word1) &&
+        Read32(memory, kMonoMetadataDecodeRowCol, mono_decode_col_word0) &&
+        Read32(memory, kMonoMetadataDecodeRowCol + 4u, mono_decode_col_word1) &&
+        mono_decode_row_word0 == 0xe92d4810u && mono_decode_row_word1 == 0xe28db008u &&
+        mono_decode_col_word0 == 0xe92d4830u && mono_decode_col_word1 == 0xe28db00cu;
+    if (mono_metadata_prologues_match) {
+        if (!WriteSvcStub(memory, kMonoMetadataDecodeRow, kSvcMonoMetadataDecodeRow) ||
+            !WriteSvcStub(memory, kMonoMetadataDecodeRowCol, kSvcMonoMetadataDecodeRowCol)) {
+            report << "    Mono metadata native fastpaths: PATCH FAILED\n";
+            return report.str();
+        }
+        report << "    Mono metadata native fastpaths: ARMED row=0x" << std::hex
+               << kMonoMetadataDecodeRow << " row_col=0x" << kMonoMetadataDecodeRowCol
+               << std::dec << "\n";
+    } else {
+        report << "    Mono metadata native fastpaths: SKIPPED (unexpected libmono prologues)\n";
+    }
+
     BootstrapEnvironment env(memory, thunks.id_to_name, thunks.name_to_stub, exports, managed_dir, host_native_window);
 #if defined(PROJECTV7_DEV_HOTPATCH) && PROJECTV7_DEV_HOTPATCH
     report << "    Developer hotpatch runtime: " << env.HotpatchStatusLine() << "\n";
 #endif
     Dynarmic::ExclusiveMonitor global_monitor{1};
+    auto guest_page_table = std::make_unique<std::array<std::uint8_t*, Dynarmic::A32::UserConfig::NUM_PAGE_TABLE_ENTRIES>>();
+    guest_page_table->fill(nullptr);
+    constexpr std::size_t kGuestPageSize = 1u << Dynarmic::A32::UserConfig::PAGE_BITS;
+    for (std::size_t offset = 0; offset + kGuestPageSize <= memory.size(); offset += kGuestPageSize)
+        (*guest_page_table)[offset >> Dynarmic::A32::UserConfig::PAGE_BITS] = memory.data() + offset;
+
     Dynarmic::A32::UserConfig config;
     config.callbacks = &env;
     config.processor_id = 0;
@@ -5295,6 +5603,11 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
     config.always_little_endian = true;
     config.enable_cycle_counting = true;
     config.code_cache_size = 32u * 1024u * 1024u;
+    config.page_table = guest_page_table.get();
+    config.detect_misaligned_access_via_page_table = 8u | 16u | 32u | 64u;
+    config.only_detect_misalignment_via_page_table_on_page_boundary = true;
+    report << "    Dynarmic guest page table: ENABLED (" << (memory.size() / kGuestPageSize)
+           << " mapped pages)\n";
     Dynarmic::A32::Jit jit(config);
     env.jit = &jit;
 

@@ -43,6 +43,11 @@ struct Cnr64HotpatchContextV1 {
     void* host_context;
     std::uint32_t (*allocate_guest)(void* host_context, std::uint32_t size, std::uint32_t alignment);
     void (*log_message)(void* host_context, const char* message);
+
+    // Developer scheduler controls. These are appended so existing V1 plugins
+    // remain binary-compatible; older plugins simply never read these fields.
+    std::uint32_t (*find_cond_waiter_thread)(void* host_context, std::uint32_t cond);
+    void (*prefer_guest_thread)(void* host_context, std::uint32_t thread_id);
 };
 
 typedef int (*Cnr64HotpatchDispatchV1)(Cnr64HotpatchContextV1* context);
