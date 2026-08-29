@@ -56,6 +56,7 @@ const ParamKey = {
   ActorList: 0xFC,
   PlayerProps: 0xF9,
   GameProps: 0xF8,
+  PropsListedInLobby: 0xFA,
   GameList: 0xF6,
   RoomOptionFlags: 0xF2,
   CleanupCache: 0xF1,

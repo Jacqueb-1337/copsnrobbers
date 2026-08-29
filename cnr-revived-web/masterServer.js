@@ -44,6 +44,13 @@ class RoomInfo {
     this.version = '';
     this.mode = '0';              // C# default mode (TDM)
     this.mapUrl = '';
+    this.customProperties = {
+      map: this.map,
+      version: this.version,
+      mode: this.mode,
+      mapUrl: this.mapUrl
+    };
+    this.lobbyPropertyKeys = ['map', 'version', 'mode'];
     this.players = new Set();
     this._actorCounter = 0;
   }
@@ -57,20 +64,62 @@ class RoomInfo {
     }
     return lowest;
   }
+  applyCreateProperties(gameProps, lobbyKeys) {
+    if (gameProps && typeof gameProps === 'object') {
+      // Photon stores CustomRoomPropertiesForLobby inside GameProps at reserved
+      // GamePropertyKey.PropsListedInLobby (byte 250), not as op parameter 250.
+      // Prefer the real location, while retaining the explicit argument as a
+      // compatibility fallback for older/custom clients.
+      const embeddedLobbyKeys = gameProps[250] ?? gameProps['250'];
+      if (Array.isArray(embeddedLobbyKeys)) lobbyKeys = embeddedLobbyKeys;
+
+      const maxP = gameProps[255] ?? gameProps['255'];
+      if (maxP !== undefined) this.maxPlayers = +maxP || this.maxPlayers;
+      const isOpen = gameProps[253] ?? gameProps['253'];
+      if (isOpen !== undefined) this.isOpen = !!isOpen;
+      const isVis = gameProps[254] ?? gameProps['254'];
+      if (isVis !== undefined) this.isVisible = !!isVis;
+
+      for (const [key, value] of Object.entries(gameProps)) {
+        if (/^\d+$/.test(key)) continue;
+        this.customProperties[key] = value;
+      }
+      if (this.customProperties.map !== undefined) this.map = this.customProperties.map;
+      if (this.customProperties.version !== undefined) this.version = this.customProperties.version;
+      if (this.customProperties.mode !== undefined) this.mode = this.customProperties.mode;
+      if (this.customProperties.mapUrl !== undefined) this.mapUrl = this.customProperties.mapUrl;
+    }
+
+    if (Array.isArray(lobbyKeys)) {
+      this.lobbyPropertyKeys = [...new Set(lobbyKeys.map(String).filter(k => k.length > 0))];
+    }
+  }
   getGamePropsHashtable() {
     // Keys that the client reads as (byte) MUST be serialized as GpType.Byte.
     // Unboxing int→byte in C# throws InvalidCastException, crashing room setup.
-    return {
-      255: photonByte(this.maxPlayers),   // (byte)MaxPlayers
-      253: this.isOpen,                   // bool IsOpen
-      254: this.isVisible,                // bool IsVisible
-      252: photonByte(this.playerCount),  // (byte)PlayerCount
-      251: false,                         // removedFromList
-      map:     this.map,
-      version: this.version,
-      mode:    this.mode,
-      mapUrl:  this.mapUrl
+    const props = {
+      255: photonByte(this.maxPlayers),
+      253: this.isOpen,
+      254: this.isVisible,
+      252: photonByte(this.playerCount),
+      251: false
     };
+    for (const [key, value] of Object.entries(this.customProperties)) props[key] = value;
+    return props;
+  }
+  getLobbyPropsHashtable() {
+    const props = {
+      255: photonByte(this.maxPlayers),
+      253: this.isOpen,
+      254: this.isVisible,
+      252: photonByte(this.playerCount),
+      251: false
+    };
+    for (const key of this.lobbyPropertyKeys) {
+      if (Object.prototype.hasOwnProperty.call(this.customProperties, key))
+        props[key] = this.customProperties[key];
+    }
+    return props;
   }
 }
 
@@ -218,6 +267,13 @@ class MasterServer {
   handleCreateGame(session, req) {
     const roomName = (req.Parameters && req.Parameters[ParamKey.RoomName]) || Math.random().toString(36).slice(2,10);
     const room = this.rooms.getOrCreateRoom(roomName);
+    const gameProps = req.Parameters && req.Parameters[ParamKey.GameProps];
+    // Real Photon puts PropsListedInLobby at GameProps[(byte)250]. Keep the
+    // top-level lookup only as a compatibility fallback.
+    let lobbyKeys = req.Parameters && req.Parameters[ParamKey.PropsListedInLobby];
+    if (!Array.isArray(lobbyKeys) && gameProps)
+      lobbyKeys = gameProps[250] ?? gameProps['250'];
+    room.applyCreateProperties(gameProps, lobbyKeys);
     console.log(`[Master] Client ${session.id} creating room '${roomName}'`);
     const gameAddr = this.pickGameServer(session.socket.remoteAddress);
     console.log(`[Master] Redirect create client ${session.id} ${session.socket.remoteAddress} -> ${gameAddr}`);
@@ -255,16 +311,7 @@ class MasterServer {
     const eventCode = full ? 230 : 229; // GameList / GameListUpd
     const roomsHt = {};
     for (const r of this.rooms.getVisibleRooms()) {
-      roomsHt[r.name] = {
-        255: photonByte(r.maxPlayers),
-        253: r.isOpen,
-        254: r.isVisible,
-        252: photonByte(r.playerCount),
-        251: false,
-        map:     r.map,
-        version: r.version,
-        mode:    r.mode
-      };
+      roomsHt[r.name] = r.getLobbyPropsHashtable();
     }
     const p = { 222: roomsHt };
     session.send(buildEvent(eventCode, p));

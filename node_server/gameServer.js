@@ -117,22 +117,15 @@ class GameServer {
     const roomName = (req.Parameters && req.Parameters[ParamKey.RoomName]) || Math.random().toString(36).slice(2,10);
     const room = this.rooms.getOrCreateRoom(roomName);
     console.log(`[Game] Client ${session.id} join/create room '${roomName}' params=${JSON.stringify(req.Parameters || {})}`);
-    // Apply room properties from the client's CreateGame/JoinGame request (param 248 = GameProps).
-    // Mirrors C# ApplyRoomPropsFromRequest.
+    // Apply the complete room property payload and the host's lobby-property list.
+    // CNRMod advertises its map metadata, thumbnail, match settings and resource
+    // requirements here, so the server must not reduce this to vanilla map/mode/version.
     const gameProps = req.Parameters && req.Parameters[ParamKey.GameProps];
-    if (gameProps && typeof gameProps === 'object') {
-      // byte-keyed standard props (keys arrive as numbers after deserialization)
-      const maxP = gameProps[255] ?? gameProps['255'];
-      if (maxP !== undefined) room.maxPlayers = +maxP || room.maxPlayers;
-      const isOpen = gameProps[253] ?? gameProps['253'];
-      if (isOpen !== undefined) room.isOpen = !!isOpen;
-      const isVis = gameProps[254] ?? gameProps['254'];
-      if (isVis !== undefined) room.isVisible = !!isVis;
-      // string-keyed custom props
-      if (gameProps['map'])     room.map     = gameProps['map'];
-      if (gameProps['version']) room.version = gameProps['version'];
-      if (gameProps['mode'])    room.mode    = gameProps['mode'];
-    }
+    // Photon embeds the lobby-property key list in GameProps[(byte)250].
+    let lobbyKeys = req.Parameters && req.Parameters[ParamKey.PropsListedInLobby];
+    if (!Array.isArray(lobbyKeys) && gameProps)
+      lobbyKeys = gameProps[250] ?? gameProps['250'];
+    room.applyCreateProperties(gameProps, lobbyKeys);
     // assign actor
     const actor = room.assignActorNr();
     session.actorNr = actor;

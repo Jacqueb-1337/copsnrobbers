@@ -141,23 +141,14 @@ class GameServer {
   handleJoin(session, req) {
     const roomName = (req.Parameters && req.Parameters[ParamKey.RoomName]) || Math.random().toString(36).slice(2,10);
     const room = this.rooms.getOrCreateRoom(roomName);
-    // Apply room properties from the client's CreateGame/JoinGame request (param 248 = GameProps).
-    // Mirrors C# ApplyRoomPropsFromRequest.
+    // Preserve the complete room payload. CNRMod advertises custom map identity,
+    // thumbnail, match settings and resource requirements through these properties.
     const gameProps = req.Parameters && req.Parameters[ParamKey.GameProps];
-    if (gameProps && typeof gameProps === 'object') {
-      // byte-keyed standard props (keys arrive as numbers after deserialization)
-      const maxP = gameProps[255] ?? gameProps['255'];
-      if (maxP !== undefined) room.maxPlayers = +maxP || room.maxPlayers;
-      const isOpen = gameProps[253] ?? gameProps['253'];
-      if (isOpen !== undefined) room.isOpen = !!isOpen;
-      const isVis = gameProps[254] ?? gameProps['254'];
-      if (isVis !== undefined) room.isVisible = !!isVis;
-      // string-keyed custom props
-      if (gameProps['map'])     room.map     = gameProps['map'];
-      if (gameProps['version']) room.version = gameProps['version'];
-      if (gameProps['mode'])    room.mode    = gameProps['mode'];
-      if (gameProps['mapUrl'])  room.mapUrl  = gameProps['mapUrl'];
-    }
+    // Photon embeds the lobby-property key list in GameProps[(byte)250].
+    let lobbyKeys = req.Parameters && req.Parameters[ParamKey.PropsListedInLobby];
+    if (!Array.isArray(lobbyKeys) && gameProps)
+      lobbyKeys = gameProps[250] ?? gameProps['250'];
+    room.applyCreateProperties(gameProps, lobbyKeys);
     const playerProps = req.Parameters && req.Parameters[ParamKey.PlayerProps];
     const advertisedName = getPlayerNameFromProps(playerProps);
     if (advertisedName) session.userId = advertisedName;
