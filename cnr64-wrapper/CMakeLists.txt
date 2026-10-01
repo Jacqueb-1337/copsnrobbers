@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # fixes before baking them into the normal bridge/runtime implementation.
 option(PROJECTV7_DEV_HOTPATCH "Enable developer-only live compatibility hotpatching" OFF)
 option(PROJECTV7_DEV_DIAGNOSTICS "Enable verbose developer compatibility tracing" OFF)
+set(PROJECTV7_COMPAT_MODULES "" CACHE STRING "Semicolon-separated embedded compatibility modules")
 
 set(DYNARMIC_FRONTENDS "A32" CACHE STRING "" FORCE)
 set(DYNARMIC_TESTS OFF CACHE BOOL "" FORCE)
@@ -34,7 +35,20 @@ set(PROJECTV7_CORE_SOURCES
     src/elf_guest_probe.cpp
     src/unity_guest_probe.cpp
     src/shared_guest_linker.cpp
+    src/pv7_compat_module_registry.cpp
 )
+
+set(PV7_COMPAT_MODULE_CNR 0)
+foreach(PV7_COMPAT_MODULE IN LISTS PROJECTV7_COMPAT_MODULES)
+    if(PV7_COMPAT_MODULE STREQUAL "cnr")
+        set(PV7_COMPAT_MODULE_CNR 1)
+        list(APPEND PROJECTV7_CORE_SOURCES
+            compat_modules/cnr/cnr_compat_module.cpp
+        )
+    elseif(NOT PV7_COMPAT_MODULE STREQUAL "")
+        message(FATAL_ERROR "Unknown ProjectV7 compatibility module: ${PV7_COMPAT_MODULE}")
+    endif()
+endforeach()
 
 if(PROJECTV7_DEV_HOTPATCH)
     list(APPEND PROJECTV7_CORE_SOURCES
@@ -49,6 +63,7 @@ target_include_directories(projectv7-core PUBLIC src)
 target_compile_definitions(projectv7-core PRIVATE
     PROJECTV7_DEV_HOTPATCH=$<BOOL:${PROJECTV7_DEV_HOTPATCH}>
     PROJECTV7_DEV_DIAGNOSTICS=$<BOOL:${PROJECTV7_DEV_DIAGNOSTICS}>
+    PV7_COMPAT_MODULE_CNR=${PV7_COMPAT_MODULE_CNR}
 )
 if(PROJECTV7_DEV_HOTPATCH)
     target_include_directories(projectv7-core PRIVATE devtools/hotpatch)
@@ -61,9 +76,20 @@ add_executable(cnr64-a32-poc
 target_link_libraries(cnr64-a32-poc PRIVATE projectv7-core)
 
 if(ANDROID)
+    # Generic Project V7 host library used by reusable wrapper templates.
+    # Compatibility modules are selected at configure time through
+    # PROJECTV7_COMPAT_MODULES; an empty list produces a game-agnostic host.
+    add_library(pv7host SHARED
+        src/jni_bridge.cpp
+    )
+    target_link_libraries(pv7host PRIVATE projectv7-core log android EGL GLESv2 OpenSLES z dl)
+    set_target_properties(pv7host PROPERTIES OUTPUT_NAME "pv7host")
+
+    # Transitional legacy target for the existing CNR wrapper while it is
+    # migrated onto the generic app.projectv7.wrapper host template.
     add_library(cnr64poc SHARED
         src/jni_bridge.cpp
     )
-    target_link_libraries(cnr64poc PRIVATE projectv7-core log android EGL GLESv2 z dl)
+    target_link_libraries(cnr64poc PRIVATE projectv7-core log android EGL GLESv2 OpenSLES z dl)
     set_target_properties(cnr64poc PROPERTIES OUTPUT_NAME "cnr64poc")
 endif()
