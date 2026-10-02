@@ -3,108 +3,124 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cops N Robbers Revival | Restored Android Multiplayer, Mods and Project V7 Support</title>
-  <meta name="description" content="Cops N Robbers Revival is a community preservation project restoring multiplayer, custom servers and mod support for the classic Cops N Robbers Android game, with Project V7 compatibility for modern 64-bit-only Android devices.">
+  <title>Cops N Robbers Revival | Multiplayer Restoration, Mods, and Android Compatibility</title>
+  <meta name="description" content="Cops N Robbers Revival preserves the classic Android game by restoring multiplayer, replacing the original backend, adding a reusable mod system, and supporting modern Android through Project V7.">
   <meta name="robots" content="index,follow">
   <link rel="canonical" href="https://jacqueb-1337.github.io/copsnrobbers/">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Cops N Robbers Revival">
-  <meta property="og:description" content="Restored multiplayer, custom servers, mod support and modern Android compatibility for Cops N Robbers.">
+  <meta property="og:description" content="Restored multiplayer, custom server support, mods, and modern Android compatibility for Cops N Robbers.">
   <meta property="og:url" content="https://jacqueb-1337.github.io/copsnrobbers/">
-  <meta name="twitter:card" content="summary">
-  <script type="application/ld+json">
-  {
-    "@context":"https://schema.org",
-    "@type":"SoftwareSourceCode",
-    "name":"Cops N Robbers Revival",
-    "codeRepository":"https://github.com/Jacqueb-1337/copsnrobbers",
-    "url":"https://jacqueb-1337.github.io/copsnrobbers/",
-    "programmingLanguage":["C#","JavaScript"],
-    "description":"Community preservation project restoring multiplayer, custom servers, mod support and modern Android compatibility for Cops N Robbers."
-  }
-  </script>
   <style>
-    :root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0d1117;color:#e6edf3}
-    *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#08111e 0,#0d1117 42%)}
-    main{max-width:980px;margin:auto;padding:48px 22px 72px}
-    header{padding:34px 0 30px;text-align:center}
-    .eyebrow{font-size:.88rem;letter-spacing:.09em;text-transform:uppercase;color:#8b949e}
-    h1{font-size:clamp(2.2rem,7vw,4.2rem);margin:12px 0}
-    .lead{max-width:800px;margin:0 auto;font-size:1.18rem;line-height:1.7;color:#c9d1d9}
-    .actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin:28px 0}
-    .btn{display:inline-block;text-decoration:none;border:1px solid #30363d;border-radius:9px;padding:11px 16px;color:#f0f6fc;background:#21262d}
-    .btn.primary{background:#238636;border-color:#2ea043}
-    section{margin-top:42px;padding:26px;border:1px solid #30363d;border-radius:14px;background:#161b22}
-    h2{margin-top:0} h3{margin-bottom:8px} p,li{line-height:1.7;color:#c9d1d9}
-    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-    .card{padding:18px;border:1px solid #30363d;border-radius:10px;background:#0d1117}
-    .card p{margin-bottom:0}
-    code{background:#21262d;padding:2px 5px;border-radius:5px}
-    a{color:#58a6ff}
-    .credit{border-left:4px solid #58a6ff;padding-left:18px}
-    footer{margin-top:48px;padding-top:24px;border-top:1px solid #30363d;color:#8b949e;font-size:.92rem}
-    @media(max-width:700px){.grid{grid-template-columns:1fr}main{padding-top:24px}}
+    :root{
+      color-scheme:dark;
+      --bg:#0d1117;
+      --panel:#161b22;
+      --border:#30363d;
+      --text:#e6edf3;
+      --muted:#8b949e;
+      --link:#58a6ff;
+      --ok:#3fb950;
+      font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text)}
+    main{max-width:920px;margin:0 auto;padding:42px 22px 70px}
+    header{padding-bottom:28px;border-bottom:1px solid var(--border)}
+    h1{font-size:clamp(2rem,6vw,3.5rem);margin:0 0 10px}
+    h2{font-size:1.35rem;margin:38px 0 12px}
+    h3{font-size:1rem;margin:22px 0 6px}
+    p,li{line-height:1.7;color:#c9d1d9}
+    .lede{font-size:1.08rem;max-width:760px}
+    .status{display:inline-block;font-size:.82rem;color:var(--ok);border:1px solid rgba(63,185,80,.4);padding:4px 8px;border-radius:999px;margin-bottom:14px}
+    nav{display:flex;flex-wrap:wrap;gap:14px;margin-top:20px}
+    nav a,.links a{color:var(--link);text-decoration:none}
+    nav a:hover,.links a:hover{text-decoration:underline}
+    .facts{width:100%;border-collapse:collapse;margin-top:14px}
+    .facts th,.facts td{padding:10px 12px;border-top:1px solid var(--border);text-align:left;vertical-align:top}
+    .facts th{width:190px;color:var(--muted);font-weight:500}
+    .milestones{list-style:none;padding:0;margin:12px 0}
+    .milestones li{padding:8px 0;border-top:1px solid var(--border)}
+    .milestones li::before{content:"✓";color:var(--ok);margin-right:10px;font-weight:700}
+    .callout{border-left:3px solid var(--link);padding:2px 0 2px 16px;margin:18px 0}
+    code{background:var(--panel);padding:2px 5px;border-radius:4px}
+    footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:.9rem}
   </style>
 </head>
 <body>
 <main>
   <header>
-    <div class="eyebrow">Android game preservation and revival</div>
+    <div class="status">Revival core complete</div>
     <h1>Cops N Robbers Revival</h1>
-    <p class="lead">A community project preserving the classic Cops N Robbers Android game by restoring multiplayer, replacing the discontinued online backend, adding a reusable mod system, and keeping the game playable on modern Android hardware.</p>
-    <div class="actions">
-      <a class="btn primary" href="https://github.com/Jacqueb-1337/copsnrobbers/releases/latest">Download latest release</a>
-      <a class="btn" href="https://github.com/Jacqueb-1337/copsnrobbers">View source</a>
-      <a class="btn" href="https://jacqueb-1337.github.io/cnr-revived-web/">CNR server project</a>
-    </div>
+    <p class="lede">A preservation project for the original Cops N Robbers Android game. The project restores multiplayer, replaces the discontinued online backend, adds a reusable mod system, and keeps the original client usable on newer Android devices.</p>
+    <nav>
+      <a href="https://github.com/Jacqueb-1337/copsnrobbers/releases/latest">Download</a>
+      <a href="https://github.com/Jacqueb-1337/copsnrobbers">Source</a>
+      <a href="https://jacqueb-1337.github.io/cnr-revived-web/">Server project</a>
+      <a href="https://jacqueb-1337.github.io/project-v7/">Project V7</a>
+    </nav>
   </header>
 
   <section>
-    <h2>What the CNR Revival project does</h2>
-    <p>The project began as a reverse-engineering effort to understand how the original Cops N Robbers Android client communicated with its multiplayer services. That work grew into a complete revival stack that can redirect the original game to a community-controlled server, restore room discovery and joining, and support live multiplayer matches again.</p>
-    <div class="grid">
-      <div class="card"><h3>Restored multiplayer</h3><p>A custom Node.js server recreates the master and game-server behavior the original client expects, including authentication, room listing, hosting, joining and in-room traffic.</p></div>
-      <div class="card"><h3>Photon compatibility</h3><p>The original networking path was reverse engineered and adapted so the game can communicate with the replacement backend using the protocol behavior it already understands.</p></div>
-      <div class="card"><h3>Mod loader</h3><p>The revived build supports loadable C# mods, allowing features and fixes to evolve without rebuilding the entire game for every change.</p></div>
-      <div class="card"><h3>Game improvements</h3><p>Existing revival work includes an in-game settings and HUD editor, recording support, server redirection and compatibility fixes for the original Unity-era Android code.</p></div>
+    <h2>What was revived</h2>
+    <p>The original game depended on multiplayer services that are no longer available. The revival work reverse engineered the client's networking behavior, redirected it to a community-controlled backend, and rebuilt enough of the original flow for room discovery, hosting, joining, and live matches.</p>
+
+    <table class="facts">
+      <tr><th>Original client</th><td>Preserved Android game client, not a remake</td></tr>
+      <tr><th>Networking</th><td>Replacement Node.js master and game services</td></tr>
+      <tr><th>Protocol work</th><td>Reverse engineered Photon-era client behavior with a TCP path</td></tr>
+      <tr><th>Mods</th><td>Runtime C# DLL loading for fixes and optional features</td></tr>
+      <tr><th>Modern Android</th><td>32-bit ARMv7 compatibility through Project V7 on supported devices</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Current project pieces</h2>
+
+    <h3>Replacement multiplayer server</h3>
+    <p>The custom Node.js backend handles the services the revived client needs, including room listing, connection redirection, hosting, joining, and in-room traffic. The server work is also documented separately in the <a href="https://jacqueb-1337.github.io/cnr-revived-web/">CNR Revived Web project</a>.</p>
+
+    <h3>Mod loader</h3>
+    <p>The patched client can load C# mod DLLs at runtime. That lets the project ship fixes and features without rebuilding the entire APK every time. Existing work includes server redirection, an in-game HUD editor, settings tools, and recording support.</p>
+
+    <h3>Original gameplay preserved</h3>
+    <p>The goal is to preserve the original game behavior and client rather than recreate Cops N Robbers from scratch. The replacement pieces exist around the original game so the project remains useful as preservation and reverse-engineering work.</p>
+  </section>
+
+  <section>
+    <h2>Completed milestones</h2>
+    <ul class="milestones">
+      <li>Class and runtime behavior reverse engineering</li>
+      <li>Custom C# DLL injection</li>
+      <li>Reusable mod loader</li>
+      <li>Server redirection</li>
+      <li>Custom room discovery</li>
+      <li>Room hosting and joining</li>
+      <li>Full multiplayer handshake</li>
+      <li>End-to-end live matches</li>
+      <li>Public release packaging</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Modern Android compatibility</h2>
+    <div class="callout">
+      <p>The original Cops N Robbers build is a 32-bit ARMv7 Android application. Many newer 64-bit-only phones cannot launch it natively.</p>
+      <p><strong><a href="https://jacqueb-1337.github.io/project-v7/">Project V7</a> provides the compatibility layer used by the revival on supported modern devices.</strong> Project V7 is a separate open-source Android compatibility project for running supported legacy 32-bit apps on 64-bit-only Android hardware.</p>
+      <p><a href="https://github.com/Jacqueb-1337/project-v7">Project V7 source code</a></p>
     </div>
   </section>
 
-  <section>
-    <h2>Modern Android and 64-bit-only phones</h2>
-    <p>The original game is a 32-bit ARMv7 Android title. Many newer phones are 64-bit-only and cannot launch the original binary directly.</p>
-    <div class="credit">
-      <p><strong>Project V7 provides the modern Android compatibility layer used to keep Cops N Robbers running on supported 64-bit-only devices.</strong> Project V7 is a separate open-source Android compatibility project that wraps and patches supported legacy 32-bit apps instead of requiring a full old-Android virtual machine.</p>
-      <p><a href="https://jacqueb-1337.github.io/project-v7/">Learn about Project V7</a> or <a href="https://github.com/Jacqueb-1337/project-v7">view the Project V7 source on GitHub</a>.</p>
-    </div>
-  </section>
-
-  <section>
-    <h2>How the revival fits together</h2>
-    <div class="grid">
-      <div class="card"><h3>Original game client</h3><p>The preserved Cops N Robbers client remains the basis of the project. Compatibility and mod hooks are added around it rather than replacing the gameplay with a remake.</p></div>
-      <div class="card"><h3>CNR mod system</h3><p>Runtime C# modules provide server redirection, interface tools and optional features. The loader is designed so additional mods can be added independently.</p></div>
-      <div class="card"><h3>CNR Revived server</h3><p>The companion Node.js backend replaces the unavailable original multiplayer services and provides the server-side room and match infrastructure.</p></div>
-      <div class="card"><h3>Project V7</h3><p>For supported modern devices, Project V7 handles the 32-bit-to-64-bit compatibility layer required to launch the legacy ARMv7 game.</p></div>
-    </div>
-  </section>
-
-  <section>
-    <h2>Project status</h2>
-    <p>The core revival milestones have been completed. Multiplayer has been demonstrated end to end against the custom server, the mod loader is functional, and public builds are distributed through the GitHub repository.</p>
-    <p>The project remains useful as a preservation, reverse-engineering and Android compatibility effort. New fixes, mods and compatibility work can continue without changing the purpose of the original game.</p>
-  </section>
-
-  <section>
-    <h2>Source, downloads and related projects</h2>
+  <section class="links">
+    <h2>Links</h2>
     <p><a href="https://github.com/Jacqueb-1337/copsnrobbers">Cops N Robbers Revival repository</a></p>
     <p><a href="https://github.com/Jacqueb-1337/copsnrobbers/releases/latest">Latest CNR Revival release</a></p>
-    <p><a href="https://jacqueb-1337.github.io/cnr-revived-web/">CNR Revived Web and server project</a></p>
-    <p><a href="https://jacqueb-1337.github.io/project-v7/">Project V7 Android 32-bit compatibility project</a></p>
+    <p><a href="https://jacqueb-1337.github.io/cnr-revived-web/">CNR Revived Web and multiplayer server</a></p>
+    <p><a href="https://jacqueb-1337.github.io/project-v7/">Project V7 Android compatibility project</a></p>
   </section>
 
   <footer>
-    <p>Cops N Robbers Revival is a community preservation project. It does not claim ownership of the original game or its assets. Original game rights remain with their respective owners. Project V7 is a separate compatibility project and is credited here for its role in modern Android support.</p>
+    Cops N Robbers Revival is a community preservation project. It does not claim ownership of the original game or its assets. Original rights remain with their respective owners.
   </footer>
 </main>
 </body>
