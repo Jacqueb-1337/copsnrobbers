@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.6.4";
+        public  const string Version        = "1.6.5";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -608,11 +608,7 @@ namespace CNRModManager
             _repos.Clear();
             string saved = PlayerPrefs.GetString(PREF_REPOS, "");
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (!string.IsNullOrEmpty(saved))
-                foreach (string r in saved.Split('|'))
-                    if (!string.IsNullOrEmpty(r) && seen.Add(r)) _repos.Add(r);
-            if (seen.Add(ModManagerEntry.DefaultRepoUrl))
-                _repos.Insert(0, ModManagerEntry.DefaultRepoUrl);
+            var seedUrls = new List<string>();
             try
             {
                 if (File.Exists(ModManagerEntry.SeedRepoFile))
@@ -621,13 +617,42 @@ namespace CNRModManager
                     {
                         string candidate = line.Trim();
                         if (candidate.StartsWith("#") || !candidate.StartsWith("https://")) continue;
-                        if (seen.Add(candidate)) _repos.Add(candidate);
+                        if (!seedUrls.Contains(candidate)) seedUrls.Add(candidate);
                     }
                 }
             }
             catch (Exception ex) { ModManagerEntry.Log("Seed repo sources: " + ex.Message); }
+
+            // Until PV7's next source policy change, GitHub is the default
+            // even on older wrappers which do not seed the optional config.
+            string preferred = seedUrls.Count > 0 ? seedUrls[0] : ModManagerEntry.GithubRepoUrl;
+            if (!string.IsNullOrEmpty(saved))
+                foreach (string r in saved.Split('|'))
+                    if (!string.IsNullOrEmpty(r) && seen.Add(r)) _repos.Add(r);
+
+            // One-time migration for an untouched original Plesk/GitHub pair.
+            // Never reorder arbitrary custom repositories or a user-modified
+            // order after the desired bootstrap preference has been applied.
+            bool defaultsOnly = true;
+            foreach (string r in _repos)
+                if (!r.Equals(ModManagerEntry.DefaultRepoUrl, StringComparison.OrdinalIgnoreCase)
+                    && !r.Equals(ModManagerEntry.GithubRepoUrl, StringComparison.OrdinalIgnoreCase))
+                    defaultsOnly = false;
+            string applied = PlayerPrefs.GetString("CNRModMgr_PrimaryConfigApplied", "");
+            if (defaultsOnly && (string.IsNullOrEmpty(saved) || applied != preferred))
+            {
+                _repos.Clear();
+                seen.Clear();
+                if (seen.Add(preferred)) _repos.Add(preferred);
+                foreach (string candidate in seedUrls)
+                    if (seen.Add(candidate)) _repos.Add(candidate);
+                PlayerPrefs.SetString("CNRModMgr_PrimaryConfigApplied", preferred);
+            }
+
             if (seen.Add(ModManagerEntry.GithubRepoUrl)) _repos.Add(ModManagerEntry.GithubRepoUrl);
+            if (seen.Add(ModManagerEntry.DefaultRepoUrl)) _repos.Add(ModManagerEntry.DefaultRepoUrl);
             SaveRepoList();
+            ModManagerEntry.Log("Primary mod repository: " + _repos[0]);
         }
 
         private void SaveRepoList()
@@ -1360,7 +1385,8 @@ namespace CNRModManager
                 bool belowMin = !string.IsNullOrEmpty(effectiveMin)
                                 && !string.IsNullOrEmpty(iv)
                                 && CompareVersions(iv, effectiveMin) < 0;
-                bool outdated = !string.IsNullOrEmpty(iv) && iv != mod.latestVersion;
+                bool outdated = !string.IsNullOrEmpty(iv) && !string.IsNullOrEmpty(mod.latestVersion)
+                                && CompareVersions(iv, mod.latestVersion) < 0;
                 if (belowMin || (outdated && GetAutoUpdate(mod.filename)))
                     _pendingUpdates.Add(mod);
             }
@@ -1642,7 +1668,7 @@ namespace CNRModManager
                                        && CompareVersions(instdVer, minVer) < 0;
                     bool hasUpdate    = !string.IsNullOrEmpty(latestVer)
                                        && !string.IsNullOrEmpty(instdVer)
-                                       && instdVer != latestVer;
+                                       && CompareVersions(instdVer, latestVer) < 0;
                     bool core = m.filename.Equals("CNRMod.dll", StringComparison.OrdinalIgnoreCase);
 
                     GUILayout.BeginVertical(GUI.skin.box);
@@ -1791,7 +1817,7 @@ namespace CNRModManager
                 bool installed    = File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename));
                 string installedVer = installed ? GetInstalledVersion(mod.filename) : "";
                 bool isUpToDate   = installed && !string.IsNullOrEmpty(installedVer)
-                                    && installedVer == mod.latestVersion;
+                                    && CompareVersions(installedVer, mod.latestVersion) >= 0;
 
                 // Auto-update toggle row (only when installed)
                 if (installed)
@@ -1941,7 +1967,7 @@ namespace CNRModManager
                         string detInstalledVer = GetInstalledVersion(mod.filename);
                         bool isThisVerInstalled = isLatest && installedMod
                             && !string.IsNullOrEmpty(detInstalledVer)
-                            && detInstalledVer == mod.latestVersion;
+                            && CompareVersions(detInstalledVer, mod.latestVersion) >= 0;
                         string vUrl = ver.url;
                         string vTag = ver.version;
                         if (isThisVerInstalled)
