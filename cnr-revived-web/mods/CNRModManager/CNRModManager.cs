@@ -61,10 +61,13 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.6.3";
+        public  const string Version        = "1.6.4";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
+        public  const string GithubRepoUrl = "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/repo.json";
+        public  const string GithubModRoot = "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/";
+        public  const string SeedRepoFile = "/storage/emulated/0/CNRMods/repo-sources.txt";
         public  static bool  IsOpen         = false;
         public  static bool  IsLoaded       = false;
 
@@ -610,6 +613,21 @@ namespace CNRModManager
                     if (!string.IsNullOrEmpty(r) && seen.Add(r)) _repos.Add(r);
             if (seen.Add(ModManagerEntry.DefaultRepoUrl))
                 _repos.Insert(0, ModManagerEntry.DefaultRepoUrl);
+            try
+            {
+                if (File.Exists(ModManagerEntry.SeedRepoFile))
+                {
+                    foreach (string line in File.ReadAllLines(ModManagerEntry.SeedRepoFile))
+                    {
+                        string candidate = line.Trim();
+                        if (candidate.StartsWith("#") || !candidate.StartsWith("https://")) continue;
+                        if (seen.Add(candidate)) _repos.Add(candidate);
+                    }
+                }
+            }
+            catch (Exception ex) { ModManagerEntry.Log("Seed repo sources: " + ex.Message); }
+            if (seen.Add(ModManagerEntry.GithubRepoUrl)) _repos.Add(ModManagerEntry.GithubRepoUrl);
+            SaveRepoList();
         }
 
         private void SaveRepoList()
@@ -624,33 +642,45 @@ namespace CNRModManager
         private void StartFetchBrowse()
         {
             if (_browseFetching) return;
-            string repoUrl = _repos.Count > 0 ? _repos[0] : ModManagerEntry.DefaultRepoUrl;
             _autoFetchDone = true;
             _browseFetching = true;
-            StartCoroutine(FetchBrowse(repoUrl));
+            StartCoroutine(FetchBrowseWithFallback());
         }
 
-        private IEnumerator FetchBrowse(string url)
+        // Try repositories in user-configured order. A second source is a real
+        // availability fallback, not merely a manually selectable list entry.
+        private IEnumerator FetchBrowseWithFallback()
         {
-            _browseStatus   = "Fetching...";
+            _browseStatus = "Fetching...";
             _browseMods.Clear();
-            ModManagerEntry.Log("FetchBrowse: " + url);
-            WWW www = new WWW(url);
-            yield return www;
-            _browseFetching = false;
-            if (!string.IsNullOrEmpty(www.error))
+            string lastError = "";
+            for (int i = 0; i < _repos.Count; i++)
             {
-                string err = www.error;
-                if (err.Contains("UnknownHost") || err.Contains("Unable to resolve") || err.Contains("No address"))
-                    _browseStatus = "Connection error — check your internet connection.";
-                else
-                    _browseStatus = "Connection error: " + err;
-                ModManagerEntry.Log("FetchBrowse err: " + www.error);
-                yield break;
+                string url = _repos[i];
+                _browseStatus = i == 0 ? "Fetching..." : "Trying backup repository...";
+                ModManagerEntry.Log("FetchBrowse attempt " + (i + 1) + ": " + url);
+                WWW www = new WWW(url);
+                yield return www;
+                if (!string.IsNullOrEmpty(www.error))
+                {
+                    lastError = www.error;
+                    ModManagerEntry.Log("FetchBrowse err: " + lastError);
+                    continue;
+                }
+                _browseMods.Clear();
+                ParseRepoJson(www.text);
+                if (_browseMods.Count > 0)
+                {
+                    ModManagerEntry.Log("Fetched " + _browseMods.Count + " mods from " + url);
+                    _browseFetching = false;
+                    if (_statusMsg == "Refreshing installed mods and update info...") _statusMsg = "";
+                    yield break;
+                }
+                lastError = _browseStatus;
+                ModManagerEntry.Log("FetchBrowse invalid catalog: " + lastError);
             }
-            ParseRepoJson(www.text);
-            if (_statusMsg == "Refreshing installed mods and update info...")
-                _statusMsg = "";
+            _browseFetching = false;
+            _browseStatus = "All mod repositories unavailable: " + lastError;
         }
 
         private void ParseRepoJson(string json)
@@ -922,7 +952,66 @@ namespace CNRModManager
             catch { }
         }
 
+        // Keep Plesk primary, but retry the identical GitHub-hosted binary when
+        // Plesk is unavailable. This also works when the manifest came from
+        // GitHub repo.json but still advertises the canonical Plesk URLs.
+        private static string GitHubMirrorUrl(string url)
+        {
+            const string liveRoot = "https://play.jacqueb.me/mods/";
+            if (string.IsNullOrEmpty(url) ||
+                !url.StartsWith(liveRoot, StringComparison.OrdinalIgnoreCase)) return null;
+            string relative = url.Substring(liveRoot.Length);
+            if (relative.IndexOf("..") >= 0 || relative.IndexOf('?') >= 0) return null;
+            return ModManagerEntry.GithubModRoot + relative;
+        }
+
         private IEnumerator DownloadToPath(string progressLabel, string url, string dest, DownloadResult result)
+        {
+            // Never let a partial/HTML error response corrupt an installed DLL.
+            string temp = dest + ".cnrdownload.tmp";
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            yield return StartCoroutine(DownloadToPathOnce(progressLabel, url, temp, result));
+            if (result.success && !IsValidDownloadedFile(temp, dest))
+            {
+                result.success = false;
+                result.error = "Invalid downloaded file";
+            }
+            if (!result.success)
+            {
+                string backup = GitHubMirrorUrl(url);
+                if (!string.IsNullOrEmpty(backup))
+                {
+                    ModManagerEntry.Log("Plesk download failed (" + result.error + "); trying GitHub " + backup);
+                    try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+                    yield return StartCoroutine(DownloadToPathOnce(progressLabel, backup, temp, result));
+                    if (result.success && !IsValidDownloadedFile(temp, dest))
+                    {
+                        result.success = false;
+                        result.error = "Invalid GitHub download";
+                    }
+                }
+            }
+            if (result.success)
+            {
+                try { File.Copy(temp, dest, true); }
+                catch (Exception ex) { result.success = false; result.error = ex.Message; }
+            }
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+        }
+
+        private static bool IsValidDownloadedFile(string temp, string dest)
+        {
+            try
+            {
+                if (!File.Exists(temp) || new FileInfo(temp).Length < 4) return false;
+                if (!dest.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) return true;
+                using (FileStream f = File.OpenRead(temp))
+                    return f.ReadByte() == 0x4D && f.ReadByte() == 0x5A;
+            }
+            catch { return false; }
+        }
+
+        private IEnumerator DownloadToPathOnce(string progressLabel, string url, string dest, DownloadResult result)
         {
             result.success = false;
             result.error = "";

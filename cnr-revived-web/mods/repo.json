@@ -3094,12 +3094,17 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.6.3",
+      "latestVersion": "1.6.4",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.6.3.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.6.4.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.6.4",
+          "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.6.4.dll",
+          "changelog": "Add automatic GitHub catalog and DLL fallback for CNRModManager, plus persistent dual-repository support for PV7 CNR builds."
+        },
         {
           "version": "1.6.3",
           "url": "https://play.jacqueb.me/mods/CNRModManager/CNRModManager-1.6.3.dll",

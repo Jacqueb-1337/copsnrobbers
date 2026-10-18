@@ -1,4 +1,4 @@
-﻿# build_and_release.ps1 - interactive build + release pipeline for CNRMod DLLs.
+# build_and_release.ps1 - interactive build + release pipeline for CNRMod DLLs.
 #
 # Interactive mode (no flags): prompts for mod selection, version bump, repo.json update, changelog.
 # One-command mode (flags):    provide -ModName and optional flags to skip all prompts.
@@ -50,7 +50,7 @@ $RepoJson    = Join-Path $ModsDir "repo.json"
 $RepoJson2   = Join-Path $ModsDir "repo2.json"
 $BuildScript = Join-Path $BuildDir "build_mod.ps1"
 $BaseUrl     = "https://play.jacqueb.me/mods"
-$BaseUrl2    = "https://github.com/Jacqueb-1337/copsnrobbers/raw/refs/heads/master/cnr-revived-web/mods"
+$BaseUrl2    = "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods"
 $FtpConfigPath = Join-Path $RootDir ".vscode\sftp.json"
 
 # -- Helpers ------------------------------------------------------------------
@@ -239,9 +239,34 @@ function Update-RepoManifest {
     return $true
 }
 
+# repo.json is canonical for both the GitHub repository and the Plesk host.
+# repo2.json is a generated, fully independent GitHub-binary mirror. Never
+# hand-edit its entries: generate it from the canonical data on every release.
+function Sync-BackupManifest {
+    $canonical = Get-Content -LiteralPath $RepoJson -Raw
+    $parsed = $canonical | ConvertFrom-Json
+    if ($null -eq $parsed -or @($parsed.mods).Count -lt 1) {
+        throw "Invalid canonical repo.json; refusing to publish the backup."
+    }
+
+    $mirror = $canonical.Replace($BaseUrl + "/", $BaseUrl2 + "/")
+    $mirrorObj = $mirror | ConvertFrom-Json
+    $a = @($parsed.mods); $b = @($mirrorObj.mods)
+    if ($a.Count -ne $b.Count) { throw "Mirrored repository missing mods." }
+    for ($i = 0; $i -lt $a.Count; $i++) {
+        if ($a[$i].id -ne $b[$i].id -or $a[$i].latestVersion -ne $b[$i].latestVersion) {
+            throw "Mirror entry mismatch at index $i."
+        }
+    }
+    # CRLF is preserved from the canonical file; the same canonical file goes
+    # to GitHub and to Plesk via FTP, so their repo.json bytes are identical.
+    [System.IO.File]::WriteAllText($RepoJson2, $mirror, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Ok ("repo2.json rebuilt: " + $b.Count + " mods with GitHub download links")
+}
+
 # -- 1. Discover mod CS files -------------------------------------------------
 Write-Step "Discovering mods in cnr-revived-web/mods/"
-$csFiles = Get-ChildItem -Path $ModsDir -Recurse -Filter "*.cs" | 
+$csFiles = Get-ChildItem -Path $ModsDir -Recurse -Filter "*.cs" |
     Where-Object { $_.Name -notmatch '-\d+\.\d+\.\d+\.cs$' } |
     Sort-Object FullName
 
@@ -262,7 +287,7 @@ if ($ModName -ne "") {
     $selectedCs = $primaryCsFiles | Where-Object { $_.BaseName -eq $ModName } | Select-Object -First 1
     if ($null -eq $selectedCs) {
         Write-Err "No .cs file found with basename '$ModName' under $ModsDir"
-        Write-Host "   Available mods:" 
+        Write-Host "   Available mods:"
         foreach ($f in $primaryCsFiles) { Write-Host "     $($f.BaseName)  ($($f.FullName))" }
         exit 1
     }
@@ -425,11 +450,9 @@ if ($doRepo) {
         Write-Host "  Enter changelog for v$newVer (single line, press Enter when done):"
         $Changelog = Read-Host "  Changelog"
     }
-    $updated1 = Update-RepoManifest -Path $RepoJson  -BaseUrl $BaseUrl  -Label "repo.json"
-    $updated2 = Update-RepoManifest -Path $RepoJson2 -BaseUrl $BaseUrl2 -Label "repo2.json"
-    if (-not $updated1 -and -not $updated2) {
-        Write-Warn "No repo manifest updated."
-    }
+    $updated1 = Update-RepoManifest -Path $RepoJson -BaseUrl $BaseUrl -Label "repo.json"
+    if (-not $updated1) { throw "Canonical repo.json could not be updated; refusing release." }
+    Sync-BackupManifest
 } else {
     Write-Warn "Skipping repo manifest update."
 }
