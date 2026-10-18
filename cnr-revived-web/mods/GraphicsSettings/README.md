@@ -8,14 +8,14 @@ Experimental client-side graphics controls. This is a separate CNR mod, not a Pr
 - The game mod loader places GraphicsSettings.dll alongside CNRSettingsMod.dll inside the CNRMods folder.
 - The controls are under Settings > GRAPHICS, using the host's external tabs API.
 
-## Features in 0.1.0
+## Features in 0.1.1
 
 | Feature | Behavior |
 | --- | --- |
 | LOD bias | Sets Unity's global LOD bias and our manual runtime LOD switcher. Camera zoom affects selected detail. |
 | Experimental automatic LOD | Vertex-cluster simplification of eligible individual single-submesh world meshes. **Off by default.** |
-| Texture resolution | Full / half / quarter via Unity masterTextureLimit. Requires existing or generated mipmaps. |
-| Texture filtering | Point / bilinear / trilinear on world textures. Trilinear needs mipmaps. |
+| Texture resolution | Game default / full / half / quarter via Unity masterTextureLimit. Requires existing or generated mipmaps. |
+| Texture filtering | Point / bilinear / trilinear on eligible world textures, excluding named UI/font atlases. Trilinear needs mipmaps. |
 | Experimental generate mipmaps | Mipmapped texture copy via GPU blit + readback, at most 32 textures and 32 MiB estimated per map. **Off by default.** |
 | Ambient light | Multiplies ambient light on shaders affected by ambient illumination. |
 | Screen dimming | Black overlay up to 70%; dims UI too. This is NOT true brightness or gamma. |
@@ -31,7 +31,7 @@ Experimental client-side graphics controls. This is a separate CNR mod, not a Pr
 - Mipmap generation uses synchronous GPU readbacks, and might cause brief hitches or texture seams. Test with small maps first.
 - No persistent disk cache. Generated meshes and textures are retained during a scene only.
 - Gamma correction requires a compatible compiled Unity-4.6 postprocessing shader and is **not yet implemented**. No fake slider is exposed.
-- The mod is compiled but **not yet run-tested**. The local adb devices command returned no connected devices. Do not publish widely before validation.
+- Phone screenshots have shown legacy-game font corruption, not yet conclusively linked to this mod. Version 0.1.1 leaves the game's original texture quality unchanged until explicitly selected and skips named UI/font atlases. A/B runtime testing is still required.
 
 ## Build
 

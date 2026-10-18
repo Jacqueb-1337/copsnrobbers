@@ -2157,9 +2157,9 @@
       "id": "GraphicsSettings",
       "name": "Graphics Settings",
       "description": "Client-only graphics options added to the CNR Settings GRAPHICS tab. Includes zoom-aware experimental auto LOD for eligible meshes, texture resolution and filtering, optional missing-mipmap generation, ambient lighting, screen dimming and FPS cap.",
-      "latestVersion": "0.1.0",
+      "latestVersion": "0.1.1",
       "filename": "GraphicsSettings.dll",
-      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/GraphicsSettings/GraphicsSettings-0.1.0.dll",
+      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/GraphicsSettings/GraphicsSettings-0.1.1.dll",
       "latestOnly": false,
       "dependencies": [
         {
@@ -2171,6 +2171,11 @@
         }
       ],
       "versions": [
+        {
+          "version": "0.1.1",
+          "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/GraphicsSettings/GraphicsSettings-0.1.1.dll",
+          "changelog": "Preserve game texture quality by default and exclude UI and font atlases from texture filtering and mipmap generation."
+        },
         {
           "version": "0.1.0",
           "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/GraphicsSettings/GraphicsSettings-0.1.0.dll",
@@ -3094,12 +3099,17 @@
       "id": "CNRModManager",
       "name": "Mod Manager",
       "description": "Browse, install, and manage DLL mods from online repositories. Tap a mod for its full description, version history, and changelogs. Supports multiple repos and works standalone even without CNR Mod installed.",
-      "latestVersion": "1.6.5",
+      "latestVersion": "1.6.6",
       "minVersion": "1.3.5",
       "filename": "CNRModManager.dll",
-      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.6.5.dll",
+      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.6.6.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "1.6.6",
+          "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.6.6.dll",
+          "changelog": "Fix nested dependency minimum-version parsing and false REQUIRED badges on installed mods."
+        },
         {
           "version": "1.6.5",
           "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRModManager/CNRModManager-1.6.5.dll",

@@ -1,4 +1,4 @@
-// GraphicsSettings v0.1.0 - independent CNR mod; CNRSettingsMod >=3.1.110 required.
+// GraphicsSettings v0.1.1 - independent CNR mod; CNRSettingsMod >=3.1.110 required.
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -8,7 +8,7 @@ namespace GraphicsSettings
 {
     public static class GraphicsSettingsEntry
     {
-        public const string Version = "0.1.0";
+        public const string Version = "0.1.1";
         public static void Load()
         {
             if (GameObject.Find("GraphicsSettings") != null) return;
@@ -52,7 +52,7 @@ namespace GraphicsSettings
         {
             instance = this;
             lodBias = PlayerPrefs.GetFloat(Prefix + "lodBias", 1f);
-            textureLimit = PlayerPrefs.GetInt(Prefix + "textureLimit", 0);
+            textureLimit = PlayerPrefs.GetInt(Prefix + "textureLimit", -1);
             filtering = PlayerPrefs.GetInt(Prefix + "filter", 1);
             fpsLimit = PlayerPrefs.GetInt(Prefix + "fps", 0);
             autoLod = PlayerPrefs.GetInt(Prefix + "autoLod", 0) != 0;
@@ -167,7 +167,7 @@ namespace GraphicsSettings
         void ApplyGlobal()
         {
             QualitySettings.lodBias = Mathf.Clamp(lodBias, 0.25f, 3f);
-            QualitySettings.masterTextureLimit = Mathf.Clamp(textureLimit, 0, 2);
+            QualitySettings.masterTextureLimit = textureLimit < 0 ? originalTextureLimit : Mathf.Clamp(textureLimit, 0, 2);
             Application.targetFrameRate = fpsLimit == 0 ? originalTargetFPS : fpsLimit;
         }
 
@@ -205,7 +205,7 @@ namespace GraphicsSettings
             }
             Hint("Converts eligible scenery meshes only. Does not alter physics, players or network objects. Starts OFF.");
             Section("Textures");
-            int newLimit = Choose("Texture resolution", textureLimit, new string[] { "Full", "Half", "Quarter" });
+            int newLimit = Choose("Texture resolution", textureLimit + 1, new string[] { "Game default", "Full", "Half", "Quarter" }) - 1;
             if (newLimit != textureLimit) { textureLimit = newLimit; PlayerPrefs.SetInt(Prefix + "textureLimit", textureLimit); ApplyGlobal(); }
             Hint("Unity texture limit only affects textures with mip levels.");
             int newFilter = Choose("Texture filtering", filtering, new string[] { "Point", "Bilinear", "Trilinear" });
@@ -240,7 +240,7 @@ namespace GraphicsSettings
             }
             if (GUILayout.Button("Restore graphics defaults"))
             {
-                lodBias = originalLodBias; ambient = 1f; dimmer = 0f; textureLimit = originalTextureLimit; filtering = 1; fpsLimit = 0;
+                lodBias = originalLodBias; ambient = 1f; dimmer = 0f; textureLimit = -1; filtering = 1; fpsLimit = 0;
                 autoLod = mipmaps = false;
                 RemoveLods(); RestoreTextures(); ApplyGlobal(); ApplyAmbient();
                 PlayerPrefs.DeleteKey(Prefix + "lodBias"); PlayerPrefs.DeleteKey(Prefix + "ambient");
@@ -283,6 +283,16 @@ namespace GraphicsSettings
             GUI.depth = priorDepth;
         }
 
+        // Old NGUI fonts and menus use shared atlas textures. Changing filter
+        // or rebuilding mip levels on these can make glyphs render as blocks.
+        static bool IsUiAtlasTexture(Material mat, Texture2D texture)
+        {
+            string names = ((mat == null ? "" : mat.name) + " " + (texture == null ? "" : texture.name)).ToLowerInvariant();
+            return names.Contains("font") || names.Contains("atlas") ||
+                   names.Contains("ngui") || names.Contains("menu") ||
+                   names.Contains("bitmap") || names.Contains("uiwidget");
+        }
+
         void ApplyTextureFilters()
         {
             // Operate only on textures used by world MeshRenderers, not UI atlases.
@@ -297,7 +307,7 @@ namespace GraphicsSettings
                     Material mat = mats[j];
                     if (mat == null || !mat.HasProperty("_MainTex")) continue;
                     Texture2D t = mat.mainTexture as Texture2D;
-                    if (t == null) continue;
+                    if (t == null || IsUiAtlasTexture(mat, t)) continue;
                     if (!replacedFilters.ContainsKey(t)) replacedFilters.Add(t, t.filterMode);
                     t.filterMode = (FilterMode)filtering;
                 }
@@ -328,7 +338,7 @@ namespace GraphicsSettings
                     Material mat = mats[textureMaterialCursor++];
                     if (mat == null || !mat.HasProperty("_MainTex")) continue;
                     Texture2D source = mat.mainTexture as Texture2D;
-                    if (source == null || source.mipmapCount > 1 || source.width < 64 || source.height < 64) continue;
+                    if (source == null || IsUiAtlasTexture(mat, source) || source.mipmapCount > 1 || source.width < 64 || source.height < 64) continue;
                     if (source.width > 1024 || source.height > 1024) { mipSkipped++; continue; }
                     Texture2D replacement;
                     if (!generatedTextures.TryGetValue(source, out replacement))

@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.6.5";
+        public  const string Version        = "1.6.6";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -777,10 +777,43 @@ namespace CNRModManager
             }
         }
 
+        // Find a property directly on the supplied JSON object, never inside
+        // nested dependencies or version entries. The previous IndexOf-based
+        // parser confused a dependency's minVersion with its parent's minimum.
+        private static int FindDirectJsonKey(string json, string key)
+        {
+            int depth = 0;
+            bool inString = false, escaped = false;
+            for (int i = 0; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (inString)
+                {
+                    if (escaped) escaped = false;
+                    else if (c == '\\') escaped = true;
+                    else if (c == '"') inString = false;
+                    continue;
+                }
+                if (c == '{') { depth++; continue; }
+                if (c == '}') { depth--; continue; }
+                if (c != '"') continue;
+                if (depth == 1 && i + key.Length + 1 < json.Length
+                    && string.CompareOrdinal(json, i + 1, key, 0, key.Length) == 0
+                    && json[i + key.Length + 1] == '"')
+                {
+                    int after = i + key.Length + 2;
+                    while (after < json.Length && char.IsWhiteSpace(json[after])) after++;
+                    if (after < json.Length && json[after] == ':') return i;
+                }
+                inString = true;
+            }
+            return -1;
+        }
+
         private static string ParseJsonStr(string json, string key)
         {
             string k = "\"" + key + "\"";
-            int ki = json.IndexOf(k);
+            int ki = FindDirectJsonKey(json, key);
             if (ki < 0) return "";
             int colon = json.IndexOf(':', ki + k.Length);
             if (colon < 0) return "";
@@ -794,7 +827,7 @@ namespace CNRModManager
         private static bool ParseJsonBool(string json, string key)
         {
             string k = "\"" + key + "\"";
-            int ki = json.IndexOf(k);
+            int ki = FindDirectJsonKey(json, key);
             if (ki < 0) return false;
             int colon = json.IndexOf(':', ki + k.Length);
             if (colon < 0) return false;
