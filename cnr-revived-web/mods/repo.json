@@ -2154,6 +2154,31 @@
       ]
     },
     {
+      "id": "GraphicsSettings",
+      "name": "Graphics Settings",
+      "description": "Client-only graphics options added to the CNR Settings GRAPHICS tab. Includes zoom-aware experimental auto LOD for eligible meshes, texture resolution and filtering, optional missing-mipmap generation, ambient lighting, screen dimming and FPS cap.",
+      "latestVersion": "0.1.0",
+      "filename": "GraphicsSettings.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/GraphicsSettings/GraphicsSettings-0.1.0.dll",
+      "latestOnly": false,
+      "dependencies": [
+        {
+          "kind": "mod",
+          "id": "CNRSettingsMod",
+          "filename": "CNRSettingsMod.dll",
+          "minVersion": "3.1.110",
+          "latestOnly": true
+        }
+      ],
+      "versions": [
+        {
+          "version": "0.1.0",
+          "url": "https://play.jacqueb.me/mods/GraphicsSettings/GraphicsSettings-0.1.0.dll",
+          "changelog": "Initial experimental client graphics tab; automatic mesh LOD for eligible scene meshes, FOV-aware detail selection, texture filtering/resolution, optional mipmap rebuilding, ambient lighting, dimming and FPS cap. Requires CNRSettingsMod 3.1.110 or newer."
+        }
+      ]
+    },
+    {
       "id": "CNRDevSettingsMod",
       "name": "CNR Developer Settings",
       "description": "Adds a DEV tab to CNR Settings with FPS display, selectable verbose diagnostics, and placeholders for additional developer/debug tools.",
