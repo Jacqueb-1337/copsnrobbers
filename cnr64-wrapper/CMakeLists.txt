@@ -56,9 +56,20 @@ if(PROJECTV7_DEV_HOTPATCH)
     )
 endif()
 
+# Engine-neutral ARM32 shared-image mapper (no Unity/Mono assumptions).
+add_library(projectv7-elf32 STATIC
+    src/arm32_guest_image.cpp
+    src/arm32_guest_relocations.cpp
+)
+target_include_directories(projectv7-elf32 PUBLIC src)
+set_target_properties(projectv7-elf32 PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+add_executable(pv7-arm32-elf-probe src/arm32_elf_probe.cpp)
+target_link_libraries(pv7-arm32-elf-probe PRIVATE projectv7-elf32)
+
 add_library(projectv7-core STATIC ${PROJECTV7_CORE_SOURCES})
 add_library(cnr64-test-core ALIAS projectv7-core)
-target_link_libraries(projectv7-core PUBLIC dynarmic)
+target_link_libraries(projectv7-core PUBLIC dynarmic projectv7-elf32)
 target_include_directories(projectv7-core PUBLIC src)
 target_compile_definitions(projectv7-core PRIVATE
     PROJECTV7_DEV_HOTPATCH=$<BOOL:${PROJECTV7_DEV_HOTPATCH}>
