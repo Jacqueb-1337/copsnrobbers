@@ -161,12 +161,64 @@ control flow through the actual translator or controlled PV7 Dynarmic
 execution. Limit per-event recording to avoid unbounded log growth
 and avoid interpreting untyped pointer registers as known signatures.
 
+## Direct ARM32 guest and internal function tracing (Oct 29)
+
+A separate genuine ARM32 Android 4.4.2 emulator was installed on C:
+in the owner's isolated PV7 ARM32Classic folder. It uses Google's
+archived Android Emulator 28.0.25 emulator-arm.exe (32-bit host), a
+compact private data image and SD card with Best Park's matching OBB,
+and software OpenGL ES 2. ADB serial is emulator-5580; existing
+Android 16 emulator was not changed.
+
+Legacy Frida 12.4.8 ARM Android server and an isolated portable
+Python 3.7 client successfully attached to the actual ARM32 game process.
+Cocos JNI initialization and nativeRender were observed. Frida Stalker
+produced zero call events and coincided with an unresponsive guest, so it
+remains disabled; exact causation was not established.
+
+The game library exports 15,115 function symbols. The new tools
+pv7_arm32_function_agent.js and pv7_arm32_function_trace.py use bounded
+Interceptor hooks on selected exported ARM functions. They record
+calls, return values, raw register-like arguments, thread ids, caller
+addresses, caller module and library-relative offsets. Pointers are
+NOT decoded, and no internal functions are invoked artificially.
+
+Verified on the running ARM guest:
+
+- 80 hooks installed with zero setup failures.
+- 12-second baseline: 668 calls each to Cocos2dxRenderer.nativeRender,
+  CCDirector.sharedDirector and CCDirector.drawScene; 2004 total counted
+  across those three symbols.
+- 39 sampled call events and 39 corresponding returns retained with
+  no recording errors.
+- drawScene's recorded caller is inside libgame.so while nativeRender's
+  caller maps to Android libdvm.so.
+- A second test using the committed collector against the same running
+  ARM guest returned 80 hooks, 30 sampled calls, 30 sampled returns
+  and zero errors.
+- All raw game and tracing evidence remains on the owner's PC, not
+  uploaded to GitHub. Source scripts, tests and docs are committed.
+
+The CLI writes a JSONL trace plus a per-symbol count and caller summary:
+
+  python pv7_arm32_function_trace.py --seconds 12 --output new-trace.jsonl
+
+Before invocation, run the legacy Frida server in the guest and
+forward the local collector port 27044 to guest port 27042. The local
+ARM32Classic README-STATUS.md explains the exact boot setup.
+
+These are true observed guest ARM32 function calls, NOT exhaustive
+coverage of all 15,115 symbols, all indirect calls or every code path.
+The next pass is to add selector groups and exercise more gameplay
+scenes while comparing the captured return-site offsets to static ELF
+disassembly.
+
 ## Remaining milestones
 
 1. DONE: Find expansion data and verify native menus, cutscene, and level selection.
    NEXT: Validate actual level gameplay, input, audio, and rendering.
-2. Add opt-in native API/import tracing to the reference runtime;
-   x86 native translation complicates direct ARM instruction hooks.
+2. DONE: Trace selected internal ARM32 exported functions without x86 translation.
+   NEXT: expand function selections and reproduce more gameplay scenes.
 3. Connect Arm32TraceRecorder to the separate Cocos Dynarmic backend.
 4. Compare synchronized startup, graphics, files, JNI, and input traces.
 5. Validate PV7 separately without changing the existing Unity/CNR path.
