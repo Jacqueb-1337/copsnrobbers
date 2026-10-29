@@ -22,6 +22,10 @@ int main(int argc, char**argv) {
         if (name == "eglMakeCurrent") return 0x78000120u;
         return std::nullopt;
     }, error));
+    assert(image.imported_symbols().size() == 1);
+    assert(image.imported_symbols()[0].name == "eglMakeCurrent");
+    assert(image.imported_symbols()[0].symbol_type == 2); // STT_FUNC
+    assert(image.imported_symbols()[0].relocation_type == 21); // R_ARM_GLOB_DAT
     assert(image.ReadWord(0x10000500u) == 0x10000040u);
     assert(image.ReadWord(0x10000504u) == 0x78000120u);
     assert(image.ReadWord(0x10000360u) == 0x10000120u);

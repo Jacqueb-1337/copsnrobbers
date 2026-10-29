@@ -36,7 +36,9 @@ Results:
   - `Cocos2dxRenderer_nativeRender`: `0x1021f0d9`
 - **All present relocation records accepted** by the current parser
   in non-executing audit mode, with **330 distinct external symbol names**
-  and **324 initializer entries** identified.
+  and **324 initializer entries** identified. Of the 330 distinct imports,
+**323 are functions** and **7 are data objects** (no untyped imports).
+These require different guest address handling in the native service bridge.
 
 No copyrighted game bytes or import addresses from the game are checked
 into Git. The engine-neutral synthetic ELF tests run in GitHub Actions

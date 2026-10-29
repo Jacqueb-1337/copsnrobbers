@@ -10,6 +10,12 @@
 
 namespace pv7 {
 
+struct Arm32GuestImport {
+    std::string name;
+    std::uint8_t symbol_type = 0; // ELF STT_NOTYPE/FUNC/OBJECT etc.
+    std::uint8_t relocation_type = 0; // R_ARM_* numeric relocation.
+};
+
 // ARM32 ELF shared image mapped at a caller-selected guest address.
 // A backend supplies guest-address thunks for unresolved system imports.
 // This maps/relocates data; it does NOT execute guest ARM instructions.
@@ -23,6 +29,7 @@ class Arm32GuestImage {
     const std::vector<std::string>& dependencies() const { return dependencies_; }
     const std::vector<std::uint32_t>& constructors() const { return constructors_; }
     const std::vector<std::string>& unresolved_imports() const { return unresolved_; }
+    const std::vector<Arm32GuestImport>& imported_symbols() const { return imports_; }
     std::uint32_t base() const { return base_; }
     std::uint32_t span() const { return static_cast<std::uint32_t>(memory_.size()); }
     const std::vector<std::uint8_t>& memory() const { return memory_; }
@@ -40,6 +47,7 @@ class Arm32GuestImage {
     std::vector<std::string> dependencies_;
     std::vector<std::uint32_t> constructors_;
     std::vector<std::string> unresolved_;
+    std::vector<Arm32GuestImport> imports_;
     std::unordered_map<std::string, std::uint32_t> exports_;
     std::vector<std::uint32_t> load_ranges_;
     bool Range(std::uint32_t vaddr, std::size_t size) const;

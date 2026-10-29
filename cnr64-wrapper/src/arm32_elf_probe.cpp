@@ -68,6 +68,19 @@ int main(int argc, char** argv) {
     }
     std::cout << "RELOCATION_AUDIT_PASS (simulated import addresses only)\n";
     std::cout << "EXTERNAL_IMPORT_COUNT " << imports.size() << "\n";
+    std::map<std::string, unsigned> typed;
+    for (const auto& entry : guest.imported_symbols()) {
+        typed.emplace(entry.name, entry.symbol_type);
+    }
+    unsigned functions=0, objects=0, other=0;
+    for (const auto& entry : typed) {
+        if (entry.second == 2) ++functions;
+        else if (entry.second == 1) ++objects;
+        else ++other;
+    }
+    std::cout << "IMPORTED_FUNCTIONS " << functions << "\n";
+    std::cout << "IMPORTED_OBJECTS " << objects << "\n";
+    std::cout << "IMPORTED_OTHER " << other << "\n";
     for (const auto& entry : imports) {
         std::cout << "IMPORT " << entry.first << "\n";
     }

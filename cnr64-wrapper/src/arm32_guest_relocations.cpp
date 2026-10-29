@@ -23,6 +23,16 @@ bool Arm32GuestImage::RelocateTable(std::uint32_t address,std::uint32_t bytes,
                 error="Bad import symbol"; return false;
             }
             if (!defined) {
+                const auto symoff = std::uint64_t(dyn_.symtab) +
+                    std::uint64_t(info>>8)*dyn_.syment + 12;
+                if (symoff >= memory_.size()) {
+                    error="Bad guest symbol info"; return false;
+                }
+                imports_.push_back(Arm32GuestImport{
+                    name,
+                    static_cast<std::uint8_t>(memory_[symoff] & 0x0fu),
+                    static_cast<std::uint8_t>(type)
+                });
                 auto resolved=resolver?resolver(name):std::nullopt;
                 if (!resolved) {
                     unresolved_.push_back(name);
@@ -45,6 +55,7 @@ bool Arm32GuestImage::RelocateTable(std::uint32_t address,std::uint32_t bytes,
 }
 bool Arm32GuestImage::Relocate(const SymbolResolver& resolver,std::string& error) {
     unresolved_.clear();
+    imports_.clear();
     if (!RelocateTable(dyn_.rel,dyn_.relsz,resolver,error)) return false;
     if (!RelocateTable(dyn_.jmprel,dyn_.pltrelsz,resolver,error)) return false;
     constructors_.clear();
