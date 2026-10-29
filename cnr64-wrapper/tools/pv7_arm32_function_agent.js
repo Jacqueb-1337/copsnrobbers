@@ -30,7 +30,7 @@ if (mod === null) {
       methods: /fullPath|isFileExist|getFileData|addImage|addSpriteFrame|spriteFrameByName|load|initWith|read|open|playSound|create/
     },
     input: {
-      classes: /Cocos2dxRenderer_nativeTouches|Cocos2dxRenderer_nativeKey|CCEventDispatcher|CCLayer|Room|AreaMenuContainer|SLMenuDelegate|KeyboardNotificationLayer/,
+      classes: /Cocos2dxRenderer_nativeTouches|Cocos2dxRenderer_nativeKey|CCEventDispatcher|CCLayer|CCMenu|CCMenuItem|Room|AreaMenuContainer|SLMenuDelegate|KeyboardNotificationLayer/,
       methods: /nativeTouches|nativeKey|touches|ccTouch|ccTouches|keyBack|dispatchTouch|touchBegan|touchEnded|touchMoved/
     },
     gameplay: {
