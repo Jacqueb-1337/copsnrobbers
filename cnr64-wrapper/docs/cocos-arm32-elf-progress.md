@@ -53,6 +53,48 @@ No copyrighted game bytes or import addresses from the game are checked
 into Git. The engine-neutral synthetic ELF tests run in GitHub Actions
 and additionally exercise `--audit-relocations`.
 
+## Compatibility Analyzer: instrumentation foundation
+
+The new engine-independent offline static analyzer is
+cnr64-wrapper/tools/arm32_compat_analyzer.py. Run it against an
+owner-supplied ARM32 .so (no game assets are committed):
+
+~~~sh
+python3 cnr64-wrapper/tools/arm32_compat_analyzer.py \
+  /path/to/libgame.so --output /path/to/report.json --max-branches 1500
+~~~
+
+The versioned JSON report includes dependency libraries; dynamic imports,
+symbol types and relocation sites; exported functions; JNI entrypoints;
+ELF constructor counts; and bounded *candidate* ARM/Thumb direct branches.
+An optional analyst-provided --aosp-tag android-X.Y.Z_rN is recorded only as
+**unverified reference metadata**. It does not guess the original Android
+version, fetch historical source, or claim the reference implements this ABI.
+
+Evidence levels must stay separate:
+
+- Static facts: ELF headers, DT_NEEDED, dynsym, ELF relocations and constructor
+  references are auditable without executing guest instructions.
+- Static hypotheses: branch patterns can be false positives when ARM/Thumb
+  mode or code-versus-data is ambiguous. Indirect calls, dispatch tables and
+  runtime dlopen/dlsym are not exhaustively visible.
+- Observed events: only recorded from actual Dynarmic execution callbacks,
+  never synthesized from the static import inventory.
+
+The reusable Arm32TraceRecorder in projectv7-elf32 provides thread-safe,
+bounded events (call, return, import, fallback, fault) recording guest PC,
+target, thread ID, raw r0-r3 samples, symbol and detail. It aggregates
+identical call sites and serializes escaped JSON Lines with drop counts.
+Raw guest registers are **not decoded argument types**, and diagnostic reports
+may contain sensitive values; uploads should remain opt-in.
+
+The recorder is a **sink**, not a live engine tracer yet: the new Cocos guest
+Dynarmic dispatcher still needs to be wired to emit events. It cannot yet
+trace Best Park gameplay or provide the 323 external function implementations.
+
+The GitHub ELF workflow now runs synthetic ELF fixture and runtime-recorder
+regression tests alongside the static analyzer tests.
+
 ## Remaining implementation
 
 1. Build a real typed import resolver, distinguishing ELF function calls
