@@ -6,6 +6,8 @@ on:
       - 'cnr64-wrapper/src/arm32_guest_image.*'
       - 'cnr64-wrapper/src/arm32_guest_relocations.cpp'
       - 'cnr64-wrapper/src/arm32_elf_probe.cpp'
+      - 'cnr64-wrapper/src/arm32_trace_recorder.*'
+      - 'cnr64-wrapper/tools/arm32_compat_analyzer.py'
       - 'cnr64-wrapper/CMakeLists.txt'
       - 'cnr64-wrapper/tests/**'
       - '.github/workflows/pv7-arm32-elf.yml'
@@ -29,6 +31,9 @@ jobs:
           c++ -std=c++20 -Wall -Wextra -Werror -Isrc \
             src/arm32_guest_image.cpp src/arm32_guest_relocations.cpp \
             src/arm32_elf_probe.cpp -o /tmp/pv7-elf-probe
+          c++ -std=c++20 -Wall -Wextra -Werror -Isrc \
+            src/arm32_trace_recorder.cpp tests/test_arm32_trace_recorder.cpp \
+            -o /tmp/pv7-arm32-trace-test
       - name: Exercise synthetic ARM32 ELF image and imports
         run: |
           set -euo pipefail
@@ -36,3 +41,11 @@ jobs:
           /tmp/pv7-elf-test /tmp/pv7-arm32-fixture.so
           /tmp/pv7-elf-probe /tmp/pv7-arm32-fixture.so
           /tmp/pv7-elf-probe /tmp/pv7-arm32-fixture.so --audit-relocations
+          /tmp/pv7-arm32-trace-test
+      - name: Verify static diagnostics analyzer and JSON provenance
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s cnr64-wrapper/tests -p test_arm32_compat_analyzer.py -v
+          python3 cnr64-wrapper/tools/arm32_compat_analyzer.py \
+            /tmp/pv7-arm32-fixture.so --output /tmp/pv7-compat-report.json
+          python3 -m json.tool /tmp/pv7-compat-report.json > /dev/null
