@@ -19,10 +19,10 @@ SERIAL = re.compile(r"^[A-Za-z0-9_.:-]+$")
 PACKAGE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+$")
 
 
-def adb(serial, *arguments, timeout=30, binary=False, executable="adb"):
+def adb(serial, *arguments, timeout=30, binary=False, executable="adb", allow_failure=False):
     command = [executable, "-s", serial, *arguments]
     result = subprocess.run(command, capture_output=True, timeout=timeout, check=False)
-    if result.returncode:
+    if result.returncode and not allow_failure:
         raise RuntimeError(
             "ADB command failed: " + " ".join(arguments) +
             "\n" + result.stderr.decode("utf-8", "replace")[:1800])
@@ -86,7 +86,8 @@ def capture(serial, package, output, duration, launch, executable):
                                     executable=executable).strip()
     if duration:
         time.sleep(duration)
-    pid = adb(serial, "shell", "pidof", package, executable=executable).strip().split()
+    pid = adb(serial, "shell", "pidof", package, executable=executable,
+              allow_failure=True).strip().split()
     pid = pid[0] if pid else ""
     data["pid"] = pid or None
     maps = ""
