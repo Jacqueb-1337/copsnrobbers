@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -33,6 +34,9 @@ class Arm32GuestImage {
     std::uint32_t base() const { return base_; }
     std::uint32_t span() const { return static_cast<std::uint32_t>(memory_.size()); }
     const std::vector<std::uint8_t>& memory() const { return memory_; }
+    // Copy a relocated ELF image into a Dynarmic-compatible guest address
+    // array, never into host-process executable memory. All-or-nothing bounds.
+    bool CopyToGuestMemory(std::span<std::uint8_t> guest, std::string& error) const;
     std::optional<std::uint32_t> ReadWord(std::uint32_t guest_address) const;
 
  private:

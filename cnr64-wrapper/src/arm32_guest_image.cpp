@@ -15,6 +15,16 @@ bool U32(const std::vector<std::uint8_t>& a,std::size_t n,std::uint32_t& x){
    (std::uint32_t(a[n+3])<<24);return true;
 }
 }
+bool Arm32GuestImage::CopyToGuestMemory(
+    std::span<std::uint8_t> guest, std::string& error) const {
+    if (memory_.empty() || base_ > guest.size() ||
+        memory_.size() > guest.size() - base_) {
+        error = "Mapped ARM32 image exceeds guest memory";
+        return false;
+    }
+    std::copy(memory_.begin(), memory_.end(), guest.begin() + base_);
+    return true;
+}
 bool Arm32GuestImage::Range(std::uint32_t p,std::size_t n)const{
  return p<=memory_.size()&&n<=memory_.size()-p;
 }

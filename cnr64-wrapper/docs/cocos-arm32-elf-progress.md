@@ -40,6 +40,12 @@ Results:
 **323 are functions** and **7 are data objects** (no untyped imports).
 These require different guest address handling in the native service bridge.
 
+The `CopyToGuestMemory` API now copies a relocated image into a
+caller-owned guest memory array at the selected base with preflight bounds
+checks; an undersized destination fails before copying. A synthetic unit test
+validates the final relocated words in the destination. This is the memory
+bridge groundwork, **not** a running Dynarmic guest/JNI environment.
+
 No copyrighted game bytes or import addresses from the game are checked
 into Git. The engine-neutral synthetic ELF tests run in GitHub Actions
 and additionally exercise `--audit-relocations`.

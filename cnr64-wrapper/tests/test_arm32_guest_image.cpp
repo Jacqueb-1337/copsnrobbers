@@ -31,5 +31,22 @@ int main(int argc, char**argv) {
     assert(image.ReadWord(0x10000360u) == 0x10000120u);
     assert(image.constructors().size() == 1);
     assert(image.constructors()[0] == 0x10000120u);
+    // The same mapped image must fit in a Dynarmic guest address array.
+    pv7::Arm32GuestImage smaller;
+    assert(smaller.Load(bytes, 0x1000, error));
+    assert(smaller.Relocate([](std::string_view name) -> std::optional<std::uint32_t> {
+        if (name == "eglMakeCurrent") return 0x3000u;
+        return std::nullopt;
+    }, error));
+    std::vector<std::uint8_t> guestMemory(0x3000, 0x33);
+    assert(smaller.CopyToGuestMemory(std::span<std::uint8_t>(guestMemory), error));
+    assert(guestMemory[0x1500] == 0x40);
+    assert(guestMemory[0x1501] == 0x10);
+    assert(guestMemory[0x1504] == 0x00);
+    assert(guestMemory[0x1505] == 0x30);
+    std::vector<std::uint8_t> tooSmall(0x1100, 0x33);
+    assert(!smaller.CopyToGuestMemory(std::span<std::uint8_t>(tooSmall), error));
+    assert(tooSmall[0x1000] == 0x33); // no partial write
+
     std::cout << "PASS ELF32/ARM image mapping, exports, relocation, constructors\n";
 }
