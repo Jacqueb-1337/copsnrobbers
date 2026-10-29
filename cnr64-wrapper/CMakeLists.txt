@@ -60,6 +60,7 @@ endif()
 add_library(projectv7-elf32 STATIC
     src/arm32_guest_image.cpp
     src/arm32_guest_relocations.cpp
+    src/arm32_trace_recorder.cpp
 )
 target_include_directories(projectv7-elf32 PUBLIC src)
 set_target_properties(projectv7-elf32 PROPERTIES POSITION_INDEPENDENT_CODE ON)
