@@ -38,7 +38,10 @@ Results:
   in non-executing audit mode, with **330 distinct external symbol names**
   and **324 initializer entries** identified. Of the 330 distinct imports,
 **323 are functions** and **7 are data objects** (no untyped imports).
-These require different guest address handling in the native service bridge.
+The exact seven data symbols are `__sF`, `__stack_chk_guard`, `_ctype_`,
+`_tolower_tab_`, `_toupper_tab_`, `optarg` and `optind`. These need
+writable guest-owned data slots or compatible C runtime tables, **not**
+function trampolines. The audit CLI now prints `DATA_IMPORT` lines for them.
 
 The `CopyToGuestMemory` API now copies a relocated image into a
 caller-owned guest memory array at the selected base with preflight bounds

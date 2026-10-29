@@ -81,6 +81,9 @@ int main(int argc, char** argv) {
     std::cout << "IMPORTED_FUNCTIONS " << functions << "\n";
     std::cout << "IMPORTED_OBJECTS " << objects << "\n";
     std::cout << "IMPORTED_OTHER " << other << "\n";
+    for (const auto& [name, kind] : typed) {
+        if (kind == 1) std::cout << "DATA_IMPORT " << name << "\n";
+    }
     for (const auto& entry : imports) {
         std::cout << "IMPORT " << entry.first << "\n";
     }
