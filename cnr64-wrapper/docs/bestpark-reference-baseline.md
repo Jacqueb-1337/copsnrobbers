@@ -50,7 +50,7 @@ The emulator reported GLES 2 EGL context initialization. This proves
 the ARMv7 game library ran far enough to reach Cocos JNI/native startup.
 It does NOT prove playable rendering or that every imported API works.
 
-## Reference blocker
+## Previously observed reference blocker
 
 App startup logs report a nonexistent OBB expansion directory:
  /storage/emulated/0/Android/obb/com.turner.bestparkintheuniverse
@@ -62,6 +62,42 @@ search. Do not call this a PV7 rendering defect.
 
 A strace attachment observed only one blocked syscall and therefore
 does not establish comprehensive native-call coverage.
+
+
+## Expansion data located; game menus and story verified
+
+The owner identified an additional archive in Downloads:
+08093-Best-Park-v1-2-1-cache.zip (373,361,872 bytes).
+The archive has three entries, including:
+
+- com.turner.bestparkintheuniverse/main.16.com.turner.bestparkintheuniverse.obb
+- OBB size: 388,494,611 bytes
+- Extracted OBB SHA-256: C59062A368C06731D29B5CE03D8B4D725C146008A9C168606F85569286C3AB44
+
+The extracted entry was copied unchanged to the isolated reference AVD:
+ /sdcard/Android/obb/com.turner.bestparkintheuniverse/main.16.com.turner.bestparkintheuniverse.obb
+
+The game's real logs now say "expansion file is ZipResourceFile",
+"isDownloading false", "exists? true", then display the complete OBB
+path. Despite subsequent legacy Play licensing errors, the original
+ARMv7 game renders its animated title screen, responds to Play,
+advances through the introductory story, reaches Select Destination,
+and opens Select 2 Characters for level 1. Gameplay itself has not
+yet been conclusively reached or validated.
+
+This test uses the previously described locally DEX-normalized APK,
+not the untouched original package. The original ZIP, OBB entry, APK
+and game library were preserved; no licensed game assets are committed.
+
+After restarting the AVD, ADB needed an explicit "adb root" again to
+read /proc/<game-pid>/maps. A subsequent collector run succeeded
+and wrote local evidence to:
+ C:/Users/Jacqueb/AppData/Local/Temp/pv7-bestpark-obb-working-baseline-root/
+
+This confirms functional ARM32 reference execution and asset loading,
+but is not proof that the PV7 Cocos host can execute this game or that
+all native function calls have been instrumented.
+
 
 ## Repeatable local capture
 
@@ -84,7 +120,8 @@ This collector does not claim to instrument every native function call.
 
 ## Remaining milestones
 
-1. Find owner-provided original game expansion data and test real menus.
+1. DONE: Find expansion data and verify native menus, cutscene, and level selection.
+   NEXT: Validate actual level gameplay, input, audio, and rendering.
 2. Add opt-in native API/import tracing to the reference runtime;
    x86 native translation complicates direct ARM instruction hooks.
 3. Connect Arm32TraceRecorder to the separate Cocos Dynarmic backend.
