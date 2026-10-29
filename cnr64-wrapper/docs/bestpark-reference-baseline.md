@@ -118,6 +118,49 @@ All raw evidence remains local to the owner's PC. Device logs can
 contain private information and should not be automatically uploaded.
 This collector does not claim to instrument every native function call.
 
+## Real native API interception (Frida)
+
+A matching Frida 17.24.3 Python client and Android x86 server were installed
+for the isolated Android 9 reference emulator. An actual attach to the
+running Best Park process succeeded. An exploratory set of 19 exposed
+libndk_translation thunk functions yielded zero calls while attached; those
+thunks do not cover all guest-to-host interactions.
+
+Tracing **35 Android host native API entry points** in libc, libdl, liblog,
+libEGL, and libGLESv2 produced real live event callbacks:
+
+- 12-second run: 210,703 host API calls observed; first 15,000 calls and
+  corresponding returns saved as 30,000 JSONL events; 195,703 later calls
+  were counted but not individually serialized due to the size cap.
+- Hooked examples observed: read, write, fstat, close, clock_gettime,
+  pthread_mutex_lock/unlock, eglSwapBuffers, glClear, glBindTexture,
+  and glDrawArrays.
+- Return addresses for glClear, glBindTexture, and glDrawArrays mapped
+  to the **libndk_translation_proxy_libGLESv2.so** module, supporting
+  guest ARM graphics calls passing through the x86 bridge.
+- Other return sites mapped to ordinary Android system/vendor libraries;
+  these are process-level observations, not necessarily calls originating
+  directly in the game library.
+- Reproducible version was added as
+  tools/pv7_reference_frida_agent.js and
+  tools/pv7_reference_frida_trace.py.
+- The checked-in scripts were tested by fetching them back to the PC
+  and running a 3-second live capture: 32,595 API calls observed,
+  15,000 entry and return pairs saved, 17,595 additional calls counted.
+
+The logs, counts, and summaries remain **local-only** under the host's
+temporary pv7-frida folder. No raw traces, game assets, or APKs
+were committed. These 35 host hooks are a confirmed first real native
+boundary trace, NOT an exhaustive recording of all 323 ARM imports,
+internal libgame functions, JNI, or every native instruction.
+
+Next: expand to an import-driven set of proxy/host API interceptors,
+correlate return addresses and threads to bridge/module origin, add
+game-initiated JNI hooks, then instrument guest ARM function-level
+control flow through the actual translator or controlled PV7 Dynarmic
+execution. Limit per-event recording to avoid unbounded log growth
+and avoid interpreting untyped pointer registers as known signatures.
+
 ## Remaining milestones
 
 1. DONE: Find expansion data and verify native menus, cutscene, and level selection.
