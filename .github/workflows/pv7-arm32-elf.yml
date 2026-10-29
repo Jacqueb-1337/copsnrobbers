@@ -35,3 +35,4 @@ jobs:
           python3 cnr64-wrapper/tests/make_arm32_fixture.py /tmp/pv7-arm32-fixture.so
           /tmp/pv7-elf-test /tmp/pv7-arm32-fixture.so
           /tmp/pv7-elf-probe /tmp/pv7-arm32-fixture.so
+          /tmp/pv7-elf-probe /tmp/pv7-arm32-fixture.so --audit-relocations
