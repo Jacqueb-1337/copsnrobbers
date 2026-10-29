@@ -31,7 +31,10 @@ int main() {
     fault.detail = "bad \"guest\"\naddress";
     trace.Record(fault);
     assert(trace.UniqueEvents() == 2);
-    trace.Record({pv7::Arm32TraceKind::Fallback, 0x90});
+    pv7::Arm32TraceEvent fallback;
+    fallback.kind = pv7::Arm32TraceKind::Fallback;
+    fallback.pc = 0x90;
+    trace.Record(fallback);
     assert(trace.DroppedEvents() == 1);
     output = trace.ToJsonLines();
     assert(output.find("bad \\\"guest\\\"\\naddress") != std::string::npos);
