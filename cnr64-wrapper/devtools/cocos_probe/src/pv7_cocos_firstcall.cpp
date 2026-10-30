@@ -153,13 +153,32 @@ public:
             return;
         }
         if (svc == kJniFindClass) {
-            reason = "JNI_FindClass:" + CString(mem_, regs[1]);
-            Fault(regs[15], reason); // fail closed until genuine Java class bridge exists
+            const auto name = CString(mem_, regs[1]);
+            if (name != "org/cocos2dx/lib/Cocos2dxBitmap") {
+                Fault(regs[15], "JNI_FindClass_unknown:" + name);
+                return;
+            }
+            // Diagnostic-only identity for a class known to the original game.
+            // No methods are simulated. The next JNI access remains fail-closed.
+            constexpr std::uint32_t kDiagnosticBitmapClass = 0x0000c010;
+            regs[0] = kDiagnosticBitmapClass;
+            std::cout << "JNI_DIAGNOSTIC_CLASS " << name
+                      << " token=0x" << std::hex << kDiagnosticBitmapClass
+                      << std::dec << "\n";
             return;
         }
         if (svc == kJniRegister) {
             reason = "JNI_RegisterNatives_count:" + std::to_string(regs[3]);
             Fault(regs[15], reason);
+            return;
+        }
+        if (svc == kMissingJniSvc + 113u) {
+            const auto classRef=regs[1], methodName=regs[2], signature=regs[3];
+            const auto name=CString(mem_,methodName), sig=CString(mem_,signature);
+            std::cout << "JNI_STATIC_METHOD_REQUEST class=0x"
+                      << std::hex << classRef << std::dec
+                      << " method=" << name << " signature=" << sig << "\n";
+            Fault(regs[15], "JNI_GetStaticMethodID_requires_implementation:" + name + sig);
             return;
         }
         if (svc >= kMissingJniSvc && svc < kMissingJniSvc + 232u) {

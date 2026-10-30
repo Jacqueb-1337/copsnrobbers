@@ -46,3 +46,10 @@ The EGL pbuffer is a smoke-test surface, not the Android wrapper's actual
 window. Host GLES calls currently run on the single probe thread; production
 integration must marshal these calls to the wrapper's EGL/render thread and
 correctly manage context loss, resize, graphics-object lifetimes and errors.
+
+## JNI bitmap discovery
+A diagnostic-only known-class token exposed the first static method lookup:
+Cocos2dxBitmap.createTextBitmap(Ljava/lang/String;Ljava/lang/String;IIII)V
+The diagnostic deliberately stops at GetStaticMethodID; no fake Java method is executed.
+The actual bridge must implement this exact signature and real bitmap-to-guest texture data transfer.
+
