@@ -39,11 +39,24 @@ set(PROJECTV7_CORE_SOURCES
 )
 
 set(PV7_COMPAT_MODULE_CNR 0)
+set(PV7_COMPAT_MODULE_COCOS2DX 0)
 foreach(PV7_COMPAT_MODULE IN LISTS PROJECTV7_COMPAT_MODULES)
     if(PV7_COMPAT_MODULE STREQUAL "cnr")
         set(PV7_COMPAT_MODULE_CNR 1)
         list(APPEND PROJECTV7_CORE_SOURCES
             compat_modules/cnr/cnr_compat_module.cpp
+        )
+    elseif(PV7_COMPAT_MODULE STREQUAL "cocos2dx")
+        set(PV7_COMPAT_MODULE_COCOS2DX 1)
+        list(APPEND PROJECTV7_CORE_SOURCES
+            compat_modules/cocos2dx/cocos2dx_compat_module.cpp
+            compat_modules/cocos2dx/cocos2dx_jni_marshaller.cpp
+            compat_modules/cocos2dx/cocos2dx_bitmap_pixels.cpp
+            compat_modules/cocos2dx/cocos2dx_guest_jni_arrays.cpp
+            compat_modules/cocos2dx/cocos2dx_jni_refs.cpp
+            compat_modules/cocos2dx/cocos2dx_guest_math.cpp
+            compat_modules/cocos2dx/elf/arm32_guest_image.cpp
+            compat_modules/cocos2dx/elf/arm32_guest_relocations.cpp
         )
     elseif(NOT PV7_COMPAT_MODULE STREQUAL "")
         message(FATAL_ERROR "Unknown ProjectV7 compatibility module: ${PV7_COMPAT_MODULE}")
@@ -64,6 +77,7 @@ target_compile_definitions(projectv7-core PRIVATE
     PROJECTV7_DEV_HOTPATCH=$<BOOL:${PROJECTV7_DEV_HOTPATCH}>
     PROJECTV7_DEV_DIAGNOSTICS=$<BOOL:${PROJECTV7_DEV_DIAGNOSTICS}>
     PV7_COMPAT_MODULE_CNR=${PV7_COMPAT_MODULE_CNR}
+    PV7_COMPAT_MODULE_COCOS2DX=${PV7_COMPAT_MODULE_COCOS2DX}
 )
 if(PROJECTV7_DEV_HOTPATCH)
     target_include_directories(projectv7-core PRIVATE devtools/hotpatch)
