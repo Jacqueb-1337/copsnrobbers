@@ -53,3 +53,4 @@ Cocos2dxBitmap.createTextBitmap(Ljava/lang/String;Ljava/lang/String;IIII)V
 The diagnostic deliberately stops at GetStaticMethodID; no fake Java method is executed.
 The actual bridge must implement this exact signature and real bitmap-to-guest texture data transfer.
 
+Original APK JADX inspection confirms createTextBitmap renders ARGB_8888 using Canvas/Paint, calls getPixels via ByteBuffer.copyPixelsToBuffer, then nativeInitBitmapDC(width,height,pixels). This is required behavior for the production bridge.
