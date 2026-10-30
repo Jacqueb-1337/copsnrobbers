@@ -489,7 +489,7 @@ private:
 
 int main(int argc, char** argv) {
     if (argc != 2 && argc != 3) {
-        std::cerr << "Usage: pv7-cocos-firstcall libgame.so [JNI_OnLoad|nativeRender]\n";
+        std::cerr << "Usage: pv7-cocos-firstcall libgame.so [constructors|JNI_OnLoad|boot|nativeRender]\n";
         return 2;
     }
     const std::string requested = argc == 3 ? argv[2] : "JNI_OnLoad";
@@ -513,19 +513,21 @@ int main(int argc, char** argv) {
         std::cerr << "IMAGE_OVERLAPS_THUNKS\n"; return 2;
     }
 
-    std::map<std::string, bool> data_imports;
-    for (const auto& i : image.imported_symbols())
-        if (i.symbol_type == 1) data_imports[i.name] = true;
+    // Import records are discovered during Relocate, not Load.
+    // The relocation walker appends the current typed import before
+    // invoking our resolver. Use that exact record for STT_OBJECT.
     std::map<std::string, std::uint32_t> addresses;
     std::vector<Import> imports;
     unsigned data_count=0;
     auto resolver = [&](std::string_view value) -> std::optional<std::uint32_t> {
         const std::string name(value);
         if (auto it = addresses.find(name); it != addresses.end()) return it->second;
-        const bool is_data = data_imports.find(name) != data_imports.end();
+        const auto& pending = image.imported_symbols();
+        const bool is_data = !pending.empty() &&
+            pending.back().name == name && pending.back().symbol_type == 1;
         if (imports.size() >= 4096) return std::nullopt;
         const std::uint32_t addr = name == "pthread_once" ? kPthreadOnce
-            : is_data ? kObjectsBase + data_count++ * 128u
+            : is_data ? kObjectsBase + data_count++ * 512u
             : kImportsBase + static_cast<std::uint32_t>(imports.size()) * 16u;
         addresses[name] = addr;
         imports.push_back({name, addr, is_data});
@@ -545,6 +547,30 @@ int main(int argc, char** argv) {
             std::cerr << "THUNK_FAILED " << imports[i].name << "\n"; return 2;
         }
     }
+    unsigned object_count = 0;
+    for (const auto& entry : imports) {
+        if (!entry.data) continue;
+        ++object_count;
+        if (entry.name == "__stack_chk_guard")
+            Put32(memory, entry.address, 0x5a17ccf0u);
+        else if (entry.name == "optind")
+            Put32(memory, entry.address, 1u);
+        else if (entry.name == "_ctype_" ||
+                 entry.name == "_tolower_tab_" ||
+                 entry.name == "_toupper_tab_") {
+            const auto table = entry.address + 16u;
+            Put32(memory, entry.address, table);
+            for (std::uint32_t i=0;i<256;++i) {
+                auto value = static_cast<std::uint8_t>(i);
+                if (entry.name == "_tolower_tab_" && i >= 'A' && i <= 'Z')
+                    value = static_cast<std::uint8_t>(i + ('a'-'A'));
+                else if (entry.name == "_toupper_tab_" && i >= 'a' && i <= 'z')
+                    value = static_cast<std::uint8_t>(i - ('a'-'A'));
+                memory[table+i] = value;
+            }
+        }
+    }
+    std::cout << "TYPED_DATA_IMPORTS count=" << object_count << "\n";
     // One-time initialization is vital: actually call the guest initializer
     // via BLX instead of lying to Cocos that initialization succeeded.
     // This simple ARM-state stub is *single-threaded diagnostic only*;
@@ -646,7 +672,8 @@ int main(int argc, char** argv) {
               << " pc=0x" << std::hex << *entry << std::dec
               << " imports=" << imports.size()
               << " image=" << image.span()
-              << " constructors_not_run=" << image.constructors().size()
+              << " constructors_not_run="
+              << (requested == "boot" ? 0u : image.constructors().size())
               << "\n";
     jit.Run();
     if (bridge.faulted) {
