@@ -178,7 +178,43 @@ public:
             std::cout << "JNI_STATIC_METHOD_REQUEST class=0x"
                       << std::hex << classRef << std::dec
                       << " method=" << name << " signature=" << sig << "\n";
-            Fault(regs[15], "JNI_GetStaticMethodID_requires_implementation:" + name + sig);
+            if (classRef == 0x0000c010u &&
+                name == "createTextBitmap" &&
+                sig == "(Ljava/lang/String;Ljava/lang/String;IIII)V") {
+                constexpr std::uint32_t kTextMethod = 0x0000c020;
+                regs[0] = kTextMethod;
+                std::cout << "JNI_METHOD_IDENTIFIED createTextBitmap token=0x"
+                          << std::hex << kTextMethod << std::dec << "\n";
+                return;
+            }
+            Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
+            return;
+        }
+        if (svc == kMissingJniSvc + 167u) {
+            const auto addr = regs[1];
+            constexpr std::size_t kMaxStringBytes = 65536;
+            if (!addr || addr >= mem_.size()) {
+                Fault(regs[15], "JNI_NewStringUTF_invalid_pointer"); return;
+            }
+            const auto lengthLimit = std::min(kMaxStringBytes, mem_.size()-addr);
+            const auto* begin = mem_.data()+addr;
+            const auto* end = static_cast<const std::uint8_t*>(
+                std::memchr(begin, 0, lengthLimit));
+            if (!end) {
+                Fault(regs[15], "JNI_NewStringUTF_unterminated"); return;
+            }
+            if (next_jstring_ > 0x0000fffcu) {
+                Fault(regs[15], "JNI_NewStringUTF_token_exhausted"); return;
+            }
+            const auto handle = next_jstring_;
+            next_jstring_ += 4;
+            guest_strings_.emplace(handle,
+                std::string(reinterpret_cast<const char*>(begin),
+                            static_cast<std::size_t>(end-begin)));
+            regs[0] = handle;
+            std::cout << "JNI_NEW_STRING_UTF handle=0x" << std::hex << handle
+                      << std::dec << " bytes=" << guest_strings_.at(handle).size()
+                      << "\n";
             return;
         }
         if (svc >= kMissingJniSvc && svc < kMissingJniSvc + 232u) {
@@ -629,6 +665,8 @@ private:
     }
     std::uint32_t next_heap_ = kHeapStart;
     std::map<std::uint32_t, std::uint32_t> allocations_;
+    std::uint32_t next_jstring_ = 0x0000c100;
+    std::map<std::uint32_t, std::string> guest_strings_;
     std::uint32_t next_key_ = 1;
     std::map<std::uint32_t, std::pair<std::uint32_t, std::uint32_t>> keys_;
     std::vector<std::uint8_t>& mem_;
@@ -641,13 +679,14 @@ private:
 
 int main(int argc, char** argv) {
     if (argc != 2 && argc != 3) {
-        std::cerr << "Usage: pv7-cocos-firstcall libgame.so [constructors|JNI_OnLoad|boot|nativeRender]\n";
+        std::cerr << "Usage: pv7-cocos-firstcall libgame.so [constructors|JNI_OnLoad|boot|nativeRender|version]\n";
         return 2;
     }
     const std::string requested = argc == 3 ? argv[2] : "JNI_OnLoad";
     const char* entry_name = nullptr;
     if (requested == "JNI_OnLoad") entry_name = "JNI_OnLoad";
     else if (requested == "nativeRender") entry_name = "Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeRender";
+    else if (requested == "version") entry_name = "_ZN7cocos2d14cocos2dVersionEv";
     else if (requested == "constructors" || requested == "boot") entry_name = "JNI_OnLoad";
     else { std::cerr << "Unknown entrypoint\n"; return 2; }
 
@@ -838,6 +877,15 @@ int main(int argc, char** argv) {
         const auto version = jit.Regs()[0];
         std::cout << "GUEST_RETURN r0=0x" << std::hex << version
                   << std::dec << " (JNI entry returned)\n";
+        if (requested == "version") {
+            const auto text = CString(memory, version);
+            if (text.rfind("cocos2d", 0) != 0) {
+                std::cout << "COCOS_VERSION_UNAVAILABLE pointer=0x" << std::hex << version << std::dec << " raw=" << text << "\n";
+                return 3;
+            }
+            std::cout << "COCOS_VERSION_DETECTED " << text << "\n";
+            return 0;
+        }
         if (requested != "boot") return 0;
         const auto init = image.FindExport("Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeInit");
         if (!init) { std::cout << "COCOS_NATIVE_INIT_MISSING\n";return 3; }
