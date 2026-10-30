@@ -26,7 +26,14 @@ target_include_directories(pv7elf PUBLIC src)
 add_executable(pv7-cocos-firstcall src/pv7_cocos_firstcall.cpp
   ../../compat_modules/cocos2dx/cocos2dx_jni_marshaller.cpp
   ../../compat_modules/cocos2dx/cocos2dx_bitmap_pixels.cpp
-  ../../compat_modules/cocos2dx/cocos2dx_guest_jni_arrays.cpp)
+  ../../compat_modules/cocos2dx/cocos2dx_guest_jni_arrays.cpp
+  ../../compat_modules/cocos2dx/cocos2dx_jni_refs.cpp
+  ../../compat_modules/cocos2dx/cocos2dx_guest_math.cpp
+  src/pv7_cocos_probe_bitmap_win32.cpp)
 target_link_libraries(pv7-cocos-firstcall PRIVATE pv7elf dynarmic)
 
 target_include_directories(pv7-cocos-firstcall PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+if(WIN32)
+  target_link_libraries(pv7-cocos-firstcall PRIVATE gdi32)
+endif()

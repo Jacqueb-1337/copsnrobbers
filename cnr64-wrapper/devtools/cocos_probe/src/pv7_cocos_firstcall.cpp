@@ -1,5 +1,8 @@
 #include "../../../compat_modules/cocos2dx/cocos2dx_guest_jni_arrays.h"
+#include "../../../compat_modules/cocos2dx/cocos2dx_jni_refs.h"
+#include "../../../compat_modules/cocos2dx/cocos2dx_guest_math.h"
 #include "../../../compat_modules/cocos2dx/cocos2dx_jni_marshaller.h"
+#include "pv7_cocos_probe_bitmap_win32.h"
 #include "arm32_guest_image.h"
 #include "dynarmic/interface/A32/a32.h"
 
@@ -91,6 +94,21 @@ public:
     std::uint32_t fault_address = 0;
     std::string reason;
     std::uint64_t ticks_remaining = 1000000;
+    std::optional<pv7::compat::cocos2dx::BitmapTextRequest> pending_bitmap;
+    bool StageBitmap(const pv7::compat::cocos2dx::BitmapPixels& image,
+                     std::uint32_t& handle, std::string& error) {
+        if (!byte_arrays_.Create(image,handle,error)) return false;
+        if (!refs_.RegisterLocal(handle,pv7::compat::cocos2dx::JniRefKind::ByteArray)) {
+            byte_arrays_.Release(handle);
+            error="JNI byte array reference collision";
+            return false;
+        }
+        return true;
+    }
+    void ReleaseBitmap(std::uint32_t handle) {
+        refs_.Delete(handle,pv7::compat::cocos2dx::JniRefScope::Local);
+        byte_arrays_.Release(handle);
+    }
 
     std::optional<std::uint32_t> MemoryReadCode(std::uint32_t a) override {
         // ARM32 kernels reserve the high kuser vector page. Dynarmic's
@@ -156,6 +174,15 @@ public:
         }
         if (svc == kJniFindClass) {
             const auto name = CString(mem_, regs[1]);
+            // Both class names are confirmed in the original Best Park APK.
+            // Additional calls are resolved by exact method signature below.
+            if (name == "com/turner/bestparkintheuniverse/regularshow") {
+                constexpr std::uint32_t kGameClass=0x0000c030u;
+                refs_.RegisterLocal(kGameClass,pv7::compat::cocos2dx::JniRefKind::Class);
+                regs[0]=kGameClass;
+                std::cout<<"JNI_GAME_CLASS_FOUND "<<name<<"\n";
+                return;
+            }
             if (name != "org/cocos2dx/lib/Cocos2dxBitmap") {
                 Fault(regs[15], "JNI_FindClass_unknown:" + name);
                 return;
@@ -163,6 +190,7 @@ public:
             // Diagnostic-only identity for a class known to the original game.
             // No methods are simulated. The next JNI access remains fail-closed.
             constexpr std::uint32_t kDiagnosticBitmapClass = 0x0000c010;
+            refs_.RegisterLocal(kDiagnosticBitmapClass,pv7::compat::cocos2dx::JniRefKind::Class);
             regs[0] = kDiagnosticBitmapClass;
             std::cout << "JNI_DIAGNOSTIC_CLASS " << name
                       << " token=0x" << std::hex << kDiagnosticBitmapClass
@@ -180,7 +208,7 @@ public:
             std::cout << "JNI_STATIC_METHOD_REQUEST class=0x"
                       << std::hex << classRef << std::dec
                       << " method=" << name << " signature=" << sig << "\n";
-            if (classRef == 0x0000c010u &&
+            if (refs_.Resolve(classRef) == 0x0000c010u &&
                 name == "createTextBitmap" &&
                 sig == "(Ljava/lang/String;Ljava/lang/String;IIII)V") {
                 constexpr std::uint32_t kTextMethod = 0x0000c020;
@@ -192,9 +220,61 @@ public:
             Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
             return;
         }
-        if (svc == kMissingJniSvc + 171u) {
+        // JNI 1.6 object-reference lifetime and identity calls.
+        // Class, string, and byte-array objects keep canonical guest handles;
+        // local/global JNI references are independently tracked aliases.
+        if (svc == kMissingJniSvc + 21u || svc == kMissingJniSvc + 25u) {
+            const auto scope = svc == kMissingJniSvc + 21u ?
+                pv7::compat::cocos2dx::JniRefScope::Global :
+                pv7::compat::cocos2dx::JniRefScope::Local;
+            std::uint32_t alias = 0;
+            std::string reference_error;
+            if (!refs_.Duplicate(regs[1],scope,alias,reference_error)) {
+                Fault(regs[15],"JNI_NewReference_failed:"+reference_error);
+                return;
+            }
+            regs[0]=alias;
+            return;
+        }
+        if (svc == kMissingJniSvc + 22u || svc == kMissingJniSvc + 23u) {
+            const auto scope = svc == kMissingJniSvc + 22u ?
+                pv7::compat::cocos2dx::JniRefScope::Global :
+                pv7::compat::cocos2dx::JniRefScope::Local;
+            const auto handle=regs[1];
+            if (!refs_.Delete(handle,scope)) {
+                Fault(regs[15],"JNI_DeleteReference_invalid");
+                return;
+            }
+            // Backing string data stays available to outstanding aliases.
+            // Its canonical identity is not valid for JNI calls after deletion.
+            return;
+        }
+        if (svc == kMissingJniSvc + 24u) {
+            regs[0]=refs_.IsSame(regs[1],regs[2])?1u:0u;
+            return;
+        }
+        if (svc == kMissingJniSvc + 26u) {
+            // This single-threaded probe can accommodate up to 4096 local
+            // handles; no Java OOM exception has been synthesized.
+            regs[0]=regs[1]<=4096u?0u:static_cast<std::uint32_t>(-4);
+            return;
+        }
+        if (svc == kMissingJniSvc + 232u) {
+            regs[0]=static_cast<std::uint32_t>(refs_.RefType(regs[1]));
+            return;
+        }
+        if (svc == kMissingJniSvc + 15u) {
+            regs[0]=0; // ExceptionOccurred: no exception pending
+            return;
+        }
+        if (svc == kMissingJniSvc + 17u || svc == kMissingJniSvc + 228u) {
+            // ExceptionClear (17) is void; ExceptionCheck (228) is false.
+            if (svc == kMissingJniSvc + 228u) regs[0]=0;
+            return;
+        }        if (svc == kMissingJniSvc + 171u) {
             std::int32_t count=0;
-            if (!byte_arrays_.Length(regs[1],count)) {
+            const auto ref=refs_.Resolve(regs[1]);
+            if (!ref || !byte_arrays_.Length(*ref,count)) {
                 Fault(regs[15],"JNI_GetArrayLength_unknown_reference");
                 return;
             }
@@ -210,12 +290,13 @@ public:
             }
             const auto destination=Read<std::uint32_t>(regs[13]);
             if (count<0 || !Fits(destination,static_cast<std::size_t>(count),mem_.size()) ||
-                !byte_arrays_.CopyRegion(regs[1],start,count,mem_.data()+destination)) {
+                !refs_.Resolve(regs[1]) ||
+                !byte_arrays_.CopyRegion(*refs_.Resolve(regs[1]),start,count,mem_.data()+destination)) {
                 Fault(regs[15],"JNI_GetByteArrayRegion_invalid"); return;
             }
             return;
         }        if (svc == kMissingJniSvc + 142u) {
-            if (regs[1] != 0x0000c010u || regs[2] != 0x0000c020u) {
+            if (refs_.Resolve(regs[1]) != 0x0000c010u || regs[2] != 0x0000c020u) {
                 Fault(regs[15], "JNI_CallStaticVoidMethodV_unknown_method");
                 return;
             }
@@ -234,9 +315,15 @@ public:
                       << " align=" << request.alignment
                       << " dimensions=" << request.width << "x" << request.height
                       << "\n";
-            // The real Android renderer and its nativeInitBitmapDC callback
-            // must be attached before allowing guest execution to continue.
-            Fault(regs[15], "JNI_BitmapText_host_renderer_not_connected");
+            if (pending_bitmap) {
+                Fault(regs[15], "JNI_BitmapText_reentrant_request");
+                return;
+            }
+            // Suspend this real guest JNI call. The driver runs a host text
+            // backend, invokes the original nativeInitBitmapDC in Dynarmic,
+            // then restores the interrupted guest registers and resumes.
+            pending_bitmap = std::move(request);
+            jit->HaltExecution();
             return;
         }        if (svc == kMissingJniSvc + 167u) {
             const auto addr = regs[1];
@@ -259,13 +346,14 @@ public:
             guest_strings_.emplace(handle,
                 std::string(reinterpret_cast<const char*>(begin),
                             static_cast<std::size_t>(end-begin)));
+            refs_.RegisterLocal(handle,pv7::compat::cocos2dx::JniRefKind::String);
             regs[0] = handle;
             std::cout << "JNI_NEW_STRING_UTF handle=0x" << std::hex << handle
                       << std::dec << " bytes=" << guest_strings_.at(handle).size()
                       << "\n";
             return;
         }
-        if (svc >= kMissingJniSvc && svc < kMissingJniSvc + 232u) {
+        if (svc >= kMissingJniSvc && svc < kMissingJniSvc + 233u) {
             Fault(regs[15], "UNIMPLEMENTED_JNI_SLOT:" +
                   std::to_string(svc - kMissingJniSvc));
             return;
@@ -286,7 +374,20 @@ public:
                 regs[0] = 0; // diagnostic sink accepted (not full liblog)
                 return;
             }
-            // Bounded guest-memory equivalents of common Bionic routines.
+            if(pv7::compat::cocos2dx::DispatchGuestMath(item.name,regs)) return;
+            if(item.name=="fopen" || item.name=="fopen64") {
+                const auto filename=CString(mem_,regs[0]);
+                const auto mode=CString(mem_,regs[1]);
+                std::cout<<"COCOS_FILE_REQUEST name="<<filename
+                         <<" mode="<<mode<<"\n";
+                if(filename.empty() && (mode=="rb" || mode=="r")) {
+                    // Bionic fopen("", "rb") correctly reports ENOENT.
+                    // This does not pretend the missing asset exists.
+                    regs[0]=0;
+                    return;
+                }
+                Fault(regs[15],"VFS_OPEN_NOT_CONNECTED");return;
+            }            // Bounded guest-memory equivalents of common Bionic routines.
             // These operate solely within the ARM guest address space.
             if (item.name == "memcpy" || item.name == "memmove" ||
                 item.name == "__aeabi_memcpy" || item.name == "__aeabi_memcpy4" ||
@@ -324,7 +425,48 @@ public:
                 regs[0] = static_cast<std::uint32_t>(diff);
                 return;
             }
-            if (item.name == "strlen") {
+            // Bionic string helpers on guest bytes. Return guest pointers,
+            // never addresses into the host process. Bound both inputs and
+            // validate termination to prevent probing beyond guest RAM.
+            if (item.name == "strstr" || item.name == "strdup") {
+                const auto first=regs[0];
+                const auto second=regs[1];
+                const auto scan=[&](std::uint32_t address)->std::optional<std::string_view> {
+                    if(address>=mem_.size()) return std::nullopt;
+                    const auto limit=std::min<std::size_t>(65536,mem_.size()-address);
+                    const auto* start=mem_.data()+address;
+                    const auto* end=static_cast<const std::uint8_t*>(
+                        std::memchr(start,0,limit));
+                    if(!end) return std::nullopt;
+                    return std::string_view(reinterpret_cast<const char*>(start),
+                                            static_cast<std::size_t>(end-start));
+                };
+                const auto haystack=scan(first);
+                if(!haystack) {Fault(regs[15],"string_helper_invalid_source");return;}
+                if(item.name=="strdup") {
+                    const auto result=Allocate(static_cast<std::uint32_t>(haystack->size()+1),4);
+                    if(!result) {regs[0]=0;return;}
+                    std::memcpy(mem_.data()+result,mem_.data()+first,haystack->size()+1);
+                    regs[0]=result;
+                    return;
+                }
+                const auto needle=scan(second);
+                if(!needle) {Fault(regs[15],"strstr_invalid_needle");return;}
+                const auto where=haystack->find(*needle);
+                regs[0]=where==std::string_view::npos?
+                    0u : first+static_cast<std::uint32_t>(where);
+                return;
+            }
+            if(item.name=="strnlen") {
+                const auto start=regs[0],max=regs[1];
+                if(max>65536u || !Fits(start,max,mem_.size())) {
+                    Fault(regs[15],"strnlen_invalid_range");return;
+                }
+                std::uint32_t count=0;
+                while(count<max && mem_[start+count]) ++count;
+                regs[0]=count;
+                return;
+            }            if (item.name == "strlen") {
                 const auto a = regs[0];
                 if (a >= mem_.size()) { Fault(a, "strlen_invalid_pointer"); return; }
                 std::size_t n = 0;
@@ -537,7 +679,26 @@ public:
                 regs[0] = kGuestTls;
                 return;
             }
-            if (item.name == "glCreateProgram" || item.name == "glCreateShader" || item.name == "glShaderSource" || item.name == "glCompileShader" || item.name == "glGetShaderiv" || item.name == "glAttachShader" || item.name == "glLinkProgram" || item.name == "glGetProgramiv" || item.name == "glBindAttribLocation" || item.name == "glGetUniformLocation" || item.name == "glGetAttribLocation" || item.name == "glUseProgram" || item.name == "glDeleteShader" || item.name == "glUniform1i") {
+            if (item.name == "glTexImage2D" || item.name == "glTexSubImage2D" ||
+                item.name == "glCompressedTexImage2D" || item.name == "glCompressedTexSubImage2D" ||
+                item.name == "glGenerateMipmap" || item.name == "glPixelStorei" || item.name == "glBlendFunc" ||
+                item.name == "glBindTexture" || item.name == "glBindBuffer" ||
+                item.name == "glEnable" || item.name == "glDisable" ||
+                item.name == "glActiveTexture" || item.name == "glClear" ||
+                item.name == "glCullFace" || item.name == "glFrontFace" ||
+                item.name == "glDepthFunc" || item.name == "glBlendEquation" ||
+                item.name == "glDepthMask" || item.name == "glClearColor" ||
+                item.name == "glViewport" || item.name == "glScissor" ||
+                item.name == "glColorMask" || item.name == "glTexParameteri" ||
+                item.name == "glTexParameterf" || item.name == "glLineWidth" ||
+                item.name == "glGenTextures" || item.name == "glDeleteTextures" ||
+                item.name == "glGenBuffers" || item.name == "glDeleteBuffers" ||
+                item.name == "glBufferData" || item.name == "glBufferSubData" ||
+                item.name == "glBlendFuncSeparate" || item.name == "glBlendEquationSeparate" ||
+                item.name == "glEnableVertexAttribArray" || item.name == "glDisableVertexAttribArray" ||
+                item.name == "glGetString" || item.name == "glGetIntegerv" ||
+                item.name == "glGetFloatv" || item.name == "glGetBooleanv" ||
+                item.name == "glGetError" || item.name == "glCreateProgram" || item.name == "glCreateShader" || item.name == "glShaderSource" || item.name == "glCompileShader" || item.name == "glGetShaderiv" || item.name == "glAttachShader" || item.name == "glLinkProgram" || item.name == "glGetProgramiv" || item.name == "glBindAttribLocation" || item.name == "glGetUniformLocation" || item.name == "glGetAttribLocation" || item.name == "glUseProgram" || item.name == "glDeleteShader" || item.name == "glUniform1i") {
                 static Pv7ProbeGles2 hostGl;
                 static bool initialized = false;
                 if (!initialized) {
@@ -552,7 +713,299 @@ public:
                     initialized = true;
                     std::cout << "HOST_GLES2_CONTEXT_READY" << "\n";
                 }
-                if (item.name == "glShaderSource") {
+                // GLES2 texture uploads. Decode all ARM32 AAPCS stack
+                // arguments, including compressed formats, and validate the
+                // entire pixel footprint before accessing the guest address.
+                if (item.name=="glTexImage2D" || item.name=="glTexSubImage2D" ||
+                    item.name=="glCompressedTexImage2D" ||
+                    item.name=="glCompressedTexSubImage2D") {
+                    const bool sub=item.name=="glTexSubImage2D" ||
+                                   item.name=="glCompressedTexSubImage2D";
+                    const bool compressed=item.name=="glCompressedTexImage2D" ||
+                                          item.name=="glCompressedTexSubImage2D";
+                    const auto sp=regs[13];
+                    const std::size_t argc=compressed?(sub?5u:4u):5u;
+                    if(!Fits(sp,argc*4,mem_.size())) {
+                        Fault(regs[15],"GLES_TEXTURE_STACK_INVALID");return;
+                    }
+                    const auto arg=[&](std::uint32_t index)->std::uint32_t {
+                        return Read<std::uint32_t>(sp+4u*index);
+                    };
+                    const auto target=regs[0];
+                    const auto level=static_cast<std::int32_t>(regs[1]);
+                    const auto width=static_cast<std::int32_t>(sub?arg(0):regs[3]);
+                    const auto height=static_cast<std::int32_t>(sub?arg(1):arg(0));
+                    const auto format=sub?arg(2):(compressed?regs[2]:arg(2));
+                    const auto type=compressed?0u:arg(3);
+                    const auto pixelPtr=compressed?(sub?arg(4):arg(3)):arg(4);
+                    const auto imageSize=compressed?(sub?arg(3):arg(2)):0u;
+                    const auto border=sub?0:static_cast<std::int32_t>(arg(1));
+                    if(width<0 || height<0 || width>16384 || height>16384 ||
+                       level<0 || level>16 || border!=0) {
+                        Fault(regs[15],"GLES_TEXTURE_ARGUMENTS_INVALID");return;
+                    }
+                    std::uint64_t byteCount=0;
+                    if(compressed) {
+                        byteCount=imageSize;
+                    } else {
+                        unsigned bpp=0;
+                        switch(type) {
+                        case 0x1401u: // GL_UNSIGNED_BYTE
+                            switch(format) {
+                            case 0x1906u: case 0x1909u: bpp=1;break;
+                            case 0x190au: bpp=2;break;
+                            case 0x1907u: bpp=3;break;
+                            case 0x1908u: bpp=4;break;
+                            default:break;
+                            }
+                            break;
+                        case 0x8363u: if(format==0x1907u)bpp=2;break;
+                        case 0x8033u: case 0x8034u:
+                            if(format==0x1908u)bpp=2;break;
+                        default:break;
+                        }
+                        if(!bpp) {
+                            Fault(regs[15],"GLES_TEXTURE_PIXEL_FORMAT_UNSUPPORTED");return;
+                        }
+                        const std::uint64_t row=static_cast<std::uint64_t>(width)*bpp;
+                        const std::uint64_t alignment=unpack_alignment_;
+                        const auto stride=(row+alignment-1)/alignment*alignment;
+                        byteCount=height?stride*static_cast<std::uint64_t>(height-1)+row:0;
+                    }
+                    if(byteCount>64ull*1024*1024 ||
+                       (pixelPtr && !Fits(pixelPtr,static_cast<std::size_t>(byteCount),mem_.size())) ||
+                       (sub && byteCount && !pixelPtr) ||
+                       (compressed && byteCount && !pixelPtr)) {
+                        Fault(regs[15],"GLES_TEXTURE_PIXELS_INVALID");return;
+                    }
+                    auto fn=hostGl.GetProcedure(item.name.c_str());
+                    if(!fn) {Fault(regs[15],"GLES_TEXTURE_PROCEDURE_MISSING:"+item.name);return;}
+                    const void* pixels=pixelPtr?mem_.data()+pixelPtr:nullptr;
+                    if(item.name=="glTexImage2D") {
+                        reinterpret_cast<void (__stdcall*)(unsigned,int,int,int,int,int,
+                                                           unsigned,unsigned,const void*)>(fn)(
+                            target,level,static_cast<int>(regs[2]),width,height,border,
+                            format,type,pixels);
+                    } else if(item.name=="glTexSubImage2D") {
+                        reinterpret_cast<void (__stdcall*)(unsigned,int,int,int,int,int,
+                                                           unsigned,unsigned,const void*)>(fn)(
+                            target,level,static_cast<int>(regs[2]),
+                            static_cast<int>(regs[3]),width,height,format,type,pixels);
+                    } else if(item.name=="glCompressedTexImage2D") {
+                        reinterpret_cast<void (__stdcall*)(unsigned,int,unsigned,int,int,
+                                                           int,int,const void*)>(fn)(
+                            target,level,regs[2],width,height,border,
+                            static_cast<int>(imageSize),pixels);
+                    } else {
+                        reinterpret_cast<void (__stdcall*)(unsigned,int,int,int,int,int,
+                                                           unsigned,int,const void*)>(fn)(
+                            target,level,static_cast<int>(regs[2]),
+                            static_cast<int>(regs[3]),width,height,format,
+                            static_cast<int>(imageSize),pixels);
+                    }
+                    std::cout<<"HOST_GLES_TEXTURE_UPLOAD "<<item.name<<" "
+                             <<width<<"x"<<height<<" bytes="<<byteCount<<"\n";
+                    return;
+                }
+                if(item.name=="glGenerateMipmap") {
+                    auto fn=hostGl.GetProcedure("glGenerateMipmap");
+                    if(!fn) {Fault(regs[15],"GLES_MIPMAP_UNAVAILABLE");return;}
+                    reinterpret_cast<void (__stdcall*)(unsigned)>(fn)(regs[0]);
+                    return;
+                }                // Core GLES2 state, texture-object and vertex/buffer calls.
+                // Every operation invokes the actual SwiftShader entrypoint.
+                if (item.name == "glPixelStorei" || item.name == "glBlendFunc" ||
+                    item.name == "glBindTexture" || item.name == "glBindBuffer" ||
+                    item.name == "glBlendEquationSeparate") {
+                    using Fn = void (__stdcall*)(unsigned,unsigned);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure(item.name.c_str()));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    fn(regs[0],regs[1]);
+                    if(item.name=="glPixelStorei" && regs[0]==0x0cf5u) {
+                        if(regs[1]!=1u && regs[1]!=2u &&
+                           regs[1]!=4u && regs[1]!=8u) {
+                            Fault(regs[15],"GLES_UNPACK_ALIGNMENT_INVALID");return;
+                        }
+                        unpack_alignment_=regs[1];
+                    }
+                    if(item.name=="glBindBuffer") {
+                        if(regs[0]==0x8892u) array_buffer_binding_=regs[1];
+                        if(regs[0]==0x8893u) element_buffer_binding_=regs[1];
+                    }
+                    return;
+                }
+                if (item.name == "glEnable" || item.name == "glDisable" ||
+                    item.name == "glActiveTexture" || item.name == "glClear" ||
+                    item.name == "glCullFace" || item.name == "glFrontFace" ||
+                    item.name == "glDepthFunc" || item.name == "glBlendEquation" ||
+                    item.name == "glEnableVertexAttribArray" ||
+                    item.name == "glDisableVertexAttribArray") {
+                    using Fn=void (__stdcall*)(unsigned);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure(item.name.c_str()));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    fn(regs[0]);
+                    return;
+                }
+                if (item.name == "glDepthMask") {
+                    using Fn=void (__stdcall*)(unsigned char);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure("glDepthMask"));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:glDepthMask");return;}
+                    fn(static_cast<unsigned char>(regs[0]));
+                    return;
+                }
+                if (item.name == "glLineWidth") {
+                    using Fn=void (__stdcall*)(float);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure("glLineWidth"));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:glLineWidth");return;}
+                    float width;
+                    std::memcpy(&width,&regs[0],4);
+                    fn(width);
+                    return;
+                }
+                if (item.name == "glClearColor") {
+                    using Fn=void (__stdcall*)(float,float,float,float);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure("glClearColor"));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:glClearColor");return;}
+                    float v[4];
+                    std::memcpy(v,regs.data(),16);
+                    fn(v[0],v[1],v[2],v[3]);
+                    return;
+                }
+                if (item.name == "glViewport" || item.name == "glScissor" ||
+                    item.name == "glColorMask" || item.name == "glBlendFuncSeparate") {
+                    using Fn=void (__stdcall*)(unsigned,unsigned,unsigned,unsigned);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure(item.name.c_str()));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    fn(regs[0],regs[1],regs[2],regs[3]);
+                    return;
+                }
+                if (item.name == "glTexParameteri" || item.name == "glTexParameterf") {
+                    auto addr=hostGl.GetProcedure(item.name.c_str());
+                    if(!addr) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    if(item.name=="glTexParameteri") {
+                        reinterpret_cast<void (__stdcall*)(unsigned,unsigned,int)>(addr)(
+                            regs[0],regs[1],static_cast<int>(regs[2]));
+                    } else {
+                        float param;
+                        std::memcpy(&param,&regs[2],4);
+                        reinterpret_cast<void (__stdcall*)(unsigned,unsigned,float)>(addr)(
+                            regs[0],regs[1],param);
+                    }
+                    return;
+                }
+                if (item.name == "glGenTextures" || item.name == "glDeleteTextures" ||
+                    item.name == "glGenBuffers" || item.name == "glDeleteBuffers") {
+                    const auto count=regs[0],data=regs[1];
+                    if(count>4096u || !Fits(data,static_cast<std::size_t>(count)*4u,mem_.size())) {
+                        Fault(regs[15],"GLES_OBJECT_ARRAY_INVALID");return;
+                    }
+                    auto addr=hostGl.GetProcedure(item.name.c_str());
+                    if(!addr) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    std::vector<unsigned> objects(count);
+                    const bool generating=item.name=="glGenTextures"||item.name=="glGenBuffers";
+                    if(!generating && count) std::memcpy(objects.data(),mem_.data()+data,count*4u);
+                    reinterpret_cast<void (__stdcall*)(int,unsigned*)>(addr)(
+                        static_cast<int>(count),objects.data());
+                    if(generating && count) std::memcpy(mem_.data()+data,objects.data(),count*4u);
+                    std::cout << "HOST_GLES_OBJECT_ARRAY " << item.name
+                              << " count=" << count << "\n";
+                    return;
+                }
+                if (item.name == "glBufferData" || item.name == "glBufferSubData") {
+                    const auto n=regs[1+(item.name=="glBufferSubData")];
+                    const auto pointer=regs[2+(item.name=="glBufferSubData")];
+                    if(n>64u*1024u*1024u || (pointer && !Fits(pointer,n,mem_.size()))) {
+                        Fault(regs[15],"GLES_BUFFER_UPLOAD_INVALID");return;
+                    }
+                    const void* bytes=pointer?mem_.data()+pointer:nullptr;
+                    auto addr=hostGl.GetProcedure(item.name.c_str());
+                    if(!addr) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    if(item.name=="glBufferData") {
+                        reinterpret_cast<void (__stdcall*)(unsigned,std::intptr_t,const void*,unsigned)>(addr)(
+                            regs[0],static_cast<std::intptr_t>(n),bytes,regs[3]);
+                    } else {
+                        reinterpret_cast<void (__stdcall*)(unsigned,std::intptr_t,std::intptr_t,const void*)>(addr)(
+                            regs[0],static_cast<std::intptr_t>(regs[1]),
+                            static_cast<std::intptr_t>(n),bytes);
+                    }
+                    return;
+                }                if (item.name == "glGetString") {
+                    auto cache = gl_strings_.find(regs[0]);
+                    if(cache!=gl_strings_.end()) {
+                        regs[0]=cache->second;
+                        return;
+                    }
+                    const auto name=regs[0];
+                    const auto value=hostGl.GetString(name);
+                    if(!value) {
+                        // GLES returns nullptr for unsupported enums and sets
+                        // its own error flag, which glGetError can query.
+                        regs[0]=0;
+                        return;
+                    }
+                    if(value->size()>65535) {
+                        Fault(regs[15],"GLES_GET_STRING_TOO_LONG");return;
+                    }
+                    const auto guest=Allocate(static_cast<std::uint32_t>(value->size()+1),4);
+                    if(!guest) {Fault(regs[15],"GLES_STRING_ALLOCATION_FAILED");return;}
+                    std::memcpy(mem_.data()+guest,value->c_str(),value->size()+1);
+                    gl_strings_.emplace(name,guest);
+                    regs[0]=guest;
+                    std::cout << "HOST_GLES_STRING enum=0x" << std::hex << name
+                              << std::dec << " bytes=" << value->size() << "\n";
+                    return;
+                }
+                if (item.name == "glGetError") {
+                    const auto error=hostGl.GetError();
+                    if(!error) {Fault(regs[15],"GLES_GET_ERROR_UNAVAILABLE");return;}
+                    regs[0]=*error;
+                    return;
+                }
+                if (item.name == "glGetIntegerv" ||
+                    item.name == "glGetFloatv" ||
+                    item.name == "glGetBooleanv") {
+                    const auto pname=regs[0], destination=regs[1];
+                    // GLES2 array-valued state is bounded by its enum.
+                    // Reject variable-length results until their actual
+                    // count is known; do not overwrite guest stack memory.
+                    if (pname==0x86a3u) {
+                        Fault(regs[15],"GLES_COMPRESSED_FORMAT_ARRAY_NEEDS_LENGTH");
+                        return;
+                    }
+                    const std::size_t count =
+                        pname==0x0ba2u || pname==0x0c10u ? 4u :
+                        pname==0x0d3au || pname==0x846du ||
+                        pname==0x846eu || pname==0x0b70u ||
+                        pname==0x0b22u ? 2u : 1u;
+                    const std::size_t byteWidth =
+                        item.name=="glGetBooleanv" ? 1u : 4u;
+                    if(!Fits(destination,count*byteWidth,mem_.size())) {
+                        Fault(regs[15],"GLES_QUERY_DESTINATION_INVALID");return;
+                    }
+                    if(item.name=="glGetIntegerv") {
+                        int values[16]{};
+                        if(!hostGl.GetIntegerv(pname,values)) {
+                            Fault(regs[15],"GLES_GET_INTEGER_UNAVAILABLE");return;
+                        }
+                        std::memcpy(mem_.data()+destination,values,count*4u);
+                    } else if(item.name=="glGetFloatv") {
+                        float values[16]{};
+                        if(!hostGl.GetFloatv(pname,values)) {
+                            Fault(regs[15],"GLES_GET_FLOAT_UNAVAILABLE");return;
+                        }
+                        std::memcpy(mem_.data()+destination,values,count*4u);
+                    } else {
+                        unsigned char values[16]{};
+                        if(!hostGl.GetBooleanv(pname,values)) {
+                            Fault(regs[15],"GLES_GET_BOOLEAN_UNAVAILABLE");return;
+                        }
+                        std::memcpy(mem_.data()+destination,values,count);
+                    }
+                    std::cout << "HOST_GLES_QUERY method=" << item.name
+                              << " enum=0x" << std::hex << pname << std::dec
+                              << " components=" << count << "\n";
+                    return;
+                }                if (item.name == "glShaderSource") {
                     const auto shader = regs[0], count = regs[1], array = regs[2], lengthArray = regs[3];
                     if (count == 0 || count > 16 || !Fits(array, count * 4u, mem_.size()) ||
                         (lengthArray && !Fits(lengthArray, count * 4u, mem_.size()))) {
@@ -714,8 +1167,12 @@ private:
     std::uint32_t next_heap_ = kHeapStart;
     std::map<std::uint32_t, std::uint32_t> allocations_;
     pv7::compat::cocos2dx::GuestJniByteArrays byte_arrays_;
+    pv7::compat::cocos2dx::GuestJniRefs refs_;
     std::uint32_t next_jstring_ = 0x0000c100;
     std::map<std::uint32_t, std::string> guest_strings_;
+    std::map<std::uint32_t, std::uint32_t> gl_strings_;
+    std::uint32_t unpack_alignment_ = 4;
+    std::uint32_t array_buffer_binding_ = 0, element_buffer_binding_ = 0;
     std::uint32_t next_key_ = 1;
     std::map<std::uint32_t, std::pair<std::uint32_t, std::uint32_t>> keys_;
     std::vector<std::uint8_t>& mem_;
@@ -836,7 +1293,7 @@ int main(int argc, char** argv) {
     }
     // Populate every JNI function table slot with a distinct missing-method
     // trap. An unimplemented method is reported by index, not an invalid PC.
-    for (std::uint32_t i=0;i<232;++i) {
+    for (std::uint32_t i=0;i<233;++i) {
         const std::uint32_t address = kMissingJniBase + i * 8;
         if (!Trap(memory, address, kMissingJniSvc + i) ||
             !Put32(memory, kEnvTable + i * 4, address)) {
@@ -955,6 +1412,89 @@ int main(int argc, char** argv) {
         std::cout << "EXECUTING_COCOS_NATIVE_INIT pc=0x" << std::hex << *init
                   << std::dec << "\n";
         jit.Run();
+        // Drive every suspended Cocos bitmap JNI request as a complete
+        // guest->host->guest call. The Win32 renderer is diagnostic only.
+        // Android must supply pixels using its own Paint/Canvas implementation.
+        unsigned bitmap_callbacks = 0;
+        while (!bridge.faulted && bridge.pending_bitmap && bitmap_callbacks < 64) {
+            const auto native_bitmap = image.FindExport(
+                "Java_org_cocos2dx_lib_Cocos2dxBitmap_nativeInitBitmapDC");
+            if (!native_bitmap) {
+                std::cout << "COCOS_BITMAP_NATIVE_CALLBACK_EXPORT_MISSING\n";
+                return 3;
+            }
+            auto request = std::move(*bridge.pending_bitmap);
+            bridge.pending_bitmap.reset();
+            pv7::compat::cocos2dx::BitmapPixels rendered;
+            std::string render_error;
+            if (!pv7::compat::cocos2dx::RenderProbeBitmap(
+                    request, rendered, render_error)) {
+                std::cout << "COCOS_BITMAP_HOST_RENDER_FAILED " << render_error << "\n";
+                return 3;
+            }
+            std::uint32_t array_ref = 0;
+            if (!bridge.StageBitmap(rendered, array_ref, render_error)) {
+                std::cout << "COCOS_BITMAP_GUEST_ARRAY_FAILED " << render_error << "\n";
+                return 3;
+            }
+            constexpr std::uint32_t callback_stack = kStack - 0x80;
+            if (!Put32(memory, callback_stack, array_ref)) {
+                bridge.ReleaseBitmap(array_ref);
+                std::cout << "COCOS_BITMAP_CALLBACK_STACK_INVALID\n";
+                return 3;
+            }
+            // Interruptible A32 guest call: preserve all integer, VFP, status
+            // and return state, run the original function, then resume the
+            // suspended CallStaticVoidMethodV at the exact point it stopped.
+            const auto interrupted_regs = jit.Regs();
+            const auto interrupted_extregs = jit.ExtRegs();
+            const auto interrupted_cpsr = jit.Cpsr();
+            const auto interrupted_fpscr = jit.Fpscr();
+            bridge.returned = false;
+            bridge.ticks_remaining = 2000000;
+            jit.ClearHalt();
+            jit.Regs().fill(0);
+            jit.Regs()[0] = kEnv;
+            jit.Regs()[1] = 0;
+            jit.Regs()[2] = static_cast<std::uint32_t>(rendered.width);
+            jit.Regs()[3] = static_cast<std::uint32_t>(rendered.height);
+            jit.Regs()[13] = callback_stack;
+            jit.Regs()[14] = kReturnTrap;
+            jit.Regs()[15] = *native_bitmap & ~1u;
+            jit.SetCpsr((*native_bitmap & 1u) ? 0x20u : 0u);
+            std::cout << "COCOS_BITMAP_GUEST_CALLBACK_BEGIN pc=0x"
+                      << std::hex << *native_bitmap
+                      << " array=0x" << array_ref << std::dec
+                      << " dimensions=" << rendered.width << "x"
+                      << rendered.height << " bytes=" << rendered.bytes.size()
+                      << "\n";
+            jit.Run();
+            const bool completed_callback = bridge.returned && !bridge.faulted;
+            bridge.ReleaseBitmap(array_ref);
+            if (!completed_callback) {
+                std::cout << "COCOS_BITMAP_GUEST_CALLBACK_STOP "
+                          << (bridge.faulted ? bridge.reason : "instruction_budget")
+                          << " pc=0x" << std::hex << jit.Regs()[15] << std::dec
+                          << "\n";
+                return 3;
+            }
+            ++bitmap_callbacks;
+            std::cout << "COCOS_BITMAP_GUEST_CALLBACK_COMPLETED count="
+                      << bitmap_callbacks << "\n";
+            jit.Regs() = interrupted_regs;
+            jit.ExtRegs() = interrupted_extregs;
+            jit.SetCpsr(interrupted_cpsr);
+            jit.SetFpscr(interrupted_fpscr);
+            bridge.returned = false;
+            bridge.ticks_remaining = 2000000;
+            jit.ClearHalt();
+            jit.Run();
+        }
+        if (bridge.pending_bitmap) {
+            std::cout << "COCOS_BITMAP_REQUEST_LIMIT count="
+                      << bitmap_callbacks << "\n";
+            return 3;
+        }
         if (bridge.faulted) {
             std::cout << "COCOS_NATIVE_INIT_STOP " << bridge.reason
                       << " fault_address=0x" << std::hex << bridge.fault_address

@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <cstdint>
 #include <string>
+#include <optional>
 #include <vector>
 #include <filesystem>
 class Pv7ProbeGles2 {
@@ -80,6 +81,45 @@ public:
         }
         ready_ = true;
         return true;
+    }
+    // Query the actual SwiftShader GLES2 driver. Do not invent extensions or
+    // capabilities; Cocos uses these strings to select rendering features.
+    std::optional<std::string> GetString(unsigned pname) const {
+        using Fn = const unsigned char* (__stdcall*)(unsigned);
+        auto fn=reinterpret_cast<Fn>(GetProcAddress(gles_,"glGetString"));
+        if(!ready_ || !fn) return std::nullopt;
+        auto text=fn(pname);
+        if(!text) return std::nullopt;
+        return std::string(reinterpret_cast<const char*>(text));
+    }
+    bool GetIntegerv(unsigned pname,int* output) const {
+        using Fn=void (__stdcall*)(unsigned,int*);
+        auto fn=reinterpret_cast<Fn>(GetProcAddress(gles_,"glGetIntegerv"));
+        if(!ready_ || !fn || !output) return false;
+        fn(pname,output);
+        return true;
+    }
+    bool GetFloatv(unsigned pname,float* output) const {
+        using Fn=void (__stdcall*)(unsigned,float*);
+        auto fn=reinterpret_cast<Fn>(GetProcAddress(gles_,"glGetFloatv"));
+        if(!ready_ || !fn || !output) return false;
+        fn(pname,output);
+        return true;
+    }
+    bool GetBooleanv(unsigned pname,unsigned char* output) const {
+        using Fn=void (__stdcall*)(unsigned,unsigned char*);
+        auto fn=reinterpret_cast<Fn>(GetProcAddress(gles_,"glGetBooleanv"));
+        if(!ready_ || !fn || !output) return false;
+        fn(pname,output);
+        return true;
+    }
+    std::optional<unsigned> GetError() const {
+        using Fn=unsigned (__stdcall*)();
+        auto fn=reinterpret_cast<Fn>(GetProcAddress(gles_,"glGetError"));
+        if(!ready_ || !fn) return std::nullopt;
+        return fn();
+    }    FARPROC GetProcedure(const char* name) const {
+        return ready_ && gles_ ? GetProcAddress(gles_,name) : nullptr;
     }
     unsigned CreateProgram() const { return ready_ && createProgram_ ? createProgram_() : 0; }
     unsigned CreateShader(unsigned type) const { return ready_ && createShader_ ? createShader_(type) : 0; }

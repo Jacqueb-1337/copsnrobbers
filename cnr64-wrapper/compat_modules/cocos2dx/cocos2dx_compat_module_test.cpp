@@ -1,3 +1,7 @@
+#include "cocos2dx_guest_math.h"
+#include <bit>
+#include <cmath>
+#include "cocos2dx_jni_refs.h"
 #include "cocos2dx_guest_jni_arrays.h"
 #include "cocos2dx_bitmap_pixels.h"
 #include "cocos2dx_jni_marshaller.h"
@@ -56,5 +60,47 @@ int main() {
     assert(arrays.Release(arrayHandle));
     assert(!arrays.Length(arrayHandle,byteCount));
     assert(!arrays.Release(arrayHandle));
+    GuestJniRefs refs;
+    assert(refs.RegisterLocal(0xc010,JniRefKind::Class));
+    assert(refs.RefType(0xc010)==1);
+    assert(refs.RegisterLocal(0xc100,JniRefKind::String));
+    std::uint32_t globalAlias=0, localAlias=0;
+    assert(refs.Duplicate(0xc100,JniRefScope::Global,globalAlias,error));
+    assert(refs.Duplicate(0xc100,JniRefScope::Local,localAlias,error));
+    assert(globalAlias!=localAlias && refs.IsSame(globalAlias,localAlias));
+    assert(refs.RefType(globalAlias)==2);
+    assert(refs.Delete(0xc100,JniRefScope::Local));
+    assert(refs.IsSame(globalAlias,localAlias));
+    assert(!refs.Delete(globalAlias,JniRefScope::Local));
+    assert(refs.Delete(localAlias,JniRefScope::Local));
+    assert(refs.Delete(globalAlias,JniRefScope::Global));
+    assert(!refs.Resolve(globalAlias));
+    assert(refs.IsSame(0,0));
+    assert(!refs.IsSame(0,0xc010));
+    // ARM32 base AAPCS: sin(pi/6) passes the double in r0:r1.
+    std::array<std::uint32_t,16> mathRegs{};
+    const auto putDouble=[&](int base,double value) {
+        const auto bits=std::bit_cast<std::uint64_t>(value);
+        mathRegs[base]=static_cast<std::uint32_t>(bits);
+        mathRegs[base+1]=static_cast<std::uint32_t>(bits>>32);
+    };
+    const auto getDouble=[&]() {
+        const auto bits=static_cast<std::uint64_t>(mathRegs[0]) |
+                        (static_cast<std::uint64_t>(mathRegs[1])<<32);
+        return std::bit_cast<double>(bits);
+    };
+    putDouble(0,3.14159265358979323846/6);
+    assert(DispatchGuestMath("sin",mathRegs));
+    assert(std::fabs(getDouble()-0.5)<1e-12);
+    putDouble(0,2.0);
+    putDouble(2,5.0);
+    assert(DispatchGuestMath("pow",mathRegs));
+    assert(getDouble()==32.0);
+    mathRegs[0]=std::bit_cast<std::uint32_t>(0.25f);
+    assert(DispatchGuestMath("sinf",mathRegs));
+    assert(std::fabs(std::bit_cast<float>(mathRegs[0])-std::sin(0.25f))<1e-7f);
+    const auto saved=mathRegs;
+    assert(!DispatchGuestMath("unsupported_libm",mathRegs));
+    assert(mathRegs==saved);
     return 0;
 }
