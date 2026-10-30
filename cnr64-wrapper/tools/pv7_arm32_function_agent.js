@@ -36,6 +36,10 @@ if (mod === null) {
     gameplay: {
       classes: /Room|TutorialRoom|Player|Enemy|CharacterSkills|Character|Entity|ItemDestroyRoom|CutscenePlayer|FrameHandler|GameScene/,
       methods: /update|onLevel|createEnemy|addXp|onTutorial|init|create|attack|spawn|move|damage|die|skill|onEnter|onExit/
+    },
+    character: {
+      classes: /CharacterSelectScene|CCMenu|CCMenuItem|CCDirector|Room|Character/,
+      methods: /characterSelectCallback|onCharSelect|characterHandler|createCharButton|getCharNameFromButton|onEnterTransitionDidFinish|ccTouchBegan|ccTouchEnded|activate|replaceScene|setNextScene|init|onEnter/
     }
   };
   var selector = selectors[profile];
@@ -53,9 +57,9 @@ if (mod === null) {
     });
     // On a tiny emulated ARM CPU, favor game-specific functions over generic
     // framework constructors. Keep the stable render profile unmodified.
-    if (profile === 'scene' || profile === 'gameplay') {
+    if (profile === 'scene' || profile === 'gameplay' || profile === 'character') {
       function priority(name) {
-        if (/CutscenePlayer|TutorialRoom|AreaMenuContainer|SLMenu|LevelSelect|Room|Player|Enemy|CharacterSkills/.test(name)) return 0;
+        if (/CharacterSelectScene|CutscenePlayer|TutorialRoom|AreaMenuContainer|SLMenu|LevelSelect|Room|Player|Enemy|CharacterSkills/.test(name)) return 0;
         if (/CCDirector/.test(name)) return 1;
         return 2;
       }
