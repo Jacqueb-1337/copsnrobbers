@@ -1,3 +1,4 @@
+#include "../../../compat_modules/cocos2dx/cocos2dx_guest_jni_arrays.h"
 #include "../../../compat_modules/cocos2dx/cocos2dx_jni_marshaller.h"
 #include "arm32_guest_image.h"
 #include "dynarmic/interface/A32/a32.h"
@@ -191,7 +192,29 @@ public:
             Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
             return;
         }
-        if (svc == kMissingJniSvc + 142u) {
+        if (svc == kMissingJniSvc + 171u) {
+            std::int32_t count=0;
+            if (!byte_arrays_.Length(regs[1],count)) {
+                Fault(regs[15],"JNI_GetArrayLength_unknown_reference");
+                return;
+            }
+            regs[0]=static_cast<std::uint32_t>(count);
+            return;
+        }
+        if (svc == kMissingJniSvc + 200u) {
+            // JNI GetByteArrayRegion(JNIEnv*, jbyteArray, start, len, buf).
+            const auto count=static_cast<std::int32_t>(regs[3]);
+            const auto start=static_cast<std::int32_t>(regs[2]);
+            if (!Fits(regs[13],4,mem_.size())) {
+                Fault(regs[15],"JNI_GetByteArrayRegion_stack_invalid"); return;
+            }
+            const auto destination=Read<std::uint32_t>(regs[13]);
+            if (count<0 || !Fits(destination,static_cast<std::size_t>(count),mem_.size()) ||
+                !byte_arrays_.CopyRegion(regs[1],start,count,mem_.data()+destination)) {
+                Fault(regs[15],"JNI_GetByteArrayRegion_invalid"); return;
+            }
+            return;
+        }        if (svc == kMissingJniSvc + 142u) {
             if (regs[1] != 0x0000c010u || regs[2] != 0x0000c020u) {
                 Fault(regs[15], "JNI_CallStaticVoidMethodV_unknown_method");
                 return;
@@ -690,6 +713,7 @@ private:
     }
     std::uint32_t next_heap_ = kHeapStart;
     std::map<std::uint32_t, std::uint32_t> allocations_;
+    pv7::compat::cocos2dx::GuestJniByteArrays byte_arrays_;
     std::uint32_t next_jstring_ = 0x0000c100;
     std::map<std::uint32_t, std::string> guest_strings_;
     std::uint32_t next_key_ = 1;

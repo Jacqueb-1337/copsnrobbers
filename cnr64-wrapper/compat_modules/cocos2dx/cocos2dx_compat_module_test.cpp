@@ -1,3 +1,4 @@
+#include "cocos2dx_guest_jni_arrays.h"
 #include "cocos2dx_bitmap_pixels.h"
 #include "cocos2dx_jni_marshaller.h"
 #include "cocos2dx_compat_module.h"
@@ -40,5 +41,20 @@ int main() {
     assert(!ReadBitmapPixels(3,2,std::span<const std::uint8_t>(pixels.data(),23),bitmap,error));
     assert(!ReadBitmapPixels(50000,50000,pixels,bitmap,error));
     assert(bitmap.bytes==pixels); // failed conversion never damages last frame
+    GuestJniByteArrays arrays;
+    std::uint32_t arrayHandle=0;
+    assert(arrays.Create(bitmap,arrayHandle,error));
+    assert(arrayHandle!=0);
+    std::int32_t byteCount=0;
+    assert(arrays.Length(arrayHandle,byteCount) && byteCount==24);
+    std::uint8_t sample[4]{};
+    assert(arrays.CopyRegion(arrayHandle,2,4,sample));
+    for(auto byte:sample) assert(byte==0x7f);
+    assert(!arrays.CopyRegion(arrayHandle,22,4,sample));
+    assert(!arrays.CopyRegion(arrayHandle,-1,2,sample));
+    assert(!arrays.CopyRegion(arrayHandle,0,2,nullptr));
+    assert(arrays.Release(arrayHandle));
+    assert(!arrays.Length(arrayHandle,byteCount));
+    assert(!arrays.Release(arrayHandle));
     return 0;
 }
