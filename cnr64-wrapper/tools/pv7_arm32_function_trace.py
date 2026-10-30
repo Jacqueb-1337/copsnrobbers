@@ -23,7 +23,7 @@ import time
 AGENT = Path(__file__).with_name("pv7_arm32_function_agent.js")
 PACKAGE = "com.turner.bestparkintheuniverse"
 REMOTE_RE = re.compile(r"^[A-Za-z0-9_.-]+:[0-9]{2,5}$")
-PROFILES = ("render", "scene", "assets", "input", "gameplay")
+PROFILES = ("render", "scene", "assets", "input", "gameplay", "character")
 
 
 def aggregate(records):
