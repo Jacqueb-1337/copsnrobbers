@@ -1,3 +1,4 @@
+#include "../../../compat_modules/cocos2dx/cocos2dx_jni_marshaller.h"
 #include "arm32_guest_image.h"
 #include "dynarmic/interface/A32/a32.h"
 
@@ -190,7 +191,31 @@ public:
             Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
             return;
         }
-        if (svc == kMissingJniSvc + 167u) {
+        if (svc == kMissingJniSvc + 142u) {
+            if (regs[1] != 0x0000c010u || regs[2] != 0x0000c020u) {
+                Fault(regs[15], "JNI_CallStaticVoidMethodV_unknown_method");
+                return;
+            }
+            pv7::compat::cocos2dx::BitmapJniMarshaller decoder;
+            pv7::compat::cocos2dx::BitmapTextRequest request;
+            std::string decodeError;
+            std::unordered_map<std::uint32_t,std::string> handles(
+                guest_strings_.begin(),guest_strings_.end());
+            if (!decoder.Decode(mem_, regs[3],handles,request,decodeError)) {
+                Fault(regs[15], "JNI_BitmapText_decode_failed:" + decodeError);
+                return;
+            }
+            std::cout << "COCOS_BITMAP_TEXT_REQUEST text=" << request.text
+                      << " font=" << request.font
+                      << " size=" << request.font_size
+                      << " align=" << request.alignment
+                      << " dimensions=" << request.width << "x" << request.height
+                      << "\n";
+            // The real Android renderer and its nativeInitBitmapDC callback
+            // must be attached before allowing guest execution to continue.
+            Fault(regs[15], "JNI_BitmapText_host_renderer_not_connected");
+            return;
+        }        if (svc == kMissingJniSvc + 167u) {
             const auto addr = regs[1];
             constexpr std::size_t kMaxStringBytes = 65536;
             if (!addr || addr >= mem_.size()) {

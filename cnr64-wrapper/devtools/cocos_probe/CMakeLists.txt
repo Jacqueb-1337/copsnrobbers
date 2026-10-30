@@ -23,5 +23,8 @@ add_subdirectory("${PV7_THIRD_PARTY}/dynarmic" dynarmic)
 
 add_library(pv7elf STATIC src/arm32_guest_image.cpp src/arm32_guest_relocations.cpp)
 target_include_directories(pv7elf PUBLIC src)
-add_executable(pv7-cocos-firstcall src/pv7_cocos_firstcall.cpp)
+add_executable(pv7-cocos-firstcall src/pv7_cocos_firstcall.cpp
+  ../../compat_modules/cocos2dx/cocos2dx_jni_marshaller.cpp)
 target_link_libraries(pv7-cocos-firstcall PRIVATE pv7elf dynarmic)
+
+target_include_directories(pv7-cocos-firstcall PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
