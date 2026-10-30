@@ -33,8 +33,10 @@ constexpr std::uint32_t kVM = 0x00009000;
 constexpr std::uint32_t kVMTable = 0x00009100;
 constexpr std::uint32_t kEnv = 0x00009200;
 constexpr std::uint32_t kEnvTable = 0x00009300;
-constexpr std::uint32_t kStack = 0x01f00000;
-constexpr std::size_t kMemorySize = 32 * 1024 * 1024;
+constexpr std::uint32_t kStack = 0x07f00000;
+constexpr std::uint32_t kHeapStart = 0x02000000;
+constexpr std::uint32_t kHeapEnd = 0x07d00000;
+constexpr std::size_t kMemorySize = 128 * 1024 * 1024;
 constexpr std::uint32_t kImportSvcBase = 0x00001000;
 constexpr std::uint32_t kJniGetEnv = 20;
 constexpr std::uint32_t kJniAttach = 21;
@@ -45,6 +47,8 @@ constexpr std::uint32_t kKuserCmpxchg = 30;
 constexpr std::uint32_t kKuserMemoryBarrier = 31;
 constexpr std::uint32_t kKuserGetTls = 32;
 constexpr std::uint32_t kGuestTls = 0x0000b000;
+constexpr std::uint32_t kMissingJniBase = 0x00010000;
+constexpr std::uint32_t kMissingJniSvc = 0x00020000;
 
 bool Fits(std::size_t address, std::size_t size, std::size_t capacity) {
     return address <= capacity && size <= capacity - address;
@@ -154,6 +158,11 @@ public:
         if (svc == kJniRegister) {
             reason = "JNI_RegisterNatives_count:" + std::to_string(regs[3]);
             Fault(regs[15], reason);
+            return;
+        }
+        if (svc >= kMissingJniSvc && svc < kMissingJniSvc + 232u) {
+            Fault(regs[15], "UNIMPLEMENTED_JNI_SLOT:" +
+                  std::to_string(svc - kMissingJniSvc));
             return;
         }
         if (svc >= kImportSvcBase && svc < kImportSvcBase + imports_.size()) {
@@ -288,6 +297,141 @@ public:
                 regs[0] = regs[0] <= 0x7fu ? regs[0] : 0xffffffffu;
                 return;
             }
+            if (item.name == "wctype") {
+                const auto category = CString(mem_, regs[0]);
+                constexpr const char* names[] = {
+                    "alnum", "alpha", "blank", "cntrl", "digit", "graph",
+                    "lower", "print", "punct", "space", "upper", "xdigit"
+                };
+                regs[0] = 0;
+                for (unsigned i=0;i<std::size(names);++i) {
+                    if (category == names[i]) { regs[0] = i+1; break; }
+                }
+                return;
+            }
+            if (item.name == "iswctype") {
+                const auto code = regs[0], category = regs[1];
+                const bool ascii = code < 128u;
+                const auto isAlpha = ascii && ((code >= 'A' && code <= 'Z') ||
+                                                (code >= 'a' && code <= 'z'));
+                const auto isDigit = code >= '0' && code <= '9';
+                const auto isSpace = code == ' ' || (code >= 9 && code <= 13);
+                const auto isCntrl = code < 32 || code == 127;
+                const auto isGraph = code > 32 && code < 127;
+                const auto isPrint = code >= 32 && code < 127;
+                const auto isUpper = code >= 'A' && code <= 'Z';
+                const auto isLower = code >= 'a' && code <= 'z';
+                const auto isXdigit = isDigit || (code >= 'A' && code <= 'F') ||
+                    (code >= 'a' && code <= 'f');
+                bool yes = false;
+                switch (category) {
+                    case 1: yes = isAlpha || isDigit; break;
+                    case 2: yes = isAlpha; break;
+                    case 3: yes = code == ' ' || code == 9; break;
+                    case 4: yes = isCntrl; break;
+                    case 5: yes = isDigit; break;
+                    case 6: yes = isGraph; break;
+                    case 7: yes = isLower; break;
+                    case 8: yes = isPrint; break;
+                    case 9: yes = isGraph && !isAlpha && !isDigit; break;
+                    case 10: yes = isSpace; break;
+                    case 11: yes = isUpper; break;
+                    case 12: yes = isXdigit; break;
+                    default: break;
+                }
+                regs[0] = yes ? 1u : 0u;
+                return;
+            }
+            if (item.name == "__cxa_atexit") {
+                // Register guest destructor/argument/DSO for later native
+                // shutdown. This smoke probe does not unload the library.
+                if (destructors_.size() >= 4096) {
+                    Fault(regs[15], "cxa_atexit_overflow"); return;
+                }
+                destructors_.push_back({regs[0], regs[1], regs[2]});
+                regs[0] = 0; // registration succeeded
+                return;
+            }
+            if (item.name == "malloc" || item.name == "__libc_malloc" ||
+                item.name == "_Znwj" || item.name == "_Znaj") {
+                regs[0] = Allocate(regs[0], 16u);
+                return;
+            }
+            if (item.name == "calloc") {
+                const auto a = regs[0], b = regs[1];
+                if (b && a > 0xffffffffu / b) {
+                    regs[0] = 0; return;
+                }
+                regs[0] = Allocate(a * b, 16u);
+                return;
+            }
+            if (item.name == "free" || item.name == "__libc_free" ||
+                item.name == "_ZdlPv" || item.name == "_ZdaPv") {
+                if (regs[0] && !allocations_.count(regs[0])) {
+                    Fault(regs[15], "free_of_unowned_guest_pointer"); return;
+                }
+                // Deliberately retains released blocks until probe end.
+                // This is a bounded smoke heap, not a production allocator.
+                regs[0] = 0;
+                return;
+            }
+            if (item.name == "realloc") {
+                const auto pointer = regs[0], requested = regs[1];
+                if (pointer && !allocations_.count(pointer)) {
+                    Fault(regs[15], "realloc_of_unowned_guest_pointer"); return;
+                }
+                if (!requested) { regs[0] = 0; return; }
+                const auto destination = Allocate(requested, 16u);
+                if (destination && pointer) {
+                    const auto n = std::min(allocations_[pointer], requested);
+                    std::memcpy(mem_.data()+destination,mem_.data()+pointer,n);
+                }
+                regs[0] = destination;
+                return;
+            }
+            if (item.name == "posix_memalign") {
+                const auto out=regs[0], align=regs[1], n=regs[2];
+                if (!Fits(out,4,mem_.size()) || align < 4 ||
+                    (align & (align - 1)) != 0 || align > 65536u) {
+                    regs[0] = 22; return; // EINVAL
+                }
+                const auto value = Allocate(n, align);
+                if (!value) { regs[0] = 12; return; } // ENOMEM
+                Put32(mem_,out,value);
+                regs[0] = 0;
+                return;
+            }
+            if (item.name == "pthread_key_create") {
+                const auto out = regs[0];
+                if (!Fits(out, 4, mem_.size()) || next_key_ >= 256) {
+                    regs[0] = 11; return; // EAGAIN
+                }
+                const auto key = next_key_++;
+                keys_[key] = {regs[1],0}; // guest destructor, current value
+                Put32(mem_,out,key);
+                regs[0] = 0;
+                return;
+            }
+            if (item.name == "pthread_getspecific") {
+                const auto it = keys_.find(regs[0]);
+                regs[0] = it != keys_.end() ? it->second.second : 0u;
+                return;
+            }
+            if (item.name == "pthread_setspecific") {
+                const auto it = keys_.find(regs[0]);
+                if (it == keys_.end()) { regs[0] = 22; return; }
+                it->second.second = regs[1];
+                regs[0] = 0;
+                return;
+            }
+            if (item.name == "pthread_key_delete") {
+                regs[0] = keys_.erase(regs[0]) ? 0u : 22u;
+                return;
+            }
+            if (item.name == "pthread_self") {
+                regs[0] = kGuestTls;
+                return;
+            }
             reason = "UNIMPLEMENTED_IMPORT:" + item.name;
             std::cout << "IMPORT_TRAP " << item.name
                       << " pc=0x" << std::hex << regs[15]
@@ -318,8 +462,27 @@ private:
         reason = std::move(why);
         if (jit) jit->HaltExecution();
     }
+    std::uint32_t Allocate(std::uint32_t size, std::uint32_t alignment) {
+        if (!size) size=1;
+        if (size > 32u * 1024 * 1024) return 0;
+        const std::uint64_t start =
+            (static_cast<std::uint64_t>(next_heap_) + alignment - 1) &
+            ~static_cast<std::uint64_t>(alignment - 1);
+        const std::uint64_t end = start + size;
+        if (end > kHeapEnd || end > mem_.size()) return 0;
+        next_heap_ = static_cast<std::uint32_t>(end);
+        const auto address = static_cast<std::uint32_t>(start);
+        allocations_[address] = size;
+        return address;
+    }
+    std::uint32_t next_heap_ = kHeapStart;
+    std::map<std::uint32_t, std::uint32_t> allocations_;
+    std::uint32_t next_key_ = 1;
+    std::map<std::uint32_t, std::pair<std::uint32_t, std::uint32_t>> keys_;
     std::vector<std::uint8_t>& mem_;
     const std::vector<Import>& imports_;
+    struct Destructor { std::uint32_t function, arg, dso; };
+    std::vector<Destructor> destructors_;
     unsigned log_count_ = 0;
 };
 } // namespace
@@ -333,7 +496,7 @@ int main(int argc, char** argv) {
     const char* entry_name = nullptr;
     if (requested == "JNI_OnLoad") entry_name = "JNI_OnLoad";
     else if (requested == "nativeRender") entry_name = "Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeRender";
-    else if (requested == "constructors") entry_name = "JNI_OnLoad";
+    else if (requested == "constructors" || requested == "boot") entry_name = "JNI_OnLoad";
     else { std::cerr << "Unknown entrypoint\n"; return 2; }
 
     std::ifstream source(argv[1], std::ios::binary);
@@ -405,6 +568,15 @@ int main(int argc, char** argv) {
             std::cerr << "PTHREAD_ONCE_THUNK_FAILED\n"; return 2;
         }
     }
+    // Populate every JNI function table slot with a distinct missing-method
+    // trap. An unimplemented method is reported by index, not an invalid PC.
+    for (std::uint32_t i=0;i<232;++i) {
+        const std::uint32_t address = kMissingJniBase + i * 8;
+        if (!Trap(memory, address, kMissingJniSvc + i) ||
+            !Put32(memory, kEnvTable + i * 4, address)) {
+            std::cerr << "JNI_TABLE_SETUP_FAILED\n";return 2;
+        }
+    }
     // Minimal invocation interface scaffolding. Unknown JNI operations halt.
     if (!Trap(memory, kReturnTrap, 0) ||
         !Trap(memory, kGetEnvStub, kJniGetEnv) ||
@@ -430,7 +602,7 @@ int main(int argc, char** argv) {
     conf.code_cache_size = 16 * 1024 * 1024;
     Dynarmic::A32::Jit jit(conf);
     bridge.jit = &jit;
-    if (requested == "constructors") {
+    if (requested == "constructors" || requested == "boot") {
         std::size_t n = 0;
         for (const auto address : image.constructors()) {
             bridge.returned = false;
@@ -457,8 +629,13 @@ int main(int argc, char** argv) {
                 std::cout << "CONSTRUCTOR_OK count=" << n << "\n";
         }
         std::cout << "ALL_CONSTRUCTORS_RETURNED count=" << n << "\n";
-        return 0;
+        if (requested == "constructors") return 0;
     }
+    bridge.returned = false;
+    bridge.faulted = false;
+    bridge.reason.clear();
+    bridge.ticks_remaining = 1000000;
+    jit.ClearHalt();
     jit.Regs().fill(0);
     jit.Regs()[0] = kVM; // first argument of JNI_OnLoad
     jit.Regs()[13] = kStack;
@@ -479,9 +656,42 @@ int main(int argc, char** argv) {
         return 3; // expected actionable missing service, not success
     }
     if (bridge.returned) {
-        std::cout << "GUEST_RETURN r0=0x" << std::hex << jit.Regs()[0]
-                  << std::dec << " (constructors and Android services are still unavailable)\n";
-        return 0;
+        const auto version = jit.Regs()[0];
+        std::cout << "GUEST_RETURN r0=0x" << std::hex << version
+                  << std::dec << " (JNI entry returned)\n";
+        if (requested != "boot") return 0;
+        const auto init = image.FindExport("Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeInit");
+        if (!init) { std::cout << "COCOS_NATIVE_INIT_MISSING\n";return 3; }
+        bridge.returned = false;
+        bridge.faulted = false;
+        bridge.reason.clear();
+        bridge.ticks_remaining = 1000000;
+        jit.ClearHalt();
+        jit.Regs().fill(0);
+        jit.Regs()[0] = kEnv; // JNIEnv* mock
+        jit.Regs()[1] = 0; // Java renderer object placeholder
+        jit.Regs()[2] = 480; // reference landscape width
+        jit.Regs()[3] = 320; // reference landscape height
+        jit.Regs()[13] = kStack;
+        jit.Regs()[14] = kReturnTrap;
+        jit.Regs()[15] = *init & ~1u;
+        jit.SetCpsr((*init & 1u) ? 0x20u : 0u);
+        std::cout << "EXECUTING_COCOS_NATIVE_INIT pc=0x" << std::hex << *init
+                  << std::dec << "\n";
+        jit.Run();
+        if (bridge.faulted) {
+            std::cout << "COCOS_NATIVE_INIT_STOP " << bridge.reason
+                      << " fault_address=0x" << std::hex << bridge.fault_address
+                      << std::dec << "\n";
+            return 3;
+        }
+        if (bridge.returned) {
+            std::cout << "COCOS_NATIVE_INIT_RETURNED (render loop not started)\n";
+            return 0;
+        }
+        std::cout << "COCOS_NATIVE_INIT_TIMED_OUT pc=0x" << std::hex
+                  << jit.Regs()[15] << std::dec << "\n";
+        return 4;
     }
     std::cout << "GUEST_STOP instruction_budget_exhausted_or_stalled pc=0x"
               << std::hex << jit.Regs()[15] << std::dec << "\n";
