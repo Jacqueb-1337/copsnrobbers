@@ -38,11 +38,30 @@ class Arm32FunctionTraceTests(unittest.TestCase):
                 module.capture("127.0.0.1:27044", module.PACKAGE, 0,
                                pathlib.Path(tmp) / "out.jsonl")
 
+    def test_rejects_invalid_profile_and_hook_limits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = pathlib.Path(tmp) / "unused.jsonl"
+            with self.assertRaises(ValueError):
+                module.capture("127.0.0.1:27044", module.PACKAGE,
+                               5, output, profile="everything")
+            with self.assertRaises(ValueError):
+                module.capture("127.0.0.1:27044", module.PACKAGE,
+                               5, output, max_hooks=121)
+            with self.assertRaises(ValueError):
+                module.capture("127.0.0.1:27044", module.PACKAGE,
+                               5, output, sample_limit=0)
+            with self.assertRaises(ValueError):
+                module.capture("127.0.0.1:27044", module.PACKAGE,
+                               5, output, tap=(50, 40), tap_after=5)
+
     def test_agent_contains_no_stalker(self):
         agent = TOOL.with_name("pv7_arm32_function_agent.js").read_text()
         self.assertIn("Interceptor.attach", agent)
         self.assertNotIn("Stalker.follow", agent)
-        self.assertIn("maxSamples = 1000", agent)
+        self.assertIn("var maxSamples", agent)
+        for profile in module.PROFILES:
+            self.assertIn(profile + ":", agent)
+        self.assertIn("CCMenu", agent)
 
 
 if __name__ == "__main__":
