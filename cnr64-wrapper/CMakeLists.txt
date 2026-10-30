@@ -68,6 +68,11 @@ set_target_properties(projectv7-elf32 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_executable(pv7-arm32-elf-probe src/arm32_elf_probe.cpp)
 target_link_libraries(pv7-arm32-elf-probe PRIVATE projectv7-elf32)
 
+# Run a real Cocos ARM32 guest entry under Dynarmic in a bounded, fail-closed
+# developer probe. No game files are bundled; production runtime unchanged.
+add_executable(pv7-cocos-firstcall src/pv7_cocos_firstcall.cpp)
+target_link_libraries(pv7-cocos-firstcall PRIVATE dynarmic projectv7-elf32)
+
 add_library(projectv7-core STATIC ${PROJECTV7_CORE_SOURCES})
 add_library(cnr64-test-core ALIAS projectv7-core)
 target_link_libraries(projectv7-core PUBLIC dynarmic projectv7-elf32)
