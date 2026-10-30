@@ -23,7 +23,7 @@ if (mod === null) {
     },
     scene: {
       classes: /CCDirector|CCScene|CCTransition|SLMenu|AreaMenu|Room|CutscenePlayer|Select|Screen|LevelSelect/,
-      methods: /runWithScene|replaceScene|pushScene|popScene|setNextScene|init|onEnter|onExit|create|start|show|hide|transition|loadLevel/
+      methods: /runWithScene|replaceScene|pushScene|popScene|setNextScene|init|onEnter|onExit|create|start|show|hide|transition|loadLevel|update|endCallback/
     },
     assets: {
       classes: /CCFileUtils|CCTextureCache|CCTexture2D|CCSpriteFrameCache|CCBReader|ZipFile|CCImage|SoundPlayer|CCSpriteBatchNode/,
@@ -47,11 +47,26 @@ if (mod === null) {
     });
     var candidates = [];
     var seen = {};
-    exports.forEach(function (e) {
+    var eligible = exports.filter(function (e) {
+      return e.name.indexOf('_ZTh') !== 0 &&
+        selector.classes.test(e.name) && selector.methods.test(e.name);
+    });
+    // On a tiny emulated ARM CPU, favor game-specific functions over generic
+    // framework constructors. Keep the stable render profile unmodified.
+    if (profile === 'scene' || profile === 'gameplay') {
+      function priority(name) {
+        if (/CutscenePlayer|TutorialRoom|AreaMenuContainer|SLMenu|LevelSelect|Room|Player|Enemy|CharacterSkills/.test(name)) return 0;
+        if (/CCDirector/.test(name)) return 1;
+        return 2;
+      }
+      eligible = eligible.map(function (e, i) {
+        return {entry: e, originalIndex: i, priority: priority(e.name)};
+      }).sort(function (a, b) {
+        return a.priority - b.priority || a.originalIndex - b.originalIndex;
+      }).map(function (x) {return x.entry;});
+    }
+    eligible.forEach(function (e) {
       if (candidates.length >= cap) return;
-      // Skip adjustment thunks and overlapping aliases to avoid duplicate hooks.
-      if (e.name.indexOf('_ZTh') === 0) return;
-      if (!selector.classes.test(e.name) || !selector.methods.test(e.name)) return;
       var address = e.address.toString();
       if (seen[address]) return;
       seen[address] = true;
