@@ -213,6 +213,19 @@ The next pass is to add selector groups and exercise more gameplay
 scenes while comparing the captured return-site offsets to static ELF
 disassembly.
 
+
+## Multi-profile tracing verified
+
+The ARM32 Frida Interceptor tracer now supports render, scene, assets, input and gameplay profiles, bounded hooks and samples, and a timed ADB tap with phase markers. It does not invoke native functions or use Stalker.
+
+On a real emulator input test, 31 hooks succeeded, zero failed, five native functions fired (11 sampled calls with 11 returns): Cocos2dxRenderer.nativeTouchesBegin/End, CCMenu.ccTouchBegan/Ended and CCLayer.setTouchMode. The verified tap at 249,253 advanced Best Park from title to opening cutscene.
+
+While advancing the cutscene, the assets profile hooked 65 exported ARM32 functions and recorded SoundPlayer.playSound, CCTexture2D.initWithData and CCTexture2D.initWithString, three call/return pairs without errors.
+
+The earlier scene profile hooked 70 functions but captured no scene callbacks, and the gameplay profile hooked 72 of 75 functions, with three explicit Frida interception errors (BossRoom.addXpToPlayer, HordeRoom.addXpToPlayer, PlayerComboSystem.update). No gameplay-profile events fired while in the cutscene. Neither establishes missing game functionality. The selection code now prioritizes game-specific functions for scene and gameplay; this last prioritization passed CI but awaits another live profile test.
+
+Original APK/OBB and all raw trace data remain on user's PC. This is selected native export-call tracing, not exhaustive instrumentation of all game function paths.
+
 ## Remaining milestones
 
 1. DONE: Find expansion data and verify native menus, cutscene, and level selection.
