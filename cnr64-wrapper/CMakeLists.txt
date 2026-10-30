@@ -10,6 +10,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # fixes before baking them into the normal bridge/runtime implementation.
 option(PROJECTV7_DEV_HOTPATCH "Enable developer-only live compatibility hotpatching" OFF)
 option(PROJECTV7_DEV_DIAGNOSTICS "Enable verbose developer compatibility tracing" OFF)
+set(PROJECTV7_WORKER_QUANTUM_SLICES 4 CACHE STRING "Number of guest thread slices per pump")
+if(NOT PROJECTV7_WORKER_QUANTUM_SLICES MATCHES "^[0-9]+$" OR PROJECTV7_WORKER_QUANTUM_SLICES LESS 1 OR PROJECTV7_WORKER_QUANTUM_SLICES GREATER 16)
+    message(FATAL_ERROR "Invalid guest thread pump quantum")
+endif()
 set(PROJECTV7_COMPAT_MODULES "" CACHE STRING "Semicolon-separated embedded compatibility modules")
 
 set(DYNARMIC_FRONTENDS "A32" CACHE STRING "" FORCE)
@@ -77,6 +81,7 @@ target_compile_definitions(projectv7-core PRIVATE
     PROJECTV7_DEV_HOTPATCH=$<BOOL:${PROJECTV7_DEV_HOTPATCH}>
     PROJECTV7_DEV_DIAGNOSTICS=$<BOOL:${PROJECTV7_DEV_DIAGNOSTICS}>
     PV7_COMPAT_MODULE_CNR=${PV7_COMPAT_MODULE_CNR}
+    PROJECTV7_WORKER_QUANTUM_SLICES=${PROJECTV7_WORKER_QUANTUM_SLICES}
     PV7_COMPAT_MODULE_COCOS2DX=${PV7_COMPAT_MODULE_COCOS2DX}
 )
 if(PROJECTV7_DEV_HOTPATCH)

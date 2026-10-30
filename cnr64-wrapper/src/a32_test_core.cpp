@@ -104,7 +104,9 @@ A32SelfTestResult RunA32SelfTest(const std::string& originalLibMainPath,
                                 const std::string& originalLibMonoPath,
                                 const std::string& managedDirPath,
                                 const std::string& packageCodePath,
-                                void* hostNativeWindow) {
+                                void* hostNativeWindow,
+                                void* hostJniEnv,
+                                std::uint32_t hostDisplayId) {
     std::ostringstream report;
 #if defined(__aarch64__)
     report << "Host ISA: AArch64\n";
@@ -158,7 +160,8 @@ A32SelfTestResult RunA32SelfTest(const std::string& originalLibMainPath,
                                                                        originalLibMonoPath,
                                                                        managedDirPath,
                                                                        packageCodePath,
-                                                                       hostNativeWindow);
+                                                                       hostNativeWindow,
+                                                                       hostJniEnv);
     report << sharedResult.report << "\n";
 
     const bool ok = first_ok && rewrite_ok && elfResult.ok && unityResult.ok && monoResult.ok && sharedResult.ok;

@@ -255,36 +255,105 @@
     }
 
     bool DispatchRealSockets(const std::string& name) {
+        const Pv7DispatchNameKey& fast_name{name};
+#if PROJECTV7_FAST_SYMBOL_DISPATCH
+        if (fast_name.empty()) return false;
+        switch (fast_name.front()) {
+        case 'a':
+            if (!(fast_name == "accept")) return false;
+            break;
+        case 'b':
+            if (!(fast_name == "bind")) return false;
+            break;
+        case 'c':
+            if (!(fast_name == "connect")) return false;
+            break;
+        case 'e':
+            if (!(fast_name == "epoll_create" || fast_name == "epoll_ctl" || fast_name == "epoll_wait")) return false;
+            break;
+        case 'f':
+            if (!(fast_name == "fcntl" || fast_name == "freeaddrinfo")) return false;
+            break;
+        case 'g':
+            if (!(fast_name == "gai_strerror" || fast_name == "getaddrinfo" || fast_name == "gethostbyaddr" || fast_name == "gethostbyname" || fast_name == "getpeername" || fast_name == "getsockname" || fast_name == "getsockopt")) return false;
+            break;
+        case 'i':
+            if (!(fast_name == "ioctl")) return false;
+            break;
+        case 'l':
+            if (!(fast_name == "listen")) return false;
+            break;
+        case 'p':
+            if (!(fast_name == "pipe" || fast_name == "poll")) return false;
+            break;
+        case 'r':
+            if (!(fast_name == "recv" || fast_name == "recvfrom" || fast_name == "recvmsg")) return false;
+            break;
+        case 's':
+            if (!(fast_name == "select" || fast_name == "send" || fast_name == "sendmsg" || fast_name == "sendto" || fast_name == "setsockopt" || fast_name == "shutdown" || fast_name == "socket")) return false;
+            break;
+        default: return false;
+        }
+#endif
 #if !defined(_WIN32)
-        if (name == "socket") {
+        // A guest worker shares the render host thread. Ordinary blocking reads
+        // must suspend that guest, not sleep the entire host scheduler.
+        const int receive_fd = static_cast<int>(Arg(0));
+        const bool cooperative_receive = current_thread_id_ != 1u && Arg(3) == 0u &&
+            (fast_name == "recv" || fast_name == "recvfrom") && name_to_stub_.count(name) &&
+            (::fcntl(receive_fd, F_GETFL, 0) & O_NONBLOCK) == 0;
+        const auto receive_key = (static_cast<std::uint64_t>(current_thread_id_) << 32) | Arg(0);
+        if (cooperative_receive && !guest_receive_deadlines_.count(receive_key)) {
+            timeval timeout{};
+            socklen_t size = sizeof(timeout);
+            auto deadline = std::chrono::steady_clock::time_point::max();
+            if (::getsockopt(receive_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, &size) == 0 &&
+                (timeout.tv_sec > 0 || timeout.tv_usec > 0))
+                deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout.tv_sec) +
+                           std::chrono::microseconds(timeout.tv_usec);
+            guest_receive_deadlines_[receive_key] = deadline;
+        }
+        auto retry_receive = [&](ssize_t result) {
+            if (!cooperative_receive) return false;
+            if (result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) &&
+                std::chrono::steady_clock::now() < guest_receive_deadlines_.at(receive_key)) {
+                jit->Regs()[15] = name_to_stub_.at(name);
+                cooperative_yield_requested_ = true;
+                jit->HaltExecution();
+                return true;
+            }
+            guest_receive_deadlines_.erase(receive_key);
+            return false;
+        };
+        if (fast_name == "socket") {
             errno = 0;
             const int fd = ::socket(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)), static_cast<int>(Arg(2)));
             SetErrno(fd >= 0 ? 0u : static_cast<std::uint32_t>(errno));
             Ret(static_cast<std::uint32_t>(fd));
             return true;
         }
-        if (name == "bind" || name == "connect") {
+        if (fast_name == "bind" || fast_name == "connect") {
             const std::uint32_t address = Arg(1), length = Arg(2);
             if (length && !Fits(address, length)) { SetErrno(14); Ret(0xffffffffu); return true; }
             errno = 0;
             const sockaddr* sa = length ? reinterpret_cast<const sockaddr*>(memory_.data() + address) : nullptr;
-            const int rc = name == "bind"
+            const int rc = fast_name == "bind"
                 ? ::bind(static_cast<int>(Arg(0)), sa, static_cast<socklen_t>(length))
                 : ::connect(static_cast<int>(Arg(0)), sa, static_cast<socklen_t>(length));
             SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
             Ret(static_cast<std::uint32_t>(rc));
             return true;
         }
-        if (name == "listen" || name == "shutdown") {
+        if (fast_name == "listen" || fast_name == "shutdown") {
             errno = 0;
-            const int rc = name == "listen"
+            const int rc = fast_name == "listen"
                 ? ::listen(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)))
                 : ::shutdown(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)));
             SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
             Ret(static_cast<std::uint32_t>(rc));
             return true;
         }
-        if (name == "accept") {
+        if (fast_name == "accept") {
             sockaddr_storage storage{};
             socklen_t length = sizeof(storage);
             if (Arg(2) && Fits(Arg(2), 4u)) length = std::min<socklen_t>(Read<std::uint32_t>(Arg(2)), sizeof(storage));
@@ -300,23 +369,25 @@
             Ret(static_cast<std::uint32_t>(fd));
             return true;
         }
-        if (name == "send" || name == "recv") {
+        if (fast_name == "send" || fast_name == "recv") {
             const std::uint32_t buffer = Arg(1), length = Arg(2);
             if (length && !Fits(buffer, length)) { SetErrno(14); Ret(0xffffffffu); return true; }
             errno = 0;
-            const ssize_t rc = name == "send"
+            const ssize_t rc = fast_name == "send"
                 ? ::send(static_cast<int>(Arg(0)), memory_.data() + buffer, length, static_cast<int>(Arg(3)))
-                : ::recv(static_cast<int>(Arg(0)), memory_.data() + buffer, length, static_cast<int>(Arg(3)));
+                : ::recv(static_cast<int>(Arg(0)), memory_.data() + buffer, length,
+                         static_cast<int>(Arg(3)) | (cooperative_receive ? MSG_DONTWAIT : 0));
+            if (retry_receive(rc)) return true;
             SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno));
             Ret(static_cast<std::uint32_t>(rc));
             return true;
         }
-        if (name == "sendto" || name == "recvfrom") {
+        if (fast_name == "sendto" || fast_name == "recvfrom") {
             const std::uint32_t buffer = Arg(1), length = Arg(2);
             if (length && !Fits(buffer, length)) { SetErrno(14); Ret(0xffffffffu); return true; }
             errno = 0;
             ssize_t rc = -1;
-            if (name == "sendto") {
+            if (fast_name == "sendto") {
                 const std::uint32_t address = Arg(4), address_length = Arg(5);
                 if (address_length && !Fits(address, address_length)) { SetErrno(14); Ret(0xffffffffu); return true; }
                 const sockaddr* sa = address_length ? reinterpret_cast<const sockaddr*>(memory_.data() + address) : nullptr;
@@ -326,8 +397,10 @@
                 sockaddr_storage storage{};
                 socklen_t address_length = sizeof(storage);
                 if (Arg(5) && Fits(Arg(5), 4u)) address_length = std::min<socklen_t>(Read<std::uint32_t>(Arg(5)), sizeof(storage));
-                rc = ::recvfrom(static_cast<int>(Arg(0)), memory_.data() + buffer, length, static_cast<int>(Arg(3)),
+                rc = ::recvfrom(static_cast<int>(Arg(0)), memory_.data() + buffer, length,
+                                static_cast<int>(Arg(3)) | (cooperative_receive ? MSG_DONTWAIT : 0),
                                 Arg(4) ? reinterpret_cast<sockaddr*>(&storage) : nullptr, Arg(4) ? &address_length : nullptr);
+                if (retry_receive(rc)) return true;
                 if (rc >= 0 && Arg(4)) {
                     if (!Fits(Arg(4), address_length)) { SetErrno(14); Ret(0xffffffffu); return true; }
                     std::memcpy(memory_.data() + Arg(4), &storage, address_length);
@@ -338,7 +411,7 @@
             Ret(static_cast<std::uint32_t>(rc));
             return true;
         }
-        if (name == "sendmsg" || name == "recvmsg") {
+        if (fast_name == "sendmsg" || fast_name == "recvmsg") {
             const std::uint32_t guest_header = Arg(1);
             if (!guest_header || !Fits(guest_header, 28u)) { SetErrno(14); Ret(0xffffffffu); return true; }
             const std::uint32_t guest_name = Read<std::uint32_t>(guest_header + 0u);
@@ -367,10 +440,10 @@
             host.msg_controllen = guest_control_length;
             host.msg_flags = static_cast<int>(Read<std::uint32_t>(guest_header + 24u));
             errno = 0;
-            const ssize_t rc = name == "sendmsg"
+            const ssize_t rc = fast_name == "sendmsg"
                 ? ::sendmsg(static_cast<int>(Arg(0)), &host, static_cast<int>(Arg(2)))
                 : ::recvmsg(static_cast<int>(Arg(0)), &host, static_cast<int>(Arg(2)));
-            if (name == "recvmsg" && rc >= 0) {
+            if (fast_name == "recvmsg" && rc >= 0) {
                 Write32(memory_, guest_header + 4u, static_cast<std::uint32_t>(host.msg_namelen));
                 Write32(memory_, guest_header + 20u, static_cast<std::uint32_t>(host.msg_controllen));
                 Write32(memory_, guest_header + 24u, static_cast<std::uint32_t>(host.msg_flags));
@@ -379,12 +452,12 @@
             Ret(static_cast<std::uint32_t>(rc));
             return true;
         }
-        if (name == "getsockname" || name == "getpeername") {
+        if (fast_name == "getsockname" || fast_name == "getpeername") {
             if (!Arg(2) || !Fits(Arg(2), 4u)) { SetErrno(14); Ret(0xffffffffu); return true; }
             socklen_t length = static_cast<socklen_t>(Read<std::uint32_t>(Arg(2)));
             if (length && !Fits(Arg(1), length)) { SetErrno(14); Ret(0xffffffffu); return true; }
             errno = 0;
-            const int rc = name == "getsockname"
+            const int rc = fast_name == "getsockname"
                 ? ::getsockname(static_cast<int>(Arg(0)), reinterpret_cast<sockaddr*>(memory_.data() + Arg(1)), &length)
                 : ::getpeername(static_cast<int>(Arg(0)), reinterpret_cast<sockaddr*>(memory_.data() + Arg(1)), &length);
             Write32(memory_, Arg(2), static_cast<std::uint32_t>(length));
@@ -392,11 +465,11 @@
             Ret(static_cast<std::uint32_t>(rc));
             return true;
         }
-        if (name == "setsockopt" || name == "getsockopt") {
+        if (fast_name == "setsockopt" || fast_name == "getsockopt") {
             const int level = static_cast<int>(Arg(1)), option = static_cast<int>(Arg(2));
             errno = 0;
             int rc = -1;
-            if (name == "setsockopt") {
+            if (fast_name == "setsockopt") {
                 const std::uint32_t guest = Arg(3), length = Arg(4);
                 if (length && !Fits(guest, length)) return false;
                 if (level == SOL_SOCKET && (option == SO_RCVTIMEO || option == SO_SNDTIMEO) && length >= 8u) {
@@ -418,7 +491,7 @@
             Ret(static_cast<std::uint32_t>(rc));
             return true;
         }
-        if (name == "poll") {
+        if (fast_name == "poll") {
             const std::uint32_t guest = Arg(0), count = Arg(1);
             if (count > 4096u || (count && !Fits(guest, static_cast<std::size_t>(count) * 8u))) return false;
             std::vector<pollfd> fds(count);
@@ -432,7 +505,7 @@
             for (std::uint32_t i = 0; i < count; ++i) Write<std::int16_t>(guest + i * 8u + 6u, fds[i].revents);
             SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno)); Ret(static_cast<std::uint32_t>(rc)); return true;
         }
-        if (name == "select") {
+        if (fast_name == "select") {
             const int nfds = static_cast<int>(Arg(0));
             fd_set readfds{}, writefds{}, exceptfds{};
             fd_set* r = nullptr; fd_set* w = nullptr; fd_set* e = nullptr;
@@ -450,17 +523,17 @@
             }
             SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno)); Ret(static_cast<std::uint32_t>(rc)); return true;
         }
-        if (name == "epoll_create") {
+        if (fast_name == "epoll_create") {
             errno = 0; const int rc = ::epoll_create(static_cast<int>(Arg(0)));
             SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno)); Ret(static_cast<std::uint32_t>(rc)); return true;
         }
-        if (name == "epoll_ctl") {
+        if (fast_name == "epoll_ctl") {
             epoll_event event{}; epoll_event* ptr = nullptr;
             if (Arg(3)) { if (!Fits(Arg(3), 12u)) return false; std::memcpy(&event, memory_.data() + Arg(3), 12u); ptr = &event; }
             errno = 0; const int rc = ::epoll_ctl(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)), static_cast<int>(Arg(2)), ptr);
             SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno)); Ret(static_cast<std::uint32_t>(rc)); return true;
         }
-        if (name == "epoll_wait") {
+        if (fast_name == "epoll_wait") {
             const int max_events = static_cast<int>(Arg(2));
             if (max_events < 0 || (max_events && !Fits(Arg(1), static_cast<std::size_t>(max_events) * 12u))) return false;
             std::vector<epoll_event> events(static_cast<std::size_t>(max_events));
@@ -468,24 +541,24 @@
             if (rc > 0) std::memcpy(memory_.data() + Arg(1), events.data(), static_cast<std::size_t>(rc) * 12u);
             SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno)); Ret(static_cast<std::uint32_t>(rc)); return true;
         }
-        if (name == "pipe") {
+        if (fast_name == "pipe") {
             if (!Arg(0) || !Fits(Arg(0), 8u)) return false;
             int fds[2]{}; errno = 0; const int rc = ::pipe(fds);
             if (rc == 0) { Write<std::int32_t>(Arg(0), fds[0]); Write<std::int32_t>(Arg(0) + 4u, fds[1]); }
             SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno)); Ret(static_cast<std::uint32_t>(rc)); return true;
         }
-        if (name == "fcntl") {
+        if (fast_name == "fcntl") {
             errno = 0;
             const int rc = ::fcntl(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)), static_cast<long>(static_cast<std::int32_t>(Arg(2))));
             SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno)); Ret(static_cast<std::uint32_t>(rc)); return true;
         }
-        if (name == "ioctl") {
+        if (fast_name == "ioctl") {
             errno = 0;
             void* argument = Arg(2) && Fits(Arg(2), 4u) ? memory_.data() + Arg(2) : reinterpret_cast<void*>(static_cast<std::uintptr_t>(Arg(2)));
             const int rc = ::ioctl(static_cast<int>(Arg(0)), static_cast<unsigned long>(Arg(1)), argument);
             SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno)); Ret(static_cast<std::uint32_t>(rc)); return true;
         }
-        if (name == "getaddrinfo") {
+        if (fast_name == "getaddrinfo") {
             const std::string node = Arg(0) ? ReadCString(Arg(0), 4096) : std::string{};
             const std::string service = Arg(1) ? ReadCString(Arg(1), 256) : std::string{};
             addrinfo hints{}; addrinfo* hint_ptr = nullptr;
@@ -523,13 +596,13 @@
             if (Arg(3)) Write32(memory_, Arg(3), guest_nodes.empty() ? 0u : guest_nodes.front());
             Ret(0); return true;
         }
-        if (name == "freeaddrinfo") { Ret(0); return true; }
-        if (name == "gai_strerror") {
+        if (fast_name == "freeaddrinfo") { Ret(0); return true; }
+        if (fast_name == "gai_strerror") {
             const char* text = ::gai_strerror(static_cast<int>(Arg(0)));
             const std::string copy = text ? text : "getaddrinfo error";
             const std::uint32_t guest = Allocate(copy.size() + 1u, 1u); if (guest) WriteCString(guest, copy); Ret(guest); return true;
         }
-        if (name == "gethostbyname") {
+        if (fast_name == "gethostbyname") {
             const std::string host = ReadCString(Arg(0), 4096);
             addrinfo hints{}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
             addrinfo* result = nullptr;
@@ -547,14 +620,15 @@
             Write<std::int32_t>(entry_guest + 8u, AF_INET); Write<std::int32_t>(entry_guest + 12u, 4); Write32(memory_, entry_guest + 16u, list_guest);
             ::freeaddrinfo(result); Ret(entry_guest); return true;
         }
-        if (name == "gethostbyaddr") { Ret(0); return true; }
+        if (fast_name == "gethostbyaddr") { Ret(0); return true; }
 #endif
         return false;
     }
 
     bool DispatchCompatExtras(const std::string& name) {
+        const Pv7DispatchNameKey& fast_name{name};
         if (DispatchRealSockets(name)) return true;
-        if (name == "getenv") {
+        if (fast_name == "getenv") {
             const std::string key = ReadCString(Arg(0), 1024);
             if (guest_environment_.empty()) {
                 std::string home = "/data/user/0/me.jacqueb.cnr64poc";
@@ -572,20 +646,20 @@
             if (guest) WriteCString(guest, found->second);
             Ret(guest); return true;
         }
-        if (name == "setenv") {
+        if (fast_name == "setenv") {
             const std::string key = ReadCString(Arg(0), 1024), value = ReadCString(Arg(1), 8192);
             if (key.empty() || key.find('=') != std::string::npos) { SetErrno(22); Ret(0xffffffffu); return true; }
             if (Arg(2) || guest_environment_.find(key) == guest_environment_.end()) guest_environment_[key] = value;
             SetErrno(0); Ret(0); return true;
         }
-        if (name == "unsetenv") {
+        if (fast_name == "unsetenv") {
             guest_environment_.erase(ReadCString(Arg(0), 1024)); SetErrno(0); Ret(0); return true;
         }
-        if (name == "chdir" || name == "chmod") {
+        if (fast_name == "chdir" || fast_name == "chmod") {
 #if !defined(_WIN32)
             const std::string path = NormalizeGuestPath(ReadCString(Arg(0)));
             errno = 0;
-            const int rc = name == "chdir" ? ::chdir(path.c_str()) : ::chmod(path.c_str(), static_cast<mode_t>(Arg(1)));
+            const int rc = fast_name == "chdir" ? ::chdir(path.c_str()) : ::chmod(path.c_str(), static_cast<mode_t>(Arg(1)));
             SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno)); Ret(static_cast<std::uint32_t>(rc));
 #else
             SetErrno(38); Ret(0xffffffffu);
@@ -593,7 +667,7 @@
             return true;
         }
 
-        if (name == "__android_log_write") {
+        if (fast_name == "__android_log_write") {
             const std::string tag = ReadCString(Arg(1), 256);
             const std::string text = ReadCString(Arg(2), 4096);
 #if defined(__ANDROID__)
@@ -602,7 +676,7 @@
             if (diagnostic_formats.size() < 16) diagnostic_formats.push_back("__android_log_write: " + text);
             Ret(0); return true;
         }
-        if (name == "__cxa_pure_virtual" || name == "__stack_chk_fail") {
+        if (fast_name == "__cxa_pure_virtual" || fast_name == "__stack_chk_fail") {
             failed = true;
             fault_pc = jit ? jit->Regs()[15] : 0u;
             fault_exception = -3;
@@ -610,9 +684,9 @@
             if (jit) jit->HaltExecution();
             return true;
         }
-        if (name == "qsort") return StartGuestQsort(Arg(0), Arg(1), Arg(2), Arg(3));
+        if (fast_name == "qsort") return StartGuestQsort(Arg(0), Arg(1), Arg(2), Arg(3));
 
-        if (name == "strsep") {
+        if (fast_name == "strsep") {
             const std::uint32_t string_ptr_ptr = Arg(0);
             if (!string_ptr_ptr || !Fits(string_ptr_ptr, 4u)) { Ret(0); return true; }
             const std::uint32_t current = Read<std::uint32_t>(string_ptr_ptr);
@@ -624,12 +698,12 @@
             else Write32(memory_, string_ptr_ptr, 0u);
             Ret(current); return true;
         }
-        if (name == "strtok" || name == "strtok_r") {
+        if (fast_name == "strtok" || fast_name == "strtok_r") {
             std::uint32_t current = Arg(0);
             const std::string delimiters = ReadCString(Arg(1));
             std::uint32_t* state = &strtok_state_;
             std::uint32_t external_state = 0;
-            if (name == "strtok_r") {
+            if (fast_name == "strtok_r") {
                 if (!Arg(2) || !Fits(Arg(2), 4u)) { Ret(0); return true; }
                 external_state = Read<std::uint32_t>(Arg(2));
                 if (!current) current = external_state;
@@ -637,27 +711,27 @@
             if (!current) { Ret(0); return true; }
             while (Fits(current, 1u) && memory_[current] != 0 && delimiters.find(static_cast<char>(memory_[current])) != std::string::npos) ++current;
             if (!Fits(current, 1u) || memory_[current] == 0) {
-                if (name == "strtok_r") Write32(memory_, Arg(2), 0u); else *state = 0;
+                if (fast_name == "strtok_r") Write32(memory_, Arg(2), 0u); else *state = 0;
                 Ret(0); return true;
             }
             const std::uint32_t token = current;
             while (Fits(current, 1u) && memory_[current] != 0 && delimiters.find(static_cast<char>(memory_[current])) == std::string::npos) ++current;
             std::uint32_t next = 0;
             if (Fits(current, 1u) && memory_[current] != 0) { memory_[current] = 0; next = current + 1u; }
-            if (name == "strtok_r") Write32(memory_, Arg(2), next); else *state = next;
+            if (fast_name == "strtok_r") Write32(memory_, Arg(2), next); else *state = next;
             Ret(token); return true;
         }
 
-        if (name == "wmemchr" || name == "wmemcmp" || name == "wmemcpy" || name == "wmemmove" || name == "wmemset") {
-            const std::uint32_t count = name == "wmemcmp" ? Arg(2) : (name == "wmemset" ? Arg(2) : Arg(2));
+        if (fast_name == "wmemchr" || fast_name == "wmemcmp" || fast_name == "wmemcpy" || fast_name == "wmemmove" || fast_name == "wmemset") {
+            const std::uint32_t count = fast_name == "wmemcmp" ? Arg(2) : (fast_name == "wmemset" ? Arg(2) : Arg(2));
             const std::size_t bytes = static_cast<std::size_t>(count) * 4u;
-            if (name == "wmemchr") {
+            if (fast_name == "wmemchr") {
                 if (!Fits(Arg(0), bytes)) return false;
                 std::uint32_t result = 0;
                 for (std::uint32_t i = 0; i < count; ++i) if (Read<std::uint32_t>(Arg(0) + i * 4u) == Arg(1)) { result = Arg(0) + i * 4u; break; }
                 Ret(result); return true;
             }
-            if (name == "wmemcmp") {
+            if (fast_name == "wmemcmp") {
                 if (!Fits(Arg(0), bytes) || !Fits(Arg(1), bytes)) return false;
                 int result = 0;
                 for (std::uint32_t i = 0; i < count; ++i) {
@@ -666,45 +740,45 @@
                 }
                 Ret(static_cast<std::uint32_t>(result)); return true;
             }
-            if (name == "wmemset") {
+            if (fast_name == "wmemset") {
                 if (!Fits(Arg(0), bytes)) return false;
                 for (std::uint32_t i = 0; i < count; ++i) Write32(memory_, Arg(0) + i * 4u, Arg(1));
                 Ret(Arg(0)); return true;
             }
             if (!Fits(Arg(0), bytes) || !Fits(Arg(1), bytes)) return false;
-            if (name == "wmemmove") std::memmove(memory_.data() + Arg(0), memory_.data() + Arg(1), bytes);
+            if (fast_name == "wmemmove") std::memmove(memory_.data() + Arg(0), memory_.data() + Arg(1), bytes);
             else std::memcpy(memory_.data() + Arg(0), memory_.data() + Arg(1), bytes);
             Ret(Arg(0)); return true;
         }
 
-        if (name == "lrand48") {
+        if (fast_name == "lrand48") {
             rand48_state_ = (0x5deece66dULL * rand48_state_ + 0xbULL) & ((1ULL << 48) - 1ULL);
             Ret(static_cast<std::uint32_t>(rand48_state_ >> 17)); return true;
         }
-        if (name == "srand48") {
+        if (fast_name == "srand48") {
             rand48_state_ = (static_cast<std::uint64_t>(Arg(0)) << 16) | 0x330eULL;
             Ret(0); return true;
         }
 
-        if (name == "gmtime" || name == "localtime") {
+        if (fast_name == "gmtime" || fast_name == "localtime") {
             if (!Arg(0) || !Fits(Arg(0), 4u)) { Ret(0); return true; }
             const std::time_t value = static_cast<std::time_t>(static_cast<std::int32_t>(Read<std::uint32_t>(Arg(0))));
             std::tm copy{};
-            const std::tm* source = name == "gmtime" ? std::gmtime(&value) : std::localtime(&value);
+            const std::tm* source = fast_name == "gmtime" ? std::gmtime(&value) : std::localtime(&value);
             if (!source) { Ret(0); return true; }
             copy = *source;
-            const std::uint32_t guest = name == "gmtime" ? kBootstrapRuntimeBase + 0x400u : kBootstrapRuntimeBase + 0x440u;
+            const std::uint32_t guest = fast_name == "gmtime" ? kBootstrapRuntimeBase + 0x400u : kBootstrapRuntimeBase + 0x440u;
             if (!WriteGuestTm32(guest, copy)) { Ret(0); return true; }
             Ret(guest); return true;
         }
-        if (name == "mktime") {
+        if (fast_name == "mktime") {
             std::tm value{};
             if (!ReadGuestTm32(Arg(0), value)) { Ret(0xffffffffu); return true; }
             const std::time_t result = std::mktime(&value);
             WriteGuestTm32(Arg(0), value);
             Ret(static_cast<std::uint32_t>(static_cast<std::int64_t>(result))); return true;
         }
-        if (name == "strftime") {
+        if (fast_name == "strftime") {
             const std::uint32_t dst = Arg(0), capacity = Arg(1);
             if (!dst || capacity == 0 || !Fits(dst, capacity)) { Ret(0); return true; }
             std::tm value{};
@@ -716,11 +790,11 @@
             Ret(static_cast<std::uint32_t>(written)); return true;
         }
 
-        if (name == "sscanf") {
+        if (fast_name == "sscanf") {
             Ret(static_cast<std::uint32_t>(ScanGuestText(ReadCString(Arg(0), 65536), ReadCString(Arg(1), 4096), 2u)));
             return true;
         }
-        if (name == "fscanf") {
+        if (fast_name == "fscanf") {
             std::FILE* file = LookupFileHandle(Arg(0));
             if (!file) { Ret(0xffffffffu); return true; }
             char buffer[4096]{};
@@ -729,7 +803,7 @@
             return true;
         }
 
-        if (name == "fdopen") {
+        if (fast_name == "fdopen") {
 #if !defined(_WIN32)
             const int fd = static_cast<int>(Arg(0));
             const std::string mode = ReadCString(Arg(1), 32);
@@ -742,19 +816,19 @@
 #endif
             return true;
         }
-        if (name == "putc" || name == "getwc" || name == "putwc" || name == "ungetwc") {
-            const std::uint32_t handle = (name == "getwc") ? Arg(0) : Arg(1);
+        if (fast_name == "putc" || fast_name == "getwc" || fast_name == "putwc" || fast_name == "ungetwc") {
+            const std::uint32_t handle = (fast_name == "getwc") ? Arg(0) : Arg(1);
             std::FILE* file = LookupFileHandle(handle);
             if (!file) { Ret(0xffffffffu); return true; }
             int rc = -1;
-            if (name == "getwc") rc = std::fgetc(file);
-            else if (name == "putc" || name == "putwc") rc = std::fputc(static_cast<int>(Arg(0) & 0xffu), file);
+            if (fast_name == "getwc") rc = std::fgetc(file);
+            else if (fast_name == "putc" || fast_name == "putwc") rc = std::fputc(static_cast<int>(Arg(0) & 0xffu), file);
             else rc = std::ungetc(static_cast<int>(Arg(0) & 0xffu), file);
             Ret(static_cast<std::uint32_t>(rc)); return true;
         }
-        if (name == "setvbuf") { Ret(0); return true; }
+        if (fast_name == "setvbuf") { Ret(0); return true; }
 
-        if (name == "opendir") {
+        if (fast_name == "opendir") {
 #if !defined(_WIN32)
             const std::string path = NormalizeGuestPath(ReadCString(Arg(0)));
             errno = 0;
@@ -769,7 +843,7 @@
 #endif
             return true;
         }
-        if (name == "readdir") {
+        if (fast_name == "readdir") {
 #if !defined(_WIN32)
             const auto found = dir_handles_.find(Arg(0));
             if (found == dir_handles_.end()) { SetErrno(9); Ret(0); return true; }
@@ -790,7 +864,7 @@
 #endif
             return true;
         }
-        if (name == "closedir") {
+        if (fast_name == "closedir") {
 #if !defined(_WIN32)
             const auto found = dir_handles_.find(Arg(0));
             if (found == dir_handles_.end()) { SetErrno(9); Ret(0xffffffffu); return true; }
@@ -805,31 +879,31 @@
             return true;
         }
 
-        if (name == "dup2" || name == "fsync" || name == "ftruncate" || name == "truncate" ||
-            name == "mkdir" || name == "rmdir" || name == "unlink" || name == "rename" || name == "mkstemp" ||
-            name == "flock" || name == "utime" || name == "writev" || name == "sendfile") {
+        if (fast_name == "dup2" || fast_name == "fsync" || fast_name == "ftruncate" || fast_name == "truncate" ||
+            fast_name == "mkdir" || fast_name == "rmdir" || fast_name == "unlink" || fast_name == "rename" || fast_name == "mkstemp" ||
+            fast_name == "flock" || fast_name == "utime" || fast_name == "writev" || fast_name == "sendfile") {
 #if !defined(_WIN32)
             errno = 0;
             int rc = -1;
-            if (name == "dup2") rc = ::dup2(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)));
-            else if (name == "fsync") rc = ::fsync(static_cast<int>(Arg(0)));
-            else if (name == "ftruncate") rc = ::ftruncate(static_cast<int>(Arg(0)), static_cast<off_t>(static_cast<std::int32_t>(Arg(1))));
-            else if (name == "truncate") rc = ::truncate(NormalizeGuestPath(ReadCString(Arg(0))).c_str(), static_cast<off_t>(static_cast<std::int32_t>(Arg(1))));
-            else if (name == "mkdir") rc = ::mkdir(NormalizeGuestPath(ReadCString(Arg(0))).c_str(), static_cast<mode_t>(Arg(1)));
-            else if (name == "rmdir") rc = ::rmdir(NormalizeGuestPath(ReadCString(Arg(0))).c_str());
-            else if (name == "unlink") rc = ::unlink(NormalizeGuestPath(ReadCString(Arg(0))).c_str());
-            else if (name == "rename") rc = ::rename(NormalizeGuestPath(ReadCString(Arg(0))).c_str(), NormalizeGuestPath(ReadCString(Arg(1))).c_str());
-            else if (name == "mkstemp") {
+            if (fast_name == "dup2") rc = ::dup2(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)));
+            else if (fast_name == "fsync") rc = ::fsync(static_cast<int>(Arg(0)));
+            else if (fast_name == "ftruncate") rc = ::ftruncate(static_cast<int>(Arg(0)), static_cast<off_t>(static_cast<std::int32_t>(Arg(1))));
+            else if (fast_name == "truncate") rc = ::truncate(NormalizeGuestPath(ReadCString(Arg(0))).c_str(), static_cast<off_t>(static_cast<std::int32_t>(Arg(1))));
+            else if (fast_name == "mkdir") rc = ::mkdir(NormalizeGuestPath(ReadCString(Arg(0))).c_str(), static_cast<mode_t>(Arg(1)));
+            else if (fast_name == "rmdir") rc = ::rmdir(NormalizeGuestPath(ReadCString(Arg(0))).c_str());
+            else if (fast_name == "unlink") rc = ::unlink(NormalizeGuestPath(ReadCString(Arg(0))).c_str());
+            else if (fast_name == "rename") rc = ::rename(NormalizeGuestPath(ReadCString(Arg(0))).c_str(), NormalizeGuestPath(ReadCString(Arg(1))).c_str());
+            else if (fast_name == "mkstemp") {
                 const std::string original = NormalizeGuestPath(ReadCString(Arg(0)));
                 std::vector<char> path(original.begin(), original.end()); path.push_back(0);
                 rc = ::mkstemp(path.data());
                 if (rc >= 0) WriteCString(Arg(0), path.data());
-            } else if (name == "flock") rc = ::flock(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)));
-            else if (name == "utime") {
+            } else if (fast_name == "flock") rc = ::flock(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)));
+            else if (fast_name == "utime") {
                 struct utimbuf times{}; struct utimbuf* ptr = nullptr;
                 if (Arg(1) && Fits(Arg(1), 8u)) { times.actime = static_cast<time_t>(Read<std::int32_t>(Arg(1))); times.modtime = static_cast<time_t>(Read<std::int32_t>(Arg(1) + 4u)); ptr = &times; }
                 rc = ::utime(NormalizeGuestPath(ReadCString(Arg(0))).c_str(), ptr);
-            } else if (name == "writev") {
+            } else if (fast_name == "writev") {
                 const std::uint32_t count = Arg(2), vector = Arg(1);
                 if (count > 1024u || (count && !Fits(vector, static_cast<std::size_t>(count) * 8u))) return false;
                 ssize_t total = 0;
@@ -842,7 +916,7 @@
                     if (static_cast<std::uint32_t>(part) != len) break;
                 }
                 rc = static_cast<int>(total);
-            } else if (name == "sendfile") {
+            } else if (fast_name == "sendfile") {
                 const int out_fd = static_cast<int>(Arg(0)), in_fd = static_cast<int>(Arg(1));
                 std::uint32_t offset = 0; if (Arg(2) && Fits(Arg(2), 4u)) offset = Read<std::uint32_t>(Arg(2));
                 std::size_t remaining = Arg(3), sent = 0; std::array<std::uint8_t, 16384> buffer{};
@@ -866,22 +940,22 @@
             return true;
         }
 
-        if (name == "getpriority") { Ret(0); return true; }
-        if (name == "setpriority" || name == "setresuid") { Ret(0); return true; }
-        if (name == "getgrgid" || name == "getgrnam" || name == "getpwnam" || name == "getpwuid") { Ret(0); return true; }
-        if (name == "fork" || name == "execl" || name == "execv" || name == "execve" || name == "system" ||
-            name == "popen" || name == "pclose" || name == "waitpid" || name == "ptrace") {
-            SetErrno(name == "ptrace" ? 1u : 38u); // EPERM or ENOSYS
+        if (fast_name == "getpriority") { Ret(0); return true; }
+        if (fast_name == "setpriority" || fast_name == "setresuid") { Ret(0); return true; }
+        if (fast_name == "getgrgid" || fast_name == "getgrnam" || fast_name == "getpwnam" || fast_name == "getpwuid") { Ret(0); return true; }
+        if (fast_name == "fork" || fast_name == "execl" || fast_name == "execv" || fast_name == "execve" || fast_name == "system" ||
+            fast_name == "popen" || fast_name == "pclose" || fast_name == "waitpid" || fast_name == "ptrace") {
+            SetErrno(fast_name == "ptrace" ? 1u : 38u); // EPERM or ENOSYS
             Ret(0xffffffffu); return true;
         }
 
-        if (name == "SHA1Init" || name == "SHA1Update" || name == "SHA1Final") {
-            if (name == "SHA1Init") {
+        if (fast_name == "SHA1Init" || fast_name == "SHA1Update" || fast_name == "SHA1Final") {
+            if (fast_name == "SHA1Init") {
                 Sha1State32 state{}; Sha1InitState(state); sha1_states_[Arg(0)] = state; Ret(0); return true;
             }
-            auto found = sha1_states_.find(name == "SHA1Final" ? Arg(1) : Arg(0));
+            auto found = sha1_states_.find(fast_name == "SHA1Final" ? Arg(1) : Arg(0));
             if (found == sha1_states_.end()) { Ret(0); return true; }
-            if (name == "SHA1Update") {
+            if (fast_name == "SHA1Update") {
                 if (!Fits(Arg(1), Arg(2))) return false;
                 Sha1UpdateState(found->second, memory_.data() + Arg(1), Arg(2)); Ret(0); return true;
             }

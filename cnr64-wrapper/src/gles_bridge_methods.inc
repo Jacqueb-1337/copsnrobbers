@@ -31,7 +31,12 @@
     }
 
     bool DispatchGles(const std::string& name) {
-        if (name == "glDiscardFramebufferEXT") {
+#if PROJECTV7_FAST_SYMBOL_DISPATCH
+        // All supported graphics exports belong to the GL or EGL namespace.
+        if (name.compare(0, 2, "gl") != 0 && name.compare(0, 3, "egl") != 0) return false;
+#endif
+        const Pv7DispatchNameKey& fast_name{name};
+        if (fast_name == "glDiscardFramebufferEXT") {
             using Proc = void (*)(GLenum, GLsizei, const GLenum*);
             const GLsizei count = static_cast<GLsizei>(Arg(1));
             const GLenum* attachments = count > 0 ? GuestGlArray<GLenum>(Arg(2), static_cast<std::size_t>(count)) : nullptr;
@@ -39,13 +44,13 @@
             if (const Proc proc = HostGlExtension<Proc>("glDiscardFramebufferEXT")) proc(static_cast<GLenum>(Arg(0)), count, attachments);
             return true;
         }
-        if (name == "glMapBufferOES" || name == "glMapBufferRangeEXT") {
+        if (fast_name == "glMapBufferOES" || fast_name == "glMapBufferRangeEXT") {
             const GLenum target = static_cast<GLenum>(Arg(0));
             GLint host_size = 0;
             glGetBufferParameteriv(target, GL_BUFFER_SIZE, &host_size);
             if (host_size < 0) { Ret(0); return true; }
-            const std::uint32_t offset = name == "glMapBufferRangeEXT" ? Arg(1) : 0u;
-            const std::uint32_t length = name == "glMapBufferRangeEXT" ? Arg(2) : static_cast<std::uint32_t>(host_size);
+            const std::uint32_t offset = fast_name == "glMapBufferRangeEXT" ? Arg(1) : 0u;
+            const std::uint32_t length = fast_name == "glMapBufferRangeEXT" ? Arg(2) : static_cast<std::uint32_t>(host_size);
             if (offset > static_cast<std::uint32_t>(host_size) || length > static_cast<std::uint32_t>(host_size) - offset) { Ret(0); return true; }
             const std::uint32_t guest = Allocate(length ? length : 1u, 16u);
             if (!guest) { Ret(0); return true; }
@@ -54,7 +59,7 @@
             Ret(guest);
             return true;
         }
-        if (name == "glFlushMappedBufferRangeEXT") {
+        if (fast_name == "glFlushMappedBufferRangeEXT") {
             const GLenum target = static_cast<GLenum>(Arg(0));
             const auto found = gl_mapped_ranges_.find(static_cast<std::uint32_t>(target));
             if (found == gl_mapped_ranges_.end()) return true;
@@ -63,7 +68,7 @@
             if (length) glBufferSubData(target, static_cast<GLintptr>(found->second.offset + relative), static_cast<GLsizeiptr>(length), memory_.data() + found->second.guest + relative);
             return true;
         }
-        if (name == "glUnmapBufferOES") {
+        if (fast_name == "glUnmapBufferOES") {
             const GLenum target = static_cast<GLenum>(Arg(0));
             const auto found = gl_mapped_ranges_.find(static_cast<std::uint32_t>(target));
             if (found != gl_mapped_ranges_.end()) {
@@ -73,26 +78,26 @@
             Ret(GL_TRUE);
             return true;
         }
-        if (name == "glGenQueriesEXT" || name == "glDeleteQueriesEXT") {
+        if (fast_name == "glGenQueriesEXT" || fast_name == "glDeleteQueriesEXT") {
             using Proc = void (*)(GLsizei, GLuint*);
             const GLsizei count = static_cast<GLsizei>(Arg(0));
             GLuint* values = count > 0 ? GuestGlArray<GLuint>(Arg(1), static_cast<std::size_t>(count)) : nullptr;
             if (count < 0 || (count > 0 && !values)) return false;
             if (const Proc proc = HostGlExtension<Proc>(name.c_str())) proc(count, values);
-            else if (name == "glGenQueriesEXT" && values) std::memset(values, 0, static_cast<std::size_t>(count) * sizeof(GLuint));
+            else if (fast_name == "glGenQueriesEXT" && values) std::memset(values, 0, static_cast<std::size_t>(count) * sizeof(GLuint));
             return true;
         }
-        if (name == "glBeginQueryEXT") {
+        if (fast_name == "glBeginQueryEXT") {
             using Proc = void (*)(GLenum, GLuint);
             if (const Proc proc = HostGlExtension<Proc>("glBeginQueryEXT")) proc(static_cast<GLenum>(Arg(0)), static_cast<GLuint>(Arg(1)));
             return true;
         }
-        if (name == "glEndQueryEXT") {
+        if (fast_name == "glEndQueryEXT") {
             using Proc = void (*)(GLenum);
             if (const Proc proc = HostGlExtension<Proc>("glEndQueryEXT")) proc(static_cast<GLenum>(Arg(0)));
             return true;
         }
-        if (name == "glGetQueryObjectuivEXT") {
+        if (fast_name == "glGetQueryObjectuivEXT") {
             using Proc = void (*)(GLuint, GLenum, GLuint*);
             GLuint* value = GuestGlArray<GLuint>(Arg(2));
             if (!value) return false;
@@ -100,12 +105,12 @@
             else *value = 0;
             return true;
         }
-        if (name == "glQueryCounterEXT") {
+        if (fast_name == "glQueryCounterEXT") {
             using Proc = void (*)(GLuint, GLenum);
             if (const Proc proc = HostGlExtension<Proc>("glQueryCounterEXT")) proc(static_cast<GLuint>(Arg(0)), static_cast<GLenum>(Arg(1)));
             return true;
         }
-        if (name == "glGetQueryObjectui64vEXT") {
+        if (fast_name == "glGetQueryObjectui64vEXT") {
             using Proc = void (*)(GLuint, GLenum, std::uint64_t*);
             if (!Arg(2) || !Fits(Arg(2), 8u)) return false;
             std::uint64_t value = 0;
@@ -113,7 +118,7 @@
             Write<std::uint64_t>(Arg(2), value);
             return true;
         }
-        if (name == "glDrawBuffersNV") {
+        if (fast_name == "glDrawBuffersNV") {
             using Proc = void (*)(GLsizei, const GLenum*);
             const GLsizei count = static_cast<GLsizei>(Arg(0));
             const GLenum* values = count > 0 ? GuestGlArray<GLenum>(Arg(1), static_cast<std::size_t>(count)) : nullptr;
@@ -121,22 +126,22 @@
             if (const Proc proc = HostGlExtension<Proc>("glDrawBuffersNV")) proc(count, values);
             return true;
         }
-        if (name == "glRenderbufferStorageMultisampleEXT" || name == "glRenderbufferStorageMultisampleAPPLE") {
+        if (fast_name == "glRenderbufferStorageMultisampleEXT" || fast_name == "glRenderbufferStorageMultisampleAPPLE") {
             using Proc = void (*)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
             if (const Proc proc = HostGlExtension<Proc>(name.c_str())) proc(static_cast<GLenum>(Arg(0)), static_cast<GLsizei>(Arg(1)), static_cast<GLenum>(Arg(2)), static_cast<GLsizei>(Arg(3)), static_cast<GLsizei>(Arg(4)));
             return true;
         }
-        if (name == "glFramebufferTexture2DMultisampleEXT") {
+        if (fast_name == "glFramebufferTexture2DMultisampleEXT") {
             using Proc = void (*)(GLenum, GLenum, GLenum, GLuint, GLint, GLsizei);
             if (const Proc proc = HostGlExtension<Proc>("glFramebufferTexture2DMultisampleEXT")) proc(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)), static_cast<GLenum>(Arg(2)), static_cast<GLuint>(Arg(3)), static_cast<GLint>(Arg(4)), static_cast<GLsizei>(Arg(5)));
             return true;
         }
-        if (name == "glResolveMultisampleFramebufferAPPLE") {
+        if (fast_name == "glResolveMultisampleFramebufferAPPLE") {
             using Proc = void (*)();
             if (const Proc proc = HostGlExtension<Proc>("glResolveMultisampleFramebufferAPPLE")) proc();
             return true;
         }
-        if (name == "glGetProgramBinaryOES") {
+        if (fast_name == "glGetProgramBinaryOES") {
             using Proc = void (*)(GLuint, GLsizei, GLsizei*, GLenum*, void*);
             const GLsizei capacity = static_cast<GLsizei>(Arg(1));
             GLsizei* length = Arg(2) ? GuestGlArray<GLsizei>(Arg(2)) : nullptr;
@@ -147,7 +152,7 @@
             else { if (length) *length = 0; if (format) *format = 0; }
             return true;
         }
-        if (name == "glProgramBinaryOES") {
+        if (fast_name == "glProgramBinaryOES") {
             using Proc = void (*)(GLuint, GLenum, const void*, GLint);
             const GLint length = static_cast<GLint>(Arg(3));
             const void* binary = length > 0 ? GuestGlBytes(Arg(2), static_cast<std::size_t>(length)) : nullptr;
@@ -155,39 +160,55 @@
             if (const Proc proc = HostGlExtension<Proc>("glProgramBinaryOES")) proc(static_cast<GLuint>(Arg(0)), static_cast<GLenum>(Arg(1)), binary, length);
             return true;
         }
-        if (name == "glPushGroupMarkerEXT") {
+        if (fast_name == "glPushGroupMarkerEXT") {
             using Proc = void (*)(GLsizei, const GLchar*);
             const std::string marker = ReadCString(Arg(1), 4096);
             if (const Proc proc = HostGlExtension<Proc>("glPushGroupMarkerEXT")) proc(static_cast<GLsizei>(Arg(0)), marker.c_str());
             return true;
         }
-        if (name == "glPopGroupMarkerEXT") {
+        if (fast_name == "glPopGroupMarkerEXT") {
             using Proc = void (*)();
             if (const Proc proc = HostGlExtension<Proc>("glPopGroupMarkerEXT")) proc();
             return true;
         }
 
-        if (name == "glActiveTexture") { glActiveTexture(static_cast<GLenum>(Arg(0))); return true; }
-        if (name == "glAttachShader") { glAttachShader(static_cast<GLuint>(Arg(0)), static_cast<GLuint>(Arg(1))); return true; }
-        if (name == "glBindAttribLocation") {
+        if (fast_name == "glActiveTexture") { glActiveTexture(static_cast<GLenum>(Arg(0))); return true; }
+        if (fast_name == "glAttachShader") { glAttachShader(static_cast<GLuint>(Arg(0)), static_cast<GLuint>(Arg(1))); return true; }
+        if (fast_name == "glBindAttribLocation") {
             const std::string value = ReadCString(Arg(2));
             glBindAttribLocation(static_cast<GLuint>(Arg(0)), static_cast<GLuint>(Arg(1)), value.c_str());
             return true;
         }
-        if (name == "glBindBuffer") { glBindBuffer(static_cast<GLenum>(Arg(0)), static_cast<GLuint>(Arg(1))); return true; }
-        if (name == "glBindFramebuffer") { glBindFramebuffer(static_cast<GLenum>(Arg(0)), static_cast<GLuint>(Arg(1))); return true; }
-        if (name == "glBindRenderbuffer") { glBindRenderbuffer(static_cast<GLenum>(Arg(0)), static_cast<GLuint>(Arg(1))); return true; }
-        if (name == "glBindTexture") { glBindTexture(static_cast<GLenum>(Arg(0)), static_cast<GLuint>(Arg(1))); return true; }
-        if (name == "glBlendEquationSeparate") {
+        if (fast_name == "glBindBuffer") { glBindBuffer(static_cast<GLenum>(Arg(0)), static_cast<GLuint>(Arg(1))); return true; }
+        if (fast_name == "glBindFramebuffer") {
+            const GLenum target = static_cast<GLenum>(Arg(0));
+            const GLuint requested = static_cast<GLuint>(Arg(1));
+            glBindFramebuffer(target, requested);
+#if defined(__ANDROID__)
+            static int fbo_bind_log_count = 0;
+            if (fbo_bind_log_count < 160) {
+                GLint actual = -1;
+                glGetIntegerv(GL_FRAMEBUFFER_BINDING, &actual);
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7FBO bind target=0x%x requested=%u actual=%d",
+                                    target, requested, actual);
+                ++fbo_bind_log_count;
+            }
+#endif
+            return true;
+        }
+        if (fast_name == "glBindRenderbuffer") { glBindRenderbuffer(static_cast<GLenum>(Arg(0)), static_cast<GLuint>(Arg(1))); return true; }
+        if (fast_name == "glBindTexture") { glBindTexture(static_cast<GLenum>(Arg(0)), static_cast<GLuint>(Arg(1))); return true; }
+        if (fast_name == "glBlendEquationSeparate") {
             glBlendEquationSeparate(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)));
             return true;
         }
-        if (name == "glBlendFuncSeparate") {
+        if (fast_name == "glBlendFuncSeparate") {
             glBlendFuncSeparate(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)),
                                 static_cast<GLenum>(Arg(2)), static_cast<GLenum>(Arg(3)));
             return true;
         }
-        if (name == "glBufferData") {
+        if (fast_name == "glBufferData") {
             const GLsizeiptr size = static_cast<GLsizeiptr>(static_cast<std::int32_t>(Arg(1)));
             if (size < 0) return false;
             const std::uint32_t guest_data = Arg(2);
@@ -196,7 +217,7 @@
             glBufferData(static_cast<GLenum>(Arg(0)), size, data, static_cast<GLenum>(Arg(3)));
             return true;
         }
-        if (name == "glBufferSubData") {
+        if (fast_name == "glBufferSubData") {
             const GLintptr offset = static_cast<GLintptr>(static_cast<std::int32_t>(Arg(1)));
             const GLsizeiptr size = static_cast<GLsizeiptr>(static_cast<std::int32_t>(Arg(2)));
             if (offset < 0 || size < 0) return false;
@@ -206,21 +227,90 @@
             glBufferSubData(static_cast<GLenum>(Arg(0)), offset, size, data);
             return true;
         }
-        if (name == "glCheckFramebufferStatus") {
-            Ret(static_cast<std::uint32_t>(glCheckFramebufferStatus(static_cast<GLenum>(Arg(0)))));
+        if (fast_name == "glCheckFramebufferStatus") {
+            const GLenum target = static_cast<GLenum>(Arg(0));
+            const GLenum status = glCheckFramebufferStatus(target);
+#if defined(__ANDROID__)
+            static int fbo_status_log_count = 0;
+            if (fbo_status_log_count < 80) {
+                GLint actual = -1;
+                glGetIntegerv(GL_FRAMEBUFFER_BINDING, &actual);
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7FBO status target=0x%x bound=%d status=0x%x",
+                                    target, actual, status);
+                ++fbo_status_log_count;
+            }
+#endif
+            Ret(static_cast<std::uint32_t>(status));
             return true;
         }
-        if (name == "glClear") { glClear(static_cast<GLbitfield>(Arg(0))); return true; }
-        if (name == "glClearColor") { glClearColor(ArgFloat(0), ArgFloat(1), ArgFloat(2), ArgFloat(3)); return true; }
-        if (name == "glClearDepthf") { glClearDepthf(ArgFloat(0)); return true; }
-        if (name == "glClearStencil") { glClearStencil(static_cast<GLint>(Arg(0))); return true; }
-        if (name == "glColorMask") {
+        if (fast_name == "glClear") { glClear(static_cast<GLbitfield>(Arg(0))); return true; }
+        if (fast_name == "glClearColor") { glClearColor(ArgFloat(0), ArgFloat(1), ArgFloat(2), ArgFloat(3)); return true; }
+        if (fast_name == "glClearDepthf") { glClearDepthf(ArgFloat(0)); return true; }
+        if (fast_name == "glClearStencil") { glClearStencil(static_cast<GLint>(Arg(0))); return true; }
+        if (fast_name == "glColorMask") {
             glColorMask(static_cast<GLboolean>(Arg(0)), static_cast<GLboolean>(Arg(1)),
                         static_cast<GLboolean>(Arg(2)), static_cast<GLboolean>(Arg(3)));
             return true;
         }
-        if (name == "glCompileShader") { glCompileShader(static_cast<GLuint>(Arg(0))); return true; }
-        if (name == "glCompressedTexImage2D") {
+        if (fast_name == "glCompileShader") {
+            const GLuint shader = static_cast<GLuint>(Arg(0));
+            glCompileShader(shader);
+
+            GLint compiled = GL_FALSE;
+            glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+            if (compiled != GL_TRUE) {
+                GLint source_length = 0;
+                glGetShaderiv(shader, GL_SHADER_SOURCE_LENGTH, &source_length);
+                if (source_length > 1 && source_length < (1024 * 1024)) {
+                    std::string source(static_cast<std::size_t>(source_length), '\0');
+                    GLsizei written = 0;
+                    glGetShaderSource(shader, source_length, &written, source.data());
+                    if (written > 0) source.resize(static_cast<std::size_t>(written));
+                    else source.clear();
+
+                    // Some modern Adreno drivers reject old Unity 4.x generated GLSL
+                    // when the final preprocessor line is not newline-terminated.
+                    // Retry only shaders that already failed, leaving normal shaders untouched.
+                    if (!source.empty() && source.back() != '\n') {
+                        source.push_back('\n');
+                        const GLchar* retry_source = source.c_str();
+                        const GLint retry_length = static_cast<GLint>(source.size());
+                        glShaderSource(shader, 1, &retry_source, &retry_length);
+                        glCompileShader(shader);
+                        glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+#if defined(__ANDROID__)
+                        if (compiled == GL_TRUE) {
+                            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                "PV7GL shader recovered after newline retry shader=%u source=%d",
+                                                shader, retry_length);
+                        }
+#endif
+                    }
+
+#if defined(__ANDROID__)
+                    if (compiled != GL_TRUE) {
+                        GLint log_length = 0;
+                        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_length);
+                        std::string info;
+                        if (log_length > 1 && log_length < 65536) {
+                            info.resize(static_cast<std::size_t>(log_length));
+                            GLsizei log_written = 0;
+                            glGetShaderInfoLog(shader, log_length, &log_written, info.data());
+                            if (log_written > 0) info.resize(static_cast<std::size_t>(log_written));
+                        }
+                        const std::size_t tail_start = source.size() > 512 ? source.size() - 512 : 0;
+                        const std::string tail = source.substr(tail_start);
+                        __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                            "PV7GL shader compile failed shader=%u source=%zu log=%s tail=%s",
+                                            shader, source.size(), info.c_str(), tail.c_str());
+                    }
+#endif
+                }
+            }
+            return true;
+        }
+        if (fast_name == "glCompressedTexImage2D") {
             const GLsizei size = static_cast<GLsizei>(Arg(6));
             if (size < 0) return false;
             const std::uint32_t guest_data = Arg(7);
@@ -232,7 +322,7 @@
                                    size, data);
             return true;
         }
-        if (name == "glCompressedTexSubImage2D") {
+        if (fast_name == "glCompressedTexSubImage2D") {
             const GLsizei size = static_cast<GLsizei>(Arg(7));
             if (size < 0) return false;
             const std::uint32_t guest_data = Arg(8);
@@ -244,14 +334,14 @@
                                       static_cast<GLenum>(Arg(6)), size, data);
             return true;
         }
-        if (name == "glCopyTexSubImage2D") {
+        if (fast_name == "glCopyTexSubImage2D") {
             glCopyTexSubImage2D(static_cast<GLenum>(Arg(0)), static_cast<GLint>(Arg(1)),
                                 static_cast<GLint>(Arg(2)), static_cast<GLint>(Arg(3)),
                                 static_cast<GLint>(Arg(4)), static_cast<GLint>(Arg(5)),
                                 static_cast<GLsizei>(Arg(6)), static_cast<GLsizei>(Arg(7)));
             return true;
         }
-        if (name == "glCreateProgram") {
+        if (fast_name == "glCreateProgram") {
             using Proc = GLuint (*)();
             if (const Proc proc = HostGlExtension<Proc>("glCreateProgram")) {
                 Ret(static_cast<std::uint32_t>(proc()));
@@ -260,50 +350,63 @@
             }
             return true;
         }
-        if (name == "glCreateShader") {
+        if (fast_name == "glCreateShader") {
             Ret(static_cast<std::uint32_t>(glCreateShader(static_cast<GLenum>(Arg(0)))));
             return true;
         }
-        if (name == "glCullFace") { glCullFace(static_cast<GLenum>(Arg(0))); return true; }
-        if (name == "glDeleteBuffers") {
+        if (fast_name == "glCullFace") { glCullFace(static_cast<GLenum>(Arg(0))); return true; }
+        if (fast_name == "glDeleteBuffers") {
             const GLsizei count = static_cast<GLsizei>(Arg(0));
             const GLuint* values = GuestGlArray<GLuint>(Arg(1), count < 0 ? 0 : static_cast<std::size_t>(count));
             if (count < 0 || (count != 0 && !values)) return false;
             glDeleteBuffers(count, values);
             return true;
         }
-        if (name == "glDeleteFramebuffers") {
+        if (fast_name == "glDeleteFramebuffers") {
             const GLsizei count = static_cast<GLsizei>(Arg(0));
             const GLuint* values = GuestGlArray<GLuint>(Arg(1), count < 0 ? 0 : static_cast<std::size_t>(count));
             if (count < 0 || (count != 0 && !values)) return false;
+#if defined(__ANDROID__)
+            static int fbo_delete_log_count = 0;
+            if (fbo_delete_log_count < 80) {
+                std::string ids;
+                for (GLsizei i = 0; i < count && i < 8; ++i) {
+                    if (!ids.empty()) ids += ",";
+                    ids += std::to_string(values[i]);
+                }
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7FBO delete count=%d ids=%s", count, ids.c_str());
+                ++fbo_delete_log_count;
+            }
+#endif
             glDeleteFramebuffers(count, values);
             return true;
         }
-        if (name == "glDeleteProgram") { glDeleteProgram(static_cast<GLuint>(Arg(0))); return true; }
-        if (name == "glDeleteRenderbuffers") {
+        if (fast_name == "glDeleteProgram") { glDeleteProgram(static_cast<GLuint>(Arg(0))); return true; }
+        if (fast_name == "glDeleteRenderbuffers") {
             const GLsizei count = static_cast<GLsizei>(Arg(0));
             const GLuint* values = GuestGlArray<GLuint>(Arg(1), count < 0 ? 0 : static_cast<std::size_t>(count));
             if (count < 0 || (count != 0 && !values)) return false;
             glDeleteRenderbuffers(count, values);
             return true;
         }
-        if (name == "glDeleteShader") { glDeleteShader(static_cast<GLuint>(Arg(0))); return true; }
-        if (name == "glDeleteTextures") {
+        if (fast_name == "glDeleteShader") { glDeleteShader(static_cast<GLuint>(Arg(0))); return true; }
+        if (fast_name == "glDeleteTextures") {
             const GLsizei count = static_cast<GLsizei>(Arg(0));
             const GLuint* values = GuestGlArray<GLuint>(Arg(1), count < 0 ? 0 : static_cast<std::size_t>(count));
             if (count < 0 || (count != 0 && !values)) return false;
             glDeleteTextures(count, values);
             return true;
         }
-        if (name == "glDepthFunc") { glDepthFunc(static_cast<GLenum>(Arg(0))); return true; }
-        if (name == "glDepthMask") { glDepthMask(static_cast<GLboolean>(Arg(0))); return true; }
-        if (name == "glDisable") { glDisable(static_cast<GLenum>(Arg(0))); return true; }
-        if (name == "glDisableVertexAttribArray") { glDisableVertexAttribArray(static_cast<GLuint>(Arg(0))); return true; }
-        if (name == "glDrawArrays") {
+        if (fast_name == "glDepthFunc") { glDepthFunc(static_cast<GLenum>(Arg(0))); return true; }
+        if (fast_name == "glDepthMask") { glDepthMask(static_cast<GLboolean>(Arg(0))); return true; }
+        if (fast_name == "glDisable") { glDisable(static_cast<GLenum>(Arg(0))); return true; }
+        if (fast_name == "glDisableVertexAttribArray") { glDisableVertexAttribArray(static_cast<GLuint>(Arg(0))); return true; }
+        if (fast_name == "glDrawArrays") {
             glDrawArrays(static_cast<GLenum>(Arg(0)), static_cast<GLint>(Arg(1)), static_cast<GLsizei>(Arg(2)));
             return true;
         }
-        if (name == "glDrawElements") {
+        if (fast_name == "glDrawElements") {
             const std::uint32_t guest_indices = Arg(3);
             const void* indices = GuestGlDataOrOffset(guest_indices, GL_ELEMENT_ARRAY_BUFFER_BINDING);
             if (guest_indices != 0 && !indices) return false;
@@ -311,52 +414,79 @@
                            static_cast<GLenum>(Arg(2)), indices);
             return true;
         }
-        if (name == "glEnable") { glEnable(static_cast<GLenum>(Arg(0))); return true; }
-        if (name == "glEnableVertexAttribArray") { glEnableVertexAttribArray(static_cast<GLuint>(Arg(0))); return true; }
-        if (name == "glFinish") { glFinish(); return true; }
-        if (name == "glFlush") { glFlush(); return true; }
-        if (name == "glFramebufferRenderbuffer") {
+        if (fast_name == "glEnable") { glEnable(static_cast<GLenum>(Arg(0))); return true; }
+        if (fast_name == "glEnableVertexAttribArray") { glEnableVertexAttribArray(static_cast<GLuint>(Arg(0))); return true; }
+        if (fast_name == "glFinish") { glFinish(); return true; }
+        if (fast_name == "glFlush") { glFlush(); return true; }
+        if (fast_name == "glFramebufferRenderbuffer") {
             glFramebufferRenderbuffer(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)),
                                       static_cast<GLenum>(Arg(2)), static_cast<GLuint>(Arg(3)));
             return true;
         }
-        if (name == "glFramebufferTexture2D") {
-            glFramebufferTexture2D(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)),
-                                   static_cast<GLenum>(Arg(2)), static_cast<GLuint>(Arg(3)),
-                                   static_cast<GLint>(Arg(4)));
+        if (fast_name == "glFramebufferTexture2D") {
+            const GLenum target = static_cast<GLenum>(Arg(0));
+            const GLenum attachment = static_cast<GLenum>(Arg(1));
+            const GLenum textarget = static_cast<GLenum>(Arg(2));
+            const GLuint texture = static_cast<GLuint>(Arg(3));
+            const GLint level = static_cast<GLint>(Arg(4));
+            glFramebufferTexture2D(target, attachment, textarget, texture, level);
+#if defined(__ANDROID__)
+            static int fbo_attach_log_count = 0;
+            if (fbo_attach_log_count < 100) {
+                GLint actual = -1;
+                glGetIntegerv(GL_FRAMEBUFFER_BINDING, &actual);
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7FBO attachTex bound=%d attachment=0x%x texTarget=0x%x tex=%u level=%d",
+                                    actual, attachment, textarget, texture, level);
+                ++fbo_attach_log_count;
+            }
+#endif
             return true;
         }
-        if (name == "glFrontFace") { glFrontFace(static_cast<GLenum>(Arg(0))); return true; }
-        if (name == "glGenBuffers") {
+        if (fast_name == "glFrontFace") { glFrontFace(static_cast<GLenum>(Arg(0))); return true; }
+        if (fast_name == "glGenBuffers") {
             const GLsizei count = static_cast<GLsizei>(Arg(0));
             GLuint* values = GuestGlArray<GLuint>(Arg(1), count < 0 ? 0 : static_cast<std::size_t>(count));
             if (count < 0 || (count != 0 && !values)) return false;
             glGenBuffers(count, values);
             return true;
         }
-        if (name == "glGenFramebuffers") {
+        if (fast_name == "glGenFramebuffers") {
             const GLsizei count = static_cast<GLsizei>(Arg(0));
             GLuint* values = GuestGlArray<GLuint>(Arg(1), count < 0 ? 0 : static_cast<std::size_t>(count));
             if (count < 0 || (count != 0 && !values)) return false;
             glGenFramebuffers(count, values);
+#if defined(__ANDROID__)
+            static int fbo_gen_log_count = 0;
+            if (fbo_gen_log_count < 80) {
+                std::string ids;
+                for (GLsizei i = 0; i < count && i < 8; ++i) {
+                    if (!ids.empty()) ids += ",";
+                    ids += std::to_string(values[i]);
+                }
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7FBO gen count=%d ids=%s", count, ids.c_str());
+                ++fbo_gen_log_count;
+            }
+#endif
             return true;
         }
-        if (name == "glGenRenderbuffers") {
+        if (fast_name == "glGenRenderbuffers") {
             const GLsizei count = static_cast<GLsizei>(Arg(0));
             GLuint* values = GuestGlArray<GLuint>(Arg(1), count < 0 ? 0 : static_cast<std::size_t>(count));
             if (count < 0 || (count != 0 && !values)) return false;
             glGenRenderbuffers(count, values);
             return true;
         }
-        if (name == "glGenTextures") {
+        if (fast_name == "glGenTextures") {
             const GLsizei count = static_cast<GLsizei>(Arg(0));
             GLuint* values = GuestGlArray<GLuint>(Arg(1), count < 0 ? 0 : static_cast<std::size_t>(count));
             if (count < 0 || (count != 0 && !values)) return false;
             glGenTextures(count, values);
             return true;
         }
-        if (name == "glGenerateMipmap") { glGenerateMipmap(static_cast<GLenum>(Arg(0))); return true; }
-        if (name == "glGetActiveAttrib" || name == "glGetActiveUniform") {
+        if (fast_name == "glGenerateMipmap") { glGenerateMipmap(static_cast<GLenum>(Arg(0))); return true; }
+        if (fast_name == "glGetActiveAttrib" || fast_name == "glGetActiveUniform") {
             const GLsizei buffer_size = static_cast<GLsizei>(Arg(2));
             if (buffer_size < 0) return false;
             GLsizei* length = Arg(3) == 0 ? nullptr : GuestGlArray<GLsizei>(Arg(3));
@@ -365,7 +495,7 @@
             GLchar* out_name = Arg(6) == 0 ? nullptr : GuestGlArray<GLchar>(Arg(6), static_cast<std::size_t>(buffer_size));
             if ((Arg(3) && !length) || (Arg(4) && !size) || (Arg(5) && !type) ||
                 (Arg(6) && buffer_size != 0 && !out_name)) return false;
-            if (name == "glGetActiveAttrib") {
+            if (fast_name == "glGetActiveAttrib") {
                 glGetActiveAttrib(static_cast<GLuint>(Arg(0)), static_cast<GLuint>(Arg(1)),
                                   buffer_size, length, size, type, out_name);
             } else {
@@ -374,50 +504,50 @@
             }
             return true;
         }
-        if (name == "glGetAttribLocation" || name == "glGetUniformLocation") {
+        if (fast_name == "glGetAttribLocation" || fast_name == "glGetUniformLocation") {
             const std::string value = ReadCString(Arg(1));
-            const GLint result = name == "glGetAttribLocation"
+            const GLint result = fast_name == "glGetAttribLocation"
                 ? glGetAttribLocation(static_cast<GLuint>(Arg(0)), value.c_str())
                 : glGetUniformLocation(static_cast<GLuint>(Arg(0)), value.c_str());
             Ret(static_cast<std::uint32_t>(result));
             return true;
         }
-        if (name == "glGetError") { Ret(static_cast<std::uint32_t>(glGetError())); return true; }
-        if (name == "glGetFramebufferAttachmentParameteriv") {
+        if (fast_name == "glGetError") { Ret(static_cast<std::uint32_t>(glGetError())); return true; }
+        if (fast_name == "glGetFramebufferAttachmentParameteriv") {
             GLint* value = GuestGlArray<GLint>(Arg(3));
             if (!value) return false;
             glGetFramebufferAttachmentParameteriv(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)),
                                                   static_cast<GLenum>(Arg(2)), value);
             return true;
         }
-        if (name == "glGetIntegerv") {
+        if (fast_name == "glGetIntegerv") {
             GLint* value = GuestGlArray<GLint>(Arg(1), 16);
             if (!value) value = GuestGlArray<GLint>(Arg(1));
             if (!value) return false;
             glGetIntegerv(static_cast<GLenum>(Arg(0)), value);
             return true;
         }
-        if (name == "glGetProgramInfoLog" || name == "glGetShaderInfoLog") {
+        if (fast_name == "glGetProgramInfoLog" || fast_name == "glGetShaderInfoLog") {
             const GLsizei buffer_size = static_cast<GLsizei>(Arg(1));
             if (buffer_size < 0) return false;
             GLsizei* length = Arg(2) == 0 ? nullptr : GuestGlArray<GLsizei>(Arg(2));
             GLchar* log = Arg(3) == 0 ? nullptr : GuestGlArray<GLchar>(Arg(3), static_cast<std::size_t>(buffer_size));
             if ((Arg(2) && !length) || (Arg(3) && buffer_size != 0 && !log)) return false;
-            if (name == "glGetProgramInfoLog") {
+            if (fast_name == "glGetProgramInfoLog") {
                 glGetProgramInfoLog(static_cast<GLuint>(Arg(0)), buffer_size, length, log);
             } else {
                 glGetShaderInfoLog(static_cast<GLuint>(Arg(0)), buffer_size, length, log);
             }
             return true;
         }
-        if (name == "glGetProgramiv" || name == "glGetShaderiv") {
+        if (fast_name == "glGetProgramiv" || fast_name == "glGetShaderiv") {
             GLint* value = GuestGlArray<GLint>(Arg(2));
             if (!value) return false;
-            if (name == "glGetProgramiv") glGetProgramiv(static_cast<GLuint>(Arg(0)), static_cast<GLenum>(Arg(1)), value);
+            if (fast_name == "glGetProgramiv") glGetProgramiv(static_cast<GLuint>(Arg(0)), static_cast<GLenum>(Arg(1)), value);
             else glGetShaderiv(static_cast<GLuint>(Arg(0)), static_cast<GLenum>(Arg(1)), value);
             return true;
         }
-        if (name == "glGetString") {
+        if (fast_name == "glGetString") {
             const GLenum token = static_cast<GLenum>(Arg(0));
             const auto cached = gl_string_cache_.find(static_cast<std::uint32_t>(token));
             if (cached != gl_string_cache_.end()) {
@@ -439,7 +569,7 @@
             Ret(guest);
             return true;
         }
-        if (name == "glGetVertexAttribPointerv") {
+        if (fast_name == "glGetVertexAttribPointerv") {
             void* pointer = nullptr;
             glGetVertexAttribPointerv(static_cast<GLuint>(Arg(0)), static_cast<GLenum>(Arg(1)), &pointer);
             std::uint32_t guest_pointer = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(pointer));
@@ -453,16 +583,16 @@
             *out = guest_pointer;
             return true;
         }
-        if (name == "glGetVertexAttribiv") {
+        if (fast_name == "glGetVertexAttribiv") {
             GLint* value = GuestGlArray<GLint>(Arg(2));
             if (!value) return false;
             glGetVertexAttribiv(static_cast<GLuint>(Arg(0)), static_cast<GLenum>(Arg(1)), value);
             return true;
         }
-        if (name == "glLinkProgram") { glLinkProgram(static_cast<GLuint>(Arg(0))); return true; }
-        if (name == "glPixelStorei") { glPixelStorei(static_cast<GLenum>(Arg(0)), static_cast<GLint>(Arg(1))); return true; }
-        if (name == "glPolygonOffset") { glPolygonOffset(ArgFloat(0), ArgFloat(1)); return true; }
-        if (name == "glReadPixels") {
+        if (fast_name == "glLinkProgram") { glLinkProgram(static_cast<GLuint>(Arg(0))); return true; }
+        if (fast_name == "glPixelStorei") { glPixelStorei(static_cast<GLenum>(Arg(0)), static_cast<GLint>(Arg(1))); return true; }
+        if (fast_name == "glPolygonOffset") { glPolygonOffset(ArgFloat(0), ArgFloat(1)); return true; }
+        if (fast_name == "glReadPixels") {
             const std::uint32_t guest_pixels = Arg(6);
             void* pixels = guest_pixels == 0 ? nullptr : GuestGlBytes(guest_pixels);
             if (guest_pixels != 0 && !pixels) return false;
@@ -471,17 +601,33 @@
                          static_cast<GLenum>(Arg(4)), static_cast<GLenum>(Arg(5)), pixels);
             return true;
         }
-        if (name == "glRenderbufferStorage") {
+        if (fast_name == "glRenderbufferStorage") {
             glRenderbufferStorage(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)),
                                   static_cast<GLsizei>(Arg(2)), static_cast<GLsizei>(Arg(3)));
             return true;
         }
-        if (name == "glScissor") {
-            glScissor(static_cast<GLint>(Arg(0)), static_cast<GLint>(Arg(1)),
-                      static_cast<GLsizei>(Arg(2)), static_cast<GLsizei>(Arg(3)));
+        if (fast_name == "glScissor") {
+            GLint x = static_cast<GLint>(Arg(0));
+            GLint y = static_cast<GLint>(Arg(1));
+            GLsizei width = static_cast<GLsizei>(Arg(2));
+            GLsizei height = static_cast<GLsizei>(Arg(3));
+#if defined(__ANDROID__)
+            GLint framebuffer = 0;
+            glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+            if (framebuffer == 0 && x == 0 && y == 0 && width > 0 && height > 0 && host_native_window_) {
+                const int host_width = ANativeWindow_getWidth(static_cast<ANativeWindow*>(host_native_window_));
+                const int host_height = ANativeWindow_getHeight(static_cast<ANativeWindow*>(host_native_window_));
+                if (host_width > 0 && host_height > 0 &&
+                    (width != host_width || height != host_height)) {
+                    width = static_cast<GLsizei>(host_width);
+                    height = static_cast<GLsizei>(host_height);
+                }
+            }
+#endif
+            glScissor(x, y, width, height);
             return true;
         }
-        if (name == "glShaderSource") {
+        if (fast_name == "glShaderSource") {
             const GLsizei count = static_cast<GLsizei>(Arg(1));
             if (count < 0) return false;
             const std::uint32_t* guest_strings = GuestGlArray<std::uint32_t>(
@@ -508,26 +654,26 @@
             glShaderSource(static_cast<GLuint>(Arg(0)), count, strings.data(), lengths);
             return true;
         }
-        if (name == "glStencilFunc") {
+        if (fast_name == "glStencilFunc") {
             glStencilFunc(static_cast<GLenum>(Arg(0)), static_cast<GLint>(Arg(1)), static_cast<GLuint>(Arg(2)));
             return true;
         }
-        if (name == "glStencilFuncSeparate") {
+        if (fast_name == "glStencilFuncSeparate") {
             glStencilFuncSeparate(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)),
                                   static_cast<GLint>(Arg(2)), static_cast<GLuint>(Arg(3)));
             return true;
         }
-        if (name == "glStencilMask") { glStencilMask(static_cast<GLuint>(Arg(0))); return true; }
-        if (name == "glStencilOp") {
+        if (fast_name == "glStencilMask") { glStencilMask(static_cast<GLuint>(Arg(0))); return true; }
+        if (fast_name == "glStencilOp") {
             glStencilOp(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)), static_cast<GLenum>(Arg(2)));
             return true;
         }
-        if (name == "glStencilOpSeparate") {
+        if (fast_name == "glStencilOpSeparate") {
             glStencilOpSeparate(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)),
                                 static_cast<GLenum>(Arg(2)), static_cast<GLenum>(Arg(3)));
             return true;
         }
-        if (name == "glTexImage2D") {
+        if (fast_name == "glTexImage2D") {
             const std::uint32_t guest_pixels = Arg(8);
             const void* pixels = guest_pixels == 0 ? nullptr : GuestGlBytes(guest_pixels);
             if (guest_pixels != 0 && !pixels) return false;
@@ -537,11 +683,11 @@
                          static_cast<GLenum>(Arg(6)), static_cast<GLenum>(Arg(7)), pixels);
             return true;
         }
-        if (name == "glTexParameteri") {
+        if (fast_name == "glTexParameteri") {
             glTexParameteri(static_cast<GLenum>(Arg(0)), static_cast<GLenum>(Arg(1)), static_cast<GLint>(Arg(2)));
             return true;
         }
-        if (name == "glTexSubImage2D") {
+        if (fast_name == "glTexSubImage2D") {
             const std::uint32_t guest_pixels = Arg(8);
             const void* pixels = guest_pixels == 0 ? nullptr : GuestGlBytes(guest_pixels);
             if (guest_pixels != 0 && !pixels) return false;
@@ -551,10 +697,10 @@
                             static_cast<GLenum>(Arg(6)), static_cast<GLenum>(Arg(7)), pixels);
             return true;
         }
-        if (name == "glUniform1fv" || name == "glUniform1iv" ||
-            name == "glUniform2fv" || name == "glUniform2iv" ||
-            name == "glUniform3fv" || name == "glUniform3iv" ||
-            name == "glUniform4fv" || name == "glUniform4iv") {
+        if (fast_name == "glUniform1fv" || fast_name == "glUniform1iv" ||
+            fast_name == "glUniform2fv" || fast_name == "glUniform2iv" ||
+            fast_name == "glUniform3fv" || fast_name == "glUniform3iv" ||
+            fast_name == "glUniform4fv" || fast_name == "glUniform4iv") {
             const GLsizei count = static_cast<GLsizei>(Arg(1));
             if (count < 0) return false;
             const int components = name[9] - '0';
@@ -576,14 +722,14 @@
             }
             return true;
         }
-        if (name == "glUniform1i") {
+        if (fast_name == "glUniform1i") {
             glUniform1i(static_cast<GLint>(Arg(0)), static_cast<GLint>(Arg(1)));
             return true;
         }
-        if (name == "glUniformMatrix3fv" || name == "glUniformMatrix4fv") {
+        if (fast_name == "glUniformMatrix3fv" || fast_name == "glUniformMatrix4fv") {
             const GLsizei count = static_cast<GLsizei>(Arg(1));
             if (count < 0) return false;
-            const std::size_t components = name == "glUniformMatrix3fv" ? 9u : 16u;
+            const std::size_t components = fast_name == "glUniformMatrix3fv" ? 9u : 16u;
             const GLfloat* data = GuestGlArray<GLfloat>(Arg(3), static_cast<std::size_t>(count) * components);
             if (count != 0 && !data) return false;
             if (components == 9) {
@@ -593,8 +739,8 @@
             }
             return true;
         }
-        if (name == "glUseProgram") { glUseProgram(static_cast<GLuint>(Arg(0))); return true; }
-        if (name == "glVertexAttribPointer") {
+        if (fast_name == "glUseProgram") { glUseProgram(static_cast<GLuint>(Arg(0))); return true; }
+        if (fast_name == "glVertexAttribPointer") {
             const std::uint32_t guest_pointer = Arg(5);
             const void* pointer = GuestGlDataOrOffset(guest_pointer, GL_ARRAY_BUFFER_BINDING);
             if (guest_pointer != 0 && !pointer) return false;
@@ -603,9 +749,35 @@
                                   static_cast<GLsizei>(Arg(4)), pointer);
             return true;
         }
-        if (name == "glViewport") {
-            glViewport(static_cast<GLint>(Arg(0)), static_cast<GLint>(Arg(1)),
-                       static_cast<GLsizei>(Arg(2)), static_cast<GLsizei>(Arg(3)));
+        if (fast_name == "glViewport") {
+            GLint x = static_cast<GLint>(Arg(0));
+            GLint y = static_cast<GLint>(Arg(1));
+            GLsizei width = static_cast<GLsizei>(Arg(2));
+            GLsizei height = static_cast<GLsizei>(Arg(3));
+#if defined(__ANDROID__)
+            GLint framebuffer = 0;
+            glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+            if (framebuffer == 0 && x == 0 && y == 0 && width > 0 && height > 0 && host_native_window_) {
+                guest_logical_viewport_width = static_cast<std::uint32_t>(width);
+                guest_logical_viewport_height = static_cast<std::uint32_t>(height);
+                const int host_width = ANativeWindow_getWidth(static_cast<ANativeWindow*>(host_native_window_));
+                const int host_height = ANativeWindow_getHeight(static_cast<ANativeWindow*>(host_native_window_));
+                if (host_width > 0 && host_height > 0) {
+                    static int viewport_log_count = 0;
+                    if (viewport_log_count < 40) {
+                        __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                            "PV7GL default viewport %dx%d -> %dx%d",
+                                            width, height, host_width, host_height);
+                        ++viewport_log_count;
+                    }
+                    if (width != host_width || height != host_height) {
+                        width = static_cast<GLsizei>(host_width);
+                        height = static_cast<GLsizei>(host_height);
+                    }
+                }
+            }
+#endif
+            glViewport(x, y, width, height);
             return true;
         }
         return false;

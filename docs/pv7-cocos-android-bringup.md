@@ -69,10 +69,32 @@ No original game APK or native guest binaries belong in this repository.
   seven dependencies and its real JNI_OnLoad/nativeInit/nativeRender symbols.
   `pv7-cocos-elf-smoke` exited 0; portable contract test exited 0.
 - Java Android bitmap renderer compiled against android-35.
-- ARM64 `PROJECTV7_COMPAT_MODULES=cocos2dx` build: `projectv7-core`
-  compiled successfully. **The final `pv7host` shared-library target did
-  not compile** because this isolated checkout's legacy `jni_bridge.cpp`
-  references a newer `RunA32SelfTest` signature, `SetGuestGameLoopRunning`
-  and `HostTouchEvent` absent from its older `a32_test_core.h`.
-  Do not ship a wrapper or claim full host compatibility until that mismatch
-  is resolved against the correct baseline and the guest lifecycle is wired.
+- ARM64 `PROJECTV7_COMPAT_MODULES=cocos2dx` full `pv7host` shared-library
+  target compiles and links, verified with Android NDK 28. The original build
+  failure came from incompatible JNI bridge/core snapshots in the isolated
+  checkout. The aligned native bridge, input queue, Unity probe, binary
+  tracing, storage JNI helpers, URL handler and thread-pump configuration
+  are now compiled together without placeholder JNI functions.
+- A successful host link proves native integration only. Cocos JNI_OnLoad,
+  nativeInit, nativeRender, actual first frame, and OBB loading still require
+  device-side guest execution tests before a playable claim is appropriate.
+- `scripts/local_cocos_host_smoke.py` repacks host libraries into a test-only
+  APK template. The output must be zipaligned and signed with a development
+  keystore before emulator installation. Do not publish such builds as a
+  production Cocos compatibility release.
+## Additional Android host verification
+
+- With `PROJECTV7_COMPAT_MODULES=cocos2dx`, both complete Android ARM64 and
+  x86_64 native shared libraries link successfully using NDK 28.
+- A local, debug-signed diagnostic wrapper was assembled by replacing both
+  library entries in the v1.36 host template. `zipalign` and `apksigner`
+  completed, and APK signing verified using schemes v2 and v3.
+- The diagnostic wrapper installed on the existing x86_64 emulator and
+  launched `app.projectv7.wrapper.MainActivity`. Android's native loader
+  confirmed `libpv7host.so ... ok`; the process stayed alive, created a
+  rendering surface and produced no AndroidRuntime fatal exceptions.
+- This particular smoke-test APK intentionally contains **zero guest payload
+  bytes**, so no Best Park ARM32 instructions or original Cocos JNI methods
+  ran. The result verifies native loading/packaging and UI lifecycle only.
+- Build artifacts are local and test-only. No production APK released and no
+  Project V7 Cocos compatibility gate changed.
