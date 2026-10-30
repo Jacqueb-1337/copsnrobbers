@@ -1,0 +1,58 @@
+name: PV7 ARM32 ELF guest loader
+
+on:
+  pull_request:
+    paths:
+      - 'cnr64-wrapper/src/arm32_guest_image.*'
+      - 'cnr64-wrapper/src/arm32_guest_relocations.cpp'
+      - 'cnr64-wrapper/src/arm32_elf_probe.cpp'
+      - 'cnr64-wrapper/src/arm32_trace_recorder.*'
+      - 'cnr64-wrapper/tools/arm32_compat_analyzer.py'
+      - 'cnr64-wrapper/tools/pv7_reference_collect.py'
+      - 'cnr64-wrapper/tools/pv7_arm32_function_agent.js'
+      - 'cnr64-wrapper/tools/pv7_arm32_function_trace.py'
+      - 'cnr64-wrapper/tools/pv7_arm32_trace_correlate.py'
+      - 'cnr64-wrapper/CMakeLists.txt'
+      - 'cnr64-wrapper/tests/**'
+      - '.github/workflows/pv7-arm32-elf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-elf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native mapper and tests (without Dynarmic)
+        run: |
+          set -euo pipefail
+          cd cnr64-wrapper
+          c++ -std=c++20 -Wall -Wextra -Werror -Isrc \
+            src/arm32_guest_image.cpp src/arm32_guest_relocations.cpp \
+            tests/test_arm32_guest_image.cpp -o /tmp/pv7-elf-test
+          c++ -std=c++20 -Wall -Wextra -Werror -Isrc \
+            src/arm32_guest_image.cpp src/arm32_guest_relocations.cpp \
+            src/arm32_elf_probe.cpp -o /tmp/pv7-elf-probe
+          c++ -std=c++20 -Wall -Wextra -Werror -Isrc \
+            src/arm32_trace_recorder.cpp tests/test_arm32_trace_recorder.cpp \
+            -o /tmp/pv7-arm32-trace-test
+      - name: Exercise synthetic ARM32 ELF image and imports
+        run: |
+          set -euo pipefail
+          python3 cnr64-wrapper/tests/make_arm32_fixture.py /tmp/pv7-arm32-fixture.so
+          /tmp/pv7-elf-test /tmp/pv7-arm32-fixture.so
+          /tmp/pv7-elf-probe /tmp/pv7-arm32-fixture.so
+          /tmp/pv7-elf-probe /tmp/pv7-arm32-fixture.so --audit-relocations
+          /tmp/pv7-arm32-trace-test
+      - name: Verify static diagnostics analyzer and JSON provenance
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s cnr64-wrapper/tests -p test_arm32_compat_analyzer.py -v
+          python3 -m unittest discover -s cnr64-wrapper/tests -p test_pv7_reference_collect.py -v
+          python3 -m unittest discover -s cnr64-wrapper/tests -p test_pv7_arm32_function_trace.py -v
+          python3 -m unittest discover -s cnr64-wrapper/tests -p test_pv7_arm32_trace_correlate.py -v
+          python3 cnr64-wrapper/tools/arm32_compat_analyzer.py \
+            /tmp/pv7-arm32-fixture.so --output /tmp/pv7-compat-report.json
+          python3 -m json.tool /tmp/pv7-compat-report.json > /dev/null
