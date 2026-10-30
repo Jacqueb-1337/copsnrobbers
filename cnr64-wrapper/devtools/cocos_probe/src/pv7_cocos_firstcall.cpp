@@ -1,0 +1,1522 @@
+#include "../../../compat_modules/cocos2dx/cocos2dx_guest_jni_arrays.h"
+#include "../../../compat_modules/cocos2dx/cocos2dx_jni_refs.h"
+#include "../../../compat_modules/cocos2dx/cocos2dx_guest_math.h"
+#include "../../../compat_modules/cocos2dx/cocos2dx_jni_marshaller.h"
+#if defined(_WIN32)
+#include "pv7_cocos_probe_bitmap_win32.h"
+#endif
+#include "arm32_guest_image.h"
+#include "dynarmic/interface/A32/a32.h"
+
+#include "pv7_gles_probe.h"
+#include <cstdlib>
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <iterator>
+#include <map>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+// PV7 development-only execution probe: the first actual ARM instructions
+// of the owner's original Cocos ELF run under Dynarmic. All unknown imports
+// halt at a named SVC, not at fabricated successful return values.
+// This does NOT implement Android, rendering, or a complete JNI environment.
+namespace {
+constexpr std::uint32_t kImageBase = 0x01000000;
+constexpr std::uint32_t kImportsBase = 0x01800000;
+constexpr std::uint32_t kObjectsBase = 0x01900000;
+constexpr std::uint32_t kPthreadOnce = 0x01a00000;
+constexpr std::uint32_t kReturnTrap = 0x00008000;
+constexpr std::uint32_t kGetEnvStub = 0x00008100;
+constexpr std::uint32_t kAttachStub = 0x00008110;
+constexpr std::uint32_t kFindClassStub = 0x00008120;
+constexpr std::uint32_t kRegisterStub = 0x00008130;
+constexpr std::uint32_t kGetVersionStub = 0x00008140;
+constexpr std::uint32_t kVM = 0x00009000;
+constexpr std::uint32_t kVMTable = 0x00009100;
+constexpr std::uint32_t kEnv = 0x00009200;
+constexpr std::uint32_t kEnvTable = 0x00009300;
+constexpr std::uint32_t kStack = 0x07f00000;
+constexpr std::uint32_t kHeapStart = 0x02000000;
+constexpr std::uint32_t kHeapEnd = 0x07d00000;
+constexpr std::size_t kMemorySize = 128 * 1024 * 1024;
+constexpr std::uint32_t kImportSvcBase = 0x00001000;
+constexpr std::uint32_t kJniGetEnv = 20;
+constexpr std::uint32_t kJniAttach = 21;
+constexpr std::uint32_t kJniFindClass = 22;
+constexpr std::uint32_t kJniRegister = 23;
+constexpr std::uint32_t kJniGetVersion = 24;
+constexpr std::uint32_t kKuserCmpxchg = 30;
+constexpr std::uint32_t kKuserMemoryBarrier = 31;
+constexpr std::uint32_t kKuserGetTls = 32;
+constexpr std::uint32_t kGuestTls = 0x0000b000;
+constexpr std::uint32_t kMissingJniBase = 0x00010000;
+constexpr std::uint32_t kMissingJniSvc = 0x00020000;
+
+bool Fits(std::size_t address, std::size_t size, std::size_t capacity) {
+    return address <= capacity && size <= capacity - address;
+}
+bool Put32(std::vector<std::uint8_t>& mem, std::uint32_t address, std::uint32_t val) {
+    if (!Fits(address, sizeof(val), mem.size())) return false;
+    std::memcpy(mem.data() + address, &val, sizeof(val));
+    return true;
+}
+bool Trap(std::vector<std::uint8_t>& mem, std::uint32_t address, std::uint32_t id) {
+    return Put32(mem, address, 0xef000000u | id) &&
+           Put32(mem, address + 4, 0xe12fff1eu); // BX LR
+}
+std::string CString(const std::vector<std::uint8_t>& mem, std::uint32_t addr) {
+    std::string out;
+    if (addr >= mem.size()) return out;
+    for (std::size_t i = 0; i < 128 && addr + i < mem.size(); ++i) {
+        if (!mem[addr + i]) break;
+        out.push_back(static_cast<char>(mem[addr + i]));
+    }
+    return out;
+}
+struct Import {
+    std::string name;
+    std::uint32_t address;
+    bool data = false;
+};
+class Bridge final : public Dynarmic::A32::UserCallbacks {
+public:
+    explicit Bridge(std::vector<std::uint8_t>& memory,
+                    const std::vector<Import>& imports)
+        : mem_(memory), imports_(imports) {}
+    Dynarmic::A32::Jit* jit = nullptr;
+    bool returned = false;
+    bool faulted = false;
+    std::uint32_t fault_address = 0;
+    std::string reason;
+    std::uint64_t ticks_remaining = 1000000;
+    std::optional<pv7::compat::cocos2dx::BitmapTextRequest> pending_bitmap;
+    bool StageBitmap(const pv7::compat::cocos2dx::BitmapPixels& image,
+                     std::uint32_t& handle, std::string& error) {
+        if (!byte_arrays_.Create(image,handle,error)) return false;
+        if (!refs_.RegisterLocal(handle,pv7::compat::cocos2dx::JniRefKind::ByteArray)) {
+            byte_arrays_.Release(handle);
+            error="JNI byte array reference collision";
+            return false;
+        }
+        return true;
+    }
+    void ReleaseBitmap(std::uint32_t handle) {
+        refs_.Delete(handle,pv7::compat::cocos2dx::JniRefScope::Local);
+        byte_arrays_.Release(handle);
+    }
+
+    std::optional<std::uint32_t> MemoryReadCode(std::uint32_t a) override {
+        // ARM32 kernels reserve the high kuser vector page. Dynarmic's
+        // code-fetch callback must supply *both* the helper SVC and the
+        // following BX LR; the translator can fetch beyond a helper entry.
+        switch (a) {
+        case 0xffff0fc0: return 0xef000000u | kKuserCmpxchg;
+        case 0xffff0fa0: return 0xef000000u | kKuserMemoryBarrier;
+        case 0xffff0fe0: return 0xef000000u | kKuserGetTls;
+        case 0xffff0fc4:
+        case 0xffff0fa4:
+        case 0xffff0fe4: return 0xe12fff1eu; // BX LR
+        default: break;
+        }
+        if (!Fits(a, 4, mem_.size())) { Fault(a, "code_fetch_out_of_range"); return std::nullopt; }
+        return Read<std::uint32_t>(a);
+    }
+    std::uint8_t MemoryRead8(std::uint32_t a) override { return Read<std::uint8_t>(a); }
+    std::uint16_t MemoryRead16(std::uint32_t a) override { return Read<std::uint16_t>(a); }
+    std::uint32_t MemoryRead32(std::uint32_t a) override {
+        if (a == 0xffff0ffc) return 3; // kuser helper version: TLS, CAS32, barrier
+        return Read<std::uint32_t>(a);
+    }
+    std::uint64_t MemoryRead64(std::uint32_t a) override { return Read<std::uint64_t>(a); }
+    void MemoryWrite8(std::uint32_t a, std::uint8_t v) override { Write(a,v); }
+    void MemoryWrite16(std::uint32_t a, std::uint16_t v) override { Write(a,v); }
+    void MemoryWrite32(std::uint32_t a, std::uint32_t v) override { Write(a,v); }
+    void MemoryWrite64(std::uint32_t a, std::uint64_t v) override { Write(a,v); }
+    void InterpreterFallback(std::uint32_t pc, std::size_t) override { Fault(pc, "interpreter_fallback"); }
+    void ExceptionRaised(std::uint32_t pc, Dynarmic::A32::Exception) override { Fault(pc, "guest_exception"); }
+    void AddTicks(std::uint64_t ticks) override {
+        ticks_remaining = ticks >= ticks_remaining ? 0 : ticks_remaining - ticks;
+    }
+    std::uint64_t GetTicksRemaining() override { return ticks_remaining; }
+    void CallSVC(std::uint32_t svc) override {
+        if (!jit) return;
+        auto& regs = jit->Regs();
+        if (svc == 0) {
+            returned = true;
+            jit->HaltExecution();
+            return;
+        }
+        if (svc == kJniGetEnv || svc == kJniAttach) {
+            if (!Put32(mem_, regs[1], kEnv)) { Fault(regs[1], "jni_out_pointer_invalid"); return; }
+            regs[0] = 0; // JNI_OK only for these two specifically modeled operations
+            return;
+        }
+        if (svc == kJniGetVersion) { regs[0] = 0x00010006; return; }
+        if (svc == kKuserGetTls) { regs[0] = kGuestTls; return; }
+        if (svc == kKuserMemoryBarrier) { return; } // single-threaded probe only
+        if (svc == kKuserCmpxchg) {
+            const std::uint32_t ptr = regs[2];
+            if ((ptr & 3) || !Fits(ptr, 4, mem_.size())) {
+                Fault(ptr, "kuser_cmpxchg_invalid_pointer"); return;
+            }
+            const std::uint32_t actual = Read<std::uint32_t>(ptr);
+            const bool swapped = actual == regs[0];
+            if (swapped) Write<std::uint32_t>(ptr, regs[1]);
+            regs[0] = swapped ? 0u : 1u;
+            const std::uint32_t cpsr = jit->Cpsr();
+            jit->SetCpsr(swapped ? (cpsr | (1u << 29)) : (cpsr & ~(1u << 29)));
+            return;
+        }
+        if (svc == kJniFindClass) {
+            const auto name = CString(mem_, regs[1]);
+            // Both class names are confirmed in the original Best Park APK.
+            // Additional calls are resolved by exact method signature below.
+            if (name == "com/turner/bestparkintheuniverse/regularshow") {
+                constexpr std::uint32_t kGameClass=0x0000c030u;
+                refs_.RegisterLocal(kGameClass,pv7::compat::cocos2dx::JniRefKind::Class);
+                regs[0]=kGameClass;
+                std::cout<<"JNI_GAME_CLASS_FOUND "<<name<<"\n";
+                return;
+            }
+            if (name != "org/cocos2dx/lib/Cocos2dxBitmap") {
+                Fault(regs[15], "JNI_FindClass_unknown:" + name);
+                return;
+            }
+            // Diagnostic-only identity for a class known to the original game.
+            // No methods are simulated. The next JNI access remains fail-closed.
+            constexpr std::uint32_t kDiagnosticBitmapClass = 0x0000c010;
+            refs_.RegisterLocal(kDiagnosticBitmapClass,pv7::compat::cocos2dx::JniRefKind::Class);
+            regs[0] = kDiagnosticBitmapClass;
+            std::cout << "JNI_DIAGNOSTIC_CLASS " << name
+                      << " token=0x" << std::hex << kDiagnosticBitmapClass
+                      << std::dec << "\n";
+            return;
+        }
+        if (svc == kJniRegister) {
+            reason = "JNI_RegisterNatives_count:" + std::to_string(regs[3]);
+            Fault(regs[15], reason);
+            return;
+        }
+        if (svc == kMissingJniSvc + 113u) {
+            const auto classRef=regs[1], methodName=regs[2], signature=regs[3];
+            const auto name=CString(mem_,methodName), sig=CString(mem_,signature);
+            std::cout << "JNI_STATIC_METHOD_REQUEST class=0x"
+                      << std::hex << classRef << std::dec
+                      << " method=" << name << " signature=" << sig << "\n";
+            if (refs_.Resolve(classRef) == 0x0000c010u &&
+                name == "createTextBitmap" &&
+                sig == "(Ljava/lang/String;Ljava/lang/String;IIII)V") {
+                constexpr std::uint32_t kTextMethod = 0x0000c020;
+                regs[0] = kTextMethod;
+                std::cout << "JNI_METHOD_IDENTIFIED createTextBitmap token=0x"
+                          << std::hex << kTextMethod << std::dec << "\n";
+                return;
+            }
+            Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
+            return;
+        }
+        // JNI 1.6 object-reference lifetime and identity calls.
+        // Class, string, and byte-array objects keep canonical guest handles;
+        // local/global JNI references are independently tracked aliases.
+        if (svc == kMissingJniSvc + 21u || svc == kMissingJniSvc + 25u) {
+            const auto scope = svc == kMissingJniSvc + 21u ?
+                pv7::compat::cocos2dx::JniRefScope::Global :
+                pv7::compat::cocos2dx::JniRefScope::Local;
+            std::uint32_t alias = 0;
+            std::string reference_error;
+            if (!refs_.Duplicate(regs[1],scope,alias,reference_error)) {
+                Fault(regs[15],"JNI_NewReference_failed:"+reference_error);
+                return;
+            }
+            regs[0]=alias;
+            return;
+        }
+        if (svc == kMissingJniSvc + 22u || svc == kMissingJniSvc + 23u) {
+            const auto scope = svc == kMissingJniSvc + 22u ?
+                pv7::compat::cocos2dx::JniRefScope::Global :
+                pv7::compat::cocos2dx::JniRefScope::Local;
+            const auto handle=regs[1];
+            if (!refs_.Delete(handle,scope)) {
+                Fault(regs[15],"JNI_DeleteReference_invalid");
+                return;
+            }
+            // Backing string data stays available to outstanding aliases.
+            // Its canonical identity is not valid for JNI calls after deletion.
+            return;
+        }
+        if (svc == kMissingJniSvc + 24u) {
+            regs[0]=refs_.IsSame(regs[1],regs[2])?1u:0u;
+            return;
+        }
+        if (svc == kMissingJniSvc + 26u) {
+            // This single-threaded probe can accommodate up to 4096 local
+            // handles; no Java OOM exception has been synthesized.
+            regs[0]=regs[1]<=4096u?0u:static_cast<std::uint32_t>(-4);
+            return;
+        }
+        if (svc == kMissingJniSvc + 232u) {
+            regs[0]=static_cast<std::uint32_t>(refs_.RefType(regs[1]));
+            return;
+        }
+        if (svc == kMissingJniSvc + 15u) {
+            regs[0]=0; // ExceptionOccurred: no exception pending
+            return;
+        }
+        if (svc == kMissingJniSvc + 17u || svc == kMissingJniSvc + 228u) {
+            // ExceptionClear (17) is void; ExceptionCheck (228) is false.
+            if (svc == kMissingJniSvc + 228u) regs[0]=0;
+            return;
+        }        if (svc == kMissingJniSvc + 171u) {
+            std::int32_t count=0;
+            const auto ref=refs_.Resolve(regs[1]);
+            if (!ref || !byte_arrays_.Length(*ref,count)) {
+                Fault(regs[15],"JNI_GetArrayLength_unknown_reference");
+                return;
+            }
+            regs[0]=static_cast<std::uint32_t>(count);
+            return;
+        }
+        if (svc == kMissingJniSvc + 200u) {
+            // JNI GetByteArrayRegion(JNIEnv*, jbyteArray, start, len, buf).
+            const auto count=static_cast<std::int32_t>(regs[3]);
+            const auto start=static_cast<std::int32_t>(regs[2]);
+            if (!Fits(regs[13],4,mem_.size())) {
+                Fault(regs[15],"JNI_GetByteArrayRegion_stack_invalid"); return;
+            }
+            const auto destination=Read<std::uint32_t>(regs[13]);
+            if (count<0 || !Fits(destination,static_cast<std::size_t>(count),mem_.size()) ||
+                !refs_.Resolve(regs[1]) ||
+                !byte_arrays_.CopyRegion(*refs_.Resolve(regs[1]),start,count,mem_.data()+destination)) {
+                Fault(regs[15],"JNI_GetByteArrayRegion_invalid"); return;
+            }
+            return;
+        }        if (svc == kMissingJniSvc + 142u) {
+            if (refs_.Resolve(regs[1]) != 0x0000c010u || regs[2] != 0x0000c020u) {
+                Fault(regs[15], "JNI_CallStaticVoidMethodV_unknown_method");
+                return;
+            }
+            pv7::compat::cocos2dx::BitmapJniMarshaller decoder;
+            pv7::compat::cocos2dx::BitmapTextRequest request;
+            std::string decodeError;
+            std::unordered_map<std::uint32_t,std::string> handles(
+                guest_strings_.begin(),guest_strings_.end());
+            if (!decoder.Decode(mem_, regs[3],handles,request,decodeError)) {
+                Fault(regs[15], "JNI_BitmapText_decode_failed:" + decodeError);
+                return;
+            }
+            std::cout << "COCOS_BITMAP_TEXT_REQUEST text=" << request.text
+                      << " font=" << request.font
+                      << " size=" << request.font_size
+                      << " align=" << request.alignment
+                      << " dimensions=" << request.width << "x" << request.height
+                      << "\n";
+            if (pending_bitmap) {
+                Fault(regs[15], "JNI_BitmapText_reentrant_request");
+                return;
+            }
+            // Suspend this real guest JNI call. The driver runs a host text
+            // backend, invokes the original nativeInitBitmapDC in Dynarmic,
+            // then restores the interrupted guest registers and resumes.
+            pending_bitmap = std::move(request);
+            jit->HaltExecution();
+            return;
+        }        if (svc == kMissingJniSvc + 167u) {
+            const auto addr = regs[1];
+            constexpr std::size_t kMaxStringBytes = 65536;
+            if (!addr || addr >= mem_.size()) {
+                Fault(regs[15], "JNI_NewStringUTF_invalid_pointer"); return;
+            }
+            const auto lengthLimit = std::min(kMaxStringBytes, mem_.size()-addr);
+            const auto* begin = mem_.data()+addr;
+            const auto* end = static_cast<const std::uint8_t*>(
+                std::memchr(begin, 0, lengthLimit));
+            if (!end) {
+                Fault(regs[15], "JNI_NewStringUTF_unterminated"); return;
+            }
+            if (next_jstring_ > 0x0000fffcu) {
+                Fault(regs[15], "JNI_NewStringUTF_token_exhausted"); return;
+            }
+            const auto handle = next_jstring_;
+            next_jstring_ += 4;
+            guest_strings_.emplace(handle,
+                std::string(reinterpret_cast<const char*>(begin),
+                            static_cast<std::size_t>(end-begin)));
+            refs_.RegisterLocal(handle,pv7::compat::cocos2dx::JniRefKind::String);
+            regs[0] = handle;
+            std::cout << "JNI_NEW_STRING_UTF handle=0x" << std::hex << handle
+                      << std::dec << " bytes=" << guest_strings_.at(handle).size()
+                      << "\n";
+            return;
+        }
+        if (svc >= kMissingJniSvc && svc < kMissingJniSvc + 233u) {
+            Fault(regs[15], "UNIMPLEMENTED_JNI_SLOT:" +
+                  std::to_string(svc - kMissingJniSvc));
+            return;
+        }
+        if (svc >= kImportSvcBase && svc < kImportSvcBase + imports_.size()) {
+            const auto& item = imports_[svc - kImportSvcBase];
+            if (item.name == "__android_log_print" ||
+                item.name == "__android_log_write") {
+                // Both signatures start with priority and tag. log_print has
+                // a varargs format, log_write a literal message. This is a
+                // bounded diagnostic sink; do NOT interpolate unknown args.
+                if (log_count_++ < 16) {
+                    std::cout << "ANDROID_LOG priority=" << regs[0]
+                              << " tag=" << CString(mem_, regs[1])
+                              << " format_or_message=" << CString(mem_, regs[2])
+                              << "\n";
+                }
+                regs[0] = 0; // diagnostic sink accepted (not full liblog)
+                return;
+            }
+            if(pv7::compat::cocos2dx::DispatchGuestMath(item.name,regs)) return;
+            if(item.name=="fopen" || item.name=="fopen64") {
+                const auto filename=CString(mem_,regs[0]);
+                const auto mode=CString(mem_,regs[1]);
+                std::cout<<"COCOS_FILE_REQUEST name="<<filename
+                         <<" mode="<<mode<<"\n";
+                if(filename.empty() && (mode=="rb" || mode=="r")) {
+                    // Bionic fopen("", "rb") correctly reports ENOENT.
+                    // This does not pretend the missing asset exists.
+                    regs[0]=0;
+                    return;
+                }
+                Fault(regs[15],"VFS_OPEN_NOT_CONNECTED");return;
+            }            // Bounded guest-memory equivalents of common Bionic routines.
+            // These operate solely within the ARM guest address space.
+            if (item.name == "memcpy" || item.name == "memmove" ||
+                item.name == "__aeabi_memcpy" || item.name == "__aeabi_memcpy4" ||
+                item.name == "__aeabi_memcpy8") {
+                const auto d = regs[0], src = regs[1], count = regs[2];
+                if (count > 1024 * 1024 || !Fits(d, count, mem_.size()) ||
+                    !Fits(src, count, mem_.size())) {
+                    Fault(regs[15], "memcpy_invalid_range"); return;
+                }
+                std::memmove(mem_.data() + d, mem_.data() + src, count);
+                regs[0] = d;
+                return;
+            }
+            if (item.name == "memset" || item.name == "__aeabi_memset" ||
+                item.name == "__aeabi_memset4" || item.name == "__aeabi_memset8" ||
+                item.name == "bzero") {
+                const auto d = regs[0];
+                const bool aeabi = item.name.rfind("__aeabi_", 0) == 0;
+                const auto count = aeabi || item.name == "bzero" ? regs[1] : regs[2];
+                const auto byte = item.name == "bzero" ? 0u : (aeabi ? regs[2] : regs[1]);
+                if (count > 1024 * 1024 || !Fits(d, count, mem_.size())) {
+                    Fault(regs[15], "memset_invalid_range"); return;
+                }
+                std::memset(mem_.data() + d, static_cast<int>(byte & 255u), count);
+                regs[0] = d;
+                return;
+            }
+            if (item.name == "memcmp") {
+                const auto a = regs[0], b = regs[1], len = regs[2];
+                if (len > 1024 * 1024 || !Fits(a,len,mem_.size()) ||
+                    !Fits(b,len,mem_.size())) {
+                    Fault(regs[15], "memcmp_invalid_range"); return;
+                }
+                int diff = std::memcmp(mem_.data()+a, mem_.data()+b, len);
+                regs[0] = static_cast<std::uint32_t>(diff);
+                return;
+            }
+            // Bionic string helpers on guest bytes. Return guest pointers,
+            // never addresses into the host process. Bound both inputs and
+            // validate termination to prevent probing beyond guest RAM.
+            if (item.name == "strstr" || item.name == "strdup") {
+                const auto first=regs[0];
+                const auto second=regs[1];
+                const auto scan=[&](std::uint32_t address)->std::optional<std::string_view> {
+                    if(address>=mem_.size()) return std::nullopt;
+                    const auto limit=std::min<std::size_t>(65536,mem_.size()-address);
+                    const auto* start=mem_.data()+address;
+                    const auto* end=static_cast<const std::uint8_t*>(
+                        std::memchr(start,0,limit));
+                    if(!end) return std::nullopt;
+                    return std::string_view(reinterpret_cast<const char*>(start),
+                                            static_cast<std::size_t>(end-start));
+                };
+                const auto haystack=scan(first);
+                if(!haystack) {Fault(regs[15],"string_helper_invalid_source");return;}
+                if(item.name=="strdup") {
+                    const auto result=Allocate(static_cast<std::uint32_t>(haystack->size()+1),4);
+                    if(!result) {regs[0]=0;return;}
+                    std::memcpy(mem_.data()+result,mem_.data()+first,haystack->size()+1);
+                    regs[0]=result;
+                    return;
+                }
+                const auto needle=scan(second);
+                if(!needle) {Fault(regs[15],"strstr_invalid_needle");return;}
+                const auto where=haystack->find(*needle);
+                regs[0]=where==std::string_view::npos?
+                    0u : first+static_cast<std::uint32_t>(where);
+                return;
+            }
+            if(item.name=="strnlen") {
+                const auto start=regs[0],max=regs[1];
+                if(max>65536u || !Fits(start,max,mem_.size())) {
+                    Fault(regs[15],"strnlen_invalid_range");return;
+                }
+                std::uint32_t count=0;
+                while(count<max && mem_[start+count]) ++count;
+                regs[0]=count;
+                return;
+            }            if (item.name == "strlen") {
+                const auto a = regs[0];
+                if (a >= mem_.size()) { Fault(a, "strlen_invalid_pointer"); return; }
+                std::size_t n = 0;
+                while (n < 1024 * 1024 && Fits(a,n+1,mem_.size()) && mem_[a+n]) ++n;
+                if (!Fits(a,n+1,mem_.size()) || n == 1024 * 1024) {
+                    Fault(a, "strlen_unterminated"); return;
+                }
+                regs[0] = static_cast<std::uint32_t>(n);
+                return;
+            }
+            if (item.name == "strcmp" || item.name == "strncmp") {
+                const auto a = regs[0], b = regs[1];
+                const auto maxcount = item.name == "strncmp"
+                    ? std::min<std::uint32_t>(regs[2], 65536u) : 65536u;
+                if (item.name == "strncmp" && regs[2] > 65536u) {
+                    Fault(regs[15], "strncmp_bound_exceeded"); return;
+                }
+                int diff = 0;
+                bool found_end = false;
+                for (std::uint32_t i=0;i<maxcount;++i) {
+                    if (!Fits(a,i+1,mem_.size()) || !Fits(b,i+1,mem_.size())) {
+                        Fault(regs[15], "strcmp_invalid_pointer"); return;
+                    }
+                    const auto chA = mem_[a+i], chB = mem_[b+i];
+                    if (chA != chB) { diff = static_cast<int>(chA) - static_cast<int>(chB); found_end=true; break; }
+                    if (!chA) { found_end=true; break; }
+                }
+                if (item.name == "strcmp" && !found_end) {
+                    Fault(regs[15], "strcmp_unterminated"); return;
+                }
+                regs[0] = static_cast<std::uint32_t>(diff);
+                return;
+            }
+            if (item.name == "strcpy" || item.name == "strncpy") {
+                const auto d=regs[0], src=regs[1];
+                const auto limit=item.name == "strncpy"
+                    ? std::min<std::uint32_t>(regs[2],65536u) : 65536u;
+                if (item.name == "strncpy" && regs[2]>65536u) {
+                    Fault(regs[15],"strncpy_bound_exceeded");return;
+                }
+                bool ended=false;
+                for(std::uint32_t i=0;i<limit;++i){
+                    if(!Fits(d,i+1,mem_.size())||!Fits(src,i+1,mem_.size())){
+                        Fault(regs[15],"strcpy_invalid_pointer");return;
+                    }
+                    std::uint8_t b=ended ? 0 : mem_[src+i];
+                    mem_[d+i]=b;
+                    if(!b)ended=true;
+                    if(ended&&item.name=="strcpy")break;
+                }
+                if(item.name=="strcpy"&&!ended){Fault(regs[15],"strcpy_unterminated");return;}
+                regs[0]=d;
+                return;
+            }
+            if (item.name == "strchr" || item.name == "strrchr") {
+                const auto a=regs[0]; const auto ch=static_cast<std::uint8_t>(regs[1]);
+                std::uint32_t found=0;
+                bool ended=false;
+                for(std::uint32_t i=0;i<65536u;++i){
+                    if(!Fits(a,i+1,mem_.size())){Fault(regs[15],"strchr_invalid_pointer");return;}
+                    if(mem_[a+i]==ch) { found=a+i; if(item.name=="strchr")break; }
+                    if(!mem_[a+i]){ended=true;break;}
+                }
+                if(!ended && item.name=="strrchr"){Fault(regs[15],"strrchr_unterminated");return;}
+                regs[0]=found;
+                return;
+            }
+            if (item.name == "wctob") {
+                // Single-byte C locale. WEOF/not-ASCII => EOF (-1).
+                regs[0] = regs[0] <= 0x7fu ? regs[0] : 0xffffffffu;
+                return;
+            }
+            if (item.name == "btowc") {
+                // C locale byte to wide. EOF stays WEOF.
+                regs[0] = regs[0] <= 0x7fu ? regs[0] : 0xffffffffu;
+                return;
+            }
+            if (item.name == "wctype") {
+                const auto category = CString(mem_, regs[0]);
+                constexpr const char* names[] = {
+                    "alnum", "alpha", "blank", "cntrl", "digit", "graph",
+                    "lower", "print", "punct", "space", "upper", "xdigit"
+                };
+                regs[0] = 0;
+                for (unsigned i=0;i<std::size(names);++i) {
+                    if (category == names[i]) { regs[0] = i+1; break; }
+                }
+                return;
+            }
+            if (item.name == "iswctype") {
+                const auto code = regs[0], category = regs[1];
+                const bool ascii = code < 128u;
+                const auto isAlpha = ascii && ((code >= 'A' && code <= 'Z') ||
+                                                (code >= 'a' && code <= 'z'));
+                const auto isDigit = code >= '0' && code <= '9';
+                const auto isSpace = code == ' ' || (code >= 9 && code <= 13);
+                const auto isCntrl = code < 32 || code == 127;
+                const auto isGraph = code > 32 && code < 127;
+                const auto isPrint = code >= 32 && code < 127;
+                const auto isUpper = code >= 'A' && code <= 'Z';
+                const auto isLower = code >= 'a' && code <= 'z';
+                const auto isXdigit = isDigit || (code >= 'A' && code <= 'F') ||
+                    (code >= 'a' && code <= 'f');
+                bool yes = false;
+                switch (category) {
+                    case 1: yes = isAlpha || isDigit; break;
+                    case 2: yes = isAlpha; break;
+                    case 3: yes = code == ' ' || code == 9; break;
+                    case 4: yes = isCntrl; break;
+                    case 5: yes = isDigit; break;
+                    case 6: yes = isGraph; break;
+                    case 7: yes = isLower; break;
+                    case 8: yes = isPrint; break;
+                    case 9: yes = isGraph && !isAlpha && !isDigit; break;
+                    case 10: yes = isSpace; break;
+                    case 11: yes = isUpper; break;
+                    case 12: yes = isXdigit; break;
+                    default: break;
+                }
+                regs[0] = yes ? 1u : 0u;
+                return;
+            }
+            if (item.name == "__cxa_atexit") {
+                // Register guest destructor/argument/DSO for later native
+                // shutdown. This smoke probe does not unload the library.
+                if (destructors_.size() >= 4096) {
+                    Fault(regs[15], "cxa_atexit_overflow"); return;
+                }
+                destructors_.push_back({regs[0], regs[1], regs[2]});
+                regs[0] = 0; // registration succeeded
+                return;
+            }
+            if (item.name == "malloc" || item.name == "__libc_malloc" ||
+                item.name == "_Znwj" || item.name == "_Znaj") {
+                regs[0] = Allocate(regs[0], 16u);
+                return;
+            }
+            if (item.name == "calloc") {
+                const auto a = regs[0], b = regs[1];
+                if (b && a > 0xffffffffu / b) {
+                    regs[0] = 0; return;
+                }
+                regs[0] = Allocate(a * b, 16u);
+                return;
+            }
+            if (item.name == "free" || item.name == "__libc_free" ||
+                item.name == "_ZdlPv" || item.name == "_ZdaPv") {
+                if (regs[0] && !allocations_.count(regs[0])) {
+                    Fault(regs[15], "free_of_unowned_guest_pointer"); return;
+                }
+                // Deliberately retains released blocks until probe end.
+                // This is a bounded smoke heap, not a production allocator.
+                regs[0] = 0;
+                return;
+            }
+            if (item.name == "realloc") {
+                const auto pointer = regs[0], requested = regs[1];
+                if (pointer && !allocations_.count(pointer)) {
+                    Fault(regs[15], "realloc_of_unowned_guest_pointer"); return;
+                }
+                if (!requested) { regs[0] = 0; return; }
+                const auto destination = Allocate(requested, 16u);
+                if (destination && pointer) {
+                    const auto n = std::min(allocations_[pointer], requested);
+                    std::memcpy(mem_.data()+destination,mem_.data()+pointer,n);
+                }
+                regs[0] = destination;
+                return;
+            }
+            if (item.name == "posix_memalign") {
+                const auto out=regs[0], align=regs[1], n=regs[2];
+                if (!Fits(out,4,mem_.size()) || align < 4 ||
+                    (align & (align - 1)) != 0 || align > 65536u) {
+                    regs[0] = 22; return; // EINVAL
+                }
+                const auto value = Allocate(n, align);
+                if (!value) { regs[0] = 12; return; } // ENOMEM
+                Put32(mem_,out,value);
+                regs[0] = 0;
+                return;
+            }
+            if (item.name == "pthread_key_create") {
+                const auto out = regs[0];
+                if (!Fits(out, 4, mem_.size()) || next_key_ >= 256) {
+                    regs[0] = 11; return; // EAGAIN
+                }
+                const auto key = next_key_++;
+                keys_[key] = {regs[1],0}; // guest destructor, current value
+                Put32(mem_,out,key);
+                regs[0] = 0;
+                return;
+            }
+            if (item.name == "pthread_getspecific") {
+                const auto it = keys_.find(regs[0]);
+                regs[0] = it != keys_.end() ? it->second.second : 0u;
+                return;
+            }
+            if (item.name == "pthread_setspecific") {
+                const auto it = keys_.find(regs[0]);
+                if (it == keys_.end()) { regs[0] = 22; return; }
+                it->second.second = regs[1];
+                regs[0] = 0;
+                return;
+            }
+            if (item.name == "pthread_key_delete") {
+                regs[0] = keys_.erase(regs[0]) ? 0u : 22u;
+                return;
+            }
+            if (item.name == "pthread_self") {
+                regs[0] = kGuestTls;
+                return;
+            }
+            if (item.name == "glTexImage2D" || item.name == "glTexSubImage2D" ||
+                item.name == "glCompressedTexImage2D" || item.name == "glCompressedTexSubImage2D" ||
+                item.name == "glGenerateMipmap" || item.name == "glPixelStorei" || item.name == "glBlendFunc" ||
+                item.name == "glBindTexture" || item.name == "glBindBuffer" ||
+                item.name == "glEnable" || item.name == "glDisable" ||
+                item.name == "glActiveTexture" || item.name == "glClear" ||
+                item.name == "glCullFace" || item.name == "glFrontFace" ||
+                item.name == "glDepthFunc" || item.name == "glBlendEquation" ||
+                item.name == "glDepthMask" || item.name == "glClearColor" ||
+                item.name == "glViewport" || item.name == "glScissor" ||
+                item.name == "glColorMask" || item.name == "glTexParameteri" ||
+                item.name == "glTexParameterf" || item.name == "glLineWidth" ||
+                item.name == "glGenTextures" || item.name == "glDeleteTextures" ||
+                item.name == "glGenBuffers" || item.name == "glDeleteBuffers" ||
+                item.name == "glBufferData" || item.name == "glBufferSubData" ||
+                item.name == "glBlendFuncSeparate" || item.name == "glBlendEquationSeparate" ||
+                item.name == "glEnableVertexAttribArray" || item.name == "glDisableVertexAttribArray" ||
+                item.name == "glGetString" || item.name == "glGetIntegerv" ||
+                item.name == "glGetFloatv" || item.name == "glGetBooleanv" ||
+                item.name == "glGetError" || item.name == "glCreateProgram" || item.name == "glCreateShader" || item.name == "glShaderSource" || item.name == "glCompileShader" || item.name == "glGetShaderiv" || item.name == "glAttachShader" || item.name == "glLinkProgram" || item.name == "glGetProgramiv" || item.name == "glBindAttribLocation" || item.name == "glGetUniformLocation" || item.name == "glGetAttribLocation" || item.name == "glUseProgram" || item.name == "glDeleteShader" || item.name == "glUniform1i") {
+                static Pv7ProbeGles2 hostGl;
+                static bool initialized = false;
+                if (!initialized) {
+                    const char* explicitDir = std::getenv("PV7_GLES_DIR");
+                    const char* localApp = std::getenv("LOCALAPPDATA");
+                    const std::string directory = explicitDir ? explicitDir :
+                        (localApp ? std::string(localApp) + "\\Android\\Sdk\\emulator\\lib64\\gles_swiftshader" : "");
+                    std::string error;
+                    if (!hostGl.Initialize(directory, error)) {
+                        Fault(regs[15], "GLES_CONTEXT_INIT_FAILED:" + error); return;
+                    }
+                    initialized = true;
+                    std::cout << "HOST_GLES2_CONTEXT_READY" << "\n";
+                }
+                // GLES2 texture uploads. Decode all ARM32 AAPCS stack
+                // arguments, including compressed formats, and validate the
+                // entire pixel footprint before accessing the guest address.
+                if (item.name=="glTexImage2D" || item.name=="glTexSubImage2D" ||
+                    item.name=="glCompressedTexImage2D" ||
+                    item.name=="glCompressedTexSubImage2D") {
+                    const bool sub=item.name=="glTexSubImage2D" ||
+                                   item.name=="glCompressedTexSubImage2D";
+                    const bool compressed=item.name=="glCompressedTexImage2D" ||
+                                          item.name=="glCompressedTexSubImage2D";
+                    const auto sp=regs[13];
+                    const std::size_t argc=compressed?(sub?5u:4u):5u;
+                    if(!Fits(sp,argc*4,mem_.size())) {
+                        Fault(regs[15],"GLES_TEXTURE_STACK_INVALID");return;
+                    }
+                    const auto arg=[&](std::uint32_t index)->std::uint32_t {
+                        return Read<std::uint32_t>(sp+4u*index);
+                    };
+                    const auto target=regs[0];
+                    const auto level=static_cast<std::int32_t>(regs[1]);
+                    const auto width=static_cast<std::int32_t>(sub?arg(0):regs[3]);
+                    const auto height=static_cast<std::int32_t>(sub?arg(1):arg(0));
+                    const auto format=sub?arg(2):(compressed?regs[2]:arg(2));
+                    const auto type=compressed?0u:arg(3);
+                    const auto pixelPtr=compressed?(sub?arg(4):arg(3)):arg(4);
+                    const auto imageSize=compressed?(sub?arg(3):arg(2)):0u;
+                    const auto border=sub?0:static_cast<std::int32_t>(arg(1));
+                    if(width<0 || height<0 || width>16384 || height>16384 ||
+                       level<0 || level>16 || border!=0) {
+                        Fault(regs[15],"GLES_TEXTURE_ARGUMENTS_INVALID");return;
+                    }
+                    std::uint64_t byteCount=0;
+                    if(compressed) {
+                        byteCount=imageSize;
+                    } else {
+                        unsigned bpp=0;
+                        switch(type) {
+                        case 0x1401u: // GL_UNSIGNED_BYTE
+                            switch(format) {
+                            case 0x1906u: case 0x1909u: bpp=1;break;
+                            case 0x190au: bpp=2;break;
+                            case 0x1907u: bpp=3;break;
+                            case 0x1908u: bpp=4;break;
+                            default:break;
+                            }
+                            break;
+                        case 0x8363u: if(format==0x1907u)bpp=2;break;
+                        case 0x8033u: case 0x8034u:
+                            if(format==0x1908u)bpp=2;break;
+                        default:break;
+                        }
+                        if(!bpp) {
+                            Fault(regs[15],"GLES_TEXTURE_PIXEL_FORMAT_UNSUPPORTED");return;
+                        }
+                        const std::uint64_t row=static_cast<std::uint64_t>(width)*bpp;
+                        const std::uint64_t alignment=unpack_alignment_;
+                        const auto stride=(row+alignment-1)/alignment*alignment;
+                        byteCount=height?stride*static_cast<std::uint64_t>(height-1)+row:0;
+                    }
+                    if(byteCount>64ull*1024*1024 ||
+                       (pixelPtr && !Fits(pixelPtr,static_cast<std::size_t>(byteCount),mem_.size())) ||
+                       (sub && byteCount && !pixelPtr) ||
+                       (compressed && byteCount && !pixelPtr)) {
+                        Fault(regs[15],"GLES_TEXTURE_PIXELS_INVALID");return;
+                    }
+                    auto fn=hostGl.GetProcedure(item.name.c_str());
+                    if(!fn) {Fault(regs[15],"GLES_TEXTURE_PROCEDURE_MISSING:"+item.name);return;}
+                    const void* pixels=pixelPtr?mem_.data()+pixelPtr:nullptr;
+                    if(item.name=="glTexImage2D") {
+                        reinterpret_cast<void (*)(unsigned,int,int,int,int,int,
+                                                           unsigned,unsigned,const void*)>(fn)(
+                            target,level,static_cast<int>(regs[2]),width,height,border,
+                            format,type,pixels);
+                    } else if(item.name=="glTexSubImage2D") {
+                        reinterpret_cast<void (*)(unsigned,int,int,int,int,int,
+                                                           unsigned,unsigned,const void*)>(fn)(
+                            target,level,static_cast<int>(regs[2]),
+                            static_cast<int>(regs[3]),width,height,format,type,pixels);
+                    } else if(item.name=="glCompressedTexImage2D") {
+                        reinterpret_cast<void (*)(unsigned,int,unsigned,int,int,
+                                                           int,int,const void*)>(fn)(
+                            target,level,regs[2],width,height,border,
+                            static_cast<int>(imageSize),pixels);
+                    } else {
+                        reinterpret_cast<void (*)(unsigned,int,int,int,int,int,
+                                                           unsigned,int,const void*)>(fn)(
+                            target,level,static_cast<int>(regs[2]),
+                            static_cast<int>(regs[3]),width,height,format,
+                            static_cast<int>(imageSize),pixels);
+                    }
+                    std::cout<<"HOST_GLES_TEXTURE_UPLOAD "<<item.name<<" "
+                             <<width<<"x"<<height<<" bytes="<<byteCount<<"\n";
+                    return;
+                }
+                if(item.name=="glGenerateMipmap") {
+                    auto fn=hostGl.GetProcedure("glGenerateMipmap");
+                    if(!fn) {Fault(regs[15],"GLES_MIPMAP_UNAVAILABLE");return;}
+                    reinterpret_cast<void (*)(unsigned)>(fn)(regs[0]);
+                    return;
+                }                // Core GLES2 state, texture-object and vertex/buffer calls.
+                // Every operation invokes the actual SwiftShader entrypoint.
+                if (item.name == "glPixelStorei" || item.name == "glBlendFunc" ||
+                    item.name == "glBindTexture" || item.name == "glBindBuffer" ||
+                    item.name == "glBlendEquationSeparate") {
+                    using Fn = void (*)(unsigned,unsigned);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure(item.name.c_str()));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    fn(regs[0],regs[1]);
+                    if(item.name=="glPixelStorei" && regs[0]==0x0cf5u) {
+                        if(regs[1]!=1u && regs[1]!=2u &&
+                           regs[1]!=4u && regs[1]!=8u) {
+                            Fault(regs[15],"GLES_UNPACK_ALIGNMENT_INVALID");return;
+                        }
+                        unpack_alignment_=regs[1];
+                    }
+                    if(item.name=="glBindBuffer") {
+                        if(regs[0]==0x8892u) array_buffer_binding_=regs[1];
+                        if(regs[0]==0x8893u) element_buffer_binding_=regs[1];
+                    }
+                    return;
+                }
+                if (item.name == "glEnable" || item.name == "glDisable" ||
+                    item.name == "glActiveTexture" || item.name == "glClear" ||
+                    item.name == "glCullFace" || item.name == "glFrontFace" ||
+                    item.name == "glDepthFunc" || item.name == "glBlendEquation" ||
+                    item.name == "glEnableVertexAttribArray" ||
+                    item.name == "glDisableVertexAttribArray") {
+                    using Fn=void (*)(unsigned);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure(item.name.c_str()));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    fn(regs[0]);
+                    return;
+                }
+                if (item.name == "glDepthMask") {
+                    using Fn=void (*)(unsigned char);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure("glDepthMask"));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:glDepthMask");return;}
+                    fn(static_cast<unsigned char>(regs[0]));
+                    return;
+                }
+                if (item.name == "glLineWidth") {
+                    using Fn=void (*)(float);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure("glLineWidth"));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:glLineWidth");return;}
+                    float width;
+                    std::memcpy(&width,&regs[0],4);
+                    fn(width);
+                    return;
+                }
+                if (item.name == "glClearColor") {
+                    using Fn=void (*)(float,float,float,float);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure("glClearColor"));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:glClearColor");return;}
+                    float v[4];
+                    std::memcpy(v,regs.data(),16);
+                    fn(v[0],v[1],v[2],v[3]);
+                    return;
+                }
+                if (item.name == "glViewport" || item.name == "glScissor" ||
+                    item.name == "glColorMask" || item.name == "glBlendFuncSeparate") {
+                    using Fn=void (*)(unsigned,unsigned,unsigned,unsigned);
+                    auto fn=reinterpret_cast<Fn>(hostGl.GetProcedure(item.name.c_str()));
+                    if(!fn) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    fn(regs[0],regs[1],regs[2],regs[3]);
+                    return;
+                }
+                if (item.name == "glTexParameteri" || item.name == "glTexParameterf") {
+                    auto addr=hostGl.GetProcedure(item.name.c_str());
+                    if(!addr) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    if(item.name=="glTexParameteri") {
+                        reinterpret_cast<void (*)(unsigned,unsigned,int)>(addr)(
+                            regs[0],regs[1],static_cast<int>(regs[2]));
+                    } else {
+                        float param;
+                        std::memcpy(&param,&regs[2],4);
+                        reinterpret_cast<void (*)(unsigned,unsigned,float)>(addr)(
+                            regs[0],regs[1],param);
+                    }
+                    return;
+                }
+                if (item.name == "glGenTextures" || item.name == "glDeleteTextures" ||
+                    item.name == "glGenBuffers" || item.name == "glDeleteBuffers") {
+                    const auto count=regs[0],data=regs[1];
+                    if(count>4096u || !Fits(data,static_cast<std::size_t>(count)*4u,mem_.size())) {
+                        Fault(regs[15],"GLES_OBJECT_ARRAY_INVALID");return;
+                    }
+                    auto addr=hostGl.GetProcedure(item.name.c_str());
+                    if(!addr) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    std::vector<unsigned> objects(count);
+                    const bool generating=item.name=="glGenTextures"||item.name=="glGenBuffers";
+                    if(!generating && count) std::memcpy(objects.data(),mem_.data()+data,count*4u);
+                    reinterpret_cast<void (*)(int,unsigned*)>(addr)(
+                        static_cast<int>(count),objects.data());
+                    if(generating && count) std::memcpy(mem_.data()+data,objects.data(),count*4u);
+                    std::cout << "HOST_GLES_OBJECT_ARRAY " << item.name
+                              << " count=" << count << "\n";
+                    return;
+                }
+                if (item.name == "glBufferData" || item.name == "glBufferSubData") {
+                    const auto n=regs[1+(item.name=="glBufferSubData")];
+                    const auto pointer=regs[2+(item.name=="glBufferSubData")];
+                    if(n>64u*1024u*1024u || (pointer && !Fits(pointer,n,mem_.size()))) {
+                        Fault(regs[15],"GLES_BUFFER_UPLOAD_INVALID");return;
+                    }
+                    const void* bytes=pointer?mem_.data()+pointer:nullptr;
+                    auto addr=hostGl.GetProcedure(item.name.c_str());
+                    if(!addr) {Fault(regs[15],"GLES_ENTRY_MISSING:"+item.name);return;}
+                    if(item.name=="glBufferData") {
+                        reinterpret_cast<void (*)(unsigned,std::intptr_t,const void*,unsigned)>(addr)(
+                            regs[0],static_cast<std::intptr_t>(n),bytes,regs[3]);
+                    } else {
+                        reinterpret_cast<void (*)(unsigned,std::intptr_t,std::intptr_t,const void*)>(addr)(
+                            regs[0],static_cast<std::intptr_t>(regs[1]),
+                            static_cast<std::intptr_t>(n),bytes);
+                    }
+                    return;
+                }                if (item.name == "glGetString") {
+                    auto cache = gl_strings_.find(regs[0]);
+                    if(cache!=gl_strings_.end()) {
+                        regs[0]=cache->second;
+                        return;
+                    }
+                    const auto name=regs[0];
+                    const auto value=hostGl.GetString(name);
+                    if(!value) {
+                        // GLES returns nullptr for unsupported enums and sets
+                        // its own error flag, which glGetError can query.
+                        regs[0]=0;
+                        return;
+                    }
+                    if(value->size()>65535) {
+                        Fault(regs[15],"GLES_GET_STRING_TOO_LONG");return;
+                    }
+                    const auto guest=Allocate(static_cast<std::uint32_t>(value->size()+1),4);
+                    if(!guest) {Fault(regs[15],"GLES_STRING_ALLOCATION_FAILED");return;}
+                    std::memcpy(mem_.data()+guest,value->c_str(),value->size()+1);
+                    gl_strings_.emplace(name,guest);
+                    regs[0]=guest;
+                    std::cout << "HOST_GLES_STRING enum=0x" << std::hex << name
+                              << std::dec << " bytes=" << value->size() << "\n";
+                    return;
+                }
+                if (item.name == "glGetError") {
+                    const auto error=hostGl.GetError();
+                    if(!error) {Fault(regs[15],"GLES_GET_ERROR_UNAVAILABLE");return;}
+                    regs[0]=*error;
+                    return;
+                }
+                if (item.name == "glGetIntegerv" ||
+                    item.name == "glGetFloatv" ||
+                    item.name == "glGetBooleanv") {
+                    const auto pname=regs[0], destination=regs[1];
+                    // GLES2 array-valued state is bounded by its enum.
+                    // Reject variable-length results until their actual
+                    // count is known; do not overwrite guest stack memory.
+                    if (pname==0x86a3u) {
+                        Fault(regs[15],"GLES_COMPRESSED_FORMAT_ARRAY_NEEDS_LENGTH");
+                        return;
+                    }
+                    const std::size_t count =
+                        pname==0x0ba2u || pname==0x0c10u ? 4u :
+                        pname==0x0d3au || pname==0x846du ||
+                        pname==0x846eu || pname==0x0b70u ||
+                        pname==0x0b22u ? 2u : 1u;
+                    const std::size_t byteWidth =
+                        item.name=="glGetBooleanv" ? 1u : 4u;
+                    if(!Fits(destination,count*byteWidth,mem_.size())) {
+                        Fault(regs[15],"GLES_QUERY_DESTINATION_INVALID");return;
+                    }
+                    if(item.name=="glGetIntegerv") {
+                        int values[16]{};
+                        if(!hostGl.GetIntegerv(pname,values)) {
+                            Fault(regs[15],"GLES_GET_INTEGER_UNAVAILABLE");return;
+                        }
+                        std::memcpy(mem_.data()+destination,values,count*4u);
+                    } else if(item.name=="glGetFloatv") {
+                        float values[16]{};
+                        if(!hostGl.GetFloatv(pname,values)) {
+                            Fault(regs[15],"GLES_GET_FLOAT_UNAVAILABLE");return;
+                        }
+                        std::memcpy(mem_.data()+destination,values,count*4u);
+                    } else {
+                        unsigned char values[16]{};
+                        if(!hostGl.GetBooleanv(pname,values)) {
+                            Fault(regs[15],"GLES_GET_BOOLEAN_UNAVAILABLE");return;
+                        }
+                        std::memcpy(mem_.data()+destination,values,count);
+                    }
+                    std::cout << "HOST_GLES_QUERY method=" << item.name
+                              << " enum=0x" << std::hex << pname << std::dec
+                              << " components=" << count << "\n";
+                    return;
+                }                if (item.name == "glShaderSource") {
+                    const auto shader = regs[0], count = regs[1], array = regs[2], lengthArray = regs[3];
+                    if (count == 0 || count > 16 || !Fits(array, count * 4u, mem_.size()) ||
+                        (lengthArray && !Fits(lengthArray, count * 4u, mem_.size()))) {
+                        Fault(regs[15], "GLES_SHADER_SOURCE_BAD_ARGUMENTS"); return;
+                    }
+                    std::vector<std::string> chunks;
+                    std::size_t total = 0;
+                    for (std::uint32_t i=0; i<count; ++i) {
+                        const auto guest = Read<std::uint32_t>(array + i*4u);
+                        if (!guest || guest >= mem_.size()) {
+                            Fault(regs[15], "GLES_SHADER_SOURCE_BAD_POINTER"); return;
+                        }
+                        std::size_t size = 0;
+                        if (lengthArray) {
+                            const auto specified = Read<std::int32_t>(lengthArray + i*4u);
+                            if (specified >= 0) {
+                                size = static_cast<std::size_t>(specified);
+                                if (size > 1048576u || !Fits(guest,size,mem_.size())) {
+                                    Fault(regs[15], "GLES_SHADER_SOURCE_BAD_LENGTH"); return;
+                                }
+                            } else {
+                                const auto* start = mem_.data()+guest;
+                                const auto* end = static_cast<const std::uint8_t*>(
+                                    std::memchr(start,0,std::min<std::size_t>(1048576u,mem_.size()-guest)));
+                                if (!end) { Fault(regs[15], "GLES_SHADER_SOURCE_UNTERMINATED"); return; }
+                                size = static_cast<std::size_t>(end-start);
+                            }
+                        } else {
+                            const auto* start = mem_.data()+guest;
+                            const auto* end = static_cast<const std::uint8_t*>(
+                                std::memchr(start,0,std::min<std::size_t>(1048576u,mem_.size()-guest)));
+                            if (!end) { Fault(regs[15], "GLES_SHADER_SOURCE_UNTERMINATED"); return; }
+                            size = static_cast<std::size_t>(end-start);
+                        }
+                        total += size;
+                        if (total > 1048576u) { Fault(regs[15], "GLES_SHADER_SOURCE_TOO_LARGE"); return; }
+                        chunks.emplace_back(reinterpret_cast<const char*>(mem_.data()+guest),size);
+                    }
+                    hostGl.ShaderSource(shader,chunks);
+                    std::cout << "HOST_GLES_SHADER_SOURCE shader=" << shader << " chunks=" << count
+                              << " bytes=" << total << "\n";
+                    return;
+                }
+                if (item.name == "glCompileShader") {
+                    hostGl.CompileShader(regs[0]);
+                    std::cout << "HOST_GLES_COMPILE shader=" << regs[0] << "\n";
+                    return;
+                }
+                if (item.name == "glGetShaderiv") {
+                    if (!Fits(regs[2],4,mem_.size())) {
+                        Fault(regs[15],"GLES_GET_SHADER_IV_BAD_POINTER"); return;
+                    }
+                    const auto value=hostGl.GetShaderParameter(regs[0],regs[1]);
+                    Put32(mem_,regs[2],static_cast<std::uint32_t>(value));
+                    std::cout << "HOST_GLES_SHADER_PARAM shader=" << regs[0]
+                              << " pname=0x" << std::hex << regs[1] << std::dec
+                              << " value=" << value << "\n";
+                    return;
+                }                if (item.name == "glAttachShader") {
+                    hostGl.AttachShader(regs[0],regs[1]);
+                    std::cout << "HOST_GLES_ATTACH program=" << regs[0]
+                              << " shader=" << regs[1] << "\n";
+                    return;
+                }
+                if (item.name == "glLinkProgram") {
+                    hostGl.LinkProgram(regs[0]);
+                    std::cout << "HOST_GLES_LINK program=" << regs[0] << " success=" << hostGl.GetProgramParameter(regs[0],0x8b82u) << "\n";
+                    return;
+                }
+                if (item.name == "glGetProgramiv") {
+                    if (!Fits(regs[2],4,mem_.size())) {
+                        Fault(regs[15],"GLES_GET_PROGRAM_IV_BAD_POINTER"); return;
+                    }
+                    const auto value=hostGl.GetProgramParameter(regs[0],regs[1]);
+                    Put32(mem_,regs[2],static_cast<std::uint32_t>(value));
+                    std::cout << "HOST_GLES_PROGRAM_PARAM program=" << regs[0]
+                              << " pname=0x" << std::hex << regs[1] << std::dec
+                              << " value=" << value << "\n";
+                    return;
+                }                if (item.name == "glBindAttribLocation" || item.name == "glGetUniformLocation" ||
+                    item.name == "glGetAttribLocation") {
+                    const auto guestName = item.name == "glBindAttribLocation" ? regs[2] : regs[1];
+                    if (!Fits(guestName,1,mem_.size())) {
+                        Fault(regs[15],"GLES_ATTRIBUTE_NAME_BAD_POINTER"); return;
+                    }
+                    const auto name = CString(mem_,guestName);
+                    if (name.empty() || name.size() == 128u) {
+                        Fault(regs[15],"GLES_ATTRIBUTE_NAME_INVALID"); return;
+                    }
+                    if (item.name == "glBindAttribLocation")
+                        hostGl.BindAttrib(regs[0],regs[1],name);
+                    else if (item.name == "glGetUniformLocation")
+                        regs[0] = static_cast<std::uint32_t>(hostGl.GetUniform(regs[0],name));
+                    else
+                        regs[0] = static_cast<std::uint32_t>(hostGl.GetAttrib(regs[0],name));
+                    std::cout << "HOST_GLES_NAMED " << item.name << " name=" << name << "\n";
+                    return;
+                }
+                if (item.name == "glUseProgram") {
+                    hostGl.UseProgram(regs[0]);
+                    std::cout << "HOST_GLES_USE_PROGRAM id=" << regs[0] << "\n";
+                    return;
+                }                if (item.name == "glDeleteShader") {
+                    hostGl.DeleteShader(regs[0]);
+                    std::cout << "HOST_GLES_DELETE_SHADER id=" << regs[0] << "\n";
+                    return;
+                }                if (item.name == "glUniform1i") {
+                    hostGl.Uniform1i(static_cast<int>(regs[0]),static_cast<int>(regs[1]));
+                    std::cout << "HOST_GLES_UNIFORM1I location=" << static_cast<int>(regs[0])
+                              << " value=" << static_cast<int>(regs[1]) << "\n";
+                    return;
+                }                regs[0] = item.name == "glCreateProgram" ? hostGl.CreateProgram() : hostGl.CreateShader(regs[0]);
+                if (!regs[0]) { Fault(regs[15], "GLES_OBJECT_CREATION_FAILED:" + item.name); return; }
+                std::cout << "HOST_GLES_OBJECT " << item.name << " id=" << regs[0] << "\n";
+                return;
+            }            reason = "UNIMPLEMENTED_IMPORT:" + item.name;
+            std::cout << "IMPORT_TRAP " << item.name
+                      << " pc=0x" << std::hex << regs[15]
+                      << " lr=0x" << regs[14]
+                      << " r0=0x" << regs[0] << " r1=0x" << regs[1]
+                      << " r2=0x" << regs[2] << " r3=0x" << regs[3]
+                      << std::dec << "\n";
+            Fault(regs[15], reason);
+            return;
+        }
+        Fault(regs[15], "unhandled_svc:" + std::to_string(svc));
+    }
+private:
+    template<typename T> T Read(std::uint32_t a) {
+        T v{};
+        if (!Fits(a, sizeof(T), mem_.size())) { Fault(a, "read_out_of_range"); return v; }
+        std::memcpy(&v, mem_.data() + a, sizeof(T));
+        return v;
+    }
+    template<typename T> void Write(std::uint32_t a, T v) {
+        if (!Fits(a, sizeof(T), mem_.size())) { Fault(a, "write_out_of_range"); return; }
+        std::memcpy(mem_.data() + a, &v, sizeof(T));
+    }
+    void Fault(std::uint32_t address, std::string why) {
+        if (faulted) return;
+        faulted = true;
+        fault_address = address;
+        reason = std::move(why);
+        if (jit) jit->HaltExecution();
+    }
+    std::uint32_t Allocate(std::uint32_t size, std::uint32_t alignment) {
+        if (!size) size=1;
+        if (size > 32u * 1024 * 1024) return 0;
+        const std::uint64_t start =
+            (static_cast<std::uint64_t>(next_heap_) + alignment - 1) &
+            ~static_cast<std::uint64_t>(alignment - 1);
+        const std::uint64_t end = start + size;
+        if (end > kHeapEnd || end > mem_.size()) return 0;
+        next_heap_ = static_cast<std::uint32_t>(end);
+        const auto address = static_cast<std::uint32_t>(start);
+        allocations_[address] = size;
+        return address;
+    }
+    std::uint32_t next_heap_ = kHeapStart;
+    std::map<std::uint32_t, std::uint32_t> allocations_;
+    pv7::compat::cocos2dx::GuestJniByteArrays byte_arrays_;
+    pv7::compat::cocos2dx::GuestJniRefs refs_;
+    std::uint32_t next_jstring_ = 0x0000c100;
+    std::map<std::uint32_t, std::string> guest_strings_;
+    std::map<std::uint32_t, std::uint32_t> gl_strings_;
+    std::uint32_t unpack_alignment_ = 4;
+    std::uint32_t array_buffer_binding_ = 0, element_buffer_binding_ = 0;
+    std::uint32_t next_key_ = 1;
+    std::map<std::uint32_t, std::pair<std::uint32_t, std::uint32_t>> keys_;
+    std::vector<std::uint8_t>& mem_;
+    const std::vector<Import>& imports_;
+    struct Destructor { std::uint32_t function, arg, dso; };
+    std::vector<Destructor> destructors_;
+    unsigned log_count_ = 0;
+};
+} // namespace
+
+int main(int argc, char** argv) {
+    if (argc != 2 && argc != 3) {
+        std::cerr << "Usage: pv7-cocos-firstcall libgame.so [constructors|JNI_OnLoad|boot|nativeRender|version]\n";
+        return 2;
+    }
+    const std::string requested = argc == 3 ? argv[2] : "JNI_OnLoad";
+    const char* entry_name = nullptr;
+    if (requested == "JNI_OnLoad") entry_name = "JNI_OnLoad";
+    else if (requested == "nativeRender") entry_name = "Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeRender";
+    else if (requested == "version") entry_name = "_ZN7cocos2d14cocos2dVersionEv";
+    else if (requested == "constructors" || requested == "boot") entry_name = "JNI_OnLoad";
+    else { std::cerr << "Unknown entrypoint\n"; return 2; }
+
+    std::ifstream source(argv[1], std::ios::binary);
+    if (!source) { std::cerr << "Cannot read ELF file\n"; return 2; }
+    std::vector<std::uint8_t> elf(std::istreambuf_iterator<char>{source}, {});
+    pv7::Arm32GuestImage image;
+    std::string err;
+    if (!image.Load(elf, kImageBase, err)) {
+        std::cerr << "LOAD_FAILED " << err << "\n"; return 2;
+    }
+    const auto entry = image.FindExport(entry_name);
+    if (!entry) { std::cerr << "ENTRY_MISSING " << entry_name << "\n"; return 2; }
+    if (kImageBase + image.span() >= kImportsBase) {
+        std::cerr << "IMAGE_OVERLAPS_THUNKS\n"; return 2;
+    }
+
+    // Import records are discovered during Relocate, not Load.
+    // The relocation walker appends the current typed import before
+    // invoking our resolver. Use that exact record for STT_OBJECT.
+    std::map<std::string, std::uint32_t> addresses;
+    std::vector<Import> imports;
+    unsigned data_count=0;
+    auto resolver = [&](std::string_view value) -> std::optional<std::uint32_t> {
+        const std::string name(value);
+        if (auto it = addresses.find(name); it != addresses.end()) return it->second;
+        const auto& pending = image.imported_symbols();
+        const bool is_data = !pending.empty() &&
+            pending.back().name == name && pending.back().symbol_type == 1;
+        if (imports.size() >= 4096) return std::nullopt;
+        const std::uint32_t addr = name == "pthread_once" ? kPthreadOnce
+            : is_data ? kObjectsBase + data_count++ * 512u
+            : kImportsBase + static_cast<std::uint32_t>(imports.size()) * 16u;
+        addresses[name] = addr;
+        imports.push_back({name, addr, is_data});
+        return addr;
+    };
+    if (!image.Relocate(resolver, err)) {
+        std::cerr << "RELOCATE_FAILED " << err << "\n"; return 2;
+    }
+
+    std::vector<std::uint8_t> memory(kMemorySize, 0);
+    if (!image.CopyToGuestMemory(memory, err)) {
+        std::cerr << "MAP_FAILED " << err << "\n"; return 2;
+    }
+    for (std::size_t i = 0; i < imports.size(); ++i) {
+        if (!imports[i].data && imports[i].name != "pthread_once" &&
+            !Trap(memory, imports[i].address, kImportSvcBase + static_cast<std::uint32_t>(i))) {
+            std::cerr << "THUNK_FAILED " << imports[i].name << "\n"; return 2;
+        }
+    }
+    unsigned object_count = 0;
+    for (const auto& entry : imports) {
+        if (!entry.data) continue;
+        ++object_count;
+        if (entry.name == "__stack_chk_guard")
+            Put32(memory, entry.address, 0x5a17ccf0u);
+        else if (entry.name == "optind")
+            Put32(memory, entry.address, 1u);
+        else if (entry.name == "_ctype_" ||
+                 entry.name == "_tolower_tab_" ||
+                 entry.name == "_toupper_tab_") {
+            const auto table = entry.address + 16u;
+            Put32(memory, entry.address, table);
+            for (std::uint32_t i=0;i<256;++i) {
+                auto value = static_cast<std::uint8_t>(i);
+                if (entry.name == "_tolower_tab_" && i >= 'A' && i <= 'Z')
+                    value = static_cast<std::uint8_t>(i + ('a'-'A'));
+                else if (entry.name == "_toupper_tab_" && i >= 'a' && i <= 'z')
+                    value = static_cast<std::uint8_t>(i - ('a'-'A'));
+                memory[table+i] = value;
+            }
+        }
+    }
+    std::cout << "TYPED_DATA_IMPORTS count=" << object_count << "\n";
+    // One-time initialization is vital: actually call the guest initializer
+    // via BLX instead of lying to Cocos that initialization succeeded.
+    // This simple ARM-state stub is *single-threaded diagnostic only*;
+    // a production pthread_once bridge needs synchronized contention.
+    constexpr std::uint32_t onceCode[] = {
+        0xe92d4010u, // push {r4,lr}
+        0xe1a04000u, // mov r4,r0 (pthread_once control pointer)
+        0xe5940000u, // ldr r0,[r4]
+        0xe3500000u, // cmp r0,#0
+        0x1a000004u, // bne done
+        0xe3a00001u, // mov r0,#1 (in progress)
+        0xe5840000u, // str r0,[r4]
+        0xe12fff31u, // blx r1 (run guest initializer)
+        0xe3a00002u, // mov r0,#2 (done)
+        0xe5840000u, // str r0,[r4]
+        0xe3a00000u, // mov r0,#0
+        0xe8bd8010u  // pop {r4,pc}
+    };
+    for (std::size_t i=0;i<std::size(onceCode);++i) {
+        if (!Put32(memory, kPthreadOnce + static_cast<std::uint32_t>(4*i), onceCode[i])) {
+            std::cerr << "PTHREAD_ONCE_THUNK_FAILED\n"; return 2;
+        }
+    }
+    // Populate every JNI function table slot with a distinct missing-method
+    // trap. An unimplemented method is reported by index, not an invalid PC.
+    for (std::uint32_t i=0;i<233;++i) {
+        const std::uint32_t address = kMissingJniBase + i * 8;
+        if (!Trap(memory, address, kMissingJniSvc + i) ||
+            !Put32(memory, kEnvTable + i * 4, address)) {
+            std::cerr << "JNI_TABLE_SETUP_FAILED\n";return 2;
+        }
+    }
+    // Minimal invocation interface scaffolding. Unknown JNI operations halt.
+    if (!Trap(memory, kReturnTrap, 0) ||
+        !Trap(memory, kGetEnvStub, kJniGetEnv) ||
+        !Trap(memory, kAttachStub, kJniAttach) ||
+        !Trap(memory, kFindClassStub, kJniFindClass) ||
+        !Trap(memory, kRegisterStub, kJniRegister) ||
+        !Trap(memory, kGetVersionStub, kJniGetVersion) ||
+        !Put32(memory, kVM, kVMTable) ||
+        !Put32(memory, kVMTable + 4 * 4, kAttachStub) ||
+        !Put32(memory, kVMTable + 6 * 4, kGetEnvStub) ||
+        !Put32(memory, kEnv, kEnvTable) ||
+        !Put32(memory, kEnvTable + 6 * 4, kFindClassStub) ||
+        !Put32(memory, kEnvTable + 215 * 4, kRegisterStub) ||
+        !Put32(memory, kEnvTable + 4 * 4, kGetVersionStub)) {
+        std::cerr << "JNI_SCAFFOLD_FAILED\n"; return 2;
+    }
+    Bridge bridge(memory, imports);
+    Dynarmic::A32::UserConfig conf;
+    conf.callbacks = &bridge;
+    conf.arch_version = Dynarmic::A32::ArchVersion::v7;
+    conf.always_little_endian = true;
+    conf.enable_cycle_counting = true;
+    conf.code_cache_size = 16 * 1024 * 1024;
+    Dynarmic::A32::Jit jit(conf);
+    bridge.jit = &jit;
+    if (requested == "constructors" || requested == "boot") {
+        std::size_t n = 0;
+        for (const auto address : image.constructors()) {
+            bridge.returned = false;
+            bridge.faulted = false;
+            bridge.reason.clear();
+            bridge.ticks_remaining = 200000;
+            jit.ClearHalt();
+            jit.Regs().fill(0);
+            jit.Regs()[13] = kStack;
+            jit.Regs()[14] = kReturnTrap;
+            jit.Regs()[15] = address & ~1u;
+            jit.SetCpsr((address & 1u) ? 0x20u : 0u);
+            jit.Run();
+            if (!bridge.returned || bridge.faulted) {
+                std::cout << "CONSTRUCTOR_STOP index=" << n
+                          << " address=0x" << std::hex << address
+                          << " pc=0x" << jit.Regs()[15] << std::dec
+                          << " reason=" << (bridge.faulted ? bridge.reason : "instruction_budget")
+                          << "\n";
+                return 3;
+            }
+            ++n;
+            if (n <= 4 || n % 25 == 0)
+                std::cout << "CONSTRUCTOR_OK count=" << n << "\n";
+        }
+        std::cout << "ALL_CONSTRUCTORS_RETURNED count=" << n << "\n";
+        if (requested == "constructors") return 0;
+    }
+    bridge.returned = false;
+    bridge.faulted = false;
+    bridge.reason.clear();
+    bridge.ticks_remaining = 1000000;
+    jit.ClearHalt();
+    jit.Regs().fill(0);
+    jit.Regs()[0] = kVM; // first argument of JNI_OnLoad
+    jit.Regs()[13] = kStack;
+    jit.Regs()[14] = kReturnTrap;
+    jit.Regs()[15] = *entry & ~1u;
+    jit.SetCpsr((*entry & 1u) ? 0x20u : 0u);
+    std::cout << "EXECUTING_REAL_ARM32 entry=" << entry_name
+              << " pc=0x" << std::hex << *entry << std::dec
+              << " imports=" << imports.size()
+              << " image=" << image.span()
+              << " constructors_not_run="
+              << (requested == "boot" ? 0u : image.constructors().size())
+              << "\n";
+    jit.Run();
+    if (bridge.faulted) {
+        std::cout << "GUEST_STOP " << bridge.reason
+                  << " fault_address=0x" << std::hex << bridge.fault_address << std::dec
+                  << "\n";
+        return 3; // expected actionable missing service, not success
+    }
+    if (bridge.returned) {
+        const auto version = jit.Regs()[0];
+        std::cout << "GUEST_RETURN r0=0x" << std::hex << version
+                  << std::dec << " (JNI entry returned)\n";
+        if (requested == "version") {
+            const auto text = CString(memory, version);
+            if (text.rfind("cocos2d", 0) != 0) {
+                std::cout << "COCOS_VERSION_UNAVAILABLE pointer=0x" << std::hex << version << std::dec << " raw=" << text << "\n";
+                return 3;
+            }
+            std::cout << "COCOS_VERSION_DETECTED " << text << "\n";
+            return 0;
+        }
+        if (requested != "boot") return 0;
+        const auto init = image.FindExport("Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeInit");
+        if (!init) { std::cout << "COCOS_NATIVE_INIT_MISSING\n";return 3; }
+        bridge.returned = false;
+        bridge.faulted = false;
+        bridge.reason.clear();
+        bridge.ticks_remaining = 1000000;
+        jit.ClearHalt();
+        jit.Regs().fill(0);
+        jit.Regs()[0] = kEnv; // JNIEnv* mock
+        jit.Regs()[1] = 0; // Java renderer object placeholder
+        jit.Regs()[2] = 480; // reference landscape width
+        jit.Regs()[3] = 320; // reference landscape height
+        jit.Regs()[13] = kStack;
+        jit.Regs()[14] = kReturnTrap;
+        jit.Regs()[15] = *init & ~1u;
+        jit.SetCpsr((*init & 1u) ? 0x20u : 0u);
+        std::cout << "EXECUTING_COCOS_NATIVE_INIT pc=0x" << std::hex << *init
+                  << std::dec << "\n";
+        jit.Run();
+        // Drive every suspended Cocos bitmap JNI request as a complete
+        // guest->host->guest call. The Win32 renderer is diagnostic only.
+        // Android must supply pixels using its own Paint/Canvas implementation.
+        unsigned bitmap_callbacks = 0;
+        while (!bridge.faulted && bridge.pending_bitmap && bitmap_callbacks < 64) {
+            const auto native_bitmap = image.FindExport(
+                "Java_org_cocos2dx_lib_Cocos2dxBitmap_nativeInitBitmapDC");
+            if (!native_bitmap) {
+                std::cout << "COCOS_BITMAP_NATIVE_CALLBACK_EXPORT_MISSING\n";
+                return 3;
+            }
+            auto request = std::move(*bridge.pending_bitmap);
+            bridge.pending_bitmap.reset();
+            pv7::compat::cocos2dx::BitmapPixels rendered;
+            std::string render_error;
+            #if defined(__ANDROID__)
+            std::cout << "COCOS_BITMAP_ANDROID_RENDER_BRIDGE_NOT_CONNECTED" << "\n";
+            return 3;
+#else
+if (!pv7::compat::cocos2dx::RenderProbeBitmap(
+                    request, rendered, render_error)) {
+                std::cout << "COCOS_BITMAP_HOST_RENDER_FAILED " << render_error << "\n";
+                return 3;
+            }
+            #endif
+            std::uint32_t array_ref = 0;
+            if (!bridge.StageBitmap(rendered, array_ref, render_error)) {
+                std::cout << "COCOS_BITMAP_GUEST_ARRAY_FAILED " << render_error << "\n";
+                return 3;
+            }
+            constexpr std::uint32_t callback_stack = kStack - 0x80;
+            if (!Put32(memory, callback_stack, array_ref)) {
+                bridge.ReleaseBitmap(array_ref);
+                std::cout << "COCOS_BITMAP_CALLBACK_STACK_INVALID\n";
+                return 3;
+            }
+            // Interruptible A32 guest call: preserve all integer, VFP, status
+            // and return state, run the original function, then resume the
+            // suspended CallStaticVoidMethodV at the exact point it stopped.
+            const auto interrupted_regs = jit.Regs();
+            const auto interrupted_extregs = jit.ExtRegs();
+            const auto interrupted_cpsr = jit.Cpsr();
+            const auto interrupted_fpscr = jit.Fpscr();
+            bridge.returned = false;
+            bridge.ticks_remaining = 2000000;
+            jit.ClearHalt();
+            jit.Regs().fill(0);
+            jit.Regs()[0] = kEnv;
+            jit.Regs()[1] = 0;
+            jit.Regs()[2] = static_cast<std::uint32_t>(rendered.width);
+            jit.Regs()[3] = static_cast<std::uint32_t>(rendered.height);
+            jit.Regs()[13] = callback_stack;
+            jit.Regs()[14] = kReturnTrap;
+            jit.Regs()[15] = *native_bitmap & ~1u;
+            jit.SetCpsr((*native_bitmap & 1u) ? 0x20u : 0u);
+            std::cout << "COCOS_BITMAP_GUEST_CALLBACK_BEGIN pc=0x"
+                      << std::hex << *native_bitmap
+                      << " array=0x" << array_ref << std::dec
+                      << " dimensions=" << rendered.width << "x"
+                      << rendered.height << " bytes=" << rendered.bytes.size()
+                      << "\n";
+            jit.Run();
+            const bool completed_callback = bridge.returned && !bridge.faulted;
+            bridge.ReleaseBitmap(array_ref);
+            if (!completed_callback) {
+                std::cout << "COCOS_BITMAP_GUEST_CALLBACK_STOP "
+                          << (bridge.faulted ? bridge.reason : "instruction_budget")
+                          << " pc=0x" << std::hex << jit.Regs()[15] << std::dec
+                          << "\n";
+                return 3;
+            }
+            ++bitmap_callbacks;
+            std::cout << "COCOS_BITMAP_GUEST_CALLBACK_COMPLETED count="
+                      << bitmap_callbacks << "\n";
+            jit.Regs() = interrupted_regs;
+            jit.ExtRegs() = interrupted_extregs;
+            jit.SetCpsr(interrupted_cpsr);
+            jit.SetFpscr(interrupted_fpscr);
+            bridge.returned = false;
+            bridge.ticks_remaining = 2000000;
+            jit.ClearHalt();
+            jit.Run();
+        }
+        if (bridge.pending_bitmap) {
+            std::cout << "COCOS_BITMAP_REQUEST_LIMIT count="
+                      << bitmap_callbacks << "\n";
+            return 3;
+        }
+        if (bridge.faulted) {
+            std::cout << "COCOS_NATIVE_INIT_STOP " << bridge.reason
+                      << " fault_address=0x" << std::hex << bridge.fault_address
+                      << std::dec << "\n";
+            return 3;
+        }
+        if (bridge.returned) {
+            std::cout << "COCOS_NATIVE_INIT_RETURNED (render loop not started)\n";
+            return 0;
+        }
+        std::cout << "COCOS_NATIVE_INIT_TIMED_OUT pc=0x" << std::hex
+                  << jit.Regs()[15] << std::dec << "\n";
+        return 4;
+    }
+    std::cout << "GUEST_STOP instruction_budget_exhausted_or_stalled pc=0x"
+              << std::hex << jit.Regs()[15] << std::dec << "\n";
+    return 4;
+}

@@ -104,6 +104,21 @@ if(ANDROID)
     target_link_libraries(pv7host PRIVATE projectv7-core log android EGL GLESv2 OpenSLES z dl)
     set_target_properties(pv7host PROPERTIES OUTPUT_NAME "pv7host")
 
+    # Runs the original ARM32 Cocos ELF using Dynarmic on Android.
+    # This is a developer-only executable; it does not embed a game APK or
+    # alter the production wrapper and fails closed on unknown guest calls.
+    if(PV7_COMPAT_MODULE_COCOS2DX)
+        add_executable(pv7-cocos-firstcall-android EXCLUDE_FROM_ALL
+            devtools/cocos_probe/src/pv7_cocos_firstcall.cpp
+        )
+        target_include_directories(pv7-cocos-firstcall-android PRIVATE
+            devtools/cocos_probe
+            compat_modules/cocos2dx/elf
+        )
+        target_link_libraries(pv7-cocos-firstcall-android PRIVATE
+            projectv7-core log android EGL GLESv2 z dl
+        )
+    endif()
     # Transitional legacy target for the existing CNR wrapper while it is
     # migrated onto the generic app.projectv7.wrapper host template.
     add_library(cnr64poc SHARED

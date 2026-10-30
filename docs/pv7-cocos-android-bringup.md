@@ -98,3 +98,40 @@ No original game APK or native guest binaries belong in this repository.
   ran. The result verifies native loading/packaging and UI lifecycle only.
 - Build artifacts are local and test-only. No production APK released and no
   Project V7 Cocos compatibility gate changed.
+## Real Best Park ARM32 execution on Android (2026-10-30)
+
+An optional, developer-only `pv7-cocos-firstcall-android` executable is
+compiled from the preexisting desktop Dynarmic Cocos first-call diagnostic,
+linked against the Cocos-enabled core and a genuine Android EGL pbuffer and
+GLES2 context. The original game binary is supplied separately at runtime.
+Unknown JNI/native imports fail closed instead of returning fictitious success.
+
+On an Android x86_64 emulator, the program executed Best Park 1.2.1's
+unchanged ARM32 `libgame.so` through Dynarmic. The first direct `JNI_OnLoad`
+test returned JNI version `0x00010004` with exit code zero.
+
+The subsequent `boot` diagnostic successfully ran 324 ELF constructors,
+executed `JNI_OnLoad`, entered original `nativeInit`, and compiled/linked
+multiple real GLES2 shader programs in Android's GL context. It stopped
+intentionally at Best Park's first
+`org/cocos2dx/lib/Cocos2dxBitmap.createTextBitmap` request, which needs the
+actual Android Paint/Canvas renderer to forward pixels into the original
+ARM32 guest `nativeInitBitmapDC` callback:
+
+```text
+ALL_CONSTRUCTORS_RETURNED count=324
+GUEST_RETURN r0=0x10004
+EXECUTING_COCOS_NATIVE_INIT
+HOST_GLES_LINK program=22 success=1
+COCOS_BITMAP_TEXT_REQUEST text=00.0 font=Arial size=24 align=19 dimensions=0x0
+COCOS_BITMAP_ANDROID_RENDER_BRIDGE_NOT_CONNECTED
+```
+
+The `boot` diagnostic exits 3 at this *known unimplemented boundary*.
+Do not interpret the return code as a crash or game success. The separately
+written Android Java bitmap renderer compiles but is not connected to this
+native executable, which has no Java VM. The next integration needs a JNI
+call into the Android host Activity/Java bitmap renderer, followed by the
+real guest bitmap callback. Once connected, proceed to asset/OBB file
+mapping and a real `nativeRender` frame. Do not use placeholder pixels.
+No production guest APK support or patcher change is claimed.
