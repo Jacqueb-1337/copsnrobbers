@@ -19,3 +19,4 @@ Remaining: JNI reference and method dispatch, Java calls and native
 callbacks back into the ARM32 guest, rendering, input, audio, assets,
 lifecycle and end-to-end first-frame validation.
 Never alter the original game's ARM32 libgame.so.
+Bitmap bridge note: Android renderer compiles using API 35 but is source-guided, not exact historical layout parity. BitmapPixels validates native-order ARGB_8888 byte count and dimensions. Real ARM32 nativeInitBitmapDC dispatch is not connected; probe remains fail-closed.

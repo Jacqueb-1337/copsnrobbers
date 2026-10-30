@@ -1,3 +1,4 @@
+#include "cocos2dx_bitmap_pixels.h"
 #include "cocos2dx_jni_marshaller.h"
 #include "cocos2dx_compat_module.h"
 #include <cassert>
@@ -31,5 +32,13 @@ int main() {
     assert(request.width==320 && request.height==64);
     assert(!marshaller.Decode(guest,127,strings,request,error));
     assert(!error.empty());
+    BitmapPixels bitmap;
+    std::vector<std::uint8_t> pixels(4*3*2,0x7f);
+    assert(ReadBitmapPixels(3,2,pixels,bitmap,error));
+    assert(bitmap.width==3 && bitmap.height==2);
+    assert(bitmap.bytes==pixels);
+    assert(!ReadBitmapPixels(3,2,std::span<const std::uint8_t>(pixels.data(),23),bitmap,error));
+    assert(!ReadBitmapPixels(50000,50000,pixels,bitmap,error));
+    assert(bitmap.bytes==pixels); // failed conversion never damages last frame
     return 0;
 }
