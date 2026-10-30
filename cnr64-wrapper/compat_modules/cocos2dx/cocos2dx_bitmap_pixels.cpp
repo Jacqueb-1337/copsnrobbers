@@ -1,4 +1,4 @@
-﻿#include "cocos2dx_bitmap_pixels.h"
+#include "cocos2dx_bitmap_pixels.h"
 #include <cstdint>
 #include <limits>
 
