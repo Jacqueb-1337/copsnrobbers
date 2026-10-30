@@ -10,6 +10,7 @@
 
 #include "pv7_gles_probe.h"
 #include <cstdlib>
+#include <cstdio>
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -22,7 +23,133 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#if defined(PV7_COCOS_JNI_RUNNER)
+#include <jni.h>
+#include <unistd.h>
+#include <cstdio>
 
+static thread_local JNIEnv* g_pv7_cocos_env = nullptr;
+
+static bool RenderAndroidBitmap(
+        const pv7::compat::cocos2dx::BitmapTextRequest& request,
+        pv7::compat::cocos2dx::BitmapPixels& pixels, std::string& error) {
+    JNIEnv* env = g_pv7_cocos_env;
+    if (!env) { error = "Android Java JNI context unavailable"; return false; }
+    jclass cls = env->FindClass("me/jacqueb/pv7/cocos/Pv7CocosBitmapRenderer");
+    if (env->ExceptionCheck() || !cls) {
+        env->ExceptionDescribe(); env->ExceptionClear();
+        error = "Android bitmap renderer Java class missing"; return false;
+    }
+    const auto cleanup = [&]() { env->DeleteLocalRef(cls); };
+    jmethodID method = env->GetStaticMethodID(cls, "renderForGuest",
+        "(Ljava/lang/String;Ljava/lang/String;IIII)[Ljava/lang/Object;");
+    if (env->ExceptionCheck() || !method) {
+        env->ExceptionDescribe(); env->ExceptionClear(); cleanup();
+        error = "Android bitmap renderer JNI signature missing"; return false;
+    }
+    jstring text = env->NewStringUTF(request.text.c_str());
+    jstring font = env->NewStringUTF(request.font.c_str());
+    if (env->ExceptionCheck() || !text || !font) {
+        env->ExceptionDescribe(); env->ExceptionClear();
+        if (text) env->DeleteLocalRef(text);
+        if (font) env->DeleteLocalRef(font);
+        cleanup();
+        error = "Cannot allocate Java bitmap strings"; return false;
+    }
+    auto result = static_cast<jobjectArray>(
+        env->CallStaticObjectMethod(cls, method, text, font,
+            static_cast<jint>(request.font_size),
+            static_cast<jint>(request.alignment),
+            static_cast<jint>(request.width),
+            static_cast<jint>(request.height)));
+    env->DeleteLocalRef(text);
+    env->DeleteLocalRef(font);
+    if (env->ExceptionCheck() || !result) {
+        env->ExceptionDescribe(); env->ExceptionClear();
+        if (result) env->DeleteLocalRef(result);
+        cleanup();
+        error = "Android Paint/Canvas renderer failed"; return false;
+    }
+    if (env->GetArrayLength(result) != 2) {
+        env->DeleteLocalRef(result); cleanup();
+        error = "Unexpected bitmap result packet"; return false;
+    }
+    auto dimensions = static_cast<jintArray>(env->GetObjectArrayElement(result, 0));
+    auto bytes = static_cast<jbyteArray>(env->GetObjectArrayElement(result, 1));
+    if (env->ExceptionCheck() || !dimensions || !bytes ||
+        env->GetArrayLength(dimensions) != 2) {
+        env->ExceptionDescribe(); env->ExceptionClear();
+        if (dimensions) env->DeleteLocalRef(dimensions);
+        if (bytes) env->DeleteLocalRef(bytes);
+        env->DeleteLocalRef(result); cleanup();
+        error = "Invalid Java bitmap dimension packet"; return false;
+    }
+    jint size[2]{};
+    env->GetIntArrayRegion(dimensions, 0, 2, size);
+    jsize length = env->GetArrayLength(bytes);
+    if (env->ExceptionCheck() || length <= 0 || length > 64 * 1024 * 1024) {
+        env->ExceptionDescribe(); env->ExceptionClear();
+        env->DeleteLocalRef(bytes); env->DeleteLocalRef(dimensions);
+        env->DeleteLocalRef(result); cleanup();
+        error = "Invalid bitmap pixel buffer length"; return false;
+    }
+    std::vector<std::uint8_t> payload(static_cast<std::size_t>(length));
+    env->GetByteArrayRegion(bytes, 0, length,
+                            reinterpret_cast<jbyte*>(payload.data()));
+    bool ok = !env->ExceptionCheck();
+    if (!ok) {
+        env->ExceptionDescribe(); env->ExceptionClear();
+        error = "Could not read Java bitmap pixels";
+    } else {
+        ok = pv7::compat::cocos2dx::ReadBitmapPixels(
+            size[0], size[1], std::span<const std::uint8_t>(payload),
+            pixels, error);
+    }
+    env->DeleteLocalRef(bytes);
+    env->DeleteLocalRef(dimensions);
+    env->DeleteLocalRef(result);
+    cleanup();
+    return ok;
+}
+#endif
+
+
+#if defined(PV7_COCOS_JNI_RUNNER)
+static bool ResolveAndroidExpansionPath(std::string& path, std::string& error) {
+    JNIEnv* env = g_pv7_cocos_env;
+    if (!env) { error = "missing Android JNI VM"; return false; }
+    jclass cls = env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+    if (env->ExceptionCheck() || !cls) {
+        env->ExceptionDescribe(); env->ExceptionClear();
+        error = "Cocos probe Java activity class missing"; return false;
+    }
+    jmethodID method = env->GetStaticMethodID(
+        cls, "resolveExpansionPath", "()Ljava/lang/String;");
+    if (env->ExceptionCheck() || !method) {
+        env->ExceptionDescribe(); env->ExceptionClear();
+        env->DeleteLocalRef(cls);
+        error = "Android OBB resolver method unavailable"; return false;
+    }
+    jstring value = static_cast<jstring>(env->CallStaticObjectMethod(cls, method));
+    if (env->ExceptionCheck() || !value) {
+        env->ExceptionDescribe(); env->ExceptionClear();
+        if (value) env->DeleteLocalRef(value);
+        env->DeleteLocalRef(cls);
+        error = "Android OBB resolver threw"; return false;
+    }
+    const char* utf = env->GetStringUTFChars(value, nullptr);
+    if (env->ExceptionCheck() || !utf) {
+        env->ExceptionDescribe(); env->ExceptionClear();
+        env->DeleteLocalRef(value); env->DeleteLocalRef(cls);
+        error = "Android OBB resolver invalid string"; return false;
+    }
+    path.assign(utf);
+    env->ReleaseStringUTFChars(value, utf);
+    env->DeleteLocalRef(value);
+    env->DeleteLocalRef(cls);
+    return true;
+}
+#endif
 // PV7 development-only execution probe: the first actual ARM instructions
 // of the owner's original Cocos ELF run under Dynarmic. All unknown imports
 // halt at a named SVC, not at fabricated successful return values.
@@ -97,6 +224,9 @@ public:
     std::string reason;
     std::uint64_t ticks_remaining = 1000000;
     std::optional<pv7::compat::cocos2dx::BitmapTextRequest> pending_bitmap;
+#if defined(PV7_COCOS_JNI_RUNNER)
+    ~Bridge() override { for (auto& entry:open_files_) std::fclose(entry.second); }
+#endif
     bool StageBitmap(const pv7::compat::cocos2dx::BitmapPixels& image,
                      std::uint32_t& handle, std::string& error) {
         if (!byte_arrays_.Create(image,handle,error)) return false;
@@ -219,7 +349,89 @@ public:
                           << std::hex << kTextMethod << std::dec << "\n";
                 return;
             }
-            Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
+
+            if (refs_.Resolve(classRef) == 0x0000c030u &&
+                name == "getAPKExpansionFileName" &&
+                sig == "()Ljava/lang/String;") {
+                constexpr std::uint32_t kExpansionMethod = 0x0000c040u;
+                regs[0] = kExpansionMethod;
+                std::cout << "JNI_METHOD_IDENTIFIED getAPKExpansionFileName\n";
+                return;
+            }            Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
+            return;
+        }
+
+        // The original version-16 Best Park Java method returns the absolute
+        // path to its main expansion file iff it exists, or "" otherwise.
+        // Resolve it from the diagnostic Activity's own OBB directory so the
+        // guest and host do not need identical Android package identifiers.
+        if (svc >= kMissingJniSvc + 114u && svc <= kMissingJniSvc + 116u) {
+            if (refs_.Resolve(regs[1]) != 0x0000c030u ||
+                regs[2] != 0x0000c040u) {
+                Fault(regs[15], "JNI_CallStaticObjectMethod_unknown"); return;
+            }
+#if defined(PV7_COCOS_JNI_RUNNER)
+            std::string path, resolver_error;
+            if (!ResolveAndroidExpansionPath(path, resolver_error)) {
+                Fault(regs[15], "JNI_ExpansionResolver:" + resolver_error); return;
+            }
+            if (path.size() >= 4096 || next_jstring_ > 0x0000fffcu) {
+                Fault(regs[15], "JNI_ExpansionString_invalid"); return;
+            }
+            const auto handle = next_jstring_;
+            next_jstring_ += 4;
+            guest_strings_[handle] = path;
+            if (!refs_.RegisterLocal(handle, pv7::compat::cocos2dx::JniRefKind::String)) {
+                Fault(regs[15], "JNI_ExpansionString_register_failed"); return;
+            }
+            regs[0] = handle;
+            std::cout << "COCOS_EXPANSION_NAME_RETURNED bytes=" << path.size()
+                      << " path=" << path << "\n";
+            return;
+#else
+            Fault(regs[15], "JNI_ExpansionName_requires_Android_Activity");
+            return;
+#endif
+        }
+        // Original JNI code reads expansion path through jstring UTF accessor.
+        if (svc == kMissingJniSvc + 168u ||
+            svc == kMissingJniSvc + 169u ||
+            svc == kMissingJniSvc + 170u) {
+            const auto ref=refs_.Resolve(regs[1]);
+            if (!ref || !guest_strings_.count(*ref)) {
+                Fault(regs[15], "JNI_ExpansionString_invalid_ref"); return;
+            }
+            const auto& value=guest_strings_.at(*ref);
+            if (svc == kMissingJniSvc + 168u) {
+                regs[0]=static_cast<std::uint32_t>(value.size()); return;
+            }
+            if (svc == kMissingJniSvc + 169u) {
+                if (value.size() >= 65536) {
+                    Fault(regs[15], "JNI_GetStringUTFChars_oversized"); return;
+                }
+                const auto address=Allocate(
+                    static_cast<std::uint32_t>(value.size()+1),4u);
+                if (!address || !Fits(address,value.size()+1,mem_.size())) {
+                    Fault(regs[15], "JNI_GetStringUTFChars_allocation_failed"); return;
+                }
+                std::memcpy(mem_.data()+address,value.c_str(),value.size()+1);
+                guest_string_borrows_[address]=*ref;
+                if (regs[2]) {
+                    if (!Fits(regs[2],1,mem_.size())) {
+                        Fault(regs[15], "JNI_GetStringUTFChars_isCopy_out_of_range"); return;
+                    }
+                    mem_[regs[2]]=1;
+                }
+                regs[0]=address;
+                std::cout<<"JNI_GET_STRING_UTF chars=0x"<<std::hex<<address
+                         <<std::dec<<" bytes="<<value.size()<<"\n";
+                return;
+            }
+            const auto iter=guest_string_borrows_.find(regs[2]);
+            if (iter==guest_string_borrows_.end() || iter->second!=*ref) {
+                Fault(regs[15], "JNI_ReleaseStringUTFChars_invalid_borrow"); return;
+            }
+            guest_string_borrows_.erase(iter);
             return;
         }
         // JNI 1.6 object-reference lifetime and identity calls.
@@ -377,21 +589,117 @@ public:
                 return;
             }
             if(pv7::compat::cocos2dx::DispatchGuestMath(item.name,regs)) return;
-            if(item.name=="fopen" || item.name=="fopen64") {
+            if (item.name=="fopen" || item.name=="fopen64") {
                 const auto filename=CString(mem_,regs[0]);
                 const auto mode=CString(mem_,regs[1]);
                 std::cout<<"COCOS_FILE_REQUEST name="<<filename
                          <<" mode="<<mode<<"\n";
                 if(filename.empty() && (mode=="rb" || mode=="r")) {
-                    // Bionic fopen("", "rb") correctly reports ENOENT.
-                    // This does not pretend the missing asset exists.
-                    regs[0]=0;
+                    regs[0]=0; // ENOENT for empty path, no fake stream
                     return;
                 }
+#if defined(PV7_COCOS_JNI_RUNNER)
+                std::string authorized, error;
+                if (!ResolveAndroidExpansionPath(authorized, error)) {
+                    Fault(regs[15], "VFS_OBB_RESOLVER_ERROR:" + error); return;
+                }
+                if (authorized.empty() || filename != authorized ||
+                    (mode != "rb" && mode != "r")) {
+                    Fault(regs[15], "VFS_OPEN_NOT_AUTHORIZED"); return;
+                }
+                if (open_files_.size() >= 32u) {
+                    Fault(regs[15], "VFS_OPEN_FILE_LIMIT"); return;
+                }
+                std::FILE* fp = std::fopen(authorized.c_str(), "rb");
+                if (!fp) {
+                    regs[0] = 0; // underlying OS failed opening real OBB
+                    std::cout<<"COCOS_VFS_OBB_OPEN_OS_FAILED\n";
+                    return;
+                }
+                const auto handle = next_file_handle_;
+                next_file_handle_ += 4u;
+                open_files_.emplace(handle,fp);
+                regs[0]=handle;
+                std::cout<<"COCOS_VFS_OBB_OPEN_OK handle=0x"<<std::hex<<handle
+                         <<std::dec<<"\n";
+                return;
+#else
                 Fault(regs[15],"VFS_OPEN_NOT_CONNECTED");return;
-            }            // Bounded guest-memory equivalents of common Bionic routines.
+#endif
+            }
+#if defined(PV7_COCOS_JNI_RUNNER)
+            if (item.name=="fread") {
+                const auto dest=regs[0], unit=regs[1], count=regs[2],
+                           handle=regs[3];
+                auto it=open_files_.find(handle);
+                const auto total=static_cast<std::uint64_t>(unit)*count;
+                if(it==open_files_.end() || total>16u*1024u*1024u ||
+                   !Fits(dest,static_cast<std::size_t>(total),mem_.size())) {
+                    Fault(regs[15],"VFS_READ_INVALID_RANGE_OR_FILE");return;
+                }
+                const auto read=std::fread(mem_.data()+dest,unit,count,it->second);
+                regs[0]=static_cast<std::uint32_t>(read);
+                static unsigned long long read_calls=0; if (++read_calls<=4 || read_calls%65536==0) std::cout<<"COCOS_VFS_READ units="<<read
+                         <<" unit_bytes="<<unit<<"\n";
+                return;
+            }
+            if (item.name=="fseek" || item.name=="fseeko" ||
+                item.name=="fseeko64") {
+                auto it=open_files_.find(regs[0]);
+                if(it==open_files_.end() || regs[2]>2) {
+                    Fault(regs[15],"VFS_SEEK_BAD_FILE_OR_WHENCE");return;
+                }
+                const auto offset=static_cast<std::int32_t>(regs[1]);
+                regs[0]=std::fseek(it->second,offset,static_cast<int>(regs[2]));
+                return;
+            }
+            if (item.name=="ftell" || item.name=="ftello" || item.name=="ftello64") {
+                auto it=open_files_.find(regs[0]);
+                if(it==open_files_.end()) {
+                    Fault(regs[15],"VFS_TELL_UNKNOWN_FILE");return;
+                }
+                const auto location=std::ftell(it->second);
+                if(location<0 || static_cast<std::uint64_t>(location)>UINT32_MAX) {
+                    Fault(regs[15],"VFS_TELL_OFFSET_INVALID");return;
+                }
+                regs[0]=static_cast<std::uint32_t>(location);
+                return;
+            }
+            if (item.name=="fclose") {
+                auto it=open_files_.find(regs[0]);
+                if(it==open_files_.end()) {
+                    Fault(regs[15],"VFS_CLOSE_UNKNOWN_FILE");return;
+                }
+                const int status=std::fclose(it->second);
+                open_files_.erase(it);
+                regs[0]=static_cast<std::uint32_t>(status);
+                return;
+            }
+            if (item.name=="feof" || item.name=="ferror" ||
+                item.name=="clearerr" || item.name=="rewind") {
+                auto it=open_files_.find(regs[0]);
+                if(it==open_files_.end()) {
+                    Fault(regs[15],"VFS_STATUS_UNKNOWN_FILE");return;
+                }
+                if(item.name=="feof") regs[0]=std::feof(it->second);
+                else if(item.name=="ferror") regs[0]=std::ferror(it->second);
+                else if(item.name=="clearerr") std::clearerr(it->second);
+                else std::rewind(it->second);
+                return;
+            }
+#endif            // Bounded guest-memory equivalents of common Bionic routines.
             // These operate solely within the ARM guest address space.
-            if (item.name == "memcpy" || item.name == "memmove" ||
+            if (item.name == "memchr") {
+                const auto address=regs[0], value=regs[1]&255u, count=regs[2];
+                if (count>16u*1024u*1024u || !Fits(address,count,mem_.size())) {
+                    Fault(regs[15],"memchr_invalid_guest_range"); return;
+                }
+                const auto* first=mem_.data()+address;
+                const auto* found=static_cast<const std::uint8_t*>(
+                    std::memchr(first,static_cast<int>(value),count));
+                regs[0]=found ? address+static_cast<std::uint32_t>(found-first) : 0u;
+                return;
+            }            if (item.name == "memcpy" || item.name == "memmove" ||
                 item.name == "__aeabi_memcpy" || item.name == "__aeabi_memcpy4" ||
                 item.name == "__aeabi_memcpy8") {
                 const auto d = regs[0], src = regs[1], count = regs[2];
@@ -1172,6 +1480,11 @@ private:
     pv7::compat::cocos2dx::GuestJniRefs refs_;
     std::uint32_t next_jstring_ = 0x0000c100;
     std::map<std::uint32_t, std::string> guest_strings_;
+    std::map<std::uint32_t,std::uint32_t> guest_string_borrows_;
+#if defined(PV7_COCOS_JNI_RUNNER)
+    std::map<std::uint32_t,std::FILE*> open_files_;
+    std::uint32_t next_file_handle_=0x0000d100u;
+#endif
     std::map<std::uint32_t, std::uint32_t> gl_strings_;
     std::uint32_t unpack_alignment_ = 4;
     std::uint32_t array_buffer_binding_ = 0, element_buffer_binding_ = 0;
@@ -1185,7 +1498,7 @@ private:
 };
 } // namespace
 
-int main(int argc, char** argv) {
+int RunCocosProbe(int argc, char** argv) {
     if (argc != 2 && argc != 3) {
         std::cerr << "Usage: pv7-cocos-firstcall libgame.so [constructors|JNI_OnLoad|boot|nativeRender|version]\n";
         return 2;
@@ -1429,8 +1742,16 @@ int main(int argc, char** argv) {
             bridge.pending_bitmap.reset();
             pv7::compat::cocos2dx::BitmapPixels rendered;
             std::string render_error;
-            #if defined(__ANDROID__)
-            std::cout << "COCOS_BITMAP_ANDROID_RENDER_BRIDGE_NOT_CONNECTED" << "\n";
+            #if defined(PV7_COCOS_JNI_RUNNER)
+            if (!RenderAndroidBitmap(request, rendered, render_error)) {
+                std::cout << "COCOS_BITMAP_ANDROID_RENDER_FAILED " << render_error << "\n";
+                return 3;
+            }
+            std::cout << "COCOS_BITMAP_ANDROID_RENDER_OK dimensions="
+                      << rendered.width << "x" << rendered.height
+                      << " bytes=" << rendered.bytes.size() << "\n";
+#elif defined(__ANDROID__)
+            std::cout << "COCOS_BITMAP_ANDROID_RENDER_BRIDGE_NOT_CONNECTED\n";
             return 3;
 #else
 if (!pv7::compat::cocos2dx::RenderProbeBitmap(
@@ -1458,7 +1779,7 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             const auto interrupted_cpsr = jit.Cpsr();
             const auto interrupted_fpscr = jit.Fpscr();
             bridge.returned = false;
-            bridge.ticks_remaining = 2000000;
+            bridge.ticks_remaining = 20000000;
             jit.ClearHalt();
             jit.Regs().fill(0);
             jit.Regs()[0] = kEnv;
@@ -1493,7 +1814,7 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             jit.SetCpsr(interrupted_cpsr);
             jit.SetFpscr(interrupted_fpscr);
             bridge.returned = false;
-            bridge.ticks_remaining = 2000000;
+            bridge.ticks_remaining = 20000000;
             jit.ClearHalt();
             jit.Run();
         }
@@ -1520,3 +1841,49 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
               << std::hex << jit.Regs()[15] << std::dec << "\n";
     return 4;
 }
+
+#if defined(PV7_COCOS_JNI_RUNNER)
+extern "C" JNIEXPORT jint JNICALL
+Java_me_jacqueb_pv7_cocos_CocosProbeActivity_nativeRun(
+        JNIEnv* env, jclass, jstring guestPath, jstring logPath) {
+    if (!guestPath || !logPath || !env) return 2;
+    const char* guest = env->GetStringUTFChars(guestPath, nullptr);
+    const char* logfile = env->GetStringUTFChars(logPath, nullptr);
+    if (!guest || !logfile) {
+        if (guest) env->ReleaseStringUTFChars(guestPath, guest);
+        if (logfile) env->ReleaseStringUTFChars(logPath, logfile);
+        return 2;
+    }
+    std::string original(guest);
+    std::string path(logfile);
+    env->ReleaseStringUTFChars(guestPath, guest);
+    env->ReleaseStringUTFChars(logPath, logfile);
+
+    // This debug-only activity is dedicated to a single worker/probe run.
+    // Redirect its verbose native output to a private file for adb run-as.
+    fflush(stdout); fflush(stderr);
+    int savedOut = dup(STDOUT_FILENO);
+    int savedErr = dup(STDERR_FILENO);
+    FILE* file = fopen(path.c_str(), "w");
+    if (!file) return 2;
+    dup2(fileno(file), STDOUT_FILENO);
+    dup2(fileno(file), STDERR_FILENO);
+
+    char first[] = "pv7-cocos-probe";
+    char mode[] = "boot";
+    char* args[] = {first, original.data(), mode};
+    g_pv7_cocos_env = env;
+    int result = RunCocosProbe(3, args);
+    g_pv7_cocos_env = nullptr;
+    std::cout << "ANDROID_JAVA_PROBE_EXIT=" << result << std::endl;
+    fflush(stdout); fflush(stderr);
+    if (savedOut >= 0) { dup2(savedOut, STDOUT_FILENO); close(savedOut); }
+    if (savedErr >= 0) { dup2(savedErr, STDERR_FILENO); close(savedErr); }
+    fclose(file);
+    return result;
+}
+#else
+int main(int argc, char** argv) {
+    return RunCocosProbe(argc, argv);
+}
+#endif

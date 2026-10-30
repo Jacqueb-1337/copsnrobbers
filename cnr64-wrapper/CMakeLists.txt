@@ -115,6 +115,17 @@ if(ANDROID)
             devtools/cocos_probe
             compat_modules/cocos2dx/elf
         )
+        add_library(pv7cocosprobe SHARED EXCLUDE_FROM_ALL
+            devtools/cocos_probe/src/pv7_cocos_firstcall.cpp
+        )
+        target_compile_definitions(pv7cocosprobe PRIVATE PV7_COCOS_JNI_RUNNER=1)
+        target_include_directories(pv7cocosprobe PRIVATE
+            devtools/cocos_probe
+            compat_modules/cocos2dx/elf
+        )
+        target_link_libraries(pv7cocosprobe PRIVATE
+            projectv7-core log android EGL GLESv2 z dl
+        )
         target_link_libraries(pv7-cocos-firstcall-android PRIVATE
             projectv7-core log android EGL GLESv2 z dl
         )

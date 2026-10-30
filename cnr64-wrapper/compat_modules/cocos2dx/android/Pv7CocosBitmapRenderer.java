@@ -27,6 +27,25 @@ public final class Pv7CocosBitmapRenderer {
     private static final int MAX_PIXELS_BYTES = 64 * 1024 * 1024;
 
     private Pv7CocosBitmapRenderer() {}
+    /** JNI-friendly output: {int[]{width,height}, byte[] native-order ARGB pixels}. */
+    public static Object[] renderForGuest(String source, String font, int size,
+                                          int alignment, int width, int height) {
+        final Object[][] output = new Object[1][];
+        try {
+            createTextBitmap(source, font, size, alignment, width, height,
+                (actualWidth, actualHeight, pixels) ->
+                    output[0] = new Object[] {
+                        new int[] {actualWidth, actualHeight}, pixels
+                    });
+        } catch (Throwable failure) {
+            android.util.Log.e("PV7CocosRenderer", "Android Paint/Canvas bitmap failed", failure);
+            throw new IllegalStateException("Android Paint/Canvas bitmap failed", failure);
+        }
+        if (output[0] == null) {
+            throw new IllegalStateException("Bitmap callback produced no pixels");
+        }
+        return output[0];
+    }
 
     public static void createTextBitmap(String source, String font, int size,
                                         int alignment, int width, int height,
@@ -41,7 +60,20 @@ public final class Pv7CocosBitmapRenderer {
         final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         paint.setColor(Color.WHITE);
         paint.setTextSize(size);
-        paint.setTypeface(Typeface.create(font, Typeface.NORMAL));
+        // app_process launches without Activity/system font-map initialization.
+        // A normal Activity uses the named font, while a standalone diagnostic
+        // can still rasterize real glyphs from the device's installed TTF.
+        Typeface typeface = null;
+        try {
+            typeface = Typeface.create(font, Typeface.NORMAL);
+        } catch (RuntimeException missingSystemFontMap) {
+            android.util.Log.w("PV7CocosRenderer",
+                    "System font map unavailable in ART diagnostic, using local Roboto", missingSystemFontMap);
+        }
+        if (typeface == null) {
+            typeface = Typeface.createFromFile("/system/fonts/Roboto-Regular.ttf");
+        }
+        paint.setTypeface(typeface);
 
         final int horizontal = alignment & 0x0f;
         final int vertical = (alignment >> 4) & 0x0f;

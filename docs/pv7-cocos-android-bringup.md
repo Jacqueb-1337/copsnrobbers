@@ -135,3 +135,31 @@ call into the Android host Activity/Java bitmap renderer, followed by the
 real guest bitmap callback. Once connected, proceed to asset/OBB file
 mapping and a real `nativeRender` frame. Do not use placeholder pixels.
 No production guest APK support or patcher change is claimed.
+## Android bitmap and expansion-file checkpoint
+
+The isolated Android Activity diagnostic now uses the platform Paint/Canvas
+renderer and JNI to transfer native-order ARGB pixels into the original ARM32
+`nativeInitBitmapDC`. On an Android x86_64 emulator, all six actual text
+bitmap guest callbacks completed, and GLES2 uploaded the resulting textures.
+
+The original Best Park 1.2.1 classes.dex was inspected directly: its
+`regularshow.getAPKExpansionFileName()` checks external Android/obb storage
+for `main.16.com.turner.bestparkintheuniverse.obb` and returns the existing
+absolute filename, or an empty string. This is not an arbitrary OBB guess.
+The developer-only Activity resolves the matching filename in its own
+`getObbDir()` and forwards that actual path through the guest JNI static
+object-call and string UTF accessors.
+
+The corresponding original 388,494,611-byte OBB was extracted from the
+user-supplied cache ZIP and copied to the emulator's diagnostic-app OBB
+directory, outside version control. The diagnostic successfully opened it
+with the restricted read-only guest VFS, and executed original guest read
+calls; the initial 2-million-tick budget expired while parsing it.
+A bounded larger budget and sparse read logging have been staged for testing.
+
+The file bridge only permits read-only access to the exact current
+Activity-resolved OBB filename; it does not expose other filesystem paths.
+No game assets or APKs are committed. A packaged diagnostic is NOT a PV7
+Patcher-generated playable game and does not yet support complete Cocos
+lifecycle, input, audio, or nativeRender.
+- After successful OBB open and original ARM32 reads, guest initialization reached a bounded diagnostic tick limit. With sparse read tracing and a larger bounded budget it next revealed a missing memchr import. A bounded guest-address-space memchr implementation has since compiled for ARM64 and x86_64, with follow-up runtime verification pending.
