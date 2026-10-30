@@ -226,6 +226,15 @@ The earlier scene profile hooked 70 functions but captured no scene callbacks, a
 
 Original APK/OBB and all raw trace data remain on user's PC. This is selected native export-call tracing, not exhaustive instrumentation of all game function paths.
 
+
+## Observed caller-to-callee ELF correlation
+
+The pure-Python offline tool tools/pv7_arm32_trace_correlate.py combines selected guest Frida JSONL traces with optional final call counts. It parses original ARM32 ELF symbol-table ranges and normalizes Thumb addresses. It only identifies callers when the return-site offset lies inside a function with a known nonzero size; unresolved sites remain unresolved.
+
+Verified on the owner's PC with the original extracted libgame.so and seven local trace sessions (15,115 exported ARM functions). Observed edges include CCDisplayLinkDirector.mainLoop to CCDirector.drawScene, CCTouchDispatcher.touches to CCMenu.ccTouchBegan/ccTouchEnded, Cutscene.setAndPlayCurrent to SoundPlayer.playSound, CCLabelTTF.updateTexture to CCTexture2D.initWithString, and CCTexture2D.initPremultipliedATextureWithImage to CCTexture2D.initWithData.
+
+Local private output: PV7-BestPark-all-traces.json and PV7-BestPark-all-traces.md in the ARM32Classic working directory. The original extracted library and source traces are not committed. Earlier samples without a complete summary remain samples only; unknown counts are not reconstructed.
+
 ## Remaining milestones
 
 1. DONE: Find expansion data and verify native menus, cutscene, and level selection.
