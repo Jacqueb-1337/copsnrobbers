@@ -166,3 +166,44 @@ lifecycle, input, audio, or nativeRender.
 
 ## Subsequent parser verification
 The follow-up Android Activity test of the real main expansion file first exposed an unsupported memchr import. Added a bounded guest-address-space memchr implementation for ARM32 Dynarmic import dispatch and built both ABIs. Retesting on the x86_64 Android emulator confirmed guest initialization continued past memchr and next stopped at vsnprintf (UNIMPLEMENTED_IMPORT:vsnprintf). This remains fail-closed rather than guessing the ARM varargs semantics. No playable wrapper or frame is claimed.
+## Android resource and JNI continuation (October 30, 2026)
+
+On the original Best Park ARM32 guest, `vsnprintf` first formatted the literal
+"Get data from file(globals.xml) failed!" with no varargs. The emulator passed
+that message to Android logging after a bounded guest-memory implementation.
+The next actual `sprintf` format was verified against the original `libgame.so`
+bytes as `%d-%d`; it returned three bytes for zero and zero. A shared bounded
+guest 32-bit formatter now supports checked integer/string conversions for
+`sprintf`, `snprintf` and `vsnprintf`; unknown conversions, 64-bit alignment,
+and arbitrary host varargs remain deliberately unsupported.
+
+Original `Cocos2dxHelper` methods were read from the supplied original DEX:
+`getStringForKey` and `getIntegerForKey` access Activity SharedPreferences
+`Cocos2dxPrefsFile`. Guest JNI slots for the observed static object and int
+methods now forward to the diagnostic Activity's real preference store.
+Emulator traces confirmed guest reads of character skills, dungeon settings,
+and other keys, followed by verified `atoi` conversions.
+
+The original APK contains `assets/globals.xml`, whereas the separate
+version-16 OBB contains no globals.xml. The diagnostic APK builder now stages
+the original base APK's 93 asset files from the caller-provided APK at build
+time. These assets are NOT checked into Git. Staging assets does not by itself
+establish that Cocos can access them: a native asset-manager/resource lookup
+bridge remains necessary. The guest's own `getCurrentLanguage` method was
+checked in DEX and returns `Locale.getDefault().getLanguage()`, reproduced by
+the diagnostic host. No game frame, sound, input, or production-wrapper
+playability is claimed. Stop reasons remain explicit in `cocos-probe.log`.
+### Further observed Android checkpoints
+The x86_64 Android diagnostic successfully performed `getIntegerForKey`,
+returned Android locale language `en` from the game's own
+`getCurrentLanguage()` JNI entry, formatted the missing English locale
+resource warning with `vsnprintf`, and then executed an actual guest
+`gettimeofday` bridge. The ARM32 timeval fields are explicitly checked
+32-bit seconds/microseconds, and unsupported timezone pointers fail closed.
+`org/cocos2dx/lib/Cocos2dxRenderer` class identification also passed;
+the next observed (not yet handled) JNI method is
+`setAnimationInterval(D)V`. Both Android native ABIs compiled and the
+signed diagnostic APK was reinstalled and exercised. Original asset files
+are now packaged in the local debug APK, but the native asset lookup is
+still missing, so `globals.xml` and `locale/english.txt` loading are not
+claimed working. This does not establish a playable game or nativeRender.

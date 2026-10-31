@@ -1,3 +1,4 @@
+#include "pv7_arm32_format.h"
 #include "../../../compat_modules/cocos2dx/cocos2dx_guest_jni_arrays.h"
 #include "../../../compat_modules/cocos2dx/cocos2dx_jni_refs.h"
 #include "../../../compat_modules/cocos2dx/cocos2dx_guest_math.h"
@@ -12,6 +13,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -115,7 +117,7 @@ static bool RenderAndroidBitmap(
 
 
 #if defined(PV7_COCOS_JNI_RUNNER)
-static bool ResolveAndroidExpansionPath(std::string& path, std::string& error) {
+static bool ResolveAndroidStaticString(const char* methodName, std::string& path, std::string& error) {
     JNIEnv* env = g_pv7_cocos_env;
     if (!env) { error = "missing Android JNI VM"; return false; }
     jclass cls = env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
@@ -124,7 +126,7 @@ static bool ResolveAndroidExpansionPath(std::string& path, std::string& error) {
         error = "Cocos probe Java activity class missing"; return false;
     }
     jmethodID method = env->GetStaticMethodID(
-        cls, "resolveExpansionPath", "()Ljava/lang/String;");
+        cls, methodName, "()Ljava/lang/String;");
     if (env->ExceptionCheck() || !method) {
         env->ExceptionDescribe(); env->ExceptionClear();
         env->DeleteLocalRef(cls);
@@ -148,6 +150,9 @@ static bool ResolveAndroidExpansionPath(std::string& path, std::string& error) {
     env->DeleteLocalRef(value);
     env->DeleteLocalRef(cls);
     return true;
+}
+static bool ResolveAndroidExpansionPath(std::string& path, std::string& error) {
+    return ResolveAndroidStaticString("resolveExpansionPath",path,error);
 }
 #endif
 // PV7 development-only execution probe: the first actual ARM instructions
@@ -315,6 +320,8 @@ public:
                 std::cout<<"JNI_GAME_CLASS_FOUND "<<name<<"\n";
                 return;
             }
+            if (name == "org/cocos2dx/lib/Cocos2dxHelper") { constexpr std::uint32_t kHelper=0xc050u; refs_.RegisterLocal(kHelper,pv7::compat::cocos2dx::JniRefKind::Class); regs[0]=kHelper; std::cout << "JNI_HELPER_CLASS_FOUND " << name << "\n"; return; }
+            if (name == "org/cocos2dx/lib/Cocos2dxRenderer") { constexpr std::uint32_t kRenderer=0xc090u; refs_.RegisterLocal(kRenderer,pv7::compat::cocos2dx::JniRefKind::Class); regs[0]=kRenderer; std::cout << "JNI_RENDERER_CLASS_FOUND " << name << "\n"; return; }
             if (name != "org/cocos2dx/lib/Cocos2dxBitmap") {
                 Fault(regs[15], "JNI_FindClass_unknown:" + name);
                 return;
@@ -357,22 +364,157 @@ public:
                 regs[0] = kExpansionMethod;
                 std::cout << "JNI_METHOD_IDENTIFIED getAPKExpansionFileName\n";
                 return;
+            }            if (refs_.Resolve(classRef)==0xc050u && name=="getStringForKey" &&
+                sig=="(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;") {
+                regs[0]=0xc060u;
+                std::cout<<"JNI_METHOD_IDENTIFIED getStringForKey\n";
+                return;
+            }            if (refs_.Resolve(classRef)==0xc050u && name=="getIntegerForKey" &&
+                sig=="(Ljava/lang/String;I)I") {
+                regs[0]=0xc070u;
+                std::cout<<"JNI_METHOD_IDENTIFIED getIntegerForKey\n";
+                return;
+            }            if (refs_.Resolve(classRef)==0xc030u && name=="getCurrentLanguage" &&
+                sig=="()Ljava/lang/String;") {
+                regs[0]=0xc080u;
+                std::cout<<"JNI_METHOD_IDENTIFIED getCurrentLanguage\n";
+                return;
             }            Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
             return;
         }
 
-        // The original version-16 Best Park Java method returns the absolute
+        if (svc>=kMissingJniSvc+114u && svc<=kMissingJniSvc+116u &&
+            refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc060u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            const auto method=svc-kMissingJniSvc;
+            const auto va=regs[3];
+            std::uint32_t keyRef=0, defRef=0;
+            if (method==114u) {
+                if (!Fits(regs[13],4,mem_.size())) {
+                    Fault(regs[15],"JNI_Pref_stack_out_of_range");return;
+                }
+                keyRef=regs[3]; defRef=Read<std::uint32_t>(regs[13]);
+            } else {
+                const auto stride=method==116u ? 8u : 4u;
+                if (!Fits(va,stride+4u,mem_.size())) {
+                    Fault(regs[15],"JNI_Pref_va_list_out_of_range");return;
+                }
+                keyRef=Read<std::uint32_t>(va);
+                defRef=Read<std::uint32_t>(va+stride);
+            }
+            auto key=keyRef ? refs_.Resolve(keyRef) : std::optional<std::uint32_t>{};
+            auto def=defRef ? refs_.Resolve(defRef) : std::optional<std::uint32_t>{};
+            if ((keyRef&&(!key||!guest_strings_.count(*key))) ||
+                (defRef&&(!def||!guest_strings_.count(*def)))) {
+                Fault(regs[15],"JNI_Pref_invalid_jstring_refs");return;
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID getter=cls ? env->GetStaticMethodID(cls,"readCocosPreference",
+                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;") : nullptr;
+            if (env->ExceptionCheck()||!getter) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if (cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_Pref_host_method_missing");return;
+            }
+            jstring jkey=key ? env->NewStringUTF(guest_strings_.at(*key).c_str()) : nullptr;
+            jstring jdef=def ? env->NewStringUTF(guest_strings_.at(*def).c_str()) : nullptr;
+            jstring result=static_cast<jstring>(env->CallStaticObjectMethod(
+                cls,getter,jkey,jdef));
+            if (jkey)env->DeleteLocalRef(jkey);
+            if (jdef)env->DeleteLocalRef(jdef);
+            env->DeleteLocalRef(cls);
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if (result)env->DeleteLocalRef(result);
+                Fault(regs[15],"JNI_Pref_java_exception");return;
+            }
+            if (!result) { regs[0]=0;return; }
+            const char* chars=env->GetStringUTFChars(result,nullptr);
+            if (env->ExceptionCheck()||!chars) {
+                env->ExceptionDescribe();env->ExceptionClear();env->DeleteLocalRef(result);
+                Fault(regs[15],"JNI_Pref_string_extract_failed");return;
+            }
+            std::string value(chars);
+            env->ReleaseStringUTFChars(result,chars);
+            env->DeleteLocalRef(result);
+            if (value.size()>65536u || next_jstring_>0xfffcu) {
+                Fault(regs[15],"JNI_Pref_result_too_large");return;
+            }
+            const auto handle=next_jstring_;next_jstring_+=4;
+            guest_strings_.emplace(handle,value);
+            if (!refs_.RegisterLocal(handle,pv7::compat::cocos2dx::JniRefKind::String)) {
+                Fault(regs[15],"JNI_Pref_string_register_failed");return;
+            }
+            regs[0]=handle;
+            std::cout<<"JNI_PREF_STRING_OK method="<<method<<" key="
+                     <<(key?guest_strings_.at(*key):"<null>")
+                     <<" bytes="<<value.size()<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_Pref_requires_Android_Activity");return;
+#endif
+        }        if (svc>=kMissingJniSvc+129u && svc<=kMissingJniSvc+131u &&
+            refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc070u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            const auto slot=svc-kMissingJniSvc;
+            const auto va=regs[3];
+            std::uint32_t keyRef=0, fallback=0;
+            if (slot==129u) {
+                if (!Fits(regs[13],4,mem_.size())) {
+                    Fault(regs[15],"JNI_PrefInt_stack_invalid");return;
+                }
+                keyRef=regs[3];fallback=Read<std::uint32_t>(regs[13]);
+            } else {
+                const auto stride=slot==131u ? 8u : 4u;
+                if (!Fits(va,stride+4,mem_.size())) {
+                    Fault(regs[15],"JNI_PrefInt_args_invalid");return;
+                }
+                keyRef=Read<std::uint32_t>(va);
+                fallback=Read<std::uint32_t>(va+stride);
+            }
+            auto key=keyRef ? refs_.Resolve(keyRef) : std::optional<std::uint32_t>{};
+            if (keyRef && (!key || !guest_strings_.count(*key))) {
+                Fault(regs[15],"JNI_PrefInt_key_invalid");return;
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID method=cls ? env->GetStaticMethodID(cls,"readCocosInteger",
+                "(Ljava/lang/String;I)I") : nullptr;
+            if (env->ExceptionCheck()||!method) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_PrefInt_java_method_missing");return;
+            }
+            jstring jkey=key ? env->NewStringUTF(guest_strings_.at(*key).c_str()) : nullptr;
+            const jint value=env->CallStaticIntMethod(cls,method,jkey,
+                static_cast<jint>(fallback));
+            if(jkey)env->DeleteLocalRef(jkey);
+            env->DeleteLocalRef(cls);
+            if(env->ExceptionCheck()) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_PrefInt_java_exception");return;
+            }
+            regs[0]=static_cast<std::uint32_t>(value);
+            std::cout<<"JNI_PREF_INTEGER_OK key="
+                     <<(key?guest_strings_.at(*key):"<null>")
+                     <<" value="<<value<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_PrefInt_requires_Android_Activity");return;
+#endif
+        }        // The original version-16 Best Park Java method returns the absolute
         // path to its main expansion file iff it exists, or "" otherwise.
         // Resolve it from the diagnostic Activity's own OBB directory so the
         // guest and host do not need identical Android package identifiers.
         if (svc >= kMissingJniSvc + 114u && svc <= kMissingJniSvc + 116u) {
             if (refs_.Resolve(regs[1]) != 0x0000c030u ||
-                regs[2] != 0x0000c040u) {
+                (regs[2] != 0x0000c040u && regs[2] != 0x0000c080u)) {
                 Fault(regs[15], "JNI_CallStaticObjectMethod_unknown"); return;
             }
 #if defined(PV7_COCOS_JNI_RUNNER)
             std::string path, resolver_error;
-            if (!ResolveAndroidExpansionPath(path, resolver_error)) {
+            if (!ResolveAndroidStaticString(regs[2]==0xc080u ? "getGuestLanguage" : "resolveExpansionPath", path, resolver_error)) {
                 Fault(regs[15], "JNI_ExpansionResolver:" + resolver_error); return;
             }
             if (path.size() >= 4096 || next_jstring_ > 0x0000fffcu) {
@@ -385,7 +527,7 @@ public:
                 Fault(regs[15], "JNI_ExpansionString_register_failed"); return;
             }
             regs[0] = handle;
-            std::cout << "COCOS_EXPANSION_NAME_RETURNED bytes=" << path.size()
+            std::cout << (regs[2]==0xc080u ? "COCOS_LANGUAGE_RETURNED bytes=" : "COCOS_EXPANSION_NAME_RETURNED bytes=") << path.size()
                       << " path=" << path << "\n";
             return;
 #else
@@ -589,7 +731,99 @@ public:
                 return;
             }
             if(pv7::compat::cocos2dx::DispatchGuestMath(item.name,regs)) return;
-            if (item.name=="fopen" || item.name=="fopen64") {
+            if (item.name=="sprintf" || item.name=="snprintf" ||
+                item.name=="vsnprintf") {
+                const bool unbounded=item.name=="sprintf";
+                const auto dest=regs[0];
+                const auto cap=unbounded ? 0u : regs[1];
+                const auto fmt=unbounded ? regs[1] : regs[2];
+                if (cap>65536u || (cap && !Fits(dest,cap,mem_.size()))) {
+                    Fault(regs[15],"FORMAT32_INVALID_DESTINATION");return;
+                }
+                std::size_t argumentIndex=0;
+                auto nextArgument=[&]() -> std::optional<std::uint32_t> {
+                    if (argumentIndex>=64) return std::nullopt;
+                    const auto index=argumentIndex++;
+                    if (item.name=="sprintf" && index<2) return regs[2+index];
+                    if (item.name=="snprintf" && index==0) return regs[3];
+                    std::uint64_t address;
+                    if (item.name=="vsnprintf") {
+                        address=static_cast<std::uint64_t>(regs[3])+index*4u;
+                    } else {
+                        const auto stackIndex=item.name=="sprintf" ? index-2 : index-1;
+                        address=static_cast<std::uint64_t>(regs[13])+stackIndex*4u;
+                    }
+                    if (address>mem_.size() || !Fits(static_cast<std::size_t>(address),4,mem_.size()))
+                        return std::nullopt;
+                    return Read<std::uint32_t>(static_cast<std::uint32_t>(address));
+                };
+                std::string rendered, formatError;
+                if (!pv7::cocos_probe::FormatGuest32(mem_,fmt,nextArgument,rendered,formatError)) {
+                    Fault(regs[15],"FORMAT32_UNSUPPORTED:"+formatError);return;
+                }
+                const auto bytes=unbounded ? rendered.size()+1 : cap;
+                if (bytes && !Fits(dest,bytes,mem_.size())) {
+                    Fault(regs[15],"FORMAT32_OUTPUT_INVALID");return;
+                }
+                if (bytes) {
+                    const auto count=std::min<std::size_t>(rendered.size(),bytes-1);
+                    std::memmove(mem_.data()+dest,rendered.data(),count);
+                    mem_[dest+count]=0;
+                }
+                regs[0]=static_cast<std::uint32_t>(rendered.size());
+                std::cout<<"COCOS_FORMAT32_OK name="<<item.name
+                         <<" result_bytes="<<rendered.size()<<"\n";
+                return;
+            }            if (item.name=="atoi") {
+                std::string input,error;
+                if (!pv7::cocos_probe::ReadGuestText(mem_,regs[0],input,error)) {
+                    Fault(regs[15],"ATOI_GUEST_STRING_INVALID:"+error);return;
+                }
+                std::size_t i=0;
+                while(i<input.size() && (input[i]==' ' || input[i]=='\t' ||
+                    input[i]=='\n' || input[i]=='\r' ||
+                    input[i]=='\f' || input[i]=='\v')) ++i;
+                bool negative=false;
+                if(i<input.size() && (input[i]=='+' || input[i]=='-'))
+                    negative=input[i++]=='-';
+                std::uint64_t value=0;
+                const auto first=i;
+                const auto limit=negative ? 2147483648ull : 2147483647ull;
+                while(i<input.size() && input[i]>='0' && input[i]<='9') {
+                    const auto digit=static_cast<unsigned>(input[i++]-'0');
+                    if(value>(limit-digit)/10u) {
+                        Fault(regs[15],"ATOI_GUEST_INT32_OVERFLOW");return;
+                    }
+                    value=value*10u+digit;
+                }
+                regs[0]=first==i ? 0u : static_cast<std::uint32_t>(
+                    negative ? -static_cast<std::int64_t>(value) :
+                               static_cast<std::int64_t>(value));
+                std::cout<<"COCOS_ATOI_OK value="<<static_cast<std::int32_t>(regs[0])<<"\n";
+                return;
+            }            if (item.name=="gettimeofday") {
+                // Android ARM32 EABI timeval: two signed 32-bit fields.
+                const auto destination=regs[0], timezone=regs[1];
+                if (!destination || timezone || !Fits(destination,8,mem_.size())) {
+                    Fault(regs[15],"GETTIMEOFDAY_GUEST_LAYOUT_INVALID");return;
+                }
+                const auto micros=std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                const auto seconds=micros/1000000;
+                const auto fraction=micros%1000000;
+                if (seconds>2147483647LL || seconds<0 || fraction<0) {
+                    Fault(regs[15],"GETTIMEOFDAY_TIME32_OVERFLOW");return;
+                }
+                if (!Put32(mem_,destination,static_cast<std::uint32_t>(seconds)) ||
+                    !Put32(mem_,destination+4,static_cast<std::uint32_t>(fraction))) {
+                    Fault(regs[15],"GETTIMEOFDAY_WRITE_FAILED");return;
+                }
+                regs[0]=0;
+                static unsigned timeCalls=0;
+                if (++timeCalls<=4 || timeCalls%1000u==0)
+                    std::cout<<"COCOS_GUEST_GETTIMEOFDAY_OK count="<<timeCalls<<"\n";
+                return;
+            }            if (item.name=="fopen" || item.name=="fopen64") {
                 const auto filename=CString(mem_,regs[0]);
                 const auto mode=CString(mem_,regs[1]);
                 std::cout<<"COCOS_FILE_REQUEST name="<<filename

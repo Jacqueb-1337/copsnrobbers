@@ -38,7 +38,28 @@ try {
     if (-not $entry) { throw 'Best Park APK has no ARM32 libgame.so' }
     [IO.Compression.ZipFileExtensions]::ExtractToFile($entry,
         (Join-Path $stage 'assets\guest\libgame.so'), $true)
-} finally { $zip.Dispose() }
+    # Populate the diagnostic APK with the original base-APK assets. Cocos
+    # expects globals.xml and other resources via Android's asset manager.
+    # Extract only ordinary relative assets; never commit these files.
+    $assetsRoot = [IO.Path]::GetFullPath((Join-Path $stage 'assets')) + [IO.Path]::DirectorySeparatorChar
+    $assetCount = 0
+    foreach ($asset in $zip.Entries) {
+        if (-not $asset.FullName.StartsWith('assets/', [StringComparison]::Ordinal) -or
+            [string]::IsNullOrEmpty($asset.Name)) { continue }
+        $relative = $asset.FullName.Substring(7)
+        if ($relative.StartsWith('guest/', [StringComparison]::Ordinal) -or
+            ($relative.Split('/') -contains '..')) {
+            throw "Unsafe guest asset entry: $relative"
+        }
+        $dest = [IO.Path]::GetFullPath((Join-Path $stage ($asset.FullName.Replace('/', '\'))))
+        if (-not $dest.StartsWith($assetsRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Guest asset escapes stage: $relative"
+        }
+        New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($dest)) | Out-Null
+        [IO.Compression.ZipFileExtensions]::ExtractToFile($asset, $dest, $true)
+        ++$assetCount
+    }
+    Write-Output "ORIGINAL_APK_ASSETS_STAGED=$assetCount"} finally { $zip.Dispose() }
 
 $base = Join-Path $OutDir 'base-unsigned.apk'
 & (Join-Path $bt 'aapt2.exe') link -o $base -I $androidJar --manifest (Join-Path $root 'devtools\cocos_probe\android\AndroidManifest.xml') --min-sdk-version 26 --target-sdk-version 28

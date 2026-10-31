@@ -12,7 +12,22 @@ import java.io.InputStream;
 public final class CocosProbeActivity extends Activity {
     private static native int nativeRun(String guestPath, String logPath);
     private static final String TAG = "PV7CocosProbe";
-    private TextView status;
+    private TextView status;    private static volatile CocosProbeActivity active;
+    public static String getGuestLanguage() { return java.util.Locale.getDefault().getLanguage(); }
+
+    public static int readCocosInteger(String key, int fallback) {
+        CocosProbeActivity owner=active;
+        if (owner==null) throw new IllegalStateException("Activity context not initialized");
+        return owner.getSharedPreferences("Cocos2dxPrefsFile", MODE_PRIVATE)
+                .getInt(key, fallback);
+    }
+
+    public static String readCocosPreference(String key, String fallback) {
+        CocosProbeActivity owner=active;
+        if (owner==null) throw new IllegalStateException("Activity context not initialized");
+        return owner.getSharedPreferences("Cocos2dxPrefsFile", MODE_PRIVATE)
+                .getString(key, fallback);
+    }
     private static volatile String expansionPath = "";
 
     /** Equivalent to the original game version-16 expansion lookup, with
@@ -24,6 +39,7 @@ public final class CocosProbeActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        active=this;
         status = new TextView(this);
         status.setText("Best Park guest ARM32 bitmap diagnostic running...");
         status.setTextSize(18);
@@ -46,7 +62,8 @@ public final class CocosProbeActivity extends Activity {
             File expansion = new File(getObbDir(),
                     "main.16.com.turner.bestparkintheuniverse.obb");
             expansionPath = expansion.isFile() ? expansion.getAbsolutePath() : "";
-            Log.i(TAG, "Original version-16 OBB exists=" + expansion.isFile());            File report = new File(getFilesDir(), "cocos-probe.log");
+            Log.i(TAG, "Original version-16 OBB exists=" + expansion.isFile());
+            File report = new File(getFilesDir(), "cocos-probe.log");
             System.loadLibrary("pv7cocosprobe");
             Log.i(TAG, "Invoking original Best Park ARM32 guest through Android JNI");
             int exit = nativeRun(guest.getAbsolutePath(), report.getAbsolutePath());
