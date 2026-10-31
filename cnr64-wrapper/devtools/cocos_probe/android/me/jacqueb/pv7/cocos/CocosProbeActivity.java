@@ -18,7 +18,7 @@ import java.io.InputStream;
 
 /** Local-only Android Activity, not part of the published PV7 wrapper. */
 public final class CocosProbeActivity extends Activity {
-    private static native int nativeRun(String guestPath, String logPath, Surface surface);
+    private static native int nativeRun(String guestPath, String logPath, Surface surface, int maxFrames);
     private static native void nativeCancel();
     private static native void nativeQueueTouch(int phase, int pointer, float x, float y);
     private static final String TAG = "PV7CocosProbe";
@@ -251,6 +251,12 @@ public final class CocosProbeActivity extends Activity {
         }
     }
 
+    @Override public void onBackPressed() {
+        // Signal the guest worker before Android invalidates the EGL window.
+        nativeCancel();
+        super.onBackPressed();
+    }
+
     @Override protected void onDestroy() {
         surfaceLive = false;
         nativeCancel();
@@ -407,16 +413,22 @@ public final class CocosProbeActivity extends Activity {
             if (kind == MotionEvent.ACTION_DOWN || kind == MotionEvent.ACTION_POINTER_DOWN)
                 phase = 0;
             else if (kind == MotionEvent.ACTION_UP ||
-                     kind == MotionEvent.ACTION_POINTER_UP ||
-                     kind == MotionEvent.ACTION_CANCEL)
+                     kind == MotionEvent.ACTION_POINTER_UP)
                 phase = 1;
-            else return true; // Movement/arrays require a separate verified JNI bridge.
-            int index = event.getActionIndex();
-            float x = Math.max(0, Math.min(480,
-                    event.getX(index) * 480.0f / view.getWidth()));
-            float y = Math.max(0, Math.min(320,
-                    event.getY(index) * 320.0f / view.getHeight()));
-            nativeQueueTouch(phase, event.getPointerId(index), x, y);
+            else if (kind == MotionEvent.ACTION_MOVE)
+                phase = 2;
+            else if (kind == MotionEvent.ACTION_CANCEL)
+                phase = 3;
+            else return true;
+            int first = phase >= 2 ? 0 : event.getActionIndex();
+            int last = phase >= 2 ? event.getPointerCount() : first + 1;
+            for (int index = first; index < last; ++index) {
+                float x = Math.max(0, Math.min(480,
+                        event.getX(index) * 480.0f / view.getWidth()));
+                float y = Math.max(0, Math.min(320,
+                        event.getY(index) * 320.0f / view.getHeight()));
+                nativeQueueTouch(phase, event.getPointerId(index), x, y);
+            }
             return true;
         });
         gameSurface.getHolder().setFixedSize(480, 320);
@@ -478,7 +490,11 @@ public final class CocosProbeActivity extends Activity {
             if (!surfaceLive || !surface.isValid())
                 throw new IllegalStateException("Android game surface was destroyed");
             Log.i(TAG, "Invoking original Best Park ARM32 guest with visible SurfaceView");
-            int exit = nativeRun(guest.getAbsolutePath(), report.getAbsolutePath(), surface);
+            // Default is a real continuous render loop. Tests can pass
+            // --ei pv7.maxFrames 900 to stop at a reproducible checkpoint.
+            int frameLimit = Math.max(0, Math.min(36000,
+                    getIntent().getIntExtra("pv7.maxFrames", 0)));
+            int exit = nativeRun(guest.getAbsolutePath(), report.getAbsolutePath(), surface, frameLimit);
             Log.i(TAG, "Guest diagnostic exited=" + exit + " report=" + report);
             if (exit != 0 && surfaceLive)
                 runOnUiThread(() -> {

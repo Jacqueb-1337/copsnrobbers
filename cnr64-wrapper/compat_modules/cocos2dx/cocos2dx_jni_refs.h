@@ -4,7 +4,7 @@
 #include <optional>
 #include <string>
 namespace pv7::compat::cocos2dx {
-enum class JniRefKind { Class, String, ByteArray };
+enum class JniRefKind { Class, String, ByteArray, IntArray, FloatArray };
 enum class JniRefScope { Local, Global };
 class GuestJniRefs {
 public:

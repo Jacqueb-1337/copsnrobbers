@@ -597,3 +597,62 @@ PLAY is now verified to launch an original cutscene, but **interactive
 gameplay is not yet verified**. Touch move, multi-pointer arrays, true
 hardware ARM64 behavior and a continuous non-diagnostic render loop
 remain unsupported or unverified.
+
+## October 31: continuous EGL render loop and native touch movement
+
+The Android-only diagnostic `nativeRun` now takes a configurable frame limit:
+`adb shell am start -n me.jacqueb.pv7.cocos/.CocosProbeActivity --ei pv7.maxFrames 1200`
+selects a bounded test; a normal launch uses zero, meaning render until the
+Android `SurfaceView` is destroyed. The loop uses a monotonic clock target
+of 33,333 microseconds per frame, and resets behind-schedule frame deadlines
+rather than trying to catch up by spinning. Native EGL cleanup, original audio
+cleanup, and between-frame cancellation are preserved. The host-only probe
+still has a 240-frame safety limit.
+
+The original APK's `Cocos2dxRenderer.handleActionMove` and
+`handleActionCancel` call `nativeTouchesMove(int[],float[],float[])`
+and `nativeTouchesCancel(int[],float[],float[])`. The experimental
+Dynarmic worker now stages JNI int/float arrays in mapped guest memory,
+including real array lengths, element pointers, region reads and releases,
+and calls those exact exported original ARM32 functions. Android gesture
+events are delivered to the same bounded queue as touch-begin/end, including
+the pointer IDs and per-event coordinates. For this first implementation,
+movement batches are translated as individual pointer samples rather than
+a combined multi-pointer array; simultaneous multitouch gameplay remains
+unverified.
+
+A signed emulator build completed 1,200 consecutive original guest render
+calls after a scripted Android swipe, with original `nativeTouchesBegin`,
+`nativeTouchesMove` and `nativeTouchesEnd` all returning. The extended
+frame-log validator passed with `rendered=1200 captured=26
+distinct_frame_hashes=11`, requiring real Android EGL frames and touch
+movement. Original menu-to-cutscene resources/audio continued to execute.
+
+The 1,200-frame diagnostic originally produced a 31 MB trace due to
+successful GLES draw-operation logging. A filtered 600-frame rerun passed
+the EGL/render regression validator and reduced this to 1.2 MB. Inspection
+showed `COCOS_ATOI_OK` alone represented 48,472 lines and 1.1 MB of the
+remaining trace, so those successful parser calls and repetitive progress
+samples are now suppressed as well. In a later continuous run, the log
+measured only about 81 KB after 377 frames, and the native runner no
+longer writes unbounded PPM images unless frame-limited test mode is used.
+All original assets, screen captures and OBB data remain local and out
+of Git.
+
+A continuous-run exit test reached frame 300 but exposed an Android
+surface-destruction race: pressing Back invalidated the window before
+`eglSwapBuffers`, producing `EGL_BAD_SURFACE` (12301). The Activity now
+signals native cancellation *before* its Back handler destroys the
+surface, and the JNI loop recognizes an explicitly canceled presentation
+as a normal stop rather than an emulation failure. The repeated emulator
+test reached the original frame-300 presentation checkpoint, then pressed
+Android Back and finished with:
+```text
+COCOS_RENDER_MODE continuous max_frames=0
+COCOS_RUNTIME_STOPPED_BY_SURFACE at_frame=357
+ANDROID_JAVA_PROBE_EXIT=0
+```
+No `COCOS_ONSCREEN_PRESENT_FAILED` line occurred. The final continuous
+run's log was only around 81 KB, with no recurring framebuffer PPM files.
+This verifies activity-initiated shutdown in the x86 emulator, but not
+long-duration stability, gameplay input, or real physical ARM64 behavior.

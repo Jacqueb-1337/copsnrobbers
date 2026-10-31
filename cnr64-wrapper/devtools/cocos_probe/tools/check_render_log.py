@@ -21,7 +21,8 @@ PRESENTED = re.compile(r"COCOS_ONSCREEN_FRAME_PRESENTED frame=(\d+)")
 
 
 def validate(log: str, *, require_onscreen: bool = False,
-             require_touch: bool = False) -> tuple[bool, str]:
+             require_touch: bool = False,
+             require_move: bool = False) -> tuple[bool, str]:
     if "COCOS_NATIVE_INIT_RETURNED" not in log:
         return False, "guest nativeInit did not return"
     if "COCOS_NATIVE_RENDER_STOP" in log:
@@ -31,11 +32,16 @@ def validate(log: str, *, require_onscreen: bool = False,
     if "COCOS_FRAME_READBACK_FAILED" in log or "COCOS_FRAME_SAVE_FAILED" in log:
         return False, "framebuffer capture or file save failed"
     frames = [int(f) for f in RETURNED.findall(log)]
-    if not frames or frames != list(range(1, len(frames) + 1)):
-        return False, "render returns are missing, duplicated, or out of order"
     done = SEQUENCE.findall(log)
-    if len(done) != 1 or int(done[0]) != len(frames):
-        return False, f"render sequence incomplete: {len(frames)} returns"
+    if len(done) != 1:
+        return False, "bounded render sequence did not complete"
+    count = int(done[0])
+    # Log every frame through 240, then sample every 300 frames to keep
+    # continuous mode from writing millions of lines over a long session.
+    expected_returns = list(range(1, min(240, count) + 1))
+    expected_returns += list(range(300, count + 1, 300))
+    if not frames or frames != expected_returns:
+        return False, "render returns are missing, duplicated, or out of order"
     readbacks = READBACK.findall(log)
     if not readbacks:
         return False, "no GLES framebuffer pixels read"
@@ -55,7 +61,8 @@ def validate(log: str, *, require_onscreen: bool = False,
         if "COCOS_ONSCREEN_PRESENT_FAILED" in log:
             return False, "Android window framebuffer present failed"
         actual = [int(frame) for frame in PRESENTED.findall(log)]
-        expected = [1] + list(range(10, len(frames) + 1, 10))
+        expected = [1] + list(range(10, min(count, 240) + 1, 10))
+        expected += list(range(300, count + 1, 300))
         if actual != expected:
             return False, "window frame presentation checkpoints incomplete"
     if require_touch:
@@ -63,10 +70,27 @@ def validate(log: str, *, require_onscreen: bool = False,
         ends = log.count("COCOS_GUEST_TOUCH_RETURNED phase=1")
         if not begins or not ends or ends > begins or "COCOS_GUEST_TOUCH_FAILED" in log:
             return False, "guest touch begin/end callbacks were not verified"
+    if require_move and "COCOS_GUEST_TOUCH_RETURNED phase=2" not in log:
+        return False, "original ARM32 touch-move JNI callback never returned"
     return True, (
-        f"rendered={len(frames)} captured={len(readbacks)} "
+        f"rendered={count} captured={len(readbacks)} "
         f"distinct_frame_hashes={len(set(hashes))}"
     )
+
+
+def validate_clean_shutdown(log: str) -> tuple[bool, str]:
+    if "COCOS_RENDER_MODE continuous max_frames=0" not in log:
+        return False, "diagnostic was not launched in continuous mode"
+    match = re.search(r"COCOS_RUNTIME_STOPPED_BY_SURFACE at_frame=(\d+)", log)
+    if not match:
+        return False, "guest runtime did not acknowledge Android surface cancellation"
+    if "COCOS_ONSCREEN_PRESENT_FAILED" in log or "COCOS_NATIVE_RENDER_STOP" in log:
+        return False, "rendering or EGL failed during activity shutdown"
+    if "ANDROID_JAVA_PROBE_EXIT=0" not in log:
+        return False, "guest runtime did not terminate cleanly"
+    if not PRESENTED.search(log) or not READBACK.search(log):
+        return False, "no verified visible gameplay frames prior to shutdown"
+    return True, f"continuous runtime cleanly stopped at frame={match.group(1)}"
 
 
 def main() -> int:
@@ -74,10 +98,18 @@ def main() -> int:
     parser.add_argument("log", type=Path)
     parser.add_argument("--require-onscreen", action="store_true")
     parser.add_argument("--require-touch", action="store_true")
+    parser.add_argument("--require-move", action="store_true")
+    parser.add_argument("--require-clean-stop", action="store_true")
     args = parser.parse_args()
-    ok, message = validate(
-        args.log.read_text(encoding="utf-8", errors="replace"),
-        require_onscreen=args.require_onscreen, require_touch=args.require_touch)
+    log = args.log.read_text(encoding="utf-8", errors="replace")
+    if args.require_clean_stop:
+        ok, message = validate_clean_shutdown(log)
+    else:
+        ok, message = validate(
+            log,
+            require_onscreen=args.require_onscreen,
+            require_touch=args.require_touch,
+            require_move=args.require_move)
     print(("PASS: " if ok else "FAIL: ") + message)
     return 0 if ok else 1
 
