@@ -704,3 +704,47 @@ is another separate path through `onEat`. This narrows the next diagnostic
 to observing original animation-completion and scene-index transitions.
 It does not yet prove a missing callback or justify forcing an index change.
 The extracted binary and screenshots remain outside the Git repository.
+
+## October 31: original ARM32 cutscene entry tracing
+
+The experimental Cocos diagnostic now instruments four exact Thumb-mode
+symbols from Best Park's original `libgame.so`: `Cutscene::showNextScene`,
+`Cutscene::onAnimationCompleted(int)`, `Cutscene::setAndPlayCurrent`,
+and `Cutscene::onEat`. Each instrumentation point first checks the
+original symbol's Thumb bit and exact first 16-bit PUSH instruction, then
+replaces only that instruction with a Thumb SVC. In the Dynarmic callback,
+the original register-save instruction is emulated in guest memory before
+execution continues, without changing the scene index, animation ID or
+input arguments. The probes exist only under `PV7_COCOS_JNI_RUNNER`; the
+host-only and production wrapper paths are unchanged.
+
+After restarting the emulator, Best Park's required version-16 OBB was
+missing, which initially caused blank frames despite a successful native
+init. Restoring the exact original 370 MB expansion file into the
+experimental wrapper's Android OBB directory restored actual rendering.
+This resource dependency was verified before interpreting the trace.
+
+With the original resources present, a first traced run observed the
+original `onAnimationCompleted` and `showNextScene` calls advancing a
+single Cutscene object from scene index 1 to index 2, and an input-driven
+transition from index 2 to index 3. This proves the animation completion
+callback is not globally missing.
+
+A second probe included the original `onEat` handler, and recorded the
+five stored autoplay animation hashes in the original guest object:
+`bd59b761`, `6136920c`, `3764690b`, `f4bc2d79`, and `c698d7bb`.
+The `onEat` callback was entered while the scene index was 2, but that
+particular invocation did not call `showNextScene`; it is not proof the
+method is broken, since the game's own event/animation conditions determine
+whether to advance. The run completed 1,800 original render frames with
+exit code zero. The extended regression validator passed with
+`--require-onscreen --require-touch --require-audio-stop
+--require-cutscene-trace`: `rendered=1800 captured=27
+distinct_frame_hashes=8`. Original artwork from the Benson panel remained
+visible; gameplay was not reached.
+
+The remaining investigation is to correlate scene-specific animation IDs
+and `onEat` event routing with the original resource metadata and gesture
+timing. Do not bypass scene transitions or inject synthetic completion
+signals without establishing the missing behavior. Private OBB, extracted
+original ELF, framebuffer readbacks and screenshots remain outside Git.

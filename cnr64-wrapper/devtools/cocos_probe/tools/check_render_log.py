@@ -23,7 +23,8 @@ PRESENTED = re.compile(r"COCOS_ONSCREEN_FRAME_PRESENTED frame=(\d+)")
 def validate(log: str, *, require_onscreen: bool = False,
              require_touch: bool = False,
              require_move: bool = False,
-             require_audio_stop: bool = False) -> tuple[bool, str]:
+             require_audio_stop: bool = False,
+             require_cutscene_trace: bool = False) -> tuple[bool, str]:
     if "COCOS_NATIVE_INIT_RETURNED" not in log:
         return False, "guest nativeInit did not return"
     if "COCOS_NATIVE_RENDER_STOP" in log:
@@ -79,6 +80,25 @@ def validate(log: str, *, require_onscreen: bool = False,
         "JNI_StopEffect_" in log
     ):
         return False, "original Cocos2dxHelper.stopEffect/SoundPool callback failed"
+    if require_cutscene_trace:
+        for name in ("showNextScene", "onAnimationCompleted",
+                     "setAndPlayCurrent", "onEat"):
+            if f"COCOS_CUTSCENE_TRACE_INSTALLED function={name}" not in log:
+                return False, f"original cutscene trace not installed: {name}"
+        for name in ("showNextScene", "onAnimationCompleted",
+                     "setAndPlayCurrent", "onEat"):
+            if f"COCOS_CUTSCENE_ENTER function={name}" not in log:
+                return False, f"original cutscene entry not observed: {name}"
+        indices = {int(index) for index in re.findall(
+            r"COCOS_CUTSCENE_ENTER function=setAndPlayCurrent "
+            r"this=0x[0-9a-fA-F]+ scene_index=(\d+)", log
+        )}
+        if not {1, 2}.issubset(indices):
+            return False, f"original cutscene never advanced to scene 2: {indices}"
+        if "COCOS_CUTSCENE_TRACE_OPCODE_MISMATCH" in log or (
+            "COCOS_CUTSCENE_TRACE_BAD_THIS" in log
+        ):
+            return False, "cutscene probe encountered unexpected guest state"
     return True, (
         f"rendered={count} captured={len(readbacks)} "
         f"distinct_frame_hashes={len(set(hashes))}"
@@ -107,6 +127,7 @@ def main() -> int:
     parser.add_argument("--require-touch", action="store_true")
     parser.add_argument("--require-move", action="store_true")
     parser.add_argument("--require-audio-stop", action="store_true")
+    parser.add_argument("--require-cutscene-trace", action="store_true")
     parser.add_argument("--require-clean-stop", action="store_true")
     args = parser.parse_args()
     log = args.log.read_text(encoding="utf-8", errors="replace")
@@ -118,7 +139,8 @@ def main() -> int:
             require_onscreen=args.require_onscreen,
             require_touch=args.require_touch,
             require_move=args.require_move,
-            require_audio_stop=args.require_audio_stop)
+            require_audio_stop=args.require_audio_stop,
+            require_cutscene_trace=args.require_cutscene_trace)
     print(("PASS: " if ok else "FAIL: ") + message)
     return 0 if ok else 1
 

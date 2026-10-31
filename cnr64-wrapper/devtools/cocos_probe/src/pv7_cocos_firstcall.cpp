@@ -483,6 +483,59 @@ public:
     void CallSVC(std::uint32_t svc) override {
         if (!jit) return;
         auto& regs = jit->Regs();
+#if defined(PV7_COCOS_JNI_RUNNER)
+        // Experimental observation-only Thumb function-entry probes.
+        // Replace an exact, verified PUSH prologue with a Thumb SVC and
+        // execute the displaced PUSH in the callback. No scene state changes.
+        if (svc >= 0x70u && svc <= 0x73u) {
+            const char* name = svc == 0x70u ? "showNextScene" :
+                svc == 0x71u ? "onAnimationCompleted" :
+                svc == 0x72u ? "setAndPlayCurrent" : "onEat";
+            const std::uint32_t self = regs[0];
+            if (!Fits(self,0x134u,mem_.size())) {
+                Fault(regs[15],"COCOS_CUTSCENE_TRACE_BAD_THIS");return;
+            }
+            const std::uint32_t scene = Read<std::uint32_t>(self+0x114u);
+            const std::uint32_t vectorStart = Read<std::uint32_t>(self+0x12cu);
+            const std::uint32_t vectorEnd = Read<std::uint32_t>(self+0x130u);
+            std::cout << "COCOS_CUTSCENE_ENTER function=" << name
+                      << " this=0x" << std::hex << self
+                      << " scene_index=" << std::dec << scene
+                      << " animation_id=" << static_cast<std::int32_t>(regs[1])
+                      << " completed_begin=0x" << std::hex << vectorStart
+                      << " completed_end=0x" << vectorEnd
+                      << " sprite=0x" << Read<std::uint32_t>(self+0x108u)
+                      << " return_pc=0x" << regs[14] << std::dec;
+            if (svc==0x71u && vectorEnd>=vectorStart &&
+                vectorEnd-vectorStart<=128u && (vectorEnd-vectorStart)%4u==0 &&
+                Fits(vectorStart,vectorEnd-vectorStart,mem_.size())) {
+                std::cout << " autoplay_hashes=[";
+                for(auto off=vectorStart;off<vectorEnd;off+=4u)
+                    std::cout << std::hex << Read<std::uint32_t>(off) << ",";
+                std::cout << std::dec << "]";
+            }
+            std::cout<<"\n";
+            // Emulate the exact Thumb PUSH (low registers ascending, LR last).
+            const unsigned count = (svc==0x72u || svc==0x73u) ? 5u :
+                svc==0x70u ? 4u : 3u;
+            const std::uint32_t oldSp = regs[13];
+            const std::uint32_t newSp = oldSp - count*4u;
+            if (oldSp < count*4u || !Fits(newSp,count*4u,mem_.size())) {
+                Fault(oldSp,"COCOS_CUTSCENE_TRACE_STACK_INVALID");return;
+            }
+            unsigned word=0u;
+            for (unsigned r=4;r<4+count-1;++r) {
+                if (!Put32(mem_,newSp+(word++)*4u,regs[r])) {
+                    Fault(newSp,"COCOS_CUTSCENE_TRACE_PUSH_FAILED");return;
+                }
+            }
+            if (!Put32(mem_,newSp+word*4u,regs[14])) {
+                Fault(newSp,"COCOS_CUTSCENE_TRACE_LR_PUSH_FAILED");return;
+            }
+            regs[13]=newSp;
+            return;
+        }
+#endif
         if (svc == 0) {
             returned = true;
             jit->HaltExecution();
@@ -3046,6 +3099,42 @@ int RunCocosProbe(int argc, char** argv) {
     if (!image.CopyToGuestMemory(memory, err)) {
         std::cerr << "MAP_FAILED " << err << "\n"; return 2;
     }
+#if defined(PV7_COCOS_JNI_RUNNER)
+    // Install only on original Best Park symbols whose Thumb prologues have
+    // been independently verified against the shipped ELF. Refuse to patch
+    // unknown opcode layouts so another game cannot be instrumented wrongly.
+    struct TracePoint {
+        const char* symbol;
+        std::uint16_t expectedPush;
+        std::uint16_t svc;
+        const char* label;
+    };
+    constexpr TracePoint tracePoints[] = {
+        {"_ZN8Cutscene13showNextSceneEv", 0xb570u, 0xdf70u, "showNextScene"},
+        {"_ZN8Cutscene20onAnimationCompletedEi", 0xb530u, 0xdf71u, "onAnimationCompleted"},
+        {"_ZN8Cutscene17setAndPlayCurrentEv", 0xb5f0u, 0xdf72u, "setAndPlayCurrent"},
+        {"_ZN8Cutscene5onEatEPN7cocos2d8CCObjectE",0xb5f0u,0xdf73u,"onEat"}
+    };
+    for (const auto& point:tracePoints) {
+        const auto symbol = image.FindExport(point.symbol);
+        if (!symbol || !(*symbol&1u) || !Fits(*symbol&~1u,2u,memory.size())) {
+            std::cout<<"COCOS_CUTSCENE_TRACE_UNAVAILABLE "<<point.label<<"\n";
+            continue;
+        }
+        std::uint16_t current=0;
+        const auto address=*symbol&~1u;
+        std::memcpy(&current,memory.data()+address,2u);
+        if(current!=point.expectedPush){
+            std::cout<<"COCOS_CUTSCENE_TRACE_OPCODE_MISMATCH function="<<point.label
+                     <<" expected=0x"<<std::hex<<point.expectedPush
+                     <<" actual=0x"<<current<<std::dec<<"\n";
+            continue;
+        }
+        std::memcpy(memory.data()+address,&point.svc,2u);
+        std::cout<<"COCOS_CUTSCENE_TRACE_INSTALLED function="<<point.label
+                 <<" pc=0x"<<std::hex<<*symbol<<std::dec<<"\n";
+    }
+#endif
     for (std::size_t i = 0; i < imports.size(); ++i) {
         if (!imports[i].data && imports[i].name != "pthread_once" &&
             !Trap(memory, imports[i].address, kImportSvcBase + static_cast<std::uint32_t>(i))) {
