@@ -507,6 +507,42 @@ public:
                 std::cout<<"JNI_METHOD_IDENTIFIED setBackgroundMusicVolume\n";
                 return;
             }
+            if (refs_.Resolve(classRef)==0xc050u && name=="playBackgroundMusic" &&
+                sig=="(Ljava/lang/String;Z)V") {
+                regs[0]=0xc100u;
+                std::cout<<"JNI_METHOD_IDENTIFIED playBackgroundMusic\n";
+                return;
+            }
+            if (refs_.Resolve(classRef)==0xc050u && name=="setStringForKey" &&
+                sig=="(Ljava/lang/String;Ljava/lang/String;)V") {
+                regs[0]=0xc110u;
+                std::cout<<"JNI_METHOD_IDENTIFIED setStringForKey\n";
+                return;
+            }
+            if (refs_.Resolve(classRef)==0xc050u && name=="setIntegerForKey" &&
+                sig=="(Ljava/lang/String;I)V") {
+                regs[0]=0xc120u;
+                std::cout<<"JNI_METHOD_IDENTIFIED setIntegerForKey\n";
+                return;
+            }
+            if (refs_.Resolve(classRef)==0xc030u && name=="playHavenDisplayContent" &&
+                sig=="(Ljava/lang/String;)V") {
+                regs[0]=0xc130u;
+                std::cout<<"JNI_METHOD_IDENTIFIED playHavenDisplayContent (legacy ad disabled)\n";
+                return;
+            }
+            if (refs_.Resolve(classRef)==0xc030u && name=="isUserSignedIn" &&
+                sig=="()Z") {
+                regs[0]=0xc140u;
+                std::cout<<"JNI_METHOD_IDENTIFIED isUserSignedIn (Google Play Games unavailable)\n";
+                return;
+            }
+            if (refs_.Resolve(classRef)==0xc030u && name=="isKindle" &&
+                sig=="()Z") {
+                regs[0]=0xc150u;
+                std::cout<<"JNI_METHOD_IDENTIFIED isKindle\n";
+                return;
+            }
             Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
             return;
         }
@@ -582,7 +618,42 @@ public:
 #else
             Fault(regs[15],"JNI_Pref_requires_Android_Activity");return;
 #endif
-        }        // JNI CallStaticBooleanMethod / V / A: exact original Cocos helper ABI.
+        }        // Original regularshow.isKindle() checks Build.MANUFACTURER == Amazon.
+        if(svc>=kMissingJniSvc+117u && svc<=kMissingJniSvc+119u &&
+           refs_.Resolve(regs[1])==0xc030u && regs[2]==0xc150u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            JNIEnv* env=g_pv7_cocos_env;
+            if(!env) {Fault(regs[15],"JNI_Kindle_env_missing");return;}
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID method=cls ? env->GetStaticMethodID(cls,"isGuestKindle","()Z") : nullptr;
+            if(env->ExceptionCheck()||!method) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_Kindle_host_method_missing");return;
+            }
+            jboolean result=env->CallStaticBooleanMethod(cls,method);
+            env->DeleteLocalRef(cls);
+            if(env->ExceptionCheck()){
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_Kindle_java_exception");return;
+            }
+            regs[0]=result==JNI_TRUE ? 1u : 0u;
+            std::cout<<"COCOS_DEVICE_IS_KINDLE value="<<regs[0]<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_Kindle_requires_Android");return;
+#endif
+        }
+        // Original regularshow.isUserSignedIn() queries Google Play Games.
+        // This offline diagnostic has no authenticated SDK account or service.
+        // Return the actual supported state (signed out), never fake login.
+        if(svc>=kMissingJniSvc+117u && svc<=kMissingJniSvc+119u &&
+           refs_.Resolve(regs[1])==0xc030u && regs[2]==0xc140u) {
+            regs[0]=0u;
+            std::cout<<"COCOS_PLAY_GAMES_UNAVAILABLE_SIGNED_OUT\n";
+            return;
+        }
+        // JNI CallStaticBooleanMethod / V / A: exact original Cocos helper ABI.
         if (svc>=kMissingJniSvc+117u && svc<=kMissingJniSvc+119u &&
             refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc0c0u) {
 #if defined(PV7_COCOS_JNI_RUNNER)
@@ -890,6 +961,216 @@ public:
             Fault(regs[15],"JNI_SetPrefBool_requires_Android_Activity");return;
 #endif
         }
+        // The original game's PlayHaven method schedules a legacy publisher
+        // network request asynchronously. Deliberately disable only this
+        // obsolete advertising integration in the offline diagnostic; do not
+        // synthesize an ad response or claim that the service is supported.
+        if(svc>=kMissingJniSvc+141u && svc<=kMissingJniSvc+143u &&
+           refs_.Resolve(regs[1])==0xc030u && regs[2]==0xc130u) {
+            const unsigned slot=svc-kMissingJniSvc;
+            const auto argPointer=regs[3];
+            std::uint32_t contentRef=argPointer;
+            if(slot!=141u) {
+                if(!Fits(argPointer,4u,mem_.size())){
+                    Fault(regs[15],"JNI_PlayHaven_args_invalid");return;
+                }
+                contentRef=Read<std::uint32_t>(argPointer);
+            }
+            const auto content=refs_.Resolve(contentRef);
+            if(contentRef && (!content || !guest_strings_.count(*content))){
+                Fault(regs[15],"JNI_PlayHaven_unknown_string");return;
+            }
+            if(content && guest_strings_.at(*content).size()>512u){
+                Fault(regs[15],"JNI_PlayHaven_content_oversized");return;
+            }
+            std::cout<<"COCOS_LEGACY_PLAYHAVEN_AD_REQUEST_DISABLED content="
+                     <<(content ? guest_strings_.at(*content) : "<null>")
+                     <<" (no legacy ad network call)\n";
+            return;
+        }
+        // Source-verified Cocos2dxHelper.setIntegerForKey(String, int).
+        if (svc>=kMissingJniSvc+141u && svc<=kMissingJniSvc+143u &&
+            refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc120u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            const unsigned slot=svc-kMissingJniSvc;
+            std::uint32_t keyRef=0,number=0;
+            if(slot==141u) {
+                if(!Fits(regs[13],4u,mem_.size())) {
+                    Fault(regs[15],"JNI_IntWrite_stack_invalid");return;
+                }
+                keyRef=regs[3];number=Read<std::uint32_t>(regs[13]);
+            } else {
+                const auto stride=slot==143u ? 8u : 4u;
+                if(!Fits(regs[3],stride+4u,mem_.size())) {
+                    Fault(regs[15],"JNI_IntWrite_args_invalid");return;
+                }
+                keyRef=Read<std::uint32_t>(regs[3]);
+                number=Read<std::uint32_t>(regs[3]+stride);
+            }
+            const auto key=refs_.Resolve(keyRef);
+            if(!keyRef||!key||!guest_strings_.count(*key)){
+                Fault(regs[15],"JNI_IntWrite_unknown_key");return;
+            }
+            const std::string& keyText=guest_strings_.at(*key);
+            if(keyText.empty()||keyText.size()>512u){
+                Fault(regs[15],"JNI_IntWrite_key_invalid");return;
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            if(!env){Fault(regs[15],"JNI_IntWrite_env_missing");return;}
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID setter=cls ? env->GetStaticMethodID(cls,
+                "writeCocosInteger","(Ljava/lang/String;I)V") : nullptr;
+            if(env->ExceptionCheck()||!setter){
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_IntWrite_host_method_missing");return;
+            }
+            jstring jkey=env->NewStringUTF(keyText.c_str());
+            if(env->ExceptionCheck()||!jkey){
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(jkey)env->DeleteLocalRef(jkey);
+                env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_IntWrite_invalid_jstring");return;
+            }
+            env->CallStaticVoidMethod(cls,setter,jkey,static_cast<jint>(number));
+            env->DeleteLocalRef(jkey);
+            env->DeleteLocalRef(cls);
+            if(env->ExceptionCheck()){
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_IntWrite_host_exception");return;
+            }
+            std::cout<<"COCOS_INTEGER_PREFERENCE_PERSISTED key="<<keyText
+                     <<" value="<<static_cast<std::int32_t>(number)<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_IntWrite_requires_Android");return;
+#endif
+        }
+        // Original Cocos2dxHelper.setStringForKey(String,String) with
+        // JNI V/A/direct argument decoding and actual Android preferences.
+        if (svc>=kMissingJniSvc+141u && svc<=kMissingJniSvc+143u &&
+            refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc110u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            const unsigned slot=svc-kMissingJniSvc;
+            std::uint32_t keyRef=0,valueRef=0;
+            if(slot==141u) {
+                if(!Fits(regs[13],4u,mem_.size())) {
+                    Fault(regs[15],"JNI_StringWrite_stack_invalid");return;
+                }
+                keyRef=regs[3];valueRef=Read<std::uint32_t>(regs[13]);
+            } else {
+                const auto stride=slot==143u?8u:4u;
+                if(!Fits(regs[3],stride+4u,mem_.size())) {
+                    Fault(regs[15],"JNI_StringWrite_args_invalid");return;
+                }
+                keyRef=Read<std::uint32_t>(regs[3]);
+                valueRef=Read<std::uint32_t>(regs[3]+stride);
+            }
+            const auto key=refs_.Resolve(keyRef),value=refs_.Resolve(valueRef);
+            if(!keyRef || !valueRef || !key || !value ||
+               !guest_strings_.count(*key) || !guest_strings_.count(*value)) {
+                Fault(regs[15],"JNI_StringWrite_unknown_string");return;
+            }
+            const std::string& keyText=guest_strings_.at(*key);
+            const std::string& valueText=guest_strings_.at(*value);
+            if(keyText.empty() || keyText.size()>512u || valueText.size()>65536u) {
+                Fault(regs[15],"JNI_StringWrite_size_invalid");return;
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            if(!env){Fault(regs[15],"JNI_StringWrite_missing_env");return;}
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID setter=cls ? env->GetStaticMethodID(cls,"writeCocosString",
+                "(Ljava/lang/String;Ljava/lang/String;)V"):nullptr;
+            if(env->ExceptionCheck()||!setter){
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_StringWrite_host_method_missing");return;
+            }
+            jstring jkey=env->NewStringUTF(keyText.c_str());
+            jstring jvalue=env->NewStringUTF(valueText.c_str());
+            if(env->ExceptionCheck()||!jkey||!jvalue){
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(jkey)env->DeleteLocalRef(jkey);
+                if(jvalue)env->DeleteLocalRef(jvalue);
+                env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_StringWrite_conversion_failed");return;
+            }
+            env->CallStaticVoidMethod(cls,setter,jkey,jvalue);
+            env->DeleteLocalRef(jkey);
+            env->DeleteLocalRef(jvalue);
+            env->DeleteLocalRef(cls);
+            if(env->ExceptionCheck()){
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_StringWrite_java_failed");return;
+            }
+            std::cout<<"COCOS_STRING_PREFERENCE_PERSISTED key="<<keyText
+                     <<" bytes="<<valueText.size()<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_StringWrite_requires_Android");return;
+#endif
+        }
+        // Exact Cocos2dxHelper.playBackgroundMusic(String, boolean) JNI ABI.
+        // JNI V consumes two 32-bit promoted arguments; A uses jvalue[2].
+        // No invented success: Android MediaPlayer must resolve actual guest audio.
+        if (svc>=kMissingJniSvc+141u && svc<=kMissingJniSvc+143u &&
+            refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc100u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            const auto method=svc-kMissingJniSvc;
+            std::uint32_t pathRef=0, loopFlag=0;
+            if (method==141u) {
+                if (!Fits(regs[13],4u,mem_.size())) {
+                    Fault(regs[15],"JNI_MusicPlay_stack_invalid");return;
+                }
+                pathRef=regs[3];loopFlag=Read<std::uint32_t>(regs[13]);
+            } else {
+                const auto pointer=regs[3], stride=method==143u ? 8u : 4u;
+                if (!Fits(pointer,stride+4u,mem_.size())) {
+                    Fault(regs[15],"JNI_MusicPlay_varargs_invalid");return;
+                }
+                pathRef=Read<std::uint32_t>(pointer);
+                loopFlag=Read<std::uint32_t>(pointer+stride);
+            }
+            const auto resolved=refs_.Resolve(pathRef);
+            if (!pathRef || !resolved || !guest_strings_.count(*resolved) ||
+                loopFlag>1u) {
+                Fault(regs[15],"JNI_MusicPlay_guest_args_invalid");return;
+            }
+            const std::string& path=guest_strings_.at(*resolved);
+            if(path.empty() || path.size()>512u) {
+                Fault(regs[15],"JNI_MusicPlay_invalid_path");return;
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            if(!env) {Fault(regs[15],"JNI_MusicPlay_env_unavailable");return;}
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID play=cls ? env->GetStaticMethodID(cls,
+                "playGuestBackgroundMusic","(Ljava/lang/String;Z)V") : nullptr;
+            if(env->ExceptionCheck() || !play) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_MusicPlay_host_method_missing");return;
+            }
+            jstring jpath=env->NewStringUTF(path.c_str());
+            if(!jpath || env->ExceptionCheck()) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(jpath)env->DeleteLocalRef(jpath);
+                env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_MusicPlay_path_conversion_failed");return;
+            }
+            env->CallStaticVoidMethod(cls,play,jpath,loopFlag ? JNI_TRUE : JNI_FALSE);
+            env->DeleteLocalRef(jpath);
+            env->DeleteLocalRef(cls);
+            if(env->ExceptionCheck()) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_MusicPlay_media_player_failed");return;
+            }
+            std::cout<<"COCOS_BACKGROUND_MUSIC_PLAYBACK_STARTED path="<<path
+                     <<" looping="<<loopFlag<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_MusicPlay_requires_Android");return;
+#endif
+        }
         // Exact original Cocos2dxHelper.setBackgroundMusicVolume(F)V.
         // ARM32 C varargs promote jfloat to double in CallStaticVoidMethodV.
         // The graphics probe tracks the volume state but does not fake audio.
@@ -920,7 +1201,7 @@ public:
                 env->ExceptionDescribe();env->ExceptionClear();
                 Fault(regs[15],"JNI_MusicVolume_java_exception");return;
             }
-            std::cout<<"COCOS_BACKGROUND_MUSIC_VOLUME_TRACKED_NO_PLAYBACK value="
+            std::cout<<"COCOS_BACKGROUND_MUSIC_VOLUME_SET value="
                      <<promoted<<"\n";
             return;
 #else
@@ -2850,13 +3131,14 @@ int RunCocosProbe(int argc, char** argv) {
         // Drive every suspended Cocos bitmap JNI request as a complete
         // guest->host->guest call. The Win32 renderer is diagnostic only.
         // Android must supply pixels using its own Paint/Canvas implementation.
-        unsigned bitmap_callbacks = 0;
-        while (!bridge.faulted && bridge.pending_bitmap && bitmap_callbacks < 64) {
+        auto drainBitmapCallbacks = [&]() -> bool {
+            unsigned bitmap_callbacks = 0;
+            while (!bridge.faulted && bridge.pending_bitmap && bitmap_callbacks < 64) {
             const auto native_bitmap = image.FindExport(
                 "Java_org_cocos2dx_lib_Cocos2dxBitmap_nativeInitBitmapDC");
             if (!native_bitmap) {
                 std::cout << "COCOS_BITMAP_NATIVE_CALLBACK_EXPORT_MISSING\n";
-                return 3;
+                return false;
             }
             auto request = std::move(*bridge.pending_bitmap);
             bridge.pending_bitmap.reset();
@@ -2865,31 +3147,31 @@ int RunCocosProbe(int argc, char** argv) {
             #if defined(PV7_COCOS_JNI_RUNNER)
             if (!RenderAndroidBitmap(request, rendered, render_error)) {
                 std::cout << "COCOS_BITMAP_ANDROID_RENDER_FAILED " << render_error << "\n";
-                return 3;
+                return false;
             }
             std::cout << "COCOS_BITMAP_ANDROID_RENDER_OK dimensions="
                       << rendered.width << "x" << rendered.height
                       << " bytes=" << rendered.bytes.size() << "\n";
 #elif defined(__ANDROID__)
             std::cout << "COCOS_BITMAP_ANDROID_RENDER_BRIDGE_NOT_CONNECTED\n";
-            return 3;
+            return false;
 #else
 if (!pv7::compat::cocos2dx::RenderProbeBitmap(
                     request, rendered, render_error)) {
                 std::cout << "COCOS_BITMAP_HOST_RENDER_FAILED " << render_error << "\n";
-                return 3;
+                return false;
             }
             #endif
             std::uint32_t array_ref = 0;
             if (!bridge.StageBitmap(rendered, array_ref, render_error)) {
                 std::cout << "COCOS_BITMAP_GUEST_ARRAY_FAILED " << render_error << "\n";
-                return 3;
+                return false;
             }
             constexpr std::uint32_t callback_stack = kStack - 0x80;
             if (!Put32(memory, callback_stack, array_ref)) {
                 bridge.ReleaseBitmap(array_ref);
                 std::cout << "COCOS_BITMAP_CALLBACK_STACK_INVALID\n";
-                return 3;
+                return false;
             }
             // Interruptible A32 guest call: preserve all integer, VFP, status
             // and return state, run the original function, then resume the
@@ -2924,7 +3206,7 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
                           << (bridge.faulted ? bridge.reason : "instruction_budget")
                           << " pc=0x" << std::hex << jit.Regs()[15] << std::dec
                           << "\n";
-                return 3;
+                return false;
             }
             ++bitmap_callbacks;
             std::cout << "COCOS_BITMAP_GUEST_CALLBACK_COMPLETED count="
@@ -2938,12 +3220,15 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             bridge.next_parser_sample_tick_ = 375000000;
             jit.ClearHalt();
             jit.Run();
-        }
-        if (bridge.pending_bitmap) {
-            std::cout << "COCOS_BITMAP_REQUEST_LIMIT count="
-                      << bitmap_callbacks << "\n";
-            return 3;
-        }
+            }
+            if (bridge.pending_bitmap) {
+                std::cout << "COCOS_BITMAP_REQUEST_LIMIT count="
+                          << bitmap_callbacks << "\n";
+                return false;
+            }
+            return !bridge.faulted;
+        };
+        if (!drainBitmapCallbacks()) return 3;
         if (bridge.faulted) {
             std::cout << "COCOS_NATIVE_INIT_STOP " << bridge.reason
                       << " fault_address=0x" << std::hex << bridge.fault_address
@@ -2959,7 +3244,7 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             }
             // Exercise the actual Cocos 30 FPS boot sequence without resetting
             // game state; capture only bounded checkpoints for comparison.
-            constexpr unsigned kDiagnosticFrames = 30;
+            constexpr unsigned kDiagnosticFrames = 90;
             for (unsigned frame = 1; frame <= kDiagnosticFrames; ++frame) {
                 bridge.returned=false;
                 bridge.faulted=false;
@@ -2976,6 +3261,13 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
                 std::cout<<"COCOS_NATIVE_RENDER_BEGIN frame="<<frame
                          <<" pc=0x"<<std::hex<<*render<<std::dec<<"\n";
                 jit.Run();
+                if (bridge.pending_bitmap && !bridge.faulted) {
+                    std::cout<<"COCOS_NATIVE_RENDER_BITMAP_REQUEST frame="<<frame<<"\n";
+                    if (!drainBitmapCallbacks()) {
+                        std::cout<<"COCOS_NATIVE_RENDER_BITMAP_CALLBACK_FAILED frame="<<frame<<"\n";
+                        return 3;
+                    }
+                }
                 if(bridge.faulted||!bridge.returned||bridge.pending_bitmap) {
                     std::cout<<"COCOS_NATIVE_RENDER_STOP frame="<<frame<<" reason="
                              <<(bridge.faulted?bridge.reason:

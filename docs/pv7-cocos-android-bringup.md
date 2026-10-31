@@ -409,3 +409,116 @@ physical ARM64 run, or full game loop. Production patcher and existing
 Unity/CNR functionality remain unchanged. Next implement real Cocos
 audio lifecycle and visible-surface synchronization under separate,
 verified compatibility milestones, then complete more frames.
+
+## October 31: original Best Park OBB audio and save data bridge
+
+The experimental x86_64 Android diagnostic now implements the original
+Cocos2dxHelper `playBackgroundMusic(String, boolean)` through JNI argument
+validation and real Android `MediaPlayer`. Its original Java implementation
+was verified against the shipped Best Park 1.2.1 APK. The developer-only
+Activity resolves relative audio assets from the real version-16 guest OBB
+(or original APK assets), extracts only validated bounded entries to
+app-private cache, and passes the resulting canonical file to MediaPlayer.
+The Activity retains actual playback state, supports guest looping and
+volume, and releases the player at diagnostic termination and Activity
+destruction. This is **actual host playback**, not a simulated JNI return.
+
+Observed Android emulator log:
+
+```text
+Guest background music volume=0.5
+Guest music staged from original OBB: sounds/menu.ogg
+Guest background music PLAYING from original asset: sounds/menu.ogg looping=true
+COCOS_BACKGROUND_MUSIC_PLAYBACK_STARTED path=sounds/menu.ogg looping=1
+```
+
+That call moved the original game past the prior audio JNI blocker within
+frame 24. The diagnostic also now supports `setStringForKey(String,String)`
+using the exact source-verified Cocos SharedPreferences synchronous
+`commit()` mechanism. An emulator run confirmed saving four original
+guest keys (`characterSkillsSavedKeys`, `characterSkillPointsKey`,
+`completedDungeonsKeys`, `lastAreaDungeonKey`). The next identified
+JNI access is `setIntegerForKey(String,int)`, which is modeled using the
+same source-verified Android preference API. A subsequent x86_64
+Android emulator run confirmed the original guest persisted the integer
+`restoreAtArea=0`, followed by additional original string preference keys.
+The same run completed all 30 original `nativeRender` calls and returned
+Android JNI diagnostic exit 0. The bundled log checker passed
+`rendered=30 captured=4 distinct_frame_hashes=3`. The captured frame
+30 is visibly the original **Regular Show: Best Park in the Universe**
+title screen, after the Cartoon Network and Heavy Boat splash screens.
+
+The code still runs only in the private experimental diagnostic,
+not the production PV7 Patcher. There is still no verified visible
+Android game surface, interactive controls, complete audio subsystem,
+or playable game. Audio in this proof is emitted by the Android emulator,
+not by a physical ARM64 device.
+
+## October 31: extended original boot and legacy PlayHaven boundary
+
+With a bounded 90-frame diagnostic, the original game returned from 31
+consecutive ARM32 render calls before frame 32 requested
+`regularshow.playHavenDisplayContent(String)`. Decompilation of the
+original APK confirms this method constructs a legacy
+`PHPublisherContentRequest` with the content identifier and asynchronously
+calls `send()`. It is an advertising-network request, not a rendering or
+storage API.
+
+The isolated offline diagnostic now explicitly records this request as
+`COCOS_LEGACY_PLAYHAVEN_AD_REQUEST_DISABLED` after validating the
+guest JNI argument and method identity. It deliberately does not contact
+the obsolete network, fabricate ad content, or claim PlayHaven service
+support. It is limited to the experimental debug runner only. Continued
+rendering after this explicitly disabled optional integration must be
+tested before claiming that the entire extended render loop succeeds.
+
+### Render-time bitmap fonts and platform queries
+
+A later original guest frame requests dynamic bitmap text for menu
+buttons such as `PLAY` and `MORE`, using the original bundled
+`fonts/sharkformalfunnyness.ttf`. The existing Android Canvas/Paint
+bitmap renderer and original ARM32 `nativeInitBitmapDC` callback
+already worked during `nativeInit` but were initially not serviced
+when `nativeRender` suspended in a bitmap JNI callback. Reused the
+same guarded guest/host callback drain across both entrypoints,
+preserving translated ARM32 integer/FP register context and resuming
+the interrupted original guest. On the emulator, Android bitmap
+renders, texture uploads, and twelve render-time bitmap callbacks
+completed before reaching further platform calls.
+
+Source verification against the original APK also established:
+`regularshow.isUserSignedIn()` delegates to Play Games authentication;
+the offline diagnostic has no authenticated Play Games service and
+explicitly returns signed-out rather than inventing success.
+`regularshow.isKindle()` checks
+`Build.MANUFACTURER.equals("Amazon")`; the diagnostic obtains
+that property from the real Android host. Neither platform
+compatibility path should be represented as full Play Games support.
+
+The 90-frame Android x86_64 diagnostic was subsequently verified with
+both JNI and pixel readback, after adding the source-verified Kindle
+manufacturer query. Real Android Paint rendered the original game's
+button fonts and the original ARM32 bitmap callback completed; multiple
+`PLAY` and `MORE` text requests were handled during render-time JNI.
+The offline Google Play Games query explicitly returned signed-out.
+The emulator's real `Build.MANUFACTURER` query returned non-Amazon.
+
+The signed APK diagnostic reported:
+```text
+COCOS_RENDER_SEQUENCE_COMPLETED frames=90
+ANDROID_JAVA_PROBE_EXIT=0
+PASS: rendered=90 captured=10 distinct_frame_hashes=6
+```
+
+The original game progressed to a complete visual menu, showing
+`PLAY`, `NEW GAME`, `MORE`, and `MENU`, with original title art
+and soundtrack. A frame-90 PNG was inspected locally; no guest resources
+or captured game art are committed. Both x86_64 and ARM64 probe native
+libraries built successfully; the signed APK was tested on an x86_64
+emulator only.
+
+This remains a bounded offscreen diagnostic, **not a playable product
+wrapper**. Next implement a real Android onscreen EGL surface and
+synchronize guest `nativeRender` to its lifecycle; then add Android
+touch events into the original Cocos guest touch callbacks. No
+production PV7 Patcher or Unity/CNR wrapper has changed.
