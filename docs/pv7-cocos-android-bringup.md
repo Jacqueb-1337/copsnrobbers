@@ -517,8 +517,83 @@ or captured game art are committed. Both x86_64 and ARM64 probe native
 libraries built successfully; the signed APK was tested on an x86_64
 emulator only.
 
-This remains a bounded offscreen diagnostic, **not a playable product
-wrapper**. Next implement a real Android onscreen EGL surface and
-synchronize guest `nativeRender` to its lifecycle; then add Android
-touch events into the original Cocos guest touch callbacks. No
-production PV7 Patcher or Unity/CNR wrapper has changed.
+## October 31: visible Android EGL window and early touch bridge
+
+The developer-only `CocosProbeActivity` now hosts a real Android
+`SurfaceView`. The guest translation worker acquires a reference-counted
+`ANativeWindow` from that Surface and configures the same GLES2 renderer
+used by the offscreen diagnostic with `EGL_WINDOW_BIT` and
+`eglCreateWindowSurface`. It preserves the original game's 480x320 render
+buffer and presents each completed original `nativeRender` call to the
+Activity with `eglSwapBuffers`. Existing `glReadPixels` checkpoints
+still capture actual GLES results. The worker releases EGL context,
+surfaces and native window references in order. Android SurfaceHolder
+destruction sets a cancellation flag so the bounded guest loop stops
+at a safe between-frame boundary; the Activity is landscape.
+
+A signed experimental APK was installed and run on the x86_64 Android
+emulator. Android screenshots, not just guest framebuffer dumps, showed
+the game progressing from the original loading illustration to the
+full title/menu with `PLAY`, `NEW GAME`, and `MENU` in a real
+Android window. The actual 90-frame visible diagnostic returned exit 0,
+with successful presentation at each 10-frame checkpoint. A subsequent
+240-frame visible run also returned exit 0 with no EGL presentation failure.
+Both native Android architectures built successfully; this is **not yet
+an ARM64 hardware validation**.
+
+Single-finger Android ACTION_DOWN/ACTION_UP events are queued from
+the main UI thread with surface-local coordinates mapped to the game's
+480x320 guest coordinates. Only the single Dynarmic guest worker calls
+the original exported JNI `nativeTouchesBegin(int,float,float)` and
+`nativeTouchesEnd(int,float,float)` entrypoints, using ARM32 argument
+registers and stack slots. The queue is bounded and rejects invalid
+inputs; movement and multitouch array calls are explicitly unimplemented.
+The status overlay now hides after the first displayed game frame.
+Touch behavior must be confirmed with a live emulator menu interaction
+before the experimental build can be called interactive.
+
+All experimental game data, offscreen captures and device screenshots
+stay local; no copyrighted game assets are committed. Production
+patcher and existing Unity/CNR functionality are unchanged.
+
+### On-screen ARM32 touch dispatch and audio feedback
+
+Verified exported original Cocos touch entry points
+`nativeTouchesBegin(int,float,float)` and
+`nativeTouchesEnd(int,float,float)` with the ELF dynamic symbol
+table and the original APK's `Cocos2dxRenderer.handleActionDown/Up`
+methods. Android UI queues event coordinates mapped to the guest
+framebuffer. The Dynarmic worker invokes both original ARM32 JNI exports,
+and an emulator tap returned successfully from each. A separate
+live-frame test synchronized to the guest's 60th presented frame
+confirmed PLAY button touches reached the game's own sound handler;
+the original guest requested `playEffect(String,boolean,float)`.
+
+The original APK's `Cocos2dxHelper.playEffect` delegates to
+`Cocos2dxSound.playEffect`, backed by Android SoundPool. Added a
+source-backed Android SoundPool bridge that stages actual original
+OBB/APK effect files in app-private cache, loads sound IDs, waits for
+bounded asynchronous load completion, and returns the real playback
+stream ID or -1 on failure. The emulator verified original
+`sounds/click.wav` loaded and played (stream 1), the original
+touch-end callback returned, and the game proceeded to load
+`/sd/cutscenes.ini` and begin looping original `sounds/ani_loop.ogg`.
+
+The guest later calls `playEffect` with an **empty path**. This is
+handled as source-compatible missing audio with stream ID -1, not
+as a fatal JNI error or fabricated playback. The final x86_64 Android
+emulator run injected a tap on PLAY after the original 60th
+presented frame and verified successful original ARM32 touch-begin and
+touch-end returns, real click sound stream ID, original cutscene
+loading and looping audio, two missing-audio -1 returns,
+all 240 successive on-screen original render frames, and JNI exit 0.
+An Android screen capture showed Mordecai, Rigby and Benson in the
+opening cinematic with subtitle dialogue. This is original guest
+state progression, not an artificially rendered picture. The diagnostic
+now emits on-screen frame checkpoints to Android logcat for repeatable,
+synchronized input testing.
+
+PLAY is now verified to launch an original cutscene, but **interactive
+gameplay is not yet verified**. Touch move, multi-pointer arrays, true
+hardware ARM64 behavior and a continuous non-diagnostic render loop
+remain unsupported or unverified.

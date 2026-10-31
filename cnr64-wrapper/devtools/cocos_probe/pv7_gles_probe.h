@@ -5,6 +5,7 @@
 #error "This probe header is for the Android first-call diagnostic only"
 #endif
 #include <EGL/egl.h>
+#include <android/native_window.h>
 #include <GLES2/gl2.h>
 #include <dlfcn.h>
 #include <optional>
@@ -13,14 +14,38 @@
 
 class Pv7ProbeGles2 {
 public:
-    ~Pv7ProbeGles2() {
+    ~Pv7ProbeGles2() { Shutdown(); }
+
+    // The caller keeps a JNI-acquired ANativeWindow alive through Shutdown().
+    void SetWindow(ANativeWindow* window) { native_window_ = window; }
+    bool IsReady() const { return ready_; }
+    bool IsWindowSurface() const { return window_surface_; }
+    void Shutdown() {
+        ready_ = false;
         if (display_ != EGL_NO_DISPLAY) {
             eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-            if (context_ != EGL_NO_CONTEXT) eglDestroyContext(display_, context_);
             if (surface_ != EGL_NO_SURFACE) eglDestroySurface(display_, surface_);
+            if (context_ != EGL_NO_CONTEXT) eglDestroyContext(display_, context_);
             eglTerminate(display_);
         }
+        surface_ = EGL_NO_SURFACE;
+        context_ = EGL_NO_CONTEXT;
+        display_ = EGL_NO_DISPLAY;
         if (gles_handle_) dlclose(gles_handle_);
+        gles_handle_ = nullptr;
+        window_surface_ = false;
+        native_window_ = nullptr;
+    }
+    // Presentation uses the exact same GLES context as guest draw calls.
+    bool Present(std::string& error) {
+        if (!ready_ || !window_surface_) {
+            error = "Android onscreen EGL window not ready"; return false;
+        }
+        if (eglSwapBuffers(display_, surface_) != EGL_TRUE) {
+            error = "eglSwapBuffers failed code=" + std::to_string(eglGetError());
+            return false;
+        }
+        return true;
     }
 
     bool Initialize(const std::string&, std::string& error) {
@@ -34,7 +59,8 @@ public:
         }
         const EGLint attributes[] = {
             EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
-            EGL_ALPHA_SIZE, 8, EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+            EGL_ALPHA_SIZE, 8, EGL_SURFACE_TYPE,
+            native_window_ ? EGL_WINDOW_BIT : EGL_PBUFFER_BIT,
             EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_NONE
         };
         EGLConfig config = nullptr;
@@ -42,8 +68,14 @@ public:
         if (!eglChooseConfig(display_, attributes, &config, 1, &count) || count < 1) {
             error = "Android EGL pbuffer config unavailable"; return false;
         }
-        const EGLint surface_attributes[] = { EGL_WIDTH, 480, EGL_HEIGHT, 320, EGL_NONE };
-        surface_ = eglCreatePbufferSurface(display_, config, surface_attributes);
+        if (native_window_) {
+            surface_ = eglCreateWindowSurface(display_, config,
+                reinterpret_cast<EGLNativeWindowType>(native_window_), nullptr);
+            window_surface_ = surface_ != EGL_NO_SURFACE;
+        } else {
+            const EGLint surface_attributes[] = { EGL_WIDTH, 480, EGL_HEIGHT, 320, EGL_NONE };
+            surface_ = eglCreatePbufferSurface(display_, config, surface_attributes);
+        }
         const EGLint context_attributes[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
         context_ = eglCreateContext(display_, config, EGL_NO_CONTEXT, context_attributes);
         if (surface_ == EGL_NO_SURFACE || context_ == EGL_NO_CONTEXT ||
@@ -159,4 +191,6 @@ private:
     EGLContext context_ = EGL_NO_CONTEXT;
     void* gles_handle_ = nullptr;
     bool ready_ = false;
+    bool window_surface_ = false;
+    ANativeWindow* native_window_ = nullptr;
 };

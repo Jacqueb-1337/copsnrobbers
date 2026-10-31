@@ -3,22 +3,114 @@ package me.jacqueb.pv7.cocos;
 import android.app.Activity;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Surface;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.widget.FrameLayout;
 import android.widget.TextView;
+import android.graphics.Color;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 
 /** Local-only Android Activity, not part of the published PV7 wrapper. */
 public final class CocosProbeActivity extends Activity {
-    private static native int nativeRun(String guestPath, String logPath);
+    private static native int nativeRun(String guestPath, String logPath, Surface surface);
+    private static native void nativeCancel();
+    private static native void nativeQueueTouch(int phase, int pointer, float x, float y);
     private static final String TAG = "PV7CocosProbe";
     private TextView status;
+    private SurfaceView gameSurface;
+    private volatile Thread diagnosticWorker;
+    private volatile boolean surfaceLive;
     private static volatile CocosProbeActivity active;
+
+    /** Hide status over the game as soon as a real EGL frame is presented. */
+    public static void onGuestFirstFrame() {
+        CocosProbeActivity owner = active;
+        if (owner != null) owner.runOnUiThread(() -> {
+            if (owner.status != null) owner.status.setVisibility(View.GONE);
+        });
+    }
+
     public static String getGuestLanguage() { return java.util.Locale.getDefault().getLanguage(); }
     /** Original Cocos2dxHelper.getDeviceModel() returns android.os.Build.MODEL. */
     public static String getGuestDeviceModel() { return android.os.Build.MODEL; }
     /** Original regularshow.isKindle checks Build.MANUFACTURER == Amazon. */
     public static boolean isGuestKindle() { return "Amazon".equals(android.os.Build.MANUFACTURER); }
+    private static final Object effectsLock = new Object();
+    private static android.media.SoundPool effectPool;
+    private static final java.util.Map<String, Integer> effectSoundIds =
+            new java.util.HashMap<>();
+    private static final java.util.Map<Integer, Integer> effectLoaded =
+            new java.util.HashMap<>();
+
+    /** Source-compatible original Cocos2dxSound behavior through SoundPool. */
+    public static int playGuestEffect(String path, boolean loop, float volume) {
+        if (!Float.isFinite(volume)) return -1;
+        final String asset;
+        try {
+            asset = resolveGuestAudioFile(path);
+        } catch (java.io.IOException e) {
+            Log.w(TAG, "Original guest effect missing: " + path, e);
+            return -1; // Same as original preloadEffect failure.
+        }
+        synchronized (effectsLock) {
+            if (effectPool == null) {
+                effectPool = new android.media.SoundPool.Builder()
+                        .setMaxStreams(16).build();
+                effectPool.setOnLoadCompleteListener((pool, id, status) -> {
+                    synchronized (effectsLock) {
+                        effectLoaded.put(id, status);
+                        effectsLock.notifyAll();
+                    }
+                });
+            }
+            Integer id = effectSoundIds.get(path);
+            if (id == null) {
+                int loaded = effectPool.load(asset, 1);
+                if (loaded <= 0) {
+                    Log.w(TAG, "SoundPool rejected original asset " + path);
+                    return -1;
+                }
+                id = loaded;
+                effectSoundIds.put(path, id);
+            }
+            long deadline = android.os.SystemClock.uptimeMillis() + 5000;
+            while (!effectLoaded.containsKey(id)) {
+                long remaining = deadline - android.os.SystemClock.uptimeMillis();
+                if (remaining <= 0) {
+                    Log.w(TAG, "Timed out loading original Cocos sound " + path);
+                    return -1;
+                }
+                try {
+                    effectsLock.wait(remaining);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return -1;
+                }
+            }
+            if (effectLoaded.get(id) != 0) return -1;
+            float gain = Math.max(0f, Math.min(1f, volume));
+            int stream = effectPool.play(id, gain, gain, 1, loop ? -1 : 0, 1f);
+            Log.i(TAG, "Original guest effect " + path + " stream=" + stream +
+                    " looping=" + loop + " volume=" + gain);
+            return stream == 0 ? -1 : stream;
+        }
+    }
+
+    private static void releaseGuestEffects() {
+        synchronized (effectsLock) {
+            if (effectPool != null) effectPool.release();
+            effectPool = null;
+            effectSoundIds.clear();
+            effectLoaded.clear();
+        }
+    }
+
     private static final Object musicLock = new Object();
     private static android.media.MediaPlayer backgroundPlayer;
     private static String backgroundPath;
@@ -160,7 +252,10 @@ public final class CocosProbeActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        surfaceLive = false;
+        nativeCancel();
         releaseGuestBackgroundMusic();
+        releaseGuestEffects();
         active = null;
         super.onDestroy();
     }
@@ -290,15 +385,81 @@ public final class CocosProbeActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         active=this;
+        // Preserve the original 480:320 aspect ratio on modern wide displays.
+        FrameLayout content = new FrameLayout(this) {
+            @Override protected void onSizeChanged(int w, int h, int oldW, int oldH) {
+                super.onSizeChanged(w, h, oldW, oldH);
+                if (gameSurface != null && w > 0 && h > 0) {
+                    int width = Math.min(w, Math.round(h * 1.5f));
+                    int height = Math.min(h, Math.round(w / 1.5f));
+                    gameSurface.setLayoutParams(new FrameLayout.LayoutParams(
+                            width, height, Gravity.CENTER));
+                }
+            }
+        };
+        content.setBackgroundColor(Color.BLACK);
+        gameSurface = new SurfaceView(this);
+        gameSurface.setKeepScreenOn(true);
+        gameSurface.setOnTouchListener((view, event) -> {
+            if (!surfaceLive || view.getWidth() <= 0 || view.getHeight() <= 0) return true;
+            int kind = event.getActionMasked();
+            int phase;
+            if (kind == MotionEvent.ACTION_DOWN || kind == MotionEvent.ACTION_POINTER_DOWN)
+                phase = 0;
+            else if (kind == MotionEvent.ACTION_UP ||
+                     kind == MotionEvent.ACTION_POINTER_UP ||
+                     kind == MotionEvent.ACTION_CANCEL)
+                phase = 1;
+            else return true; // Movement/arrays require a separate verified JNI bridge.
+            int index = event.getActionIndex();
+            float x = Math.max(0, Math.min(480,
+                    event.getX(index) * 480.0f / view.getWidth()));
+            float y = Math.max(0, Math.min(320,
+                    event.getY(index) * 320.0f / view.getHeight()));
+            nativeQueueTouch(phase, event.getPointerId(index), x, y);
+            return true;
+        });
+        gameSurface.getHolder().setFixedSize(480, 320);
+        content.addView(gameSurface, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         status = new TextView(this);
-        status.setText("Best Park guest ARM32 bitmap diagnostic running...");
-        status.setTextSize(18);
-        status.setPadding(24, 32, 24, 32);
-        setContentView(status);
-        new Thread(this::runDiagnostic, "pv7-cocos-diagnostic").start();
+        status.setText("Best Park original ARM32 guest: preparing visible GLES2 surface");
+        status.setTextColor(Color.WHITE);
+        status.setBackgroundColor(0x99000000);
+        status.setTextSize(12);
+        status.setPadding(12, 6, 12, 6);
+        FrameLayout.LayoutParams label = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM);
+        content.addView(status, label);
+        System.loadLibrary("pv7cocosprobe");
+        gameSurface.getHolder().addCallback(new SurfaceHolder.Callback() {
+            @Override public void surfaceCreated(SurfaceHolder holder) {
+                surfaceLive = true;
+                if (diagnosticWorker != null && diagnosticWorker.isAlive()) return;
+                Surface surface = holder.getSurface();
+                if (surface == null || !surface.isValid()) {
+                    Log.e(TAG, "Android game surface is not valid");
+                    return;
+                }
+                diagnosticWorker = new Thread(() -> runDiagnostic(surface),
+                        "pv7-cocos-onscreen-diagnostic");
+                diagnosticWorker.start();
+            }
+            @Override public void surfaceChanged(SurfaceHolder holder, int format,
+                                                  int width, int height) {
+                Log.i(TAG, "Android SurfaceView changed width=" + width +
+                        " height=" + height);
+            }
+            @Override public void surfaceDestroyed(SurfaceHolder holder) {
+                surfaceLive = false;
+                nativeCancel();
+            }
+        });
+        setContentView(content);
     }
 
-    private void runDiagnostic() {
+    private void runDiagnostic(Surface surface) {
         try {
             File guest = new File(getFilesDir(), "libgame.so");
             try (InputStream input = getAssets().open("guest/libgame.so");
@@ -314,18 +475,24 @@ public final class CocosProbeActivity extends Activity {
             expansionPath = expansion.isFile() ? expansion.getAbsolutePath() : "";
             Log.i(TAG, "Original version-16 OBB exists=" + expansion.isFile());
             File report = new File(getFilesDir(), "cocos-probe.log");
-            System.loadLibrary("pv7cocosprobe");
-            Log.i(TAG, "Invoking original Best Park ARM32 guest through Android JNI");
-            int exit = nativeRun(guest.getAbsolutePath(), report.getAbsolutePath());
+            if (!surfaceLive || !surface.isValid())
+                throw new IllegalStateException("Android game surface was destroyed");
+            Log.i(TAG, "Invoking original Best Park ARM32 guest with visible SurfaceView");
+            int exit = nativeRun(guest.getAbsolutePath(), report.getAbsolutePath(), surface);
             Log.i(TAG, "Guest diagnostic exited=" + exit + " report=" + report);
-            runOnUiThread(() -> status.setText("Cocos diagnostic exit " + exit
-                    + "\nReport saved to app-private cocos-probe.log"));
+            if (exit != 0 && surfaceLive)
+                runOnUiThread(() -> {
+                    status.setVisibility(View.VISIBLE);
+                    status.setText("Cocos diagnostic exit " + exit +
+                            "\nReport saved to app-private cocos-probe.log");
+                });
         } catch (Throwable t) {
             Log.e(TAG, "Android Cocos diagnostic failed", t);
             runOnUiThread(() -> status.setText("Diagnostic failed: " + t));
         } finally {
-            // Never leave the diagnostic app looping copyrighted game audio.
+            // Never leave this diagnostic app looping guest audio.
             releaseGuestBackgroundMusic();
+            releaseGuestEffects();
         }
     }
 }

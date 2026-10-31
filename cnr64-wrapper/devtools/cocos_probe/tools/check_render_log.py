@@ -17,9 +17,11 @@ READBACK = re.compile(
 )
 RETURNED = re.compile(r"COCOS_NATIVE_RENDER_RETURNED frame=(\d+)")
 SEQUENCE = re.compile(r"COCOS_RENDER_SEQUENCE_COMPLETED frames=(\d+)")
+PRESENTED = re.compile(r"COCOS_ONSCREEN_FRAME_PRESENTED frame=(\d+)")
 
 
-def validate(log: str) -> tuple[bool, str]:
+def validate(log: str, *, require_onscreen: bool = False,
+             require_touch: bool = False) -> tuple[bool, str]:
     if "COCOS_NATIVE_INIT_RETURNED" not in log:
         return False, "guest nativeInit did not return"
     if "COCOS_NATIVE_RENDER_STOP" in log:
@@ -46,6 +48,21 @@ def validate(log: str) -> tuple[bool, str]:
         hashes.append(digest.lower())
     if "ANDROID_JAVA_PROBE_EXIT=0" not in log:
         return False, "Android JNI diagnostic did not return success"
+    if require_onscreen:
+        if ("COCOS_ONSCREEN_SURFACE_ACQUIRED dimensions=480x320" not in log or
+                "HOST_GLES2_CONTEXT_READY mode=window" not in log):
+            return False, "real Android EGL window surface not established"
+        if "COCOS_ONSCREEN_PRESENT_FAILED" in log:
+            return False, "Android window framebuffer present failed"
+        actual = [int(frame) for frame in PRESENTED.findall(log)]
+        expected = [1] + list(range(10, len(frames) + 1, 10))
+        if actual != expected:
+            return False, "window frame presentation checkpoints incomplete"
+    if require_touch:
+        begins = log.count("COCOS_GUEST_TOUCH_RETURNED phase=0")
+        ends = log.count("COCOS_GUEST_TOUCH_RETURNED phase=1")
+        if not begins or not ends or ends > begins or "COCOS_GUEST_TOUCH_FAILED" in log:
+            return False, "guest touch begin/end callbacks were not verified"
     return True, (
         f"rendered={len(frames)} captured={len(readbacks)} "
         f"distinct_frame_hashes={len(set(hashes))}"
@@ -55,8 +72,12 @@ def validate(log: str) -> tuple[bool, str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("log", type=Path)
+    parser.add_argument("--require-onscreen", action="store_true")
+    parser.add_argument("--require-touch", action="store_true")
     args = parser.parse_args()
-    ok, message = validate(args.log.read_text(encoding="utf-8", errors="replace"))
+    ok, message = validate(
+        args.log.read_text(encoding="utf-8", errors="replace"),
+        require_onscreen=args.require_onscreen, require_touch=args.require_touch)
     print(("PASS: " if ok else "FAIL: ") + message)
     return 0 if ok else 1
 

@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <zlib.h>
@@ -24,6 +25,8 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <mutex>
+#include <deque>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -37,11 +40,31 @@ static Pv7ProbeGles2& DiagnosticGles() {
 }
 #if defined(PV7_COCOS_JNI_RUNNER)
 #include <jni.h>
+#include <android/native_window_jni.h>
+#include <android/log.h>
+#include <atomic>
 #include <unistd.h>
 #include <cstdio>
 
 static thread_local JNIEnv* g_pv7_cocos_env = nullptr;
 static thread_local std::string g_pv7_cocos_capture_path;
+static std::atomic<bool> g_pv7_cocos_cancelled{false};
+static std::atomic<bool> g_pv7_cocos_running{false};
+struct Pv7QueuedTouch {
+    jint phase = 0; // 0=down, 1=up, 2=move
+    jint pointer = 0;
+    float x = 0, y = 0;
+};
+static std::mutex g_pv7_cocos_touch_mutex;
+static std::deque<Pv7QueuedTouch> g_pv7_cocos_touch_queue;
+
+static std::vector<Pv7QueuedTouch> TakeGuestTouches() {
+    std::lock_guard<std::mutex> lock(g_pv7_cocos_touch_mutex);
+    std::vector<Pv7QueuedTouch> events(
+        g_pv7_cocos_touch_queue.begin(), g_pv7_cocos_touch_queue.end());
+    g_pv7_cocos_touch_queue.clear();
+    return events;
+}
 
 static bool RenderAndroidBitmap(
         const pv7::compat::cocos2dx::BitmapTextRequest& request,
@@ -513,6 +536,12 @@ public:
                 std::cout<<"JNI_METHOD_IDENTIFIED playBackgroundMusic\n";
                 return;
             }
+            if (refs_.Resolve(classRef)==0xc050u && name=="playEffect" &&
+                sig=="(Ljava/lang/String;ZF)I") {
+                regs[0]=0xc160u;
+                std::cout<<"JNI_METHOD_IDENTIFIED playEffect\n";
+                return;
+            }
             if (refs_.Resolve(classRef)==0xc050u && name=="setStringForKey" &&
                 sig=="(Ljava/lang/String;Ljava/lang/String;)V") {
                 regs[0]=0xc110u;
@@ -547,6 +576,88 @@ public:
             return;
         }
 
+        // Original Cocos2dxHelper.playEffect(String, boolean, float) returns
+        // the real SoundPool stream ID. Variadic ARM32 promotes float to
+        // double; the JNI jvalue[] form retains 32-bit float.
+        if (svc>=kMissingJniSvc+129u && svc<=kMissingJniSvc+131u &&
+            refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc160u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            const unsigned slot=svc-kMissingJniSvc;
+            std::uint32_t pathRef=0,loopFlag=0;
+            float gain=1.0f;
+            if (slot==129u) {
+                if(!Fits(regs[13],16u,mem_.size())){
+                    Fault(regs[15],"JNI_Effect_stack_invalid");return;
+                }
+                pathRef=regs[3];
+                loopFlag=Read<std::uint32_t>(regs[13]);
+                gain=static_cast<float>(Read<double>(regs[13]+8u));
+            } else if(slot==130u) {
+                if(!Fits(regs[3],16u,mem_.size())){
+                    Fault(regs[15],"JNI_Effect_va_invalid");return;
+                }
+                pathRef=Read<std::uint32_t>(regs[3]);
+                loopFlag=Read<std::uint32_t>(regs[3]+4u);
+                gain=static_cast<float>(Read<double>(regs[3]+8u));
+            } else {
+                if(!Fits(regs[3],20u,mem_.size())){
+                    Fault(regs[15],"JNI_Effect_jvalues_invalid");return;
+                }
+                pathRef=Read<std::uint32_t>(regs[3]);
+                loopFlag=Read<std::uint32_t>(regs[3]+8u);
+                gain=Read<float>(regs[3]+16u);
+            }
+            const auto pathHandle=refs_.Resolve(pathRef);
+            if(!pathRef || !pathHandle || !guest_strings_.count(*pathHandle) ||
+               loopFlag>1u || !std::isfinite(gain) || gain<0.0f || gain>4.0f) {
+                Fault(regs[15],"JNI_Effect_guest_args_invalid");return;
+            }
+            const std::string& path=guest_strings_.at(*pathHandle);
+            if(path.size()>512u){
+                Fault(regs[15],"JNI_Effect_path_invalid");return;
+            }
+            if (path.empty()) {
+                // Original Cocos2dxSound.preloadEffect returns -1 when its
+                // supplied asset does not exist. Empty guest path is not an
+                // emulator fault, and must not produce an invented stream.
+                regs[0]=static_cast<std::uint32_t>(-1);
+                std::cout<<"COCOS_EFFECT_NOT_FOUND empty_path stream=-1\n";
+                return;
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            if(!env) {Fault(regs[15],"JNI_Effect_no_env");return;}
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID play=cls ? env->GetStaticMethodID(cls,
+                "playGuestEffect","(Ljava/lang/String;ZF)I"):nullptr;
+            if(env->ExceptionCheck()||!play){
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_Effect_host_missing");return;
+            }
+            jstring requested=env->NewStringUTF(path.c_str());
+            if(env->ExceptionCheck()||!requested){
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(requested)env->DeleteLocalRef(requested);
+                env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_Effect_jstring_failed");return;
+            }
+            const jint stream=env->CallStaticIntMethod(cls,play,requested,
+                loopFlag ? JNI_TRUE : JNI_FALSE,static_cast<jfloat>(gain));
+            env->DeleteLocalRef(requested);
+            env->DeleteLocalRef(cls);
+            if(env->ExceptionCheck()){
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_Effect_android_audio_failed");return;
+            }
+            regs[0]=static_cast<std::uint32_t>(stream);
+            std::cout<<"COCOS_EFFECT_SOUNDPOOL_RESULT path="<<path
+                     <<" stream="<<stream<<" looping="<<loopFlag
+                     <<" gain="<<gain<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_Effect_requires_Android");return;
+#endif
+        }
         if (svc>=kMissingJniSvc+114u && svc<=kMissingJniSvc+116u &&
             refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc060u) {
 #if defined(PV7_COCOS_JNI_RUNNER)
@@ -2071,8 +2182,7 @@ public:
                 item.name == "glUniformMatrix4fv" || item.name == "glVertexAttribPointer" ||
                 item.name == "glDrawArrays") {
                 auto& hostGl = DiagnosticGles();
-                static bool initialized = false;
-                if (!initialized) {
+                if (!hostGl.IsReady()) {
                     const char* explicitDir = std::getenv("PV7_GLES_DIR");
                     const char* localApp = std::getenv("LOCALAPPDATA");
                     const std::string directory = explicitDir ? explicitDir :
@@ -2081,8 +2191,8 @@ public:
                     if (!hostGl.Initialize(directory, error)) {
                         Fault(regs[15], "GLES_CONTEXT_INIT_FAILED:" + error); return;
                     }
-                    initialized = true;
-                    std::cout << "HOST_GLES2_CONTEXT_READY" << "\n";
+                    std::cout << "HOST_GLES2_CONTEXT_READY mode="
+                              << (hostGl.IsWindowSurface() ? "window" : "pbuffer") << "\n";
                 }
                 // GLES2 texture uploads. Decode all ARM32 AAPCS stack
                 // arguments, including compressed formats, and validate the
@@ -3242,10 +3352,76 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
                 std::cout<<"COCOS_NATIVE_RENDER_EXPORT_MISSING\n";
                 return 3;
             }
+#if defined(PV7_COCOS_JNI_RUNNER)
+            // UI events are queued from Android's main thread. Only the guest
+            // render/JIT thread enters translated ARM32 touch callbacks.
+            auto dispatchGuestTouches = [&]() -> bool {
+                for (const auto& touch : TakeGuestTouches()) {
+                    if (touch.phase == 2) {
+                        // Move uses JNI int/float array arguments; don't fake it.
+                        std::cout<<"COCOS_TOUCH_MOVE_UNSUPPORTED\n";
+                        continue;
+                    }
+                    const char* symbol = touch.phase == 0 ?
+                        "Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeTouchesBegin" :
+                        "Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeTouchesEnd";
+                    const auto callback = image.FindExport(symbol);
+                    if (!callback) {
+                        std::cout<<"COCOS_TOUCH_EXPORT_MISSING "<<symbol<<"\n";
+                        return false;
+                    }
+                    // JNI ARM32 AAPCS: env, static class, jint pointer,
+                    // jfloat x in r3, fifth parameter jfloat y on stack.
+                    if (!Put32(memory, kStack, std::bit_cast<std::uint32_t>(touch.y))) {
+                        std::cout<<"COCOS_TOUCH_STACK_INVALID\n";
+                        return false;
+                    }
+                    bridge.returned=false;
+                    bridge.faulted=false;
+                    bridge.reason.clear();
+                    bridge.ticks_remaining=150000000u;
+                    jit.ClearHalt();
+                    jit.Regs().fill(0);
+                    jit.Regs()[0]=kEnv;
+                    jit.Regs()[1]=0;
+                    jit.Regs()[2]=static_cast<std::uint32_t>(touch.pointer);
+                    jit.Regs()[3]=std::bit_cast<std::uint32_t>(touch.x);
+                    jit.Regs()[13]=kStack;
+                    jit.Regs()[14]=kReturnTrap;
+                    jit.Regs()[15]=*callback&~1u;
+                    jit.SetCpsr((*callback&1u)?0x20u:0u);
+                    std::cout<<"COCOS_GUEST_TOUCH_BEGIN phase="<<touch.phase
+                             <<" pointer="<<touch.pointer<<" x="<<touch.x
+                             <<" y="<<touch.y<<" pc=0x"<<std::hex<<*callback
+                             <<std::dec<<"\n";
+                    jit.Run();
+                    if (bridge.pending_bitmap && !bridge.faulted &&
+                        !drainBitmapCallbacks()) return false;
+                    if (bridge.faulted || !bridge.returned || bridge.pending_bitmap) {
+                        std::cout<<"COCOS_GUEST_TOUCH_FAILED reason="
+                                 <<(bridge.faulted ? bridge.reason : "incomplete")
+                                 <<"\n";
+                        return false;
+                    }
+                    std::cout<<"COCOS_GUEST_TOUCH_RETURNED phase="<<touch.phase<<"\n";
+                }
+                return true;
+            };
+#endif
             // Exercise the actual Cocos 30 FPS boot sequence without resetting
             // game state; capture only bounded checkpoints for comparison.
-            constexpr unsigned kDiagnosticFrames = 90;
+            constexpr unsigned kDiagnosticFrames = 240;
             for (unsigned frame = 1; frame <= kDiagnosticFrames; ++frame) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+                if (g_pv7_cocos_cancelled.load(std::memory_order_acquire)) {
+                    std::cout << "COCOS_SURFACE_STOP_REQUESTED at_frame=" << frame << "\n";
+                    return 5;
+                }
+                if (!dispatchGuestTouches()) {
+                    std::cout << "COCOS_NATIVE_TOUCH_DISPATCH_FAILED frame=" << frame << "\n";
+                    return 3;
+                }
+#endif
                 bridge.returned=false;
                 bridge.faulted=false;
                 bridge.reason.clear();
@@ -3278,6 +3454,33 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
                 std::cout<<"COCOS_NATIVE_RENDER_RETURNED frame="<<frame<<"\n";
                 if ((frame == 1u || (frame % 10u) == 0u) && !CaptureCocosFrame(frame))
                     return 3;
+#if defined(PV7_COCOS_JNI_RUNNER)
+                if (DiagnosticGles().IsWindowSurface()) {
+                    std::string present_error;
+                    if (!DiagnosticGles().Present(present_error)) {
+                        std::cout << "COCOS_ONSCREEN_PRESENT_FAILED frame=" << frame
+                                  << " error=" << present_error << "\n";
+                        return 3;
+                    }
+                    if (frame == 1u || (frame % 10u) == 0u) {
+                        std::cout << "COCOS_ONSCREEN_FRAME_PRESENTED frame=" << frame << "\n";
+                        __android_log_print(ANDROID_LOG_INFO, "PV7CocosProbe",
+                            "COCOS_ONSCREEN_FRAME_PRESENTED frame=%u", frame);
+                    }
+                    if (frame == 1u && g_pv7_cocos_env) {
+                        JNIEnv* env = g_pv7_cocos_env;
+                        jclass cls = env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+                        jmethodID shown = cls ? env->GetStaticMethodID(cls,
+                            "onGuestFirstFrame", "()V") : nullptr;
+                        if (shown) env->CallStaticVoidMethod(cls, shown);
+                        if (env->ExceptionCheck()) {
+                            env->ExceptionDescribe();
+                            env->ExceptionClear();
+                        }
+                        if (cls) env->DeleteLocalRef(cls);
+                    }
+                }
+#endif
                 if (frame < kDiagnosticFrames)
                     std::this_thread::sleep_for(std::chrono::milliseconds(34));
             }
@@ -3300,15 +3503,39 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
 }
 
 #if defined(PV7_COCOS_JNI_RUNNER)
+extern "C" JNIEXPORT void JNICALL
+Java_me_jacqueb_pv7_cocos_CocosProbeActivity_nativeCancel(JNIEnv*, jclass) {
+    g_pv7_cocos_cancelled.store(true, std::memory_order_release);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_me_jacqueb_pv7_cocos_CocosProbeActivity_nativeQueueTouch(
+        JNIEnv*, jclass, jint phase, jint pointer, jfloat x, jfloat y) {
+    if (!g_pv7_cocos_running.load(std::memory_order_acquire) ||
+        phase < 0 || phase > 2 || pointer < 0 || pointer > 63 ||
+        !std::isfinite(x) || !std::isfinite(y) ||
+        x < 0 || x > 480 || y < 0 || y > 320) return;
+    std::lock_guard<std::mutex> lock(g_pv7_cocos_touch_mutex);
+    if (g_pv7_cocos_touch_queue.size() >= 64u) return;
+    g_pv7_cocos_touch_queue.push_back({phase,pointer,x,y});
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_me_jacqueb_pv7_cocos_CocosProbeActivity_nativeRun(
-        JNIEnv* env, jclass, jstring guestPath, jstring logPath) {
-    if (!guestPath || !logPath || !env) return 2;
+        JNIEnv* env, jclass, jstring guestPath, jstring logPath, jobject surface) {
+    if (!guestPath || !logPath || !env || !surface) return 2;
+    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+    if (!window) return 2;
+    if (ANativeWindow_setBuffersGeometry(window, 480, 320, 0) != 0) {
+        ANativeWindow_release(window);
+        return 2;
+    }
     const char* guest = env->GetStringUTFChars(guestPath, nullptr);
     const char* logfile = env->GetStringUTFChars(logPath, nullptr);
     if (!guest || !logfile) {
         if (guest) env->ReleaseStringUTFChars(guestPath, guest);
         if (logfile) env->ReleaseStringUTFChars(logPath, logfile);
+        ANativeWindow_release(window);
         return 2;
     }
     std::string original(guest);
@@ -3322,7 +3549,7 @@ Java_me_jacqueb_pv7_cocos_CocosProbeActivity_nativeRun(
     int savedOut = dup(STDOUT_FILENO);
     int savedErr = dup(STDERR_FILENO);
     FILE* file = fopen(path.c_str(), "w");
-    if (!file) return 2;
+    if (!file) { ANativeWindow_release(window); return 2; }
     dup2(fileno(file), STDOUT_FILENO);
     dup2(fileno(file), STDERR_FILENO);
 
@@ -3331,7 +3558,19 @@ Java_me_jacqueb_pv7_cocos_CocosProbeActivity_nativeRun(
     char* args[] = {first, original.data(), mode};
     g_pv7_cocos_env = env;
     g_pv7_cocos_capture_path = path;
+    g_pv7_cocos_cancelled.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(g_pv7_cocos_touch_mutex);
+        g_pv7_cocos_touch_queue.clear();
+    }
+    g_pv7_cocos_running.store(true, std::memory_order_release);
+    DiagnosticGles().SetWindow(window);
+    std::cout << "COCOS_ONSCREEN_SURFACE_ACQUIRED dimensions=480x320\n";
     int result = RunCocosProbe(3, args);
+    g_pv7_cocos_running.store(false, std::memory_order_release);
+    // No EGL objects may retain a window or context between runs.
+    DiagnosticGles().Shutdown();
+    ANativeWindow_release(window);
     g_pv7_cocos_capture_path.clear();
     g_pv7_cocos_env = nullptr;
     std::cout << "ANDROID_JAVA_PROBE_EXIT=" << result << std::endl;
