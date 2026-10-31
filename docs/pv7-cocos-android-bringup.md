@@ -359,3 +359,53 @@ Patcher, Cocos compatibility gating, and shipped Unity/CNR wrapper remain
 unchanged. Next: capture/validate the offscreen framebuffer, run consecutive
 frames with proper lifecycle and timing, and route the guest render path to
 the actual Android surface before attempting input/audio integration.
+
+## October 31: real framebuffer capture and multi-frame intro execution
+
+The x86_64 Android diagnostic now uses `glReadPixels` on the same
+480x320 offscreen EGL/GLES2 context used by the original Best Park
+1.2.1 ARM32 guest. The readback verifies GL completion and error state,
+counts non-black and varying-color pixels, and hashes real RGBA bytes.
+Optional PPM snapshots are row-flipped into standard top-down display
+order and saved **only** in the diagnostic app's private data directory.
+The local captured frame 1 visibly depicts the original Cartoon Network
+splash screen. Captured frame 20 visibly depicts the Heavy Boat logo.
+These are original game's images rendered by original ARM32 guest code,
+not substituted host graphics.
+
+Three consecutive original `nativeRender` invocations returned normally
+after successful `nativeInit`, with seven successful quad draw calls per
+invocation, stable RGBA fingerprints, and Android JNI diagnostic exit 0.
+The extended original guest loop then progressed through 23 completed
+render calls, with framebuffer variation and newly loaded OBB resources.
+Initial frame 5 exceeded a conservative 20-million-tick limit while
+decoding a legitimate PNG; increasing the bounded per-frame cap to
+300 million permitted additional original texture loads and frames.
+
+On frame 24 the guest requested two additional Cocos Java APIs:
+`getDeviceModel()Ljava/lang/String;` and
+`setBackgroundMusicVolume(F)V`. Their original APK implementations were
+decompiled to verify behavior. The developer-only Java Activity returns
+the real Android `Build.MODEL` and tracks the volume with [0, 1]
+clamping. The emulated JNI `CallStaticVoidMethodV` reads the correctly
+aligned/promoted float argument; an emulator run confirmed guest
+background volume 0.5. **This is state tracking only, not audio playback.**
+The current known next stop in frame 24 is the separate method
+`playBackgroundMusic(Ljava/lang/String;Z)V`. That request still fails
+closed; no fake playback or auto-success has been added.
+
+Added `devtools/cocos_probe/tools/check_render_log.py` to validate
+complete guest-render sequences, real nonuniform GLES pixels, and
+successful Android JNI probe exit. The incomplete frame-24 run is
+correctly rejected by that checker. Both Android x86_64 and ARM64
+native diagnostic probe builds pass; the signed diagnostic APK was
+rebuilt and exercised on the x86_64 emulator. Private guest APK, OBB,
+images, and logs are not checked into Git.
+
+The original game is **not yet playable through the PV7 Patcher**:
+the experimental diagnostic is offscreen, stops on audio JNI, and has
+no verified visible Android surface, input handling, audio playback,
+physical ARM64 run, or full game loop. Production patcher and existing
+Unity/CNR functionality remain unchanged. Next implement real Cocos
+audio lifecycle and visible-surface synchronization under separate,
+verified compatibility milestones, then complete more frames.

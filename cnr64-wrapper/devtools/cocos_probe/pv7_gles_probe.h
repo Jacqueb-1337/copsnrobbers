@@ -136,6 +136,22 @@ public:
     void DrawArrays(unsigned mode, int first, int count) const {
         if (ready_) glDrawArrays(mode, first, count);
     }
+    // Developer-only offscreen framebuffer snapshot. No guest pointers involved.
+    bool ReadFramebuffer(std::vector<std::uint8_t>& rgba, std::string& error) const {
+        constexpr int width = 480, height = 320;
+        if (!ready_) { error = "EGL context not initialized"; return false; }
+        rgba.resize(static_cast<std::size_t>(width) * height * 4u);
+        glFinish();
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+        const GLenum status = glGetError();
+        if (status != GL_NO_ERROR) {
+            error = "glReadPixels failed with GLES error " + std::to_string(status);
+            rgba.clear();
+            return false;
+        }
+        return true;
+    }
 
 private:
     EGLDisplay display_ = EGL_NO_DISPLAY;

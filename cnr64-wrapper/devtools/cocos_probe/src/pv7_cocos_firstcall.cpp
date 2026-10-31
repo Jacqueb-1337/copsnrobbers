@@ -28,12 +28,20 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <thread>
+
+// The probe uses one EGL context throughout the original guest's lifecycle.
+static Pv7ProbeGles2& DiagnosticGles() {
+    static Pv7ProbeGles2 gles;
+    return gles;
+}
 #if defined(PV7_COCOS_JNI_RUNNER)
 #include <jni.h>
 #include <unistd.h>
 #include <cstdio>
 
 static thread_local JNIEnv* g_pv7_cocos_env = nullptr;
+static thread_local std::string g_pv7_cocos_capture_path;
 
 static bool RenderAndroidBitmap(
         const pv7::compat::cocos2dx::BitmapTextRequest& request,
@@ -487,6 +495,18 @@ public:
                 std::cout<<"JNI_METHOD_IDENTIFIED setBoolForKey\n";
                 return;
             }
+            if (refs_.Resolve(classRef)==0xc050u && name=="getDeviceModel" &&
+                sig=="()Ljava/lang/String;") {
+                regs[0]=0xc0e0u;
+                std::cout<<"JNI_METHOD_IDENTIFIED getDeviceModel\n";
+                return;
+            }
+            if (refs_.Resolve(classRef)==0xc050u && name=="setBackgroundMusicVolume" &&
+                sig=="(F)V") {
+                regs[0]=0xc0f0u;
+                std::cout<<"JNI_METHOD_IDENTIFIED setBackgroundMusicVolume\n";
+                return;
+            }
             Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
             return;
         }
@@ -671,12 +691,16 @@ public:
             const bool gameMethod = refs_.Resolve(regs[1]) == 0xc030u &&
                 (regs[2] == 0xc040u || regs[2] == 0xc080u);
             const bool writableMethod = refs_.Resolve(regs[1]) == 0xc050u && regs[2] == 0xc0b0u;
-            if (!gameMethod && !writableMethod) {
+            const bool modelMethod = refs_.Resolve(regs[1]) == 0xc050u && regs[2] == 0xc0e0u;
+            if (!gameMethod && !writableMethod && !modelMethod) {
                 Fault(regs[15], "JNI_CallStaticObjectMethod_unknown"); return;
             }
 #if defined(PV7_COCOS_JNI_RUNNER)
             std::string path, resolver_error;
-            if (!ResolveAndroidStaticString(writableMethod ? "getGuestWritablePath" : (regs[2]==0xc080u ? "getGuestLanguage" : "resolveExpansionPath"), path, resolver_error)) {
+            const char* accessor = modelMethod ? "getGuestDeviceModel" :
+                writableMethod ? "getGuestWritablePath" :
+                regs[2] == 0xc080u ? "getGuestLanguage" : "resolveExpansionPath";
+            if (!ResolveAndroidStaticString(accessor, path, resolver_error)) {
                 Fault(regs[15], "JNI_ExpansionResolver:" + resolver_error); return;
             }
             if (path.size() >= 4096 || next_jstring_ > 0x0000fffcu) {
@@ -689,8 +713,11 @@ public:
                 Fault(regs[15], "JNI_ExpansionString_register_failed"); return;
             }
             regs[0] = handle;
-            std::cout << (writableMethod ? "COCOS_WRITABLE_PATH_RETURNED bytes=" : (regs[2]==0xc080u ? "COCOS_LANGUAGE_RETURNED bytes=" : "COCOS_EXPANSION_NAME_RETURNED bytes=")) << path.size()
-                      << " path=" << path << "\n";
+            std::cout << (modelMethod ? "COCOS_DEVICE_MODEL_RETURNED bytes=" :
+                          writableMethod ? "COCOS_WRITABLE_PATH_RETURNED bytes=" :
+                          regs[2]==0xc080u ? "COCOS_LANGUAGE_RETURNED bytes=" :
+                          "COCOS_EXPANSION_NAME_RETURNED bytes=")
+                      << path.size() << " value=" << path << "\n";
             return;
 #else
             Fault(regs[15], "JNI_ExpansionName_requires_Android_Activity");
@@ -861,6 +888,43 @@ public:
             return;
 #else
             Fault(regs[15],"JNI_SetPrefBool_requires_Android_Activity");return;
+#endif
+        }
+        // Exact original Cocos2dxHelper.setBackgroundMusicVolume(F)V.
+        // ARM32 C varargs promote jfloat to double in CallStaticVoidMethodV.
+        // The graphics probe tracks the volume state but does not fake audio.
+        if (svc==kMissingJniSvc+142u && refs_.Resolve(regs[1])==0xc050u &&
+            regs[2]==0xc0f0u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            const auto aligned=(regs[3]+7u)&~7u;
+            if (!Fits(aligned,8,mem_.size())) {
+                Fault(regs[15],"JNI_MusicVolume_va_invalid");return;
+            }
+            double promoted=0;
+            std::memcpy(&promoted,mem_.data()+aligned,sizeof(promoted));
+            if (!std::isfinite(promoted) || std::abs(promoted)>1000000.0) {
+                Fault(regs[15],"JNI_MusicVolume_value_invalid");return;
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID setter=cls ? env->GetStaticMethodID(cls,
+                "setGuestBackgroundMusicVolume","(F)V") : nullptr;
+            if (env->ExceptionCheck()||!setter) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_MusicVolume_host_method_missing");return;
+            }
+            env->CallStaticVoidMethod(cls,setter,static_cast<jfloat>(promoted));
+            env->DeleteLocalRef(cls);
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_MusicVolume_java_exception");return;
+            }
+            std::cout<<"COCOS_BACKGROUND_MUSIC_VOLUME_TRACKED_NO_PLAYBACK value="
+                     <<promoted<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_MusicVolume_requires_Android");return;
 #endif
         }
         if (svc==kMissingJniSvc+142u && refs_.Resolve(regs[1])==0xc090u && regs[2]==0xc0a0u) {
@@ -1725,7 +1789,7 @@ public:
                 item.name == "glGetError" || item.name == "glCreateProgram" || item.name == "glCreateShader" || item.name == "glShaderSource" || item.name == "glCompileShader" || item.name == "glGetShaderiv" || item.name == "glAttachShader" || item.name == "glLinkProgram" || item.name == "glGetProgramiv" || item.name == "glBindAttribLocation" || item.name == "glGetUniformLocation" || item.name == "glGetAttribLocation" || item.name == "glUseProgram" || item.name == "glDeleteShader" || item.name == "glUniform1i" ||
                 item.name == "glUniformMatrix4fv" || item.name == "glVertexAttribPointer" ||
                 item.name == "glDrawArrays") {
-                static Pv7ProbeGles2 hostGl;
+                auto& hostGl = DiagnosticGles();
                 static bool initialized = false;
                 if (!initialized) {
                     const char* explicitDir = std::getenv("PV7_GLES_DIR");
@@ -2297,6 +2361,64 @@ private:
 };
 } // namespace
 
+// A bounded readback proves pixels reached the Android EGL framebuffer, not
+// merely that the guest issued glDrawArrays. PPMs stay in app-private storage.
+static bool CaptureCocosFrame(unsigned frame) {
+    constexpr int width = 480, height = 320;
+    std::vector<std::uint8_t> rgba;
+    std::string error;
+    if (!DiagnosticGles().ReadFramebuffer(rgba, error)) {
+        std::cout << "COCOS_FRAME_READBACK_FAILED frame=" << frame
+                  << " reason=" << error << "\n";
+        return false;
+    }
+    std::uint64_t hash = 14695981039346656037ull;
+    std::size_t nonblack = 0, differs_from_first = 0, translucent = 0;
+    for (std::size_t i = 0; i < rgba.size(); i += 4u) {
+        if (rgba[i] || rgba[i+1] || rgba[i+2]) ++nonblack;
+        if (rgba[i] != rgba[0] || rgba[i+1] != rgba[1] ||
+            rgba[i+2] != rgba[2]) ++differs_from_first;
+        if (rgba[i+3] != 255u) ++translucent;
+        for (unsigned c = 0; c < 4; ++c) {
+            hash ^= rgba[i+c];
+            hash *= 1099511628211ull;
+        }
+    }
+    std::cout << "COCOS_FRAME_READBACK_OK frame=" << frame
+              << " size=" << width << "x" << height
+              << " nonblack=" << nonblack
+              << " color_variation=" << differs_from_first
+              << " nonopaque=" << translucent
+              << " fnv64=0x" << std::hex << hash << std::dec << "\n";
+#if defined(PV7_COCOS_JNI_RUNNER)
+    if (!g_pv7_cocos_capture_path.empty()) {
+        const std::string path = g_pv7_cocos_capture_path +
+                                 ".frame-" + std::to_string(frame) + ".ppm";
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            std::cout << "COCOS_FRAME_SAVE_FAILED frame=" << frame << "\n";
+            return false;
+        }
+        out << "P6\n" << width << " " << height << "\n255\n";
+        // GLES readback has the bottom row first; PPM stores the top row first.
+        for (int y = height - 1; y >= 0; --y) {
+            for (int x = 0; x < width; ++x) {
+                const auto pixel = (static_cast<std::size_t>(y) * width + x) * 4u;
+                out.write(reinterpret_cast<const char*>(rgba.data() + pixel), 3);
+            }
+        }
+        out.close();
+        if (!out) {
+            std::cout << "COCOS_FRAME_SAVE_FAILED frame=" << frame << "\n";
+            return false;
+        }
+        std::cout << "COCOS_FRAME_SAVED frame=" << frame
+                  << " path=" << path << "\n";
+    }
+#endif
+    return true;
+}
+
 int RunCocosProbe(int argc, char** argv) {
     if (argc != 2 && argc != 3) {
         std::cerr << "Usage: pv7-cocos-firstcall libgame.so [constructors|JNI_OnLoad|boot|nativeRender|version]\n";
@@ -2835,28 +2957,40 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
                 std::cout<<"COCOS_NATIVE_RENDER_EXPORT_MISSING\n";
                 return 3;
             }
-            bridge.returned=false;
-            bridge.faulted=false;
-            bridge.reason.clear();
-            bridge.ticks_remaining=20000000u;
-            jit.ClearHalt();
-            jit.Regs().fill(0);
-            jit.Regs()[0]=kEnv;
-            jit.Regs()[1]=0;
-            jit.Regs()[13]=kStack;
-            jit.Regs()[14]=kReturnTrap;
-            jit.Regs()[15]=*render&~1u;
-            jit.SetCpsr((*render&1u)?0x20u:0u);
-            std::cout<<"COCOS_NATIVE_RENDER_BEGIN pc=0x"<<std::hex<<*render<<std::dec<<"\n";
-            jit.Run();
-            if(bridge.faulted||!bridge.returned||bridge.pending_bitmap) {
-                std::cout<<"COCOS_NATIVE_RENDER_STOP reason="
-                         <<(bridge.faulted?bridge.reason:
-                            bridge.pending_bitmap?"pending_bitmap":"instruction_budget")
-                         <<" pc=0x"<<std::hex<<jit.Regs()[15]<<std::dec<<"\n";
-                return 3;
+            // Exercise the actual Cocos 30 FPS boot sequence without resetting
+            // game state; capture only bounded checkpoints for comparison.
+            constexpr unsigned kDiagnosticFrames = 30;
+            for (unsigned frame = 1; frame <= kDiagnosticFrames; ++frame) {
+                bridge.returned=false;
+                bridge.faulted=false;
+                bridge.reason.clear();
+                bridge.ticks_remaining=300000000u;
+                jit.ClearHalt();
+                jit.Regs().fill(0);
+                jit.Regs()[0]=kEnv;
+                jit.Regs()[1]=0;
+                jit.Regs()[13]=kStack;
+                jit.Regs()[14]=kReturnTrap;
+                jit.Regs()[15]=*render&~1u;
+                jit.SetCpsr((*render&1u)?0x20u:0u);
+                std::cout<<"COCOS_NATIVE_RENDER_BEGIN frame="<<frame
+                         <<" pc=0x"<<std::hex<<*render<<std::dec<<"\n";
+                jit.Run();
+                if(bridge.faulted||!bridge.returned||bridge.pending_bitmap) {
+                    std::cout<<"COCOS_NATIVE_RENDER_STOP frame="<<frame<<" reason="
+                             <<(bridge.faulted?bridge.reason:
+                                bridge.pending_bitmap?"pending_bitmap":"instruction_budget")
+                             <<" pc=0x"<<std::hex<<jit.Regs()[15]<<std::dec<<"\n";
+                    return 3;
+                }
+                std::cout<<"COCOS_NATIVE_RENDER_RETURNED frame="<<frame<<"\n";
+                if ((frame == 1u || (frame % 10u) == 0u) && !CaptureCocosFrame(frame))
+                    return 3;
+                if (frame < kDiagnosticFrames)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(34));
             }
-            std::cout<<"COCOS_NATIVE_RENDER_RETURNED\n";
+            std::cout<<"COCOS_RENDER_SEQUENCE_COMPLETED frames="
+                     <<kDiagnosticFrames<<"\n";
             return 0;
         }
         const auto& halted=jit.Regs();
@@ -2904,7 +3038,9 @@ Java_me_jacqueb_pv7_cocos_CocosProbeActivity_nativeRun(
     char mode[] = "boot";
     char* args[] = {first, original.data(), mode};
     g_pv7_cocos_env = env;
+    g_pv7_cocos_capture_path = path;
     int result = RunCocosProbe(3, args);
+    g_pv7_cocos_capture_path.clear();
     g_pv7_cocos_env = nullptr;
     std::cout << "ANDROID_JAVA_PROBE_EXIT=" << result << std::endl;
     fflush(stdout); fflush(stderr);

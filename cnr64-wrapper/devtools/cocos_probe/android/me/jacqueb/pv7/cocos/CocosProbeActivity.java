@@ -15,6 +15,16 @@ public final class CocosProbeActivity extends Activity {
     private TextView status;
     private static volatile CocosProbeActivity active;
     public static String getGuestLanguage() { return java.util.Locale.getDefault().getLanguage(); }
+    /** Original Cocos2dxHelper.getDeviceModel() returns android.os.Build.MODEL. */
+    public static String getGuestDeviceModel() { return android.os.Build.MODEL; }
+    // Mirrors original Cocos2dxMusic volume state. Audio playback is NOT wired
+    // in this developer-only graphics diagnostic.
+    private static volatile float guestMusicVolume = 1.0f;
+    public static void setGuestBackgroundMusicVolume(float volume) {
+        if (!Float.isFinite(volume)) throw new IllegalArgumentException("Invalid guest volume");
+        guestMusicVolume = Math.max(0.0f, Math.min(1.0f, volume));
+        Log.i(TAG, "Guest background music volume tracked, playback unwired: " + guestMusicVolume);
+    }
 
     /** Mirrors the original Cocos2dxHelper.getBoolForKey() implementation. */
     public static boolean readCocosBoolean(String key, boolean fallback) {
