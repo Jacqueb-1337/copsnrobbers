@@ -207,3 +207,54 @@ signed diagnostic APK was reinstalled and exercised. Original asset files
 are now packaged in the local debug APK, but the native asset lookup is
 still missing, so `globals.xml` and `locale/english.txt` loading are not
 claimed working. This does not establish a playable game or nativeRender.
+## Android Cocos APK, ZIP and writable-path checkpoint
+
+The original DEX of Best Park was inspected: Cocos2dxHelper.init()
+calls nativeSetApkPath(applicationInfo.sourceDir) before nativeInit,
+assigns sAssetManager from Context.getAssets(), and sets
+sFileDirectory to Context.getFilesDir().getAbsolutePath().
+The ARM32 nativeSetApkPath export is now executed via Dynarmic
+before nativeInit, using a staged guest JNI string. Real emulator logs
+confirmed COCOS_GUEST_SET_APK_PATH_OK and COCOS_VFS_APK_OPEN_OK.
+
+The diagnostic's confined read-only virtual filesystem now admits
+only the resolved diagnostic APK, original version-16 expansion OBB,
+actual app-private read paths, or virtual /sd/, /hd/, /sounds/, /ipad3/
+resource paths. The latter are resolved through Android ZipFile against
+the supplied OBB and, if absent, through original APK assets, with
+relative-path checks, per-entry 16 MiB limits, and bounded cache
+materialization. Emulator verified successful original guest fopen
+calls for /sd/gui.ini, /sd/styles.ini and /sd/sounds.txt. These three
+specific resources came from the original APK assets. The app-private
+read-only check makes missing saves return fopen failure instead of
+terminating at VFS_OPEN_NOT_AUTHORIZED. General write mode is not
+supported by the diagnostic.
+
+Added a bounded Android 64-bit zlib adapter for the original 56-byte
+ARM32 z_stream layout. Guest inflateInit2_(-15), inflate(), CRC32,
+and additional ZIP entries were verified on the Android emulator:
+one 1,724-byte compressed stream yielded 7,311 bytes; a later
+10,085-byte stream yielded 27,849 bytes, followed by CRC validation.
+Host zlib state remains in stable host storage with validated guest
+buffer pointers and is torn down on inflateEnd or bridge destruction.
+
+Other tested progress includes strict optional libxml2 getenv values,
+bounded ARM32 strtod/strtof/atof conversions with correct guest soft-float
+register returns, getCocos2dxWritablePath through genuine Activity
+files directory, and the Cocos renderer's setAnimationInterval JNI V-call
+with AAPCS 8-byte-aligned double decoding. The original method stores
+nanoseconds = (long)(1e9 * seconds); Android emulator confirmed a
+0.0333333-second frame interval, not the original incorrect tiny value.
+
+Increasing the post-bitmap guest instruction budget from 20 million to
+100 million permitted deeper game configuration/mission parsing.
+The latest Android x86_64 emulator stop after these bridges is
+JNI_GetStaticMethodID_unknown:getBoolForKey(Ljava/lang/String;Z)Z on
+org/cocos2dx/lib/Cocos2dxHelper.
+
+All source and packaging scripts are developer-only. Original game APK,
+OBB and extracted private resource files are not tracked in Git.
+Both Android ABI probes compile and a local signed debug diagnostic APK
+was rebuilt and installed on the emulator. There is still no verified
+nativeInit return, nativeRender loop, first game frame, audio or
+controller input, and production PV7 Patcher is unchanged.

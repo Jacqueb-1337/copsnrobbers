@@ -14,6 +14,8 @@
 #include <cstdio>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <zlib.h>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -155,6 +157,43 @@ static bool ResolveAndroidExpansionPath(std::string& path, std::string& error) {
     return ResolveAndroidStaticString("resolveExpansionPath",path,error);
 }
 #endif
+#if defined(PV7_COCOS_JNI_RUNNER)
+static bool ResolveAndroidObbZipEntry(
+        const std::string& virtual_path,std::string& path,std::string& error) {
+    JNIEnv* env=g_pv7_cocos_env;
+    if(!env || virtual_path.size()>512) {
+        error="invalid Android guest resource request";return false;
+    }
+    jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+    jmethodID method=cls ? env->GetStaticMethodID(cls,
+        "resolveGuestObbFile","(Ljava/lang/String;)Ljava/lang/String;") : nullptr;
+    if(env->ExceptionCheck()||!method) {
+        env->ExceptionDescribe();env->ExceptionClear();
+        if(cls)env->DeleteLocalRef(cls);
+        error="Android resource resolver missing";return false;
+    }
+    jstring key=env->NewStringUTF(virtual_path.c_str());
+    jstring result=static_cast<jstring>(env->CallStaticObjectMethod(cls,method,key));
+    if(key)env->DeleteLocalRef(key);
+    env->DeleteLocalRef(cls);
+    if(env->ExceptionCheck()) {
+        env->ExceptionDescribe();env->ExceptionClear();
+        if(result)env->DeleteLocalRef(result);
+        error="Android resource resolver threw";return false;
+    }
+    if(!result) {path.clear();return true;}
+    const char* chars=env->GetStringUTFChars(result,nullptr);
+    if(env->ExceptionCheck()||!chars) {
+        env->ExceptionDescribe();env->ExceptionClear();
+        env->DeleteLocalRef(result);
+        error="Android resource resolver returned invalid string";return false;
+    }
+    path.assign(chars);
+    env->ReleaseStringUTFChars(result,chars);
+    env->DeleteLocalRef(result);
+    return true;
+}
+#endif
 // PV7 development-only execution probe: the first actual ARM instructions
 // of the owner's original Cocos ELF run under Dynarmic. All unknown imports
 // halt at a named SVC, not at fabricated successful return values.
@@ -230,9 +269,17 @@ public:
     std::uint64_t ticks_remaining = 1000000;
     std::optional<pv7::compat::cocos2dx::BitmapTextRequest> pending_bitmap;
 #if defined(PV7_COCOS_JNI_RUNNER)
-    ~Bridge() override { for (auto& entry:open_files_) std::fclose(entry.second); }
+    ~Bridge() override { for (auto& entry:open_files_) std::fclose(entry.second); for (auto& entry:z_streams_) ::inflateEnd(&entry.second); }
 #endif
-    bool StageBitmap(const pv7::compat::cocos2dx::BitmapPixels& image,
+    bool StageGuestString(const std::string& value,std::uint32_t& handle) {
+        if (value.size()>=4096u || next_jstring_>0xfffcu) return false;
+        handle=next_jstring_;next_jstring_+=4;
+        guest_strings_.emplace(handle,value);
+        if (!refs_.RegisterLocal(handle,pv7::compat::cocos2dx::JniRefKind::String)) {
+            guest_strings_.erase(handle);return false;
+        }
+        return true;
+    }    bool StageBitmap(const pv7::compat::cocos2dx::BitmapPixels& image,
                      std::uint32_t& handle, std::string& error) {
         if (!byte_arrays_.Create(image,handle,error)) return false;
         if (!refs_.RegisterLocal(handle,pv7::compat::cocos2dx::JniRefKind::ByteArray)) {
@@ -379,7 +426,13 @@ public:
                 regs[0]=0xc080u;
                 std::cout<<"JNI_METHOD_IDENTIFIED getCurrentLanguage\n";
                 return;
-            }            Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
+            }            if (refs_.Resolve(classRef)==0xc090u &&
+                name=="setAnimationInterval" && sig=="(D)V") {
+                regs[0]=0xc0a0u;
+                std::cout<<"JNI_METHOD_IDENTIFIED setAnimationInterval\n";
+                return;
+            }            if (refs_.Resolve(classRef)==0xc050u && name=="getCocos2dxWritablePath" && sig=="()Ljava/lang/String;") { regs[0]=0xc0b0u; std::cout<<"JNI_METHOD_IDENTIFIED getCocos2dxWritablePath\n"; return; }
+            Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
             return;
         }
 
@@ -508,13 +561,15 @@ public:
         // Resolve it from the diagnostic Activity's own OBB directory so the
         // guest and host do not need identical Android package identifiers.
         if (svc >= kMissingJniSvc + 114u && svc <= kMissingJniSvc + 116u) {
-            if (refs_.Resolve(regs[1]) != 0x0000c030u ||
-                (regs[2] != 0x0000c040u && regs[2] != 0x0000c080u)) {
+            const bool gameMethod = refs_.Resolve(regs[1]) == 0xc030u &&
+                (regs[2] == 0xc040u || regs[2] == 0xc080u);
+            const bool writableMethod = refs_.Resolve(regs[1]) == 0xc050u && regs[2] == 0xc0b0u;
+            if (!gameMethod && !writableMethod) {
                 Fault(regs[15], "JNI_CallStaticObjectMethod_unknown"); return;
             }
 #if defined(PV7_COCOS_JNI_RUNNER)
             std::string path, resolver_error;
-            if (!ResolveAndroidStaticString(regs[2]==0xc080u ? "getGuestLanguage" : "resolveExpansionPath", path, resolver_error)) {
+            if (!ResolveAndroidStaticString(writableMethod ? "getGuestWritablePath" : (regs[2]==0xc080u ? "getGuestLanguage" : "resolveExpansionPath"), path, resolver_error)) {
                 Fault(regs[15], "JNI_ExpansionResolver:" + resolver_error); return;
             }
             if (path.size() >= 4096 || next_jstring_ > 0x0000fffcu) {
@@ -527,7 +582,7 @@ public:
                 Fault(regs[15], "JNI_ExpansionString_register_failed"); return;
             }
             regs[0] = handle;
-            std::cout << (regs[2]==0xc080u ? "COCOS_LANGUAGE_RETURNED bytes=" : "COCOS_EXPANSION_NAME_RETURNED bytes=") << path.size()
+            std::cout << (writableMethod ? "COCOS_WRITABLE_PATH_RETURNED bytes=" : (regs[2]==0xc080u ? "COCOS_LANGUAGE_RETURNED bytes=" : "COCOS_EXPANSION_NAME_RETURNED bytes=")) << path.size()
                       << " path=" << path << "\n";
             return;
 #else
@@ -651,6 +706,33 @@ public:
                 Fault(regs[15],"JNI_GetByteArrayRegion_invalid"); return;
             }
             return;
+        }        if (svc==kMissingJniSvc+142u && refs_.Resolve(regs[1])==0xc090u && regs[2]==0xc0a0u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            if(!Fits(regs[3],8,mem_.size())){Fault(regs[15],"JNI_Interval_invalid_va");return;}
+            double seconds=0;
+            const auto aligned=(regs[3]+7u)&~7u; if(!Fits(aligned,8,mem_.size())){Fault(regs[15],"JNI_Interval_aligned_va_invalid");return;} std::cout<<"COCOS_ANIMATION_VA_TRACE ptr=0x"<<std::hex<<regs[3]<<" w0=0x"<<Read<std::uint32_t>(regs[3])<<" w1=0x"<<Read<std::uint32_t>(regs[3]+4u)<<" aligned0=0x"<<Read<std::uint32_t>(aligned)<<" aligned1=0x"<<Read<std::uint32_t>(aligned+4u)<<std::dec<<"\n"; std::memcpy(&seconds,mem_.data()+aligned,8);
+            if (!std::isfinite(seconds) || seconds<=0 || seconds>10) {
+                Fault(regs[15],"JNI_Interval_invalid_seconds");return;
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            auto cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            auto method=cls ? env->GetStaticMethodID(cls,"setGuestAnimationInterval","(D)V") : nullptr;
+            if(env->ExceptionCheck()||!method) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_Interval_host_missing");return;
+            }
+            env->CallStaticVoidMethod(cls,method,seconds);
+            env->DeleteLocalRef(cls);
+            if(env->ExceptionCheck()) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_Interval_host_exception");return;
+            }
+            std::cout<<"COCOS_ANIMATION_INTERVAL_SET seconds="<<seconds<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_Interval_requires_Android");return;
+#endif
         }        if (svc == kMissingJniSvc + 142u) {
             if (refs_.Resolve(regs[1]) != 0x0000c010u || regs[2] != 0x0000c020u) {
                 Fault(regs[15], "JNI_CallStaticVoidMethodV_unknown_method");
@@ -823,7 +905,160 @@ public:
                 if (++timeCalls<=4 || timeCalls%1000u==0)
                     std::cout<<"COCOS_GUEST_GETTIMEOFDAY_OK count="<<timeCalls<<"\n";
                 return;
-            }            if (item.name=="fopen" || item.name=="fopen64") {
+            }
+#if defined(PV7_COCOS_JNI_RUNNER)
+            if (item.name=="inflateInit2_" || item.name=="inflateInit_") {
+                constexpr std::uint32_t guest_size=56u;
+                const auto guest=regs[0];
+                const auto requested_size=item.name=="inflateInit2_" ? regs[3] : regs[2];
+                if (!Fits(guest,guest_size,mem_.size()) || requested_size!=guest_size) {
+                    Fault(regs[15],"ZLIB_GUEST_STREAM_LAYOUT_UNSUPPORTED");return;
+                }
+                if(z_streams_.size()>=32u || z_streams_.count(guest)) {
+                    Fault(regs[15],"ZLIB_STREAM_ALREADY_INITIALIZED_OR_LIMIT");return;
+                }
+                const auto guest_version=CString(mem_,item.name=="inflateInit2_" ? regs[2] : regs[1]);
+                if(guest_version.empty() || guest_version[0]!='1') {
+                    Fault(regs[15],"ZLIB_GUEST_VERSION_INCOMPATIBLE");return;
+                }
+                const int window_bits=item.name=="inflateInit2_" ?
+                    static_cast<std::int32_t>(regs[1]) : MAX_WBITS;
+                if (window_bits < -15 || window_bits > 47) {
+                    Fault(regs[15],"ZLIB_WINDOW_BITS_INVALID");return;
+                }
+                auto [stream_it, inserted] = z_streams_.try_emplace(guest);
+                z_stream& stream=stream_it->second;
+                const int result=::inflateInit2_(&stream,window_bits,
+                    ZLIB_VERSION,static_cast<int>(sizeof(stream)));
+                regs[0]=static_cast<std::uint32_t>(result);
+                if(result==Z_OK) {
+                    Put32(mem_,guest+28u,0x0000d400u);
+                    std::cout<<"COCOS_GUEST_ZLIB_INIT_OK window_bits="
+                             <<window_bits<<"\n";
+                } else {
+                    z_streams_.erase(guest);
+                    std::cout<<"COCOS_GUEST_ZLIB_INIT_FAILED status="<<result<<"\n";
+                }
+                return;
+            }
+            if (item.name=="crc32" || item.name=="adler32") {
+                const auto address=regs[1], count=regs[2];
+                if(count>16u*1024u*1024u ||
+                   (count && !Fits(address,count,mem_.size()))) {
+                    Fault(regs[15],"ZLIB_CHECKSUM_INVALID_GUEST_RANGE");return;
+                }
+                const Bytef* bytes=count ? mem_.data()+address : Z_NULL;
+                const uLong result=item.name=="crc32" ?
+                    ::crc32(regs[0],bytes,count) : ::adler32(regs[0],bytes,count);
+                regs[0]=static_cast<std::uint32_t>(result);
+                std::cout<<"COCOS_GUEST_ZLIB_CHECKSUM_OK name="<<item.name
+                         <<" input_bytes="<<count<<"\n";
+                return;
+            }            if (item.name=="inflate" || item.name=="inflateEnd" ||
+                item.name=="inflateReset") {
+                const auto guest=regs[0];
+                auto it=z_streams_.find(guest);
+                if (it==z_streams_.end() || !Fits(guest,56u,mem_.size())) {
+                    Fault(regs[15],"ZLIB_STREAM_UNKNOWN_OR_INVALID");return;
+                }
+                z_stream& stream=it->second;
+                if(item.name=="inflateEnd") {
+                    const int result=::inflateEnd(&stream);
+                    z_streams_.erase(it);
+                    Put32(mem_,guest+28u,0);
+                    regs[0]=static_cast<std::uint32_t>(result);
+                    return;
+                }
+                if(item.name=="inflateReset") {
+                    const int result=::inflateReset(&stream);
+                    regs[0]=static_cast<std::uint32_t>(result);
+                    return;
+                }
+                const auto in=Read<std::uint32_t>(guest);
+                const auto in_count=Read<std::uint32_t>(guest+4u);
+                const auto out=Read<std::uint32_t>(guest+12u);
+                const auto out_count=Read<std::uint32_t>(guest+16u);
+                if(in_count>16u*1024u*1024u || out_count>16u*1024u*1024u ||
+                   (in_count&&!Fits(in,in_count,mem_.size())) ||
+                   (out_count&&!Fits(out,out_count,mem_.size()))) {
+                    Fault(regs[15],"ZLIB_GUEST_BUFFER_RANGE_INVALID");return;
+                }
+                stream.next_in=in_count ? mem_.data()+in : Z_NULL;
+                stream.avail_in=in_count;
+                stream.next_out=out_count ? mem_.data()+out : Z_NULL;
+                stream.avail_out=out_count;
+                const int flush=static_cast<std::int32_t>(regs[1]);
+                if(flush<Z_NO_FLUSH || flush>Z_TREES) {
+                    Fault(regs[15],"ZLIB_INVALID_FLUSH_MODE");return;
+                }
+                const int result=::inflate(&stream,flush);
+                const auto consumed=in_count-stream.avail_in;
+                const auto written=out_count-stream.avail_out;
+                if(stream.total_in>UINT32_MAX || stream.total_out>UINT32_MAX ||
+                   stream.adler>UINT32_MAX) {
+                    Fault(regs[15],"ZLIB_GUEST_COUNTER_OVERFLOW");return;
+                }
+                Put32(mem_,guest,in+consumed);
+                Put32(mem_,guest+4u,stream.avail_in);
+                Put32(mem_,guest+8u,static_cast<std::uint32_t>(stream.total_in));
+                Put32(mem_,guest+12u,out+written);
+                Put32(mem_,guest+16u,stream.avail_out);
+                Put32(mem_,guest+20u,static_cast<std::uint32_t>(stream.total_out));
+                Put32(mem_,guest+44u,static_cast<std::uint32_t>(stream.data_type));
+                Put32(mem_,guest+48u,static_cast<std::uint32_t>(stream.adler));
+                regs[0]=static_cast<std::uint32_t>(result);
+                static unsigned inflate_calls=0;
+                if(++inflate_calls<=6 || inflate_calls%5000u==0) {
+                    std::cout<<"COCOS_GUEST_ZLIB_INFLATE status="<<result
+                             <<" consumed="<<consumed<<" produced="<<written
+                             <<" calls="<<inflate_calls<<"\n";
+                }
+                return;
+            }
+#endif
+            if (item.name=="getenv") {
+                std::string name,error;
+                if (!pv7::cocos_probe::ReadGuestText(mem_,regs[0],name,error)) {
+                    Fault(regs[15],"GETENV_INVALID_GUEST_NAME:"+error);return;
+                }
+                if(name=="XML_MEM_BREAKPOINT" || name=="XML_MEM_TRACE") {
+                    regs[0]=0; // unset optional libxml2 instrumentation variables
+                    std::cout<<"COCOS_GUEST_GETENV_UNSET name="<<name<<"\n";
+                    return;
+                }
+                Fault(regs[15],"GETENV_UNMODELED_NAME:"+name);
+                return;
+            }
+            if (item.name=="strtod" || item.name=="strtof" || item.name=="atof") {
+                const auto original=regs[0];
+                std::string input,error;
+                if (!pv7::cocos_probe::ReadGuestText(mem_,original,input,error)) {
+                    Fault(regs[15],"STRTO_FLOAT_GUEST_STRING_INVALID:"+error);return;
+                }
+                char* end=nullptr;
+                double result=std::strtod(input.c_str(),&end);
+                const auto consumed=static_cast<std::uint32_t>(end-input.c_str());
+                if(item.name!="atof" && regs[1]) {
+                    if (!Put32(mem_,regs[1],original+consumed)) {
+                        Fault(regs[15],"STRTO_FLOAT_END_POINTER_INVALID");return;
+                    }
+                }
+                if(item.name=="strtof") {
+                    const float value=static_cast<float>(result);
+                    std::memcpy(&regs[0],&value,4u);
+                } else {
+                    std::uint64_t bits=0;
+                    std::memcpy(&bits,&result,sizeof(bits));
+                    regs[0]=static_cast<std::uint32_t>(bits);
+                    regs[1]=static_cast<std::uint32_t>(bits>>32u);
+                }
+                static unsigned conversions=0;
+                if(++conversions<=6 || conversions%10000u==0)
+                    std::cout<<"COCOS_GUEST_STRTO_FLOAT_OK fn="<<item.name
+                             <<" parsed_bytes="<<consumed<<" value="<<result<<"\n";
+                return;
+            }
+            if (item.name=="fopen" || item.name=="fopen64") {
                 const auto filename=CString(mem_,regs[0]);
                 const auto mode=CString(mem_,regs[1]);
                 std::cout<<"COCOS_FILE_REQUEST name="<<filename
@@ -837,14 +1072,57 @@ public:
                 if (!ResolveAndroidExpansionPath(authorized, error)) {
                     Fault(regs[15], "VFS_OBB_RESOLVER_ERROR:" + error); return;
                 }
-                if (authorized.empty() || filename != authorized ||
-                    (mode != "rb" && mode != "r")) {
-                    Fault(regs[15], "VFS_OPEN_NOT_AUTHORIZED"); return;
+                std::string apk_path, apk_error;
+                if (!ResolveAndroidStaticString("getGuestApkPath",apk_path,apk_error)) {
+                    Fault(regs[15],"VFS_APK_RESOLVER_ERROR:"+apk_error);return;
+                }
+                const bool isObb = !authorized.empty() && filename==authorized;
+                const bool isApk = !apk_path.empty() && filename==apk_path;
+                std::string files_root, files_error;
+                if (!ResolveAndroidStaticString("getGuestWritablePath",
+                                                files_root,files_error)) {
+                    Fault(regs[15],"VFS_GUEST_FILES_RESOLVER_ERROR:"+files_error);return;
+                }
+                const std::string files_prefix=files_root+"/";
+                const bool underFiles=filename.rfind(files_prefix,0)==0;
+                bool validPrivateFile=underFiles;
+                if(underFiles) {
+                    const auto relative=filename.substr(files_prefix.size());
+                    validPrivateFile=!relative.empty() && relative.size()<=512u &&
+                        relative.find('\\')==std::string::npos &&
+                        relative.find(':')==std::string::npos;
+                    std::size_t pos=0;
+                    while(validPrivateFile && pos<relative.size()) {
+                        const auto end=relative.find('/',pos);
+                        const auto len=(end==std::string::npos?relative.size():end)-pos;
+                        const auto part=relative.substr(pos,len);
+                        if(part.empty() || part=="." || part=="..") validPrivateFile=false;
+                        pos=end==std::string::npos?relative.size():end+1u;
+                    }
+                }
+                const bool virtualEntry =
+                    filename.rfind("/sd/",0)==0 || filename.rfind("/hd/",0)==0 ||
+                    filename.rfind("/ipad3/",0)==0 || filename.rfind("/sounds/",0)==0;
+                if ((!isObb && !isApk && !virtualEntry && !validPrivateFile) ||
+                    (mode!="rb" && mode!="r")) {
+                    Fault(regs[15],"VFS_OPEN_NOT_AUTHORIZED");return;
+                }
+                std::string host_path=filename;
+                if (virtualEntry) {
+                    std::string zip_error;
+                    if (!ResolveAndroidObbZipEntry(filename,host_path,zip_error)) {
+                        Fault(regs[15],"VFS_OBB_ZIP_ENTRY_ERROR:"+zip_error);return;
+                    }
+                    if (host_path.empty()) {
+                        regs[0]=0;
+                        std::cout<<"COCOS_VFS_OBB_ZIP_ENTRY_NOT_FOUND "<<filename<<"\n";
+                        return;
+                    }
                 }
                 if (open_files_.size() >= 32u) {
                     Fault(regs[15], "VFS_OPEN_FILE_LIMIT"); return;
                 }
-                std::FILE* fp = std::fopen(authorized.c_str(), "rb");
+                std::FILE* fp = std::fopen(host_path.c_str(), "rb");
                 if (!fp) {
                     regs[0] = 0; // underlying OS failed opening real OBB
                     std::cout<<"COCOS_VFS_OBB_OPEN_OS_FAILED\n";
@@ -854,7 +1132,7 @@ public:
                 next_file_handle_ += 4u;
                 open_files_.emplace(handle,fp);
                 regs[0]=handle;
-                std::cout<<"COCOS_VFS_OBB_OPEN_OK handle=0x"<<std::hex<<handle
+                std::cout<<(isObb?"COCOS_VFS_OBB_OPEN_OK handle=0x":(isApk?"COCOS_VFS_APK_OPEN_OK handle=0x":(validPrivateFile?"COCOS_VFS_PRIVATE_FILE_OPEN_OK handle=0x":"COCOS_VFS_ZIP_ENTRY_OPEN_OK handle=0x")))<<std::hex<<handle
                          <<std::dec<<"\n";
                 return;
 #else
@@ -1717,6 +1995,7 @@ private:
     std::map<std::uint32_t,std::uint32_t> guest_string_borrows_;
 #if defined(PV7_COCOS_JNI_RUNNER)
     std::map<std::uint32_t,std::FILE*> open_files_;
+    std::map<std::uint32_t,z_stream> z_streams_;
     std::uint32_t next_file_handle_=0x0000d100u;
 #endif
     std::map<std::uint32_t, std::uint32_t> gl_strings_;
@@ -1942,6 +2221,40 @@ int RunCocosProbe(int argc, char** argv) {
             return 0;
         }
         if (requested != "boot") return 0;
+#if defined(PV7_COCOS_JNI_RUNNER)
+        // Original Cocos2dxHelper.init() invokes nativeSetApkPath(sourceDir)
+        // before the renderer's nativeInit. Reproduce that exact order.
+        const auto set_apk=image.FindExport(
+            "Java_org_cocos2dx_lib_Cocos2dxHelper_nativeSetApkPath");
+        std::string apk_path,apk_error;
+        std::uint32_t guest_apk_string=0;
+        if (!set_apk || !ResolveAndroidStaticString("getGuestApkPath",apk_path,apk_error) ||
+            !bridge.StageGuestString(apk_path,guest_apk_string)) {
+            std::cout<<"COCOS_GUEST_APK_PATH_SETUP_FAILED "<<apk_error<<"\n";
+            return 3;
+        }
+        bridge.returned=false;
+        bridge.faulted=false;
+        bridge.reason.clear();
+        bridge.ticks_remaining=2000000;
+        jit.ClearHalt();
+        jit.Regs().fill(0);
+        jit.Regs()[0]=kEnv;
+        jit.Regs()[1]=0;
+        jit.Regs()[2]=guest_apk_string;
+        jit.Regs()[13]=kStack;
+        jit.Regs()[14]=kReturnTrap;
+        jit.Regs()[15]=*set_apk & ~1u;
+        jit.SetCpsr((*set_apk & 1u) ? 0x20u : 0u);
+        std::cout<<"COCOS_GUEST_SET_APK_PATH_BEGIN "<<apk_path<<"\n";
+        jit.Run();
+        if (bridge.faulted || !bridge.returned) {
+            std::cout<<"COCOS_GUEST_SET_APK_PATH_STOP "
+                     <<(bridge.faulted?bridge.reason:"instruction_budget")<<"\n";
+            return 3;
+        }
+        std::cout<<"COCOS_GUEST_SET_APK_PATH_OK\n";
+#endif
         const auto init = image.FindExport("Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeInit");
         if (!init) { std::cout << "COCOS_NATIVE_INIT_MISSING\n";return 3; }
         bridge.returned = false;
@@ -2013,7 +2326,7 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             const auto interrupted_cpsr = jit.Cpsr();
             const auto interrupted_fpscr = jit.Fpscr();
             bridge.returned = false;
-            bridge.ticks_remaining = 20000000;
+            bridge.ticks_remaining = 100000000;
             jit.ClearHalt();
             jit.Regs().fill(0);
             jit.Regs()[0] = kEnv;
@@ -2048,7 +2361,7 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             jit.SetCpsr(interrupted_cpsr);
             jit.SetFpscr(interrupted_fpscr);
             bridge.returned = false;
-            bridge.ticks_remaining = 20000000;
+            bridge.ticks_remaining = 100000000;
             jit.ClearHalt();
             jit.Run();
         }

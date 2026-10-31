@@ -12,7 +12,8 @@ import java.io.InputStream;
 public final class CocosProbeActivity extends Activity {
     private static native int nativeRun(String guestPath, String logPath);
     private static final String TAG = "PV7CocosProbe";
-    private TextView status;    private static volatile CocosProbeActivity active;
+    private TextView status;
+    private static volatile CocosProbeActivity active;
     public static String getGuestLanguage() { return java.util.Locale.getDefault().getLanguage(); }
 
     public static int readCocosInteger(String key, int fallback) {
@@ -27,6 +28,69 @@ public final class CocosProbeActivity extends Activity {
         if (owner==null) throw new IllegalStateException("Activity context not initialized");
         return owner.getSharedPreferences("Cocos2dxPrefsFile", MODE_PRIVATE)
                 .getString(key, fallback);
+    }
+    private static volatile long animationIntervalNanos = 16_666_667L;
+
+    public static void setGuestAnimationInterval(double seconds) {
+        if (!Double.isFinite(seconds) || seconds <= 0 || seconds > 10) {
+            throw new IllegalArgumentException("Invalid Cocos frame interval: " + seconds);
+        }
+        animationIntervalNanos = (long)(1_000_000_000d * seconds);
+        Log.i(TAG, "Original Cocos animation interval ns=" + animationIntervalNanos);
+    }
+
+    public static String getGuestWritablePath() { CocosProbeActivity owner=active; if(owner==null) throw new IllegalStateException("Activity not ready"); return owner.getFilesDir().getAbsolutePath(); }
+    public static String getGuestApkPath() {
+        CocosProbeActivity owner = active;
+        if (owner == null) throw new IllegalStateException("Activity not ready");
+        return owner.getApplicationInfo().sourceDir;
+    }
+    public static String resolveGuestObbFile(String virtualPath) throws java.io.IOException {
+        CocosProbeActivity owner=active;
+        if(owner==null || virtualPath==null || !virtualPath.startsWith("/")) return null;
+        final String relative=virtualPath.substring(1);
+        if(!(relative.startsWith("sd/") || relative.startsWith("hd/") ||
+             relative.startsWith("ipad3/") || relative.startsWith("sounds/")) ||
+           relative.contains("\\") || relative.contains(":") ||
+           java.util.Arrays.asList(relative.split("/")).contains("..")) return null;
+        File expansion=new File(expansionPath);
+        if(!expansion.isFile()) return null;
+        try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(expansion)) {
+            java.util.zip.ZipEntry entry=zip.getEntry(relative);
+            String sourceName=relative;
+            if(entry==null) sourceName=relative.substring(relative.indexOf('/')+1);
+            if(entry!=null && (entry.isDirectory() || entry.getSize()>16*1024*1024L))
+                return null;
+            File root=new File(owner.getCacheDir(),"guest-resource-files").getCanonicalFile();
+            File output=new File(root,relative).getCanonicalFile();
+            if(!output.getPath().startsWith(root.getPath()+File.separator)) return null;
+            if(output.isFile() && (entry==null ||
+                (entry.getSize()>=0 && output.length()==entry.getSize())))
+                return output.getAbsolutePath();
+            File parent=output.getParentFile();
+            if(!parent.isDirectory()&&!parent.mkdirs()) return null;
+            InputStream input;
+            try {
+                input=entry!=null ? zip.getInputStream(entry) : owner.getAssets().open(sourceName);
+            } catch(java.io.FileNotFoundException missing) {
+                return null;
+            }
+            File temp=new File(parent,output.getName()+".part");
+            long total=0;
+            try(InputStream data=input;FileOutputStream stream=new FileOutputStream(temp)) {
+                byte[] buffer=new byte[32768];
+                int count;
+                while((count=data.read(buffer))!=-1) {
+                    total+=count;
+                    if(total>16*1024*1024L) throw new java.io.IOException("Resource too large");
+                    stream.write(buffer,0,count);
+                }
+            }
+            if(!temp.renameTo(output)) {temp.delete();return null;}
+            Log.i(TAG,"Guest resource staged "+virtualPath+
+                    (entry==null?" from APK assets":" from OBB"));
+            return output.getAbsolutePath();
+        }
     }
     private static volatile String expansionPath = "";
 
