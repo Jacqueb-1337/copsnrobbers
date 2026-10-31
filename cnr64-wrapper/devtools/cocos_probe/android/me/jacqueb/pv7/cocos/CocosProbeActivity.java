@@ -102,6 +102,14 @@ public final class CocosProbeActivity extends Activity {
         }
     }
 
+    /** Cocos2dxHelper.stopEffect(int): stop the real stream ID returned by playEffect. */
+    public static void stopGuestEffect(int streamId) {
+        synchronized (effectsLock) {
+            if (effectPool != null) effectPool.stop(streamId);
+        }
+        Log.i(TAG, "Original guest effect stopped stream=" + streamId);
+    }
+
     private static void releaseGuestEffects() {
         synchronized (effectsLock) {
             if (effectPool != null) effectPool.release();

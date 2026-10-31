@@ -22,7 +22,8 @@ PRESENTED = re.compile(r"COCOS_ONSCREEN_FRAME_PRESENTED frame=(\d+)")
 
 def validate(log: str, *, require_onscreen: bool = False,
              require_touch: bool = False,
-             require_move: bool = False) -> tuple[bool, str]:
+             require_move: bool = False,
+             require_audio_stop: bool = False) -> tuple[bool, str]:
     if "COCOS_NATIVE_INIT_RETURNED" not in log:
         return False, "guest nativeInit did not return"
     if "COCOS_NATIVE_RENDER_STOP" in log:
@@ -72,6 +73,12 @@ def validate(log: str, *, require_onscreen: bool = False,
             return False, "guest touch begin/end callbacks were not verified"
     if require_move and "COCOS_GUEST_TOUCH_RETURNED phase=2" not in log:
         return False, "original ARM32 touch-move JNI callback never returned"
+    if require_audio_stop and (
+        "JNI_METHOD_IDENTIFIED stopEffect" not in log or
+        "COCOS_EFFECT_SOUNDPOOL_STOPPED stream=" not in log or
+        "JNI_StopEffect_" in log
+    ):
+        return False, "original Cocos2dxHelper.stopEffect/SoundPool callback failed"
     return True, (
         f"rendered={count} captured={len(readbacks)} "
         f"distinct_frame_hashes={len(set(hashes))}"
@@ -99,6 +106,7 @@ def main() -> int:
     parser.add_argument("--require-onscreen", action="store_true")
     parser.add_argument("--require-touch", action="store_true")
     parser.add_argument("--require-move", action="store_true")
+    parser.add_argument("--require-audio-stop", action="store_true")
     parser.add_argument("--require-clean-stop", action="store_true")
     args = parser.parse_args()
     log = args.log.read_text(encoding="utf-8", errors="replace")
@@ -109,7 +117,8 @@ def main() -> int:
             log,
             require_onscreen=args.require_onscreen,
             require_touch=args.require_touch,
-            require_move=args.require_move)
+            require_move=args.require_move,
+            require_audio_stop=args.require_audio_stop)
     print(("PASS: " if ok else "FAIL: ") + message)
     return 0 if ok else 1
 

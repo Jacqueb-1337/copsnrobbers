@@ -621,6 +621,12 @@ public:
                 std::cout<<"JNI_METHOD_IDENTIFIED playEffect\n";
                 return;
             }
+            if (refs_.Resolve(classRef)==0xc050u && name=="stopEffect" &&
+                sig=="(I)V") {
+                regs[0]=0xc170u;
+                std::cout<<"JNI_METHOD_IDENTIFIED stopEffect\n";
+                return;
+            }
             if (refs_.Resolve(classRef)==0xc050u && name=="setStringForKey" &&
                 sig=="(Ljava/lang/String;Ljava/lang/String;)V") {
                 regs[0]=0xc110u;
@@ -735,6 +741,42 @@ public:
             return;
 #else
             Fault(regs[15],"JNI_Effect_requires_Android");return;
+#endif
+        }
+        // Source-verified original Cocos2dxHelper.stopEffect(int) delegates
+        // to Cocos2dxSound.stopEffect(streamId), backed by SoundPool.stop().
+        if (svc>=kMissingJniSvc+141u && svc<=kMissingJniSvc+143u &&
+            refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc170u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            const unsigned slot=svc-kMissingJniSvc;
+            std::uint32_t streamId=regs[3];
+            if (slot!=141u) {
+                if (!Fits(regs[3],4u,mem_.size())) {
+                    Fault(regs[15],"JNI_StopEffect_args_invalid");return;
+                }
+                streamId=Read<std::uint32_t>(regs[3]);
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            if (!env) {Fault(regs[15],"JNI_StopEffect_no_env");return;}
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID stop=cls ? env->GetStaticMethodID(cls,
+                "stopGuestEffect","(I)V") : nullptr;
+            if (env->ExceptionCheck() || !stop) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_StopEffect_host_missing");return;
+            }
+            env->CallStaticVoidMethod(cls,stop,static_cast<jint>(streamId));
+            env->DeleteLocalRef(cls);
+            if(env->ExceptionCheck()){
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_StopEffect_android_audio_failed");return;
+            }
+            std::cout<<"COCOS_EFFECT_SOUNDPOOL_STOPPED stream="
+                     <<static_cast<std::int32_t>(streamId)<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_StopEffect_requires_Android");return;
 #endif
         }
         if (svc>=kMissingJniSvc+114u && svc<=kMissingJniSvc+116u &&

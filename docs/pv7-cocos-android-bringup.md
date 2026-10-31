@@ -656,3 +656,32 @@ No `COCOS_ONSCREEN_PRESENT_FAILED` line occurred. The final continuous
 run's log was only around 81 KB, with no recurring framebuffer PPM files.
 This verifies activity-initiated shutdown in the x86 emulator, but not
 long-duration stability, gameplay input, or real physical ARM64 behavior.
+
+## October 31: original cutscene audio callback and progression
+
+A longer Best Park intro run exposed an exact missing JNI dependency when
+the original ARM32 `nativeTouchesEnd` invoked
+`Cocos2dxHelper.stopEffect(int)`: `JNI_GetStaticMethodID_unknown:stopEffect(I)V`.
+Disassembly of the original APK confirmed that `Cocos2dxHelper.stopEffect`
+calls `Cocos2dxSound.stopEffect(streamId)`, whose implementation calls
+Android `SoundPool.stop(streamId)`. The experimental activity now performs
+that real operation, and the guest JNI bridge recognizes the exact
+`(I)V` signature and handles direct, V, and A invocation variants,
+failing closed for invalid arguments or Java exceptions.
+
+The rebuilt native x86_64 and ARM64 libraries compiled successfully,
+and the signed x86 emulator diagnostic completed 2,400 consecutive original
+render frames with `ANDROID_JAVA_PROBE_EXIT=0`.
+The renderer/audio regression validator passed with
+`rendered=2400 captured=27 distinct_frame_hashes=8`, requiring original
+ARM32 touch callbacks and the real SoundPool-stop bridge. The guest requested
+`stopEffect(-1)` and `stopEffect(1)`, and both callbacks returned.
+
+The intro comic now progresses from its opening park-wide scene to a close-up
+of Benson, proving original state advancement. However, subsequent center
+taps through 2,400 frames did not advance past the Benson dialogue, so
+actual gameplay is not yet verified. The staged original `sd/cutscenes.ini`
+contains an intro `autoPlayAnims` list; further gesture tests are required
+to establish whether advancing the remaining panels requires swipes,
+other regions, or a runtime timing/input fix. No original assets are
+committed with this diagnostic code.
