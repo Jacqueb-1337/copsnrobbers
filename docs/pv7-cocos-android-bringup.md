@@ -258,3 +258,35 @@ Both Android ABI probes compile and a local signed debug diagnostic APK
 was rebuilt and installed on the emulator. There is still no verified
 nativeInit return, nativeRender loop, first game frame, audio or
 controller input, and production PV7 Patcher is unchanged.
+
+## Android boolean preferences, PNG and TinyXML2 checkpoint
+
+Verified against original DEX: Cocos2dxHelper getBoolForKey reads
+SharedPreferences.getBoolean and setBoolForKey synchronously commits
+an Editor.putBoolean, both in Cocos2dxPrefsFile. Android emulator
+confirmed guest muted=false read and write via exact JNI method
+signatures, covering ARM32 direct, V and A call forms.
+
+The original guest then opened textures.ini and gui/common.png, and
+used setjmp for normal libpng operation. A diagnostic-only setjmp
+checkpoint allows the normal zero-return path with validated guest
+buffer identity; untested longjmp recovery remains explicitly
+unsupported. Original game code decoded a real 512x512 RGBA texture
+(1048576 bytes) and uploaded it through Android GLES2.
+
+Read-only VFS now permits fopen mode rt. The original guest opened
+/sd/gui/common.plist in that mode, accessing its 13911-byte resource
+without granting write access. Repetitive CRC32 trace output is capped.
+
+A post-bitmap guest budget increase from 100M to 400M ticks did not
+complete nativeInit. A diagnostic register snapshot places the halt
+in the original TinyXML2 XMLUtil::StringEqual, Thumb code at
+guest PC 0x0122790c (ELF relative 0x22790c), with r0=0x3c, r2=2,
+r4=0 and r5=0x3f. This indicates repeated short comparisons during
+XML processing, but does not yet prove why parser progress stalls.
+Next inspect caller, input pointer and file advancement. Do not
+merely keep raising the instruction budget.
+
+ARM64 and x86_64 diagnostic native builds pass. Android x86_64 debug
+APK was signed, installed and exercised. No nativeInit return,
+nativeRender, first game frame or production PV7 support is claimed.

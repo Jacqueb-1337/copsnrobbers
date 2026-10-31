@@ -16,6 +16,22 @@ public final class CocosProbeActivity extends Activity {
     private static volatile CocosProbeActivity active;
     public static String getGuestLanguage() { return java.util.Locale.getDefault().getLanguage(); }
 
+    /** Mirrors the original Cocos2dxHelper.getBoolForKey() implementation. */
+    public static boolean readCocosBoolean(String key, boolean fallback) {
+        CocosProbeActivity owner = active;
+        if (owner == null) throw new IllegalStateException("Activity context not initialized");
+        return owner.getSharedPreferences("Cocos2dxPrefsFile", MODE_PRIVATE)
+                .getBoolean(key, fallback);
+    }
+    /** Mirrors original Cocos2dxHelper.setBoolForKey: synchronous commit. */
+    public static void writeCocosBoolean(String key, boolean value) {
+        CocosProbeActivity owner = active;
+        if (owner == null) throw new IllegalStateException("Activity context not initialized");
+        boolean saved = owner.getSharedPreferences("Cocos2dxPrefsFile", MODE_PRIVATE)
+                .edit().putBoolean(key, value).commit();
+        if (!saved) Log.w(TAG, "Original Cocos boolean preference commit returned false");
+    }
+
     public static int readCocosInteger(String key, int fallback) {
         CocosProbeActivity owner=active;
         if (owner==null) throw new IllegalStateException("Activity context not initialized");

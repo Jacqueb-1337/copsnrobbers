@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <zlib.h>
@@ -432,6 +433,18 @@ public:
                 std::cout<<"JNI_METHOD_IDENTIFIED setAnimationInterval\n";
                 return;
             }            if (refs_.Resolve(classRef)==0xc050u && name=="getCocos2dxWritablePath" && sig=="()Ljava/lang/String;") { regs[0]=0xc0b0u; std::cout<<"JNI_METHOD_IDENTIFIED getCocos2dxWritablePath\n"; return; }
+            if (refs_.Resolve(classRef)==0xc050u && name=="getBoolForKey" &&
+                sig=="(Ljava/lang/String;Z)Z") {
+                regs[0]=0xc0c0u;
+                std::cout<<"JNI_METHOD_IDENTIFIED getBoolForKey\n";
+                return;
+            }
+            if (refs_.Resolve(classRef)==0xc050u && name=="setBoolForKey" &&
+                sig=="(Ljava/lang/String;Z)V") {
+                regs[0]=0xc0d0u;
+                std::cout<<"JNI_METHOD_IDENTIFIED setBoolForKey\n";
+                return;
+            }
             Fault(regs[15], "JNI_GetStaticMethodID_unknown:" + name + sig);
             return;
         }
@@ -507,7 +520,59 @@ public:
 #else
             Fault(regs[15],"JNI_Pref_requires_Android_Activity");return;
 #endif
-        }        if (svc>=kMissingJniSvc+129u && svc<=kMissingJniSvc+131u &&
+        }        // JNI CallStaticBooleanMethod / V / A: exact original Cocos helper ABI.
+        if (svc>=kMissingJniSvc+117u && svc<=kMissingJniSvc+119u &&
+            refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc0c0u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            const auto slot=svc-kMissingJniSvc;
+            std::uint32_t keyRef=0, fallback=0;
+            if (slot==117u) {
+                if (!Fits(regs[13],4,mem_.size())) {
+                    Fault(regs[15],"JNI_PrefBool_stack_invalid");return;
+                }
+                keyRef=regs[3];
+                fallback=Read<std::uint32_t>(regs[13]);
+            } else {
+                const auto stride=slot==119u ? 8u : 4u;
+                if (!Fits(regs[3],stride+4u,mem_.size())) {
+                    Fault(regs[15],"JNI_PrefBool_args_invalid");return;
+                }
+                keyRef=Read<std::uint32_t>(regs[3]);
+                fallback=Read<std::uint32_t>(regs[3]+stride);
+            }
+            auto key=keyRef ? refs_.Resolve(keyRef) : std::optional<std::uint32_t>{};
+            if (keyRef && (!key || !guest_strings_.count(*key))) {
+                Fault(regs[15],"JNI_PrefBool_key_invalid");return;
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID method=cls ? env->GetStaticMethodID(cls,"readCocosBoolean",
+                "(Ljava/lang/String;Z)Z") : nullptr;
+            if(env->ExceptionCheck() || !method) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_PrefBool_host_method_missing");return;
+            }
+            jstring jkey=key ? env->NewStringUTF(guest_strings_.at(*key).c_str()) : nullptr;
+            jboolean value=env->CallStaticBooleanMethod(cls,method,jkey,
+                fallback ? JNI_TRUE : JNI_FALSE);
+            if(jkey)env->DeleteLocalRef(jkey);
+            env->DeleteLocalRef(cls);
+            if(env->ExceptionCheck()) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_PrefBool_java_exception");return;
+            }
+            regs[0]=value==JNI_TRUE ? 1u : 0u;
+            std::cout<<"JNI_PREF_BOOLEAN_OK key="
+                     <<(key?guest_strings_.at(*key):"<null>")
+                     <<" fallback="<<(fallback!=0u)
+                     <<" value="<<regs[0]<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_PrefBool_requires_Android_Activity");return;
+#endif
+        }
+        if (svc>=kMissingJniSvc+129u && svc<=kMissingJniSvc+131u &&
             refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc070u) {
 #if defined(PV7_COCOS_JNI_RUNNER)
             const auto slot=svc-kMissingJniSvc;
@@ -706,7 +771,57 @@ public:
                 Fault(regs[15],"JNI_GetByteArrayRegion_invalid"); return;
             }
             return;
-        }        if (svc==kMissingJniSvc+142u && refs_.Resolve(regs[1])==0xc090u && regs[2]==0xc0a0u) {
+        }        // Original Cocos preference writes: CallStaticVoidMethod / V / A.
+        if (svc>=kMissingJniSvc+141u && svc<=kMissingJniSvc+143u &&
+            refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc0d0u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            const auto slot=svc-kMissingJniSvc;
+            std::uint32_t keyRef=0, booleanValue=0;
+            if (slot==141u) {
+                if (!Fits(regs[13],4,mem_.size())) {
+                    Fault(regs[15],"JNI_SetPrefBool_stack_invalid");return;
+                }
+                keyRef=regs[3];
+                booleanValue=Read<std::uint32_t>(regs[13]);
+            } else {
+                const auto stride=slot==143u ? 8u : 4u;
+                if (!Fits(regs[3],stride+4u,mem_.size())) {
+                    Fault(regs[15],"JNI_SetPrefBool_args_invalid");return;
+                }
+                keyRef=Read<std::uint32_t>(regs[3]);
+                booleanValue=Read<std::uint32_t>(regs[3]+stride);
+            }
+            const auto key=keyRef ? refs_.Resolve(keyRef) : std::optional<std::uint32_t>{};
+            if (keyRef && (!key || !guest_strings_.count(*key))) {
+                Fault(regs[15],"JNI_SetPrefBool_key_invalid");return;
+            }
+            JNIEnv* env=g_pv7_cocos_env;
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID method=cls ? env->GetStaticMethodID(cls,"writeCocosBoolean",
+                "(Ljava/lang/String;Z)V") : nullptr;
+            if(env->ExceptionCheck() || !method) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_SetPrefBool_host_method_missing");return;
+            }
+            jstring jkey=key ? env->NewStringUTF(guest_strings_.at(*key).c_str()) : nullptr;
+            env->CallStaticVoidMethod(cls,method,jkey,
+                booleanValue ? JNI_TRUE : JNI_FALSE);
+            if(jkey)env->DeleteLocalRef(jkey);
+            env->DeleteLocalRef(cls);
+            if(env->ExceptionCheck()) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_SetPrefBool_java_exception");return;
+            }
+            std::cout<<"JNI_PREF_BOOLEAN_WRITE_OK key="
+                     <<(key?guest_strings_.at(*key):"<null>")
+                     <<" value="<<(booleanValue!=0u)<<"\n";
+            return;
+#else
+            Fault(regs[15],"JNI_SetPrefBool_requires_Android_Activity");return;
+#endif
+        }
+        if (svc==kMissingJniSvc+142u && refs_.Resolve(regs[1])==0xc090u && regs[2]==0xc0a0u) {
 #if defined(PV7_COCOS_JNI_RUNNER)
             if(!Fits(regs[3],8,mem_.size())){Fault(regs[15],"JNI_Interval_invalid_va");return;}
             double seconds=0;
@@ -951,8 +1066,12 @@ public:
                 const uLong result=item.name=="crc32" ?
                     ::crc32(regs[0],bytes,count) : ::adler32(regs[0],bytes,count);
                 regs[0]=static_cast<std::uint32_t>(result);
-                std::cout<<"COCOS_GUEST_ZLIB_CHECKSUM_OK name="<<item.name
-                         <<" input_bytes="<<count<<"\n";
+                static unsigned long long checksum_calls=0;
+                ++checksum_calls;
+                if(checksum_calls<=8 || checksum_calls%10000u==0)
+                    std::cout<<"COCOS_GUEST_ZLIB_CHECKSUM_OK name="<<item.name
+                             <<" input_bytes="<<count
+                             <<" calls="<<checksum_calls<<"\n";
                 return;
             }            if (item.name=="inflate" || item.name=="inflateEnd" ||
                 item.name=="inflateReset") {
@@ -1016,6 +1135,26 @@ public:
                 return;
             }
 #endif
+            if (item.name=="setjmp" || item.name=="_setjmp") {
+                const auto buffer=regs[0];
+                if ((buffer&3u) || !Fits(buffer,32u,mem_.size()) ||
+                    (guest_jump_buffers_.size()>=64 && !guest_jump_buffers_.count(buffer))) {
+                    Fault(regs[15],"GUEST_SETJMP_INVALID_BUFFER");return;
+                }
+                GuestJumpCheckpoint checkpoint{};
+                checkpoint.regs=regs;
+                checkpoint.cpsr=jit->Cpsr();
+                guest_jump_buffers_[buffer]=checkpoint;
+                regs[0]=0;
+                std::cout<<"COCOS_GUEST_SETJMP_REGISTERED buffer=0x"<<std::hex
+                         <<buffer<<std::dec<<"\n";
+                return;
+            }
+            if (item.name=="longjmp" || item.name=="_longjmp" ||
+                item.name=="siglongjmp") {
+                Fault(regs[15],"GUEST_LONGJMP_NEEDS_TESTED_ARM32_CONTINUATION");
+                return;
+            }
             if (item.name=="getenv") {
                 std::string name,error;
                 if (!pv7::cocos_probe::ReadGuestText(mem_,regs[0],name,error)) {
@@ -1063,7 +1202,7 @@ public:
                 const auto mode=CString(mem_,regs[1]);
                 std::cout<<"COCOS_FILE_REQUEST name="<<filename
                          <<" mode="<<mode<<"\n";
-                if(filename.empty() && (mode=="rb" || mode=="r")) {
+                if(filename.empty() && (mode=="rb" || mode=="r" || mode=="rt")) {
                     regs[0]=0; // ENOENT for empty path, no fake stream
                     return;
                 }
@@ -1104,7 +1243,7 @@ public:
                     filename.rfind("/sd/",0)==0 || filename.rfind("/hd/",0)==0 ||
                     filename.rfind("/ipad3/",0)==0 || filename.rfind("/sounds/",0)==0;
                 if ((!isObb && !isApk && !virtualEntry && !validPrivateFile) ||
-                    (mode!="rb" && mode!="r")) {
+                    (mode!="rb" && mode!="r" && mode!="rt")) {
                     Fault(regs[15],"VFS_OPEN_NOT_AUTHORIZED");return;
                 }
                 std::string host_path=filename;
@@ -1998,6 +2137,11 @@ private:
     std::map<std::uint32_t,z_stream> z_streams_;
     std::uint32_t next_file_handle_=0x0000d100u;
 #endif
+    struct GuestJumpCheckpoint {
+        std::array<std::uint32_t,16> regs{};
+        std::uint32_t cpsr=0;
+    };
+    std::map<std::uint32_t,GuestJumpCheckpoint> guest_jump_buffers_;
     std::map<std::uint32_t, std::uint32_t> gl_strings_;
     std::uint32_t unpack_alignment_ = 4;
     std::uint32_t array_buffer_binding_ = 0, element_buffer_binding_ = 0;
@@ -2361,7 +2505,7 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             jit.SetCpsr(interrupted_cpsr);
             jit.SetFpscr(interrupted_fpscr);
             bridge.returned = false;
-            bridge.ticks_remaining = 100000000;
+            bridge.ticks_remaining = 400000000;
             jit.ClearHalt();
             jit.Run();
         }
@@ -2380,8 +2524,13 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             std::cout << "COCOS_NATIVE_INIT_RETURNED (render loop not started)\n";
             return 0;
         }
+        const auto& halted=jit.Regs();
         std::cout << "COCOS_NATIVE_INIT_TIMED_OUT pc=0x" << std::hex
-                  << jit.Regs()[15] << std::dec << "\n";
+                  << halted[15] << " r0=0x" << halted[0]
+                  << " r1=0x" << halted[1] << " r2=0x" << halted[2]
+                  << " r3=0x" << halted[3] << " r4=0x" << halted[4]
+                  << " r5=0x" << halted[5] << " sp=0x" << halted[13]
+                  << std::dec << "\n";
         return 4;
     }
     std::cout << "GUEST_STOP instruction_budget_exhausted_or_stalled pc=0x"
