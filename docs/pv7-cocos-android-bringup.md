@@ -290,3 +290,35 @@ merely keep raising the instruction budget.
 ARM64 and x86_64 diagnostic native builds pass. Android x86_64 debug
 APK was signed, installed and exercised. No nativeInit return,
 nativeRender, first game frame or production PV7 support is claimed.
+
+## October 31: TinyXML2 parser no-progress diagnostic
+
+Instrumented the original ARM32 guest's 400-million-tick initialization with
+bounded 25-million-tick samples of register state, the active import thunk,
+guest input bytes, and stack return-address candidates. The repeated import
+is **strlen("<")** from TinyXML2 StrPair::ParseText. The guest XML input
+pointer stays at the start of `<?xml version="1.0"...` while guest working
+heap addresses increase; the stack pointer is stable, indicating an iterative
+loop rather than unbounded recursion.
+
+Ran four direct test calls to the *original* exported ARM32
+XMLUtil::StringEqual under Dynarmic. The comparisons for matching and
+mismatching prefixes all returned expected values. This confirms the basic
+comparison helper on those test vectors, but not full parser control-flow
+correctness. The 13,911-byte original common.plist parses successfully via
+the independent host plist parser. A local-only, equal-size resource copy
+without its XML prolog and DOCTYPE made the guest advance to `<plist` but
+the same repeated parsing still occurred. The original resource was restored
+after the experiment; no modified original-game content was committed.
+
+Added a fail-closed developer-only guard at the original
+StrPair::ParseText -> strlen("<") import boundary, identifying repeated
+identical guest input pointers and aborting after 8,192 re-entries.
+**Verified on the Android x86_64 emulator**: after opening common.plist,
+the probe logged `TINYXML2_GUEST_INPUT_NOT_ADVANCING` with 8,193 repeats
+and returned `COCOS_NATIVE_INIT_STOP TINYXML2_REPEATED_PARSE_INPUT`
+instead of exhausting 400 million translated ticks or consuming the
+guest heap. Both Android ARM64 and x86_64 probe libraries compiled.
+The exact bug in guest TinyXML2 node/cursor progression remains unproven;
+next inspect XMLDocument::Identify / XMLNode::ParseDeep return pointers,
+rather than bypassing the parser or claiming a playable game.

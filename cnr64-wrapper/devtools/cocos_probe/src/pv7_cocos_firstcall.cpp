@@ -268,6 +268,9 @@ public:
     std::uint32_t fault_address = 0;
     std::string reason;
     std::uint64_t ticks_remaining = 1000000;
+    std::uint64_t next_parser_sample_tick_ = 0;
+    std::uint32_t last_tinyxml_input_ = 0;
+    unsigned same_tinyxml_input_count_ = 0;
     std::optional<pv7::compat::cocos2dx::BitmapTextRequest> pending_bitmap;
 #if defined(PV7_COCOS_JNI_RUNNER)
     ~Bridge() override { for (auto& entry:open_files_) std::fclose(entry.second); for (auto& entry:z_streams_) ::inflateEnd(&entry.second); }
@@ -326,6 +329,44 @@ public:
     void ExceptionRaised(std::uint32_t pc, Dynarmic::A32::Exception) override { Fault(pc, "guest_exception"); }
     void AddTicks(std::uint64_t ticks) override {
         ticks_remaining = ticks >= ticks_remaining ? 0 : ticks_remaining - ticks;
+        if (next_parser_sample_tick_ && jit &&
+            ticks_remaining <= next_parser_sample_tick_) {
+            const auto& r=jit->Regs();
+            std::cout<<"COCOS_GUEST_PROGRESS remaining_ticks="<<ticks_remaining
+                     <<" pc=0x"<<std::hex<<r[15]
+                     <<" lr=0x"<<r[14]
+                     <<" r0=0x"<<r[0]<<" r1=0x"<<r[1]
+                     <<" r2=0x"<<r[2]<<" r3=0x"<<r[3]
+                     <<" r4=0x"<<r[4]<<" r5=0x"<<r[5]
+                     <<" r6=0x"<<r[6]<<" r7=0x"<<r[7]
+                     <<" sp=0x"<<r[13] <<" cpsr=0x"<<jit->Cpsr()
+                     <<std::dec;
+            if (r[15] >= kImportsBase && r[15] < kImportsBase + imports_.size()*16u) {
+                const auto idx=(r[15]-kImportsBase)/16u;
+                std::cout<<" import="<<imports_[idx].name;
+            }
+            if (r[1] < mem_.size()) {
+                std::cout<<" r1_bytes=";
+                for(std::size_t k=0;k<16 && Fits(r[1],k+1,mem_.size());++k)
+                    std::cout<<std::hex<<std::setfill('0')<<std::setw(2)
+                             <<static_cast<unsigned>(mem_[r[1]+k]);
+                std::cout<<std::dec;
+            }
+            if(Fits(r[13],64,mem_.size())) {
+                std::cout<<" stack_return_candidates=";
+                for(unsigned i=0;i<16;++i){
+                    std::uint32_t candidate=0;
+                    std::memcpy(&candidate,mem_.data()+r[13]+i*4u,4u);
+                    if(candidate >= kImageBase && candidate < kImportsBase)
+                        std::cout<<std::hex<<candidate<<"@"<<(i*4u)<<",";
+                }
+                std::cout<<std::dec;
+            }
+            std::cout<<"\n";
+            next_parser_sample_tick_ =
+                next_parser_sample_tick_ > 25000000u ?
+                next_parser_sample_tick_-25000000u : 0;
+        }
     }
     std::uint64_t GetTicksRemaining() override { return ticks_remaining; }
     void CallSVC(std::uint32_t svc) override {
@@ -1428,6 +1469,27 @@ public:
                 regs[0]=count;
                 return;
             }            if (item.name == "strlen") {
+                // Original Best Park TinyXML2 StrPair::ParseText calls
+                // strlen("<") at this Thumb return address. A repeating
+                // input pointer means parser cursor is not advancing.
+                // Fail closed in the diagnostic before consuming all guest RAM.
+                if (regs[14] == kImageBase + 0x2279e9u &&
+                    regs[1] < mem_.size() && mem_[regs[1]]=='<' &&
+                    CString(mem_,regs[0])=="<") {
+                    if (regs[1] == last_tinyxml_input_)
+                        ++same_tinyxml_input_count_;
+                    else {
+                        last_tinyxml_input_=regs[1];
+                        same_tinyxml_input_count_=1;
+                    }
+                    if (same_tinyxml_input_count_ > 8192u) {
+                        std::cout<<"TINYXML2_GUEST_INPUT_NOT_ADVANCING ptr=0x"
+                                 <<std::hex<<last_tinyxml_input_
+                                 <<std::dec<<" repeats="<<same_tinyxml_input_count_<<"\n";
+                        Fault(regs[15],"TINYXML2_REPEATED_PARSE_INPUT");
+                        return;
+                    }
+                }
                 const auto a = regs[0];
                 if (a >= mem_.size()) { Fault(a, "strlen_invalid_pointer"); return; }
                 std::size_t n = 0;
@@ -2366,6 +2428,52 @@ int RunCocosProbe(int argc, char** argv) {
         }
         if (requested != "boot") return 0;
 #if defined(PV7_COCOS_JNI_RUNNER)
+        // Run the unmodified guest TinyXML2 prefix comparator on real A32.
+        // This identifies CPU/condition-code errors separately from parser state.
+        const auto equal=image.FindExport("_ZN8tinyxml27XMLUtil11StringEqualEPKcS2_i");
+        if (!equal) {
+            std::cout<<"TINYXML2_STRINGEQUAL_EXPORT_MISSING\n";return 3;
+        }
+        const auto compare=[&](const char* left,const char* right,
+                               std::uint32_t count,bool expected)->bool {
+            constexpr std::uint32_t leftAddr=0x0000a000u, rightAddr=0x0000a100u;
+            const auto leftSize=std::strlen(left)+1u, rightSize=std::strlen(right)+1u;
+            if(!Fits(leftAddr,leftSize,memory.size())||
+               !Fits(rightAddr,rightSize,memory.size())||
+               leftSize>256u || rightSize>256u)return false;
+            std::memcpy(memory.data()+leftAddr,left,leftSize);
+            std::memcpy(memory.data()+rightAddr,right,rightSize);
+            bridge.returned=false;
+            bridge.faulted=false;
+            bridge.reason.clear();
+            bridge.ticks_remaining=100000;
+            jit.ClearHalt();
+            jit.Regs().fill(0);
+            jit.Regs()[0]=leftAddr;
+            jit.Regs()[1]=rightAddr;
+            jit.Regs()[2]=count;
+            jit.Regs()[13]=kStack;
+            jit.Regs()[14]=kReturnTrap;
+            jit.Regs()[15]=*equal&~1u;
+            jit.SetCpsr((*equal&1u)?0x20u:0u);
+            jit.Run();
+            const auto result=jit.Regs()[0]!=0;
+            std::cout<<"TINYXML2_PREFIX_COMPARISON lhs="<<left<<" rhs="<<right
+                     <<" n="<<count<<" value="<<result
+                     <<" expected="<<expected
+                     <<" returned="<<bridge.returned
+                     <<" fault="<<bridge.reason<<"\n";
+            return bridge.returned&&!bridge.faulted&&result==expected;
+        };
+        if(!compare("<?xml","<?",2,true)||
+           !compare("<?xml","<!",2,false)||
+           !compare("<plist","<",1,true)||
+           !compare("abc","abd",3,false)) {
+            std::cout<<"TINYXML2_PREFIX_SELFTEST_FAILED\n";return 3;
+        }
+        std::cout<<"TINYXML2_PREFIX_SELFTEST_PASSED\n";
+#endif
+#if defined(PV7_COCOS_JNI_RUNNER)
         // Original Cocos2dxHelper.init() invokes nativeSetApkPath(sourceDir)
         // before the renderer's nativeInit. Reproduce that exact order.
         const auto set_apk=image.FindExport(
@@ -2506,6 +2614,7 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             jit.SetFpscr(interrupted_fpscr);
             bridge.returned = false;
             bridge.ticks_remaining = 400000000;
+            bridge.next_parser_sample_tick_ = 375000000;
             jit.ClearHalt();
             jit.Run();
         }
