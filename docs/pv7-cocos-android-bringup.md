@@ -322,3 +322,40 @@ guest heap. Both Android ARM64 and x86_64 probe libraries compiled.
 The exact bug in guest TinyXML2 node/cursor progression remains unproven;
 next inspect XMLDocument::Identify / XMLNode::ParseDeep return pointers,
 rather than bypassing the parser or claiming a playable game.
+
+## October 31: first successful ARM32 nativeRender invocation
+
+The isolated Android x86_64 diagnostic has now completed the original Best Park
+1.2.1 ARM32 `nativeInit` and one original `nativeRender` invocation through
+Dynarmic, with the original guest APK resources and version-16 OBB.
+
+The original TinyXML2 code progressed without replacing the XML parser or
+modifying the game's packaged resources. The developer-only probe exercises
+the original guest JNI path and Android GLES2 pbuffer. Its bounded EGL
+bridge supports ARM32 `glUniformMatrix4fv`, client-memory
+`glVertexAttribPointer`, and `glDrawArrays`, including validation of guest
+pointers, parameters, and host GL errors.
+
+Verified Android emulator log:
+
+```text
+COCOS_NATIVE_INIT_RETURNED
+COCOS_NATIVE_RENDER_BEGIN pc=0x121f0d9
+HOST_GLES_DRAW_ARRAYS_OK mode=0x5 first=0 count=4 draw_calls=7
+COCOS_NATIVE_RENDER_RETURNED
+ANDROID_JAVA_PROBE_EXIT=0
+```
+
+The diagnostic performed seven successful original guest `GL_TRIANGLE_STRIP`
+draw calls, then the original guest render entrypoint returned normally.
+Both Android x86_64 and ARM64 probe library builds passed and the signed
+debug diagnostic APK was installed and tested on x86_64.
+
+This is a successful **first render invocation**, not a verified visible
+frame or playable wrapper. The EGL surface is offscreen. No `glReadPixels`
+visual validation, multiple consecutive frame loop, touch input, audio,
+or physical ARM64 hardware execution has been verified. Production PV7
+Patcher, Cocos compatibility gating, and shipped Unity/CNR wrapper remain
+unchanged. Next: capture/validate the offscreen framebuffer, run consecutive
+frames with proper lifecycle and timing, and route the guest render path to
+the actual Android surface before attempting input/audio integration.

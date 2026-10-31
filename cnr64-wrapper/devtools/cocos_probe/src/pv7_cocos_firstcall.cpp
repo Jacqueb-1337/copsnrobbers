@@ -269,6 +269,7 @@ public:
     std::string reason;
     std::uint64_t ticks_remaining = 1000000;
     std::uint64_t next_parser_sample_tick_ = 0;
+    std::uint64_t draw_calls_ = 0;
     std::uint32_t last_tinyxml_input_ = 0;
     unsigned same_tinyxml_input_count_ = 0;
     std::optional<pv7::compat::cocos2dx::BitmapTextRequest> pending_bitmap;
@@ -1721,7 +1722,9 @@ public:
                 item.name == "glEnableVertexAttribArray" || item.name == "glDisableVertexAttribArray" ||
                 item.name == "glGetString" || item.name == "glGetIntegerv" ||
                 item.name == "glGetFloatv" || item.name == "glGetBooleanv" ||
-                item.name == "glGetError" || item.name == "glCreateProgram" || item.name == "glCreateShader" || item.name == "glShaderSource" || item.name == "glCompileShader" || item.name == "glGetShaderiv" || item.name == "glAttachShader" || item.name == "glLinkProgram" || item.name == "glGetProgramiv" || item.name == "glBindAttribLocation" || item.name == "glGetUniformLocation" || item.name == "glGetAttribLocation" || item.name == "glUseProgram" || item.name == "glDeleteShader" || item.name == "glUniform1i") {
+                item.name == "glGetError" || item.name == "glCreateProgram" || item.name == "glCreateShader" || item.name == "glShaderSource" || item.name == "glCompileShader" || item.name == "glGetShaderiv" || item.name == "glAttachShader" || item.name == "glLinkProgram" || item.name == "glGetProgramiv" || item.name == "glBindAttribLocation" || item.name == "glGetUniformLocation" || item.name == "glGetAttribLocation" || item.name == "glUseProgram" || item.name == "glDeleteShader" || item.name == "glUniform1i" ||
+                item.name == "glUniformMatrix4fv" || item.name == "glVertexAttribPointer" ||
+                item.name == "glDrawArrays") {
                 static Pv7ProbeGles2 hostGl;
                 static bool initialized = false;
                 if (!initialized) {
@@ -2135,7 +2138,84 @@ public:
                     hostGl.DeleteShader(regs[0]);
                     std::cout << "HOST_GLES_DELETE_SHADER id=" << regs[0] << "\n";
                     return;
-                }                if (item.name == "glUniform1i") {
+                }
+                if (item.name=="glDrawArrays") {
+                    const auto mode=regs[0];
+                    const auto first=static_cast<std::int32_t>(regs[1]);
+                    const auto count=static_cast<std::int32_t>(regs[2]);
+                    if (first<0 || count<0 || count>1000000 ||
+                        (mode!=GL_TRIANGLES && mode!=GL_TRIANGLE_STRIP &&
+                         mode!=GL_TRIANGLE_FAN && mode!=GL_LINES &&
+                         mode!=GL_LINE_STRIP && mode!=GL_POINTS)) {
+                        Fault(regs[15],"GLES_DRAW_ARRAYS_INVALID_ARGUMENTS");return;
+                    }
+                    hostGl.DrawArrays(mode,first,count);
+                    const auto glError=hostGl.GetError();
+                    if(!glError || *glError!=GL_NO_ERROR) {
+                        Fault(regs[15],"GLES_DRAW_ARRAYS_GL_ERROR");return;
+                    }
+                    ++draw_calls_;
+                    std::cout<<"HOST_GLES_DRAW_ARRAYS_OK mode=0x"<<std::hex<<mode
+                             <<std::dec<<" first="<<first<<" count="<<count
+                             <<" draw_calls="<<draw_calls_<<"\n";
+                    return;
+                }
+                if (item.name=="glVertexAttribPointer") {
+                    const auto stack=regs[13];
+                    if (!Fits(stack,8u,mem_.size())) {
+                        Fault(regs[15],"GLES_VERTEX_ATTRIBUTE_STACK_INVALID");return;
+                    }
+                    const auto index=regs[0];
+                    const auto components=static_cast<std::int32_t>(regs[1]);
+                    const auto type=regs[2];
+                    const auto normalized=regs[3];
+                    const auto stride=static_cast<std::int32_t>(Read<std::uint32_t>(stack));
+                    const auto guestPointer=Read<std::uint32_t>(stack+4u);
+                    unsigned componentBytes=0;
+                    if (type==GL_FLOAT || type==GL_FIXED) componentBytes=4;
+                    else if (type==GL_SHORT || type==GL_UNSIGNED_SHORT) componentBytes=2;
+                    else if (type==GL_BYTE || type==GL_UNSIGNED_BYTE) componentBytes=1;
+                    if (index>=16 || components<1 || components>4 || !componentBytes ||
+                        normalized>1u || stride<0 || stride>65536) {
+                        Fault(regs[15],"GLES_VERTEX_ATTRIBUTE_INVALID_PARAMETERS");return;
+                    }
+                    int boundBuffer=0;
+                    if(!hostGl.GetIntegerv(GL_ARRAY_BUFFER_BINDING,&boundBuffer)) {
+                        Fault(regs[15],"GLES_VERTEX_ATTRIBUTE_BINDING_UNAVAILABLE");return;
+                    }
+                    const void* pointer=nullptr;
+                    if (boundBuffer) {
+                        pointer=reinterpret_cast<const void*>(static_cast<std::uintptr_t>(guestPointer));
+                    } else {
+                        const auto required=static_cast<std::size_t>(components)*componentBytes;
+                        if (!Fits(guestPointer,required,mem_.size())) {
+                            Fault(regs[15],"GLES_VERTEX_ATTRIBUTE_GUEST_MEMORY_INVALID");return;
+                        }
+                        pointer=mem_.data()+guestPointer;
+                    }
+                    hostGl.VertexAttribPointer(index,components,type,normalized!=0u,
+                                               stride,pointer);
+                    std::cout<<"HOST_GLES_VERTEX_ATTRIB_POINTER index="<<index
+                             <<" size="<<components<<" type=0x"<<std::hex<<type
+                             <<std::dec<<" buffer="<<boundBuffer
+                             <<" guest_ptr=0x"<<std::hex<<guestPointer<<std::dec<<"\n";
+                    return;
+                }
+                if(item.name=="glUniformMatrix4fv") {
+                    const auto location=static_cast<std::int32_t>(regs[0]);
+                    const auto count=static_cast<std::int32_t>(regs[1]);
+                    const auto ptr=regs[3];
+                    if(count<0 || count>32 || regs[2]!=0 || (ptr&3u) ||
+                       (count && !Fits(ptr,static_cast<std::size_t>(count)*64u,mem_.size()))) {
+                        Fault(regs[15],"GLES_UNIFORM_MATRIX_INVALID_GUEST_RANGE");return;
+                    }
+                    hostGl.UniformMatrix4fv(location,count,false,
+                        count ? reinterpret_cast<const float*>(mem_.data()+ptr) : nullptr);
+                    std::cout<<"HOST_GLES_UNIFORM_MATRIX4FV location="<<location
+                             <<" count="<<count<<"\n";
+                    return;
+                }
+                if (item.name == "glUniform1i") {
                     hostGl.Uniform1i(static_cast<int>(regs[0]),static_cast<int>(regs[1]));
                     std::cout << "HOST_GLES_UNIFORM1I location=" << static_cast<int>(regs[0])
                               << " value=" << static_cast<int>(regs[1]) << "\n";
@@ -2258,7 +2338,7 @@ int RunCocosProbe(int argc, char** argv) {
             pending.back().name == name && pending.back().symbol_type == 1;
         if (imports.size() >= 4096) return std::nullopt;
         const std::uint32_t addr = name == "pthread_once" ? kPthreadOnce
-            : is_data ? kObjectsBase + data_count++ * 512u
+            : is_data ? kObjectsBase + data_count++ * 1024u
             : kImportsBase + static_cast<std::uint32_t>(imports.size()) * 16u;
         addresses[name] = addr;
         imports.push_back({name, addr, is_data});
@@ -2291,13 +2371,40 @@ int RunCocosProbe(int argc, char** argv) {
                  entry.name == "_toupper_tab_") {
             const auto table = entry.address + 16u;
             Put32(memory, entry.address, table);
-            for (std::uint32_t i=0;i<256;++i) {
-                auto value = static_cast<std::uint8_t>(i);
-                if (entry.name == "_tolower_tab_" && i >= 'A' && i <= 'Z')
-                    value = static_cast<std::uint8_t>(i + ('a'-'A'));
-                else if (entry.name == "_toupper_tab_" && i >= 'a' && i <= 'z')
-                    value = static_cast<std::uint8_t>(i - ('a'-'A'));
-                memory[table+i] = value;
+            if (entry.name == "_ctype_") {
+                // Android Bionic legacy ctype.h: (_ctype_ + 1)[ch]
+                // _U=1, _L=2, _N=4, _S=8, _P=16, _C=32,
+                // _X=64, _B=128. Raw ASCII values are NOT flags.
+                memory[table] = 0; // EOF slot
+                for (std::uint32_t c=0;c<256;++c) {
+                    std::uint8_t flags=0;
+                    const bool upper=c>='A'&&c<='Z';
+                    const bool lower=c>='a'&&c<='z';
+                    const bool digit=c>='0'&&c<='9';
+                    const bool whitespace=c==' '||(c>=9&&c<=13);
+                    if(upper)flags|=0x01;
+                    if(lower)flags|=0x02;
+                    if(digit)flags|=0x04;
+                    if(whitespace)flags|=0x08;
+                    if(c>=33&&c<=126&&!upper&&!lower&&!digit)flags|=0x10;
+                    if(c<32||c==127)flags|=0x20;
+                    if((c>='A'&&c<='F')||(c>='a'&&c<='f'))flags|=0x40;
+                    if(c==' '||c==9)flags|=0x80;
+                    memory[table+c+1u]=flags;
+                }
+            } else {
+                // Bionic conversion tables are SHORT arrays, not byte maps.
+                const std::int16_t eof=-1;
+                std::memcpy(memory.data()+table,&eof,sizeof(eof));
+                for (std::uint32_t c=0;c<256;++c) {
+                    std::int16_t value=static_cast<std::int16_t>(c);
+                    if (entry.name=="_tolower_tab_"&&c>='A'&&c<='Z')
+                        value=static_cast<std::int16_t>(c+('a'-'A'));
+                    else if(entry.name=="_toupper_tab_"&&c>='a'&&c<='z')
+                        value=static_cast<std::int16_t>(c-('a'-'A'));
+                    std::memcpy(memory.data()+table+2u*(c+1u),
+                                &value,sizeof(value));
+                }
             }
         }
     }
@@ -2472,6 +2579,98 @@ int RunCocosProbe(int argc, char** argv) {
             std::cout<<"TINYXML2_PREFIX_SELFTEST_FAILED\n";return 3;
         }
         std::cout<<"TINYXML2_PREFIX_SELFTEST_PASSED\n";
+        std::cout<<"TINYXML2_ROM_LT_LITERAL="<<CString(memory,kImageBase+0x46c961u)<<" byte="<<static_cast<unsigned>(memory[kImageBase+0x46c961u])<<"\n";
+        const auto doc_ctor=image.FindExport("_ZN8tinyxml211XMLDocumentC1EbNS_10WhitespaceE");
+        const auto doc_identify=image.FindExport("_ZN8tinyxml211XMLDocument8IdentifyEPcPPNS_7XMLNodeE");
+        constexpr std::uint32_t xmlDocAddr=0x0000d000u;
+        constexpr std::uint32_t xmlTextAddr=0x0000d900u;
+        constexpr std::uint32_t xmlNodeOutAddr=0x0000dc00u;
+        if (doc_ctor && doc_identify) {
+            std::memset(memory.data()+xmlDocAddr,0,2048u);
+            bridge.returned=false;
+            bridge.faulted=false;
+            bridge.reason.clear();
+            bridge.ticks_remaining=1000000;
+            jit.ClearHalt();
+            jit.Regs().fill(0);
+            jit.Regs()[0]=xmlDocAddr;
+            jit.Regs()[1]=1u;
+            jit.Regs()[2]=0u;
+            jit.Regs()[13]=kStack;
+            jit.Regs()[14]=kReturnTrap;
+            jit.Regs()[15]=*doc_ctor&~1u;
+            jit.SetCpsr((*doc_ctor&1u)?0x20u:0u);
+            jit.Run();
+            std::cout<<"TINYXML2_DOCUMENT_CTOR returned="<<bridge.returned
+                     <<" fault="<<bridge.reason<<"\n";
+            if (bridge.returned&&!bridge.faulted) {
+                constexpr const char* probeText="<plist>";
+                std::memcpy(memory.data()+xmlTextAddr,probeText,8u);
+                Put32(memory,xmlNodeOutAddr,0);
+                bridge.returned=false;
+                bridge.faulted=false;
+                bridge.reason.clear();
+                bridge.ticks_remaining=1000000;
+                jit.ClearHalt();
+                jit.Regs().fill(0);
+                jit.Regs()[0]=xmlDocAddr;
+                jit.Regs()[1]=xmlTextAddr;
+                jit.Regs()[2]=xmlNodeOutAddr;
+                jit.Regs()[13]=kStack;
+                jit.Regs()[14]=kReturnTrap;
+                jit.Regs()[15]=*doc_identify&~1u;
+                jit.SetCpsr((*doc_identify&1u)?0x20u:0u);
+                jit.Run();
+                std::uint32_t node=0;
+                std::memcpy(&node,memory.data()+xmlNodeOutAddr,4u);
+                std::cout<<"TINYXML2_DIRECT_IDENTIFY cursor_delta="
+                         <<static_cast<std::int64_t>(jit.Regs()[0])-xmlTextAddr
+                         <<" node=0x"<<std::hex<<node<<std::dec
+                         <<" returned="<<bridge.returned
+                         <<" fault="<<bridge.reason<<"\n";
+                bridge.returned=false;
+                bridge.faulted=false;
+                bridge.reason.clear();
+                bridge.ticks_remaining=100000u;
+                jit.ClearHalt();
+                jit.Regs().fill(0);
+                jit.Regs()[0]=xmlTextAddr;
+                jit.Regs()[1]=kImageBase+0x46c961u;
+                jit.Regs()[2]=1u;
+                jit.Regs()[13]=kStack;
+                jit.Regs()[14]=kReturnTrap;
+                jit.Regs()[15]=*equal&~1u;
+                jit.SetCpsr((*equal&1u)?0x20u:0u);
+                jit.Run();
+                std::cout<<"TINYXML2_ROM_COMPARE_DIRECT result="<<jit.Regs()[0]
+                         <<" returned="<<bridge.returned
+                         <<" fault="<<bridge.reason<<"\n";
+                const auto skip=image.FindExport("_ZN8tinyxml27XMLUtil14SkipWhiteSpaceEPc");
+                if (skip) {
+                    bridge.returned=false;
+                    bridge.faulted=false;
+                    bridge.reason.clear();
+                    bridge.ticks_remaining=100000u;
+                    jit.ClearHalt();
+                    jit.Regs().fill(0);
+                    jit.Regs()[0]=xmlTextAddr;
+                    jit.Regs()[13]=kStack;
+                    jit.Regs()[14]=kReturnTrap;
+                    jit.Regs()[15]=*skip&~1u;
+                    jit.SetCpsr((*skip&1u)?0x20u:0u);
+                    jit.Run();
+                    std::cout<<"TINYXML2_DIRECT_SKIP_WHITESPACE delta="
+                             <<static_cast<std::int64_t>(jit.Regs()[0])-xmlTextAddr
+                             <<" returned="<<bridge.returned
+                             <<" fault="<<bridge.reason<<"\n";
+                }
+
+
+            }
+
+        }
+
+
 #endif
 #if defined(PV7_COCOS_JNI_RUNNER)
         // Original Cocos2dxHelper.init() invokes nativeSetApkPath(sourceDir)
@@ -2630,7 +2829,34 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             return 3;
         }
         if (bridge.returned) {
-            std::cout << "COCOS_NATIVE_INIT_RETURNED (render loop not started)\n";
+            std::cout<<"COCOS_NATIVE_INIT_RETURNED\n";
+            const auto render=image.FindExport("Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeRender");
+            if(!render) {
+                std::cout<<"COCOS_NATIVE_RENDER_EXPORT_MISSING\n";
+                return 3;
+            }
+            bridge.returned=false;
+            bridge.faulted=false;
+            bridge.reason.clear();
+            bridge.ticks_remaining=20000000u;
+            jit.ClearHalt();
+            jit.Regs().fill(0);
+            jit.Regs()[0]=kEnv;
+            jit.Regs()[1]=0;
+            jit.Regs()[13]=kStack;
+            jit.Regs()[14]=kReturnTrap;
+            jit.Regs()[15]=*render&~1u;
+            jit.SetCpsr((*render&1u)?0x20u:0u);
+            std::cout<<"COCOS_NATIVE_RENDER_BEGIN pc=0x"<<std::hex<<*render<<std::dec<<"\n";
+            jit.Run();
+            if(bridge.faulted||!bridge.returned||bridge.pending_bitmap) {
+                std::cout<<"COCOS_NATIVE_RENDER_STOP reason="
+                         <<(bridge.faulted?bridge.reason:
+                            bridge.pending_bitmap?"pending_bitmap":"instruction_budget")
+                         <<" pc=0x"<<std::hex<<jit.Regs()[15]<<std::dec<<"\n";
+                return 3;
+            }
+            std::cout<<"COCOS_NATIVE_RENDER_RETURNED\n";
             return 0;
         }
         const auto& halted=jit.Regs();

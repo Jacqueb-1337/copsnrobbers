@@ -126,6 +126,16 @@ public:
     void UseProgram(unsigned program) const { if (ready_) glUseProgram(program); }
     void DeleteShader(unsigned shader) const { if (ready_) glDeleteShader(shader); }
     void Uniform1i(int location, int value) const { if (ready_) glUniform1i(location, value); }
+    void UniformMatrix4fv(int location, int count, bool transpose, const float* value) const {
+        if (ready_) glUniformMatrix4fv(location, count, transpose ? GL_TRUE : GL_FALSE, value);
+    }
+    void VertexAttribPointer(unsigned index, int size, unsigned type, bool normalized,
+                             int stride, const void* value) const {
+        if (ready_) glVertexAttribPointer(index,size,type,normalized?GL_TRUE:GL_FALSE,stride,value);
+    }
+    void DrawArrays(unsigned mode, int first, int count) const {
+        if (ready_) glDrawArrays(mode, first, count);
+    }
 
 private:
     EGLDisplay display_ = EGL_NO_DISPLAY;
