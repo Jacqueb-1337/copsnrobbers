@@ -685,3 +685,22 @@ contains an intro `autoPlayAnims` list; further gesture tests are required
 to establish whether advancing the remaining panels requires swipes,
 other regions, or a runtime timing/input fix. No original assets are
 committed with this diagnostic code.
+
+A follow-up emulator run with leftward Android swipes delivered the original
+ARM32 move callbacks and completed 1,800 on-screen render frames with exit
+code 0. The validator passed with `rendered=1800 captured=27
+distinct_frame_hashes=8`, requiring the actual guest move callback and
+audio-stop callback. Screen captures nevertheless remained at the same Benson
+panel from frames 900 through 1,800, so directional input alone did not
+resolve the stall.
+
+The unmodified original ARM32 ELF includes exported
+`Cutscene::showNextScene`, `Cutscene::onAnimationCompleted(int)`, and
+`Cutscene::onEat`. Source-binary Thumb disassembly (not inferred from UI)
+shows `onAnimationCompleted` tests whether the completed animation ID is
+in a stored collection and calls `showNextScene` when it is; the latter
+increments the scene index and invokes `setAndPlayCurrent`. Touch handling
+is another separate path through `onEat`. This narrows the next diagnostic
+to observing original animation-completion and scene-index transitions.
+It does not yet prove a missing callback or justify forcing an index change.
+The extracted binary and screenshots remain outside the Git repository.
