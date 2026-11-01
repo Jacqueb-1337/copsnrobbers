@@ -748,3 +748,47 @@ and `onEat` event routing with the original resource metadata and gesture
 timing. Do not bypass scene transitions or inject synthetic completion
 signals without establishing the missing behavior. Private OBB, extracted
 original ELF, framebuffer readbacks and screenshots remain outside Git.
+
+## Scene 3 manual interaction: original Cocos menu routing
+
+Inspection of the **original APK** `assets/cutscenes.ini` confirmed
+`[intro] autoPlayAnims=intro_1,intro_7,intro_13,intro_18,intro_19`.
+The scene index 3 animation is not on the autoplay list. The absence
+of another animation-completion notification at that index is therefore
+not, by itself, evidence of a failed Dynarmic callback. The original
+`Cutscene::onEat` Thumb body hashes a notification, distinguishes a
+cutscene-finish event, and calls `showNextScene` only after its own
+event/sound-state checks. It is not a generic unconditional touch handler.
+
+The original `Cutscene::createTouchEater` allocates a `CCMenu` and
+`CCMenuItemImage`, stores the touch-eater item pointer at Cutscene
+offset `+0x128`, and registers `onEat` as the menu item target.
+Disassembly of the original Cocos symbols establishes the following
+read-only guest-memory checks:
+
+- Item `CCMenuItem::isEnabled`: byte `+0xef`; selected byte `+0xee`
+- Node `CCNode::isVisible`: byte `+0xd0`; parent pointer `+0xa8`
+- Parent `CCMenu::isEnabled`: byte `+0x112`
+- Menu selected-item pointer: `+0x118`; menu state: `+0x114`
+- `CCMenu::ccTouchBegan` checks the menu visibility, enabled state and
+  whether another item is already selected before it can accept a touch
+
+The Android-only diagnostic now logs `COCOS_TOUCH_EATER_STATE` at
+the original scene transitions, completed guest touches and every
+120 rendered frames. It also observes original `CCMenu::ccTouchBegan`
+and `ccTouchEnded` calls using exact Thumb-prologue-checked SVC
+entry probes. The displaced PUSH operations are reconstructed in
+guest memory without changing menu state, target selection or touch
+coordinates. The validator has an optional
+`--require-touch-eater-state` flag to verify that the traces and
+resolved menu/item pointers are present.
+
+Both x86_64 and ARM64 native diagnostic libraries compiled, and the
+signed diagnostic APK was built. A follow-up emulator installation
+could not complete: ADB entered a transport-reset/offline state, even
+after a data-preserving cold boot. Consequently, **the new menu-state
+probes have not yet passed an Android emulator runtime test**, and no
+conclusion about the menu's actual enabled state is justified yet.
+Do not automatically enable the touch item or synthesize notification
+events without collecting that test result. The earlier 1,800-frame
+cutscene test remains the last fully verified Android runtime run.

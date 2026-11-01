@@ -24,7 +24,8 @@ def validate(log: str, *, require_onscreen: bool = False,
              require_touch: bool = False,
              require_move: bool = False,
              require_audio_stop: bool = False,
-             require_cutscene_trace: bool = False) -> tuple[bool, str]:
+             require_cutscene_trace: bool = False,
+             require_touch_eater_state: bool = False) -> tuple[bool, str]:
     if "COCOS_NATIVE_INIT_RETURNED" not in log:
         return False, "guest nativeInit did not return"
     if "COCOS_NATIVE_RENDER_STOP" in log:
@@ -99,6 +100,21 @@ def validate(log: str, *, require_onscreen: bool = False,
             "COCOS_CUTSCENE_TRACE_BAD_THIS" in log
         ):
             return False, "cutscene probe encountered unexpected guest state"
+    if require_touch_eater_state:
+        for name in ("ccTouchBegan", "ccTouchEnded"):
+            if f"COCOS_CUTSCENE_TRACE_INSTALLED function={name}" not in log:
+                return False, f"original Cocos menu trace not installed: {name}"
+        snapshots = re.findall(
+            r"COCOS_TOUCH_EATER_STATE stage=\S+ scene_index=(\d+) "
+            r"item=0x([0-9a-fA-F]+) menu=0x([0-9a-fA-F]+)", log
+        )
+        if not snapshots:
+            return False, "original cutscene touch-eater state never sampled"
+        if not any(int(item, 16) and int(menu, 16)
+                   for _, item, menu in snapshots):
+            return False, "cutscene item/parent menu pointer never resolved"
+        if "COCOS_CUTSCENE_TRACE_PUSH_FAILED" in log:
+            return False, "original Thumb prologue failed during menu trace"
     return True, (
         f"rendered={count} captured={len(readbacks)} "
         f"distinct_frame_hashes={len(set(hashes))}"
@@ -128,6 +144,7 @@ def main() -> int:
     parser.add_argument("--require-move", action="store_true")
     parser.add_argument("--require-audio-stop", action="store_true")
     parser.add_argument("--require-cutscene-trace", action="store_true")
+    parser.add_argument("--require-touch-eater-state", action="store_true")
     parser.add_argument("--require-clean-stop", action="store_true")
     args = parser.parse_args()
     log = args.log.read_text(encoding="utf-8", errors="replace")
@@ -140,7 +157,8 @@ def main() -> int:
             require_touch=args.require_touch,
             require_move=args.require_move,
             require_audio_stop=args.require_audio_stop,
-            require_cutscene_trace=args.require_cutscene_trace)
+            require_cutscene_trace=args.require_cutscene_trace,
+            require_touch_eater_state=args.require_touch_eater_state)
     print(("PASS: " if ok else "FAIL: ") + message)
     return 0 if ok else 1
 

@@ -350,6 +350,42 @@ public:
     unsigned same_tinyxml_input_count_ = 0;
     std::optional<pv7::compat::cocos2dx::BitmapTextRequest> pending_bitmap;
 #if defined(PV7_COCOS_JNI_RUNNER)
+    std::uint32_t cutscene_probe_this_ = 0;
+    std::uint32_t CutsceneTouchMenu() {
+        const auto self=cutscene_probe_this_;
+        if (!self || !Fits(static_cast<std::size_t>(self)+0x12cu,4u,mem_.size()))
+            return 0;
+        const auto item=Read<std::uint32_t>(self+0x128u);
+        if (!item || !Fits(item,0xf0u,mem_.size())) return 0;
+        const auto menu=Read<std::uint32_t>(item+0xa8u);
+        return Fits(menu,0x11cu,mem_.size()) ? menu : 0;
+    }
+    void TraceCutsceneTouchEater(const char* stage) {
+        const auto self=cutscene_probe_this_;
+        if (!self || !Fits(static_cast<std::size_t>(self)+0x12cu,4u,mem_.size()))
+            return;
+        const auto item=Read<std::uint32_t>(self+0x128u);
+        const auto menu=CutsceneTouchMenu();
+        std::cout<<"COCOS_TOUCH_EATER_STATE stage="<<stage
+                 <<" scene_index="<<Read<std::uint32_t>(self+0x114u)
+                 <<" item=0x"<<std::hex<<item
+                 <<" menu=0x"<<menu<<std::dec;
+        if (item && Fits(item,0xf0u,mem_.size())) {
+            std::cout<<" item_enabled="<<unsigned(mem_[item+0xefu])
+                     <<" item_selected="<<unsigned(mem_[item+0xeeu])
+                     <<" item_visible="<<unsigned(mem_[item+0xd0u])
+                     <<" item_running="<<unsigned(mem_[item+0xccu]);
+        }
+        if (menu) {
+            std::cout<<" menu_enabled="<<unsigned(mem_[menu+0x112u])
+                     <<" menu_visible="<<unsigned(mem_[menu+0xd0u])
+                     <<" menu_running="<<unsigned(mem_[menu+0xccu])
+                     <<" menu_state="<<Read<std::uint32_t>(menu+0x114u)
+                     <<" menu_selected=0x"<<std::hex
+                     <<Read<std::uint32_t>(menu+0x118u)<<std::dec;
+        }
+        std::cout<<"\n";
+    }
     ~Bridge() override { for (auto& entry:open_files_) std::fclose(entry.second); for (auto& entry:z_streams_) ::inflateEnd(&entry.second); }
 #endif
     bool StageGuestString(const std::string& value,std::uint32_t& handle) {
@@ -487,11 +523,23 @@ public:
         // Experimental observation-only Thumb function-entry probes.
         // Replace an exact, verified PUSH prologue with a Thumb SVC and
         // execute the displaced PUSH in the callback. No scene state changes.
-        if (svc >= 0x70u && svc <= 0x73u) {
+        if (svc >= 0x70u && svc <= 0x75u) {
+            const bool isMenu=svc>=0x74u;
             const char* name = svc == 0x70u ? "showNextScene" :
                 svc == 0x71u ? "onAnimationCompleted" :
-                svc == 0x72u ? "setAndPlayCurrent" : "onEat";
+                svc == 0x72u ? "setAndPlayCurrent" :
+                svc == 0x73u ? "onEat" :
+                svc == 0x74u ? "ccTouchBegan" : "ccTouchEnded";
             const std::uint32_t self = regs[0];
+            if (isMenu) {
+                if (self == CutsceneTouchMenu()) {
+                    std::cout<<"COCOS_CUTSCENE_MENU_TOUCH function="<<name
+                             <<" menu=0x"<<std::hex<<self<<std::dec
+                             <<" touch=0x"<<std::hex<<regs[1]<<std::dec<<"\n";
+                    TraceCutsceneTouchEater(name);
+                }
+            } else {
+                cutscene_probe_this_ = self;
             if (!Fits(self,0x134u,mem_.size())) {
                 Fault(regs[15],"COCOS_CUTSCENE_TRACE_BAD_THIS");return;
             }
@@ -515,22 +563,23 @@ public:
                 std::cout << std::dec << "]";
             }
             std::cout<<"\n";
-            // Emulate the exact Thumb PUSH (low registers ascending, LR last).
-            const unsigned count = (svc==0x72u || svc==0x73u) ? 5u :
-                svc==0x70u ? 4u : 3u;
-            const std::uint32_t oldSp = regs[13];
-            const std::uint32_t newSp = oldSp - count*4u;
-            if (oldSp < count*4u || !Fits(newSp,count*4u,mem_.size())) {
+            TraceCutsceneTouchEater(name);
+            }
+            // Reproduce the exact displaced Thumb PUSH register mask.
+            const std::uint16_t mask=svc==0x70u || svc==0x74u ? 0x4070u :
+                svc==0x71u ? 0x4030u :
+                svc==0x75u ? 0x4038u : 0x40f0u;
+            const unsigned count=std::popcount(static_cast<unsigned>(mask));
+            const std::uint32_t oldSp=regs[13];
+            const std::uint32_t newSp=oldSp-count*4u;
+            if (oldSp<count*4u || !Fits(newSp,count*4u,mem_.size())) {
                 Fault(oldSp,"COCOS_CUTSCENE_TRACE_STACK_INVALID");return;
             }
             unsigned word=0u;
-            for (unsigned r=4;r<4+count-1;++r) {
-                if (!Put32(mem_,newSp+(word++)*4u,regs[r])) {
+            for (unsigned r=0u;r<15u;++r) {
+                if ((mask & (1u<<r)) && !Put32(mem_,newSp+(word++)*4u,regs[r])) {
                     Fault(newSp,"COCOS_CUTSCENE_TRACE_PUSH_FAILED");return;
                 }
-            }
-            if (!Put32(mem_,newSp+word*4u,regs[14])) {
-                Fault(newSp,"COCOS_CUTSCENE_TRACE_LR_PUSH_FAILED");return;
             }
             regs[13]=newSp;
             return;
@@ -3113,7 +3162,9 @@ int RunCocosProbe(int argc, char** argv) {
         {"_ZN8Cutscene13showNextSceneEv", 0xb570u, 0xdf70u, "showNextScene"},
         {"_ZN8Cutscene20onAnimationCompletedEi", 0xb530u, 0xdf71u, "onAnimationCompleted"},
         {"_ZN8Cutscene17setAndPlayCurrentEv", 0xb5f0u, 0xdf72u, "setAndPlayCurrent"},
-        {"_ZN8Cutscene5onEatEPN7cocos2d8CCObjectE",0xb5f0u,0xdf73u,"onEat"}
+        {"_ZN8Cutscene5onEatEPN7cocos2d8CCObjectE",0xb5f0u,0xdf73u,"onEat"},
+        {"_ZN7cocos2d6CCMenu12ccTouchBeganEPNS_7CCTouchEPNS_7CCEventE",0xb570u,0xdf74u,"ccTouchBegan"},
+        {"_ZN7cocos2d6CCMenu12ccTouchEndedEPNS_7CCTouchEPNS_7CCEventE",0xb538u,0xdf75u,"ccTouchEnded"}
     };
     for (const auto& point:tracePoints) {
         const auto symbol = image.FindExport(point.symbol);
@@ -3686,6 +3737,9 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
                         return false;
                     }
                     std::cout<<"COCOS_GUEST_TOUCH_RETURNED phase="<<touch.phase<<"\n";
+                    bridge.TraceCutsceneTouchEater(touch.phase==0 ? "after_down" :
+                        touch.phase==1 ? "after_up" :
+                        touch.phase==2 ? "after_move" : "after_cancel");
                 }
                 return true;
             };
@@ -3744,6 +3798,10 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
                 }
                 if (frame <= 240u || (frame % 300u) == 0u)
                     std::cout<<"COCOS_NATIVE_RENDER_RETURNED frame="<<frame<<"\n";
+#if defined(PV7_COCOS_JNI_RUNNER)
+                if ((frame % 120u)==0u)
+                    bridge.TraceCutsceneTouchEater("render_checkpoint");
+#endif
                 if ((frame == 1u || (frame <= 240u && (frame % 10u) == 0u) ||
                     (frame > 240u && (frame % 900u) == 0u)) &&
                     !CaptureCocosFrame(frame))
