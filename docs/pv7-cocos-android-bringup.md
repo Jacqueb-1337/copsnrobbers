@@ -784,11 +784,62 @@ coordinates. The validator has an optional
 resolved menu/item pointers are present.
 
 Both x86_64 and ARM64 native diagnostic libraries compiled, and the
-signed diagnostic APK was built. A follow-up emulator installation
-could not complete: ADB entered a transport-reset/offline state, even
-after a data-preserving cold boot. Consequently, **the new menu-state
-probes have not yet passed an Android emulator runtime test**, and no
-conclusion about the menu's actual enabled state is justified yet.
-Do not automatically enable the touch item or synthesize notification
-events without collecting that test result. The earlier 1,800-frame
-cutscene test remains the last fully verified Android runtime run.
+signed diagnostic APK was built. The emulator was initially blocked
+by an orphaned QEMU process holding the same AVD after its launcher
+exited; terminating only the orphan and restarting without wiping its
+data restored ADB and successful APK installation.
+
+## October 31: touch-end recovery and complete Best Park introduction
+
+With original resources restored, the Android diagnostic traced the
+cutscene's full-screen touch-eater `CCMenuItemImage` as enabled,
+visible, running, and correctly parented to an enabled `CCMenu`.
+The guest receives `CCMenu::ccTouchBegan` and `ccTouchEnded`, and
+`Cutscene::onEat` triggers `showNextScene`. The first end event
+moves from scene 2 to scene 3; however, the menu's active-touch state
+(`menu+0x114`) remains `1` and the selected item pointer remains
+set. All subsequent touch-begins immediately fail to select an item.
+The exact original Thumb `str r3,[r5,#0x18]` at
+`CCMenu::ccTouchEnded+0x28` would clear that state. A disassembly-
+verified SVC probe at this instruction confirms it executes for
+other menus but is skipped in the cutscene callback path.
+
+The experimental **Android-only** guest bridge now performs a
+strictly guarded recovery after a completed original ARM32 touch-up:
+it requires the original cutscene menu's `ccTouchEnded` to have
+entered, its cleanup probe not to have executed, menu state exactly
+`1`, the correct item pointer selected, an unselected-but-enabled
+item, and an enabled parent menu. Only then does it reproduce the
+normal Cocos cleanup of writing `0` at `menu+0x114`. No scene
+indices, gestures, callbacks or animation-completion notifications
+are invented. Other menus are not affected.
+
+The rebuilt Android emulator APK completed a bounded **2,100-frame**
+run with `ANDROID_JAVA_PROBE_EXIT=0`, nonblank GLES2 output and
+original cutscene index **10**. All subsequent taps continued using
+the original `Cutscene::onEat` and `showNextScene` functions.
+
+A further continuous run progressed through original intro index
+**20**, persisted its `newGameAvailable` preference, and entered
+the post-intro `SELECT DESTINATION` screen. The original APK
+`Cocos2dxHelper.stopBackgroundMusic()V` was also source-verified to
+call `Cocos2dxMusic.stopBackgroundMusic` (which invokes Android
+`MediaPlayer.stop()`); an exact-signature JNI bridge now stops and
+releases the diagnostic's current MediaPlayer. With this bridge,
+the full intro completes and the destination screen starts loading.
+
+The **next blocker** is the post-intro text-bitmap guest callback
+resume. Five original ARM32 bitmap callbacks successfully complete
+for `SELECT DESTINATION`, but the suspended guest then enters
+`__kuser_cmpxchg` with an invalid, unaligned address
+`0x121e601` (helper PC `0xffff0fc4`). The diagnostic now
+reports `COCOS_BITMAP_GUEST_RESUME_FAULT` with the reason and PC:
+`kuser_cmpxchg_invalid_pointer`, stopping at render frame 1343.
+This is **not** an Android Paint/Canvas failure. Debug preserved
+guest-register restoration and kernel helper dispatch before
+attempting any workaround; do not ignore a bad atomic pointer.
+
+Only experimental Cocos diagnostic sources and findings are in this
+branch. The production Project V7 patcher is unchanged. **Gameplay
+beyond destination selection and physical ARM64 testing are still
+unverified.** Original APK, OBB and screenshots remain outside Git.

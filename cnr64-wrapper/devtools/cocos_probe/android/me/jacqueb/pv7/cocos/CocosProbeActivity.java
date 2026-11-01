@@ -249,6 +249,19 @@ public final class CocosProbeActivity extends Activity {
                 requested + " looping=" + loop);
     }
 
+    /** Original Cocos2dxMusic.stopBackgroundMusic() stops active MediaPlayer. */
+    public static void stopGuestBackgroundMusic() {
+        synchronized (musicLock) {
+            if (backgroundPlayer != null) {
+                backgroundPlayer.stop();
+                backgroundPlayer.release();
+                backgroundPlayer = null;
+            }
+            backgroundPath = null;
+        }
+        Log.i(TAG, "Original guest background music stopped");
+    }
+
     private static void releaseGuestBackgroundMusic() {
         synchronized (musicLock) {
             if (backgroundPlayer != null) {

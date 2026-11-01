@@ -351,6 +351,8 @@ public:
     std::optional<pv7::compat::cocos2dx::BitmapTextRequest> pending_bitmap;
 #if defined(PV7_COCOS_JNI_RUNNER)
     std::uint32_t cutscene_probe_this_ = 0;
+    std::uint64_t cutscene_menu_touch_ended_calls_ = 0;
+    std::uint64_t cutscene_menu_cleanup_calls_ = 0;
     std::uint32_t CutsceneTouchMenu() {
         const auto self=cutscene_probe_this_;
         if (!self || !Fits(static_cast<std::size_t>(self)+0x12cu,4u,mem_.size()))
@@ -359,6 +361,26 @@ public:
         if (!item || !Fits(item,0xf0u,mem_.size())) return 0;
         const auto menu=Read<std::uint32_t>(item+0xa8u);
         return Fits(menu,0x11cu,mem_.size()) ? menu : 0;
+    }
+    // Repair only the exact missing original CCMenu::ccTouchEnded idle-state
+    // write when the original callback returned without reaching it. This
+    // does not select an item, advance a scene, or synthesize an input event.
+    bool RecoverMissingCutsceneMenuCleanup() {
+        const auto menu=CutsceneTouchMenu();
+        const auto self=cutscene_probe_this_;
+        if (!menu || !Fits(self+0x128u,4u,mem_.size())) return false;
+        const auto item=Read<std::uint32_t>(self+0x128u);
+        if (!item || !Fits(item,0xf0u,mem_.size())) return false;
+        if (Read<std::uint32_t>(menu+0x114u)!=1u ||
+            Read<std::uint32_t>(menu+0x118u)!=item ||
+            mem_[item+0xeeu]!=0u || mem_[item+0xefu]!=1u ||
+            mem_[menu+0x112u]!=1u)
+            return false;
+        if(!Put32(mem_,menu+0x114u,0u)) return false;
+        std::cout<<"COCOS_CUTSCENE_MENU_MISSED_CLEANUP_RECOVERED menu=0x"
+                 <<std::hex<<menu<<" item=0x"<<item<<std::dec
+                 <<" scene_index="<<Read<std::uint32_t>(self+0x114u)<<"\n";
+        return true;
     }
     void TraceCutsceneTouchEater(const char* stage) {
         const auto self=cutscene_probe_this_;
@@ -520,6 +542,28 @@ public:
         if (!jit) return;
         auto& regs = jit->Regs();
 #if defined(PV7_COCOS_JNI_RUNNER)
+        // Original Cocos CCMenu::ccTouchEnded+0x28 is precisely
+        // Thumb STR r3,[r5,#0x18]. Observe reaching the cleanup and
+        // reproduce that same store, without clearing any state early.
+        if (svc == 0x76u) {
+            const std::uint32_t address=regs[5]+0x18u;
+            if (address<regs[5] || !Fits(address,4u,mem_.size())) {
+                Fault(address,"COCOS_MENU_CLEANUP_BAD_ADDRESS");return;
+            }
+            if (regs[5]>=0xfcu &&
+                regs[5]-0xfcu==CutsceneTouchMenu())
+                ++cutscene_menu_cleanup_calls_;
+            std::cout<<"COCOS_MENU_CLEANUP_REACHED target=0x"
+                     <<std::hex<<address
+                     <<" menu=0x"<<CutsceneTouchMenu()
+                     <<" base_r5=0x"<<regs[5]
+                     <<" previous=0x"<<Read<std::uint32_t>(address)
+                     <<" storing=0x"<<regs[3]<<std::dec<<"\n";
+            if (!Put32(mem_,address,regs[3])) {
+                Fault(address,"COCOS_MENU_CLEANUP_WRITE_FAILED");return;
+            }
+            return;
+        }
         // Experimental observation-only Thumb function-entry probes.
         // Replace an exact, verified PUSH prologue with a Thumb SVC and
         // execute the displaced PUSH in the callback. No scene state changes.
@@ -533,6 +577,7 @@ public:
             const std::uint32_t self = regs[0];
             if (isMenu) {
                 if (self == CutsceneTouchMenu()) {
+                    if (svc == 0x75u) ++cutscene_menu_touch_ended_calls_;
                     std::cout<<"COCOS_CUTSCENE_MENU_TOUCH function="<<name
                              <<" menu=0x"<<std::hex<<self<<std::dec
                              <<" touch=0x"<<std::hex<<regs[1]<<std::dec<<"\n";
@@ -727,6 +772,12 @@ public:
                 sig=="(I)V") {
                 regs[0]=0xc170u;
                 std::cout<<"JNI_METHOD_IDENTIFIED stopEffect\n";
+                return;
+            }
+            if (refs_.Resolve(classRef)==0xc050u &&
+                name=="stopBackgroundMusic" && sig=="()V") {
+                regs[0]=0xc180u;
+                std::cout<<"JNI_METHOD_IDENTIFIED stopBackgroundMusic\n";
                 return;
             }
             if (refs_.Resolve(classRef)==0xc050u && name=="setStringForKey" &&
@@ -1498,6 +1549,33 @@ public:
             return;
 #else
             Fault(regs[15],"JNI_StringWrite_requires_Android");return;
+#endif
+        }
+        // Original Cocos2dxHelper.stopBackgroundMusic()V -> Cocos2dxMusic
+        // -> MediaPlayer.stop(). There are no JNI method arguments.
+        if (svc>=kMissingJniSvc+141u && svc<=kMissingJniSvc+143u &&
+            refs_.Resolve(regs[1])==0xc050u && regs[2]==0xc180u) {
+#if defined(PV7_COCOS_JNI_RUNNER)
+            JNIEnv* env=g_pv7_cocos_env;
+            if (!env) { Fault(regs[15],"JNI_MusicStop_env_missing");return; }
+            jclass cls=env->FindClass("me/jacqueb/pv7/cocos/CocosProbeActivity");
+            jmethodID stop=cls ? env->GetStaticMethodID(cls,
+                "stopGuestBackgroundMusic","()V") : nullptr;
+            if (env->ExceptionCheck() || !stop) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                if(cls)env->DeleteLocalRef(cls);
+                Fault(regs[15],"JNI_MusicStop_host_missing");return;
+            }
+            env->CallStaticVoidMethod(cls,stop);
+            env->DeleteLocalRef(cls);
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();env->ExceptionClear();
+                Fault(regs[15],"JNI_MusicStop_media_player_failed");return;
+            }
+            std::cout<<"COCOS_BACKGROUND_MUSIC_STOPPED\n";
+            return;
+#else
+            Fault(regs[15],"JNI_MusicStop_requires_Android");return;
 #endif
         }
         // Exact Cocos2dxHelper.playBackgroundMusic(String, boolean) JNI ABI.
@@ -3185,6 +3263,26 @@ int RunCocosProbe(int argc, char** argv) {
         std::cout<<"COCOS_CUTSCENE_TRACE_INSTALLED function="<<point.label
                  <<" pc=0x"<<std::hex<<*symbol<<std::dec<<"\n";
     }
+    // Probe the original touch-end cleanup write. It is a single Thumb
+    // STR r3,[r5,#0x18], and execution must reach it naturally. No
+    // synthetic menu reset is injected on touch-up or a frame boundary.
+    if (const auto touchEnd=image.FindExport(
+            "_ZN7cocos2d6CCMenu12ccTouchEndedEPNS_7CCTouchEPNS_7CCEventE")) {
+        const std::uint32_t cleanup=(*touchEnd&~1u)+0x28u;
+        if (Fits(cleanup,2u,memory.size())) {
+            std::uint16_t original=0;
+            std::memcpy(&original,memory.data()+cleanup,2u);
+            if (original==0x61abu) {
+                constexpr std::uint16_t trap=0xdf76u;
+                std::memcpy(memory.data()+cleanup,&trap,2u);
+                std::cout<<"COCOS_MENU_CLEANUP_TRACE_INSTALLED pc=0x"
+                         <<std::hex<<cleanup<<std::dec<<"\n";
+            } else {
+                std::cout<<"COCOS_MENU_CLEANUP_OPCODE_MISMATCH original=0x"
+                         <<std::hex<<original<<std::dec<<"\n";
+            }
+        }
+    }
 #endif
     for (std::size_t i = 0; i < imports.size(); ++i) {
         if (!imports[i].data && imports[i].name != "pthread_once" &&
@@ -3651,12 +3749,21 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
             bridge.next_parser_sample_tick_ = 375000000;
             jit.ClearHalt();
             jit.Run();
+            if (bridge.faulted) {
+                std::cout<<"COCOS_BITMAP_GUEST_RESUME_FAULT reason="
+                         <<bridge.reason<<" address=0x"<<std::hex
+                         <<bridge.fault_address<<" pc=0x"<<jit.Regs()[15]
+                         <<std::dec<<" count="<<bitmap_callbacks<<"\n";
+            }
             }
             if (bridge.pending_bitmap) {
                 std::cout << "COCOS_BITMAP_REQUEST_LIMIT count="
                           << bitmap_callbacks << "\n";
                 return false;
             }
+            if (bridge.faulted)
+                std::cout<<"COCOS_BITMAP_DRAIN_FAILED reason="<<bridge.reason
+                         <<" completed="<<bitmap_callbacks<<"\n";
             return !bridge.faulted;
         };
         if (!drainBitmapCallbacks()) return 3;
@@ -3725,6 +3832,8 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
                              <<" pointer="<<touch.pointer<<" x="<<touch.x
                              <<" y="<<touch.y<<" pc=0x"<<std::hex<<*callback
                              <<std::dec<<"\n";
+                    const auto touchEndBefore=bridge.cutscene_menu_touch_ended_calls_;
+                    const auto cleanupBefore=bridge.cutscene_menu_cleanup_calls_;
                     jit.Run();
                     const bool bitmapCompleted = !bridge.pending_bitmap ||
                         (!bridge.faulted && drainBitmapCallbacks());
@@ -3737,6 +3846,10 @@ if (!pv7::compat::cocos2dx::RenderProbeBitmap(
                         return false;
                     }
                     std::cout<<"COCOS_GUEST_TOUCH_RETURNED phase="<<touch.phase<<"\n";
+                    if (touch.phase==1 &&
+                        bridge.cutscene_menu_touch_ended_calls_>touchEndBefore &&
+                        bridge.cutscene_menu_cleanup_calls_==cleanupBefore)
+                        bridge.RecoverMissingCutsceneMenuCleanup();
                     bridge.TraceCutsceneTouchEater(touch.phase==0 ? "after_down" :
                         touch.phase==1 ? "after_up" :
                         touch.phase==2 ? "after_move" : "after_cancel");
