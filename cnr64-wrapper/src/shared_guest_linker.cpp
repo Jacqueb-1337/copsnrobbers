@@ -1,4 +1,7 @@
 #include "shared_guest_linker.h"
+#include "guest_memory.h"
+#include "pv7_compat_module_registry.h"
+#include "pv7_binary_trace.hpp"
 
 #if defined(PROJECTV7_DEV_HOTPATCH) && PROJECTV7_DEV_HOTPATCH
 #include "hotpatch_runtime.h"
@@ -6,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cctype>
@@ -15,22 +19,31 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <deque>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #if defined(__ANDROID__)
+#include <jni.h>
 #include <android/log.h>
+#include <sys/mman.h>
 #include <android/native_window.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include <SLES/OpenSLES.h>
+#include <SLES/OpenSLES_Android.h>
 #include <zlib.h>
 #endif
 
@@ -66,12 +79,167 @@ extern "C" int access(const char*, int);
 #include "dynarmic/interface/exclusive_monitor.h"
 
 namespace {
+#if defined(PROJECTV7_FAST_SYMBOL_DISPATCH) && PROJECTV7_FAST_SYMBOL_DISPATCH
+using Pv7DispatchNameKey = std::string_view;
+#else
+using Pv7DispatchNameKey = std::string;
+#endif
+std::mutex g_host_touch_mutex;
+std::deque<HostTouchEvent> g_host_touch_queue;
+std::atomic<bool> g_guest_game_loop_running{false};
+std::atomic<bool> g_guest_restart_requested{false};
+struct HostTextEvent { std::string text; bool closed=false,canceled=false; };
+std::mutex g_host_text_mutex;
+std::optional<HostTextEvent> g_host_text_event;
+std::optional<HostTextEvent> PopHostTextEvent() {
+    std::lock_guard<std::mutex> lock(g_host_text_mutex);
+    auto event=std::move(g_host_text_event);g_host_text_event.reset();return event;
+}
+
+std::atomic<std::uint32_t> g_net_trace_count{0};
+std::atomic<std::uint32_t> g_thread_trace_count{0};
+std::atomic<std::uint32_t> g_thread_snapshot_count{0};
+
+bool PopHostTouchEvent(HostTouchEvent& event) {
+    std::lock_guard<std::mutex> lock(g_host_touch_mutex);
+    if (g_host_touch_queue.empty()) return false;
+    event = std::move(g_host_touch_queue.front());
+    g_host_touch_queue.pop_front();
+    return true;
+}
+
+#if defined(__ANDROID__)
+class AndroidAudioOutput final {
+public:
+    AndroidAudioOutput() = default;
+    ~AndroidAudioOutput() { Shutdown(); }
+
+    bool Configure(std::uint32_t sample_rate) {
+        Shutdown();
+        if (sample_rate < 8000u || sample_rate > 192000u) return false;
+
+        SLresult rc = slCreateEngine(&engine_object_, 0, nullptr, 0, nullptr, nullptr);
+        if (rc != SL_RESULT_SUCCESS || !engine_object_) return false;
+        rc = (*engine_object_)->Realize(engine_object_, SL_BOOLEAN_FALSE);
+        if (rc != SL_RESULT_SUCCESS) { Shutdown(); return false; }
+        rc = (*engine_object_)->GetInterface(engine_object_, SL_IID_ENGINE, &engine_);
+        if (rc != SL_RESULT_SUCCESS || !engine_) { Shutdown(); return false; }
+
+        rc = (*engine_)->CreateOutputMix(engine_, &output_mix_object_, 0, nullptr, nullptr);
+        if (rc != SL_RESULT_SUCCESS || !output_mix_object_) { Shutdown(); return false; }
+        rc = (*output_mix_object_)->Realize(output_mix_object_, SL_BOOLEAN_FALSE);
+        if (rc != SL_RESULT_SUCCESS) { Shutdown(); return false; }
+
+        SLDataLocator_AndroidSimpleBufferQueue queue_locator{
+            SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE,
+            static_cast<SLuint32>(buffers_.size())
+        };
+        SLDataFormat_PCM pcm_format{
+            SL_DATAFORMAT_PCM,
+            2,
+            static_cast<SLuint32>(sample_rate * 1000u),
+            SL_PCMSAMPLEFORMAT_FIXED_16,
+            SL_PCMSAMPLEFORMAT_FIXED_16,
+            SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT,
+            SL_BYTEORDER_LITTLEENDIAN
+        };
+        SLDataSource source{&queue_locator, &pcm_format};
+        SLDataLocator_OutputMix output_locator{SL_DATALOCATOR_OUTPUTMIX, output_mix_object_};
+        SLDataSink sink{&output_locator, nullptr};
+        const SLInterfaceID ids[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE};
+        const SLboolean required[] = {SL_BOOLEAN_TRUE};
+        rc = (*engine_)->CreateAudioPlayer(engine_, &player_object_, &source, &sink,
+                                           1, ids, required);
+        if (rc != SL_RESULT_SUCCESS || !player_object_) { Shutdown(); return false; }
+        rc = (*player_object_)->Realize(player_object_, SL_BOOLEAN_FALSE);
+        if (rc != SL_RESULT_SUCCESS) { Shutdown(); return false; }
+        rc = (*player_object_)->GetInterface(player_object_, SL_IID_PLAY, &play_);
+        if (rc != SL_RESULT_SUCCESS || !play_) { Shutdown(); return false; }
+        rc = (*player_object_)->GetInterface(player_object_, SL_IID_ANDROIDSIMPLEBUFFERQUEUE,
+                                             &queue_);
+        if (rc != SL_RESULT_SUCCESS || !queue_) { Shutdown(); return false; }
+        rc = (*queue_)->RegisterCallback(queue_, &AndroidAudioOutput::BufferQueueCallback, this);
+        if (rc != SL_RESULT_SUCCESS) { Shutdown(); return false; }
+        rc = (*play_)->SetPlayState(play_, SL_PLAYSTATE_PLAYING);
+        if (rc != SL_RESULT_SUCCESS) { Shutdown(); return false; }
+
+        queued_.store(0, std::memory_order_release);
+        write_index_ = 0;
+        sample_rate_ = sample_rate;
+        configured_ = true;
+        return true;
+    }
+
+    bool CanAccept() const {
+        return configured_ && queue_ && queued_.load(std::memory_order_acquire) < buffers_.size();
+    }
+
+    bool Enqueue(const std::uint8_t* data, std::size_t size) {
+        if (!data || size == 0 || !CanAccept()) return false;
+        auto& buffer = buffers_[write_index_];
+        buffer.assign(data, data + size);
+        const SLresult rc = (*queue_)->Enqueue(queue_, buffer.data(), static_cast<SLuint32>(buffer.size()));
+        if (rc != SL_RESULT_SUCCESS) return false;
+        write_index_ = (write_index_ + 1u) % buffers_.size();
+        queued_.fetch_add(1u, std::memory_order_acq_rel);
+        return true;
+    }
+
+    void Shutdown() {
+        configured_ = false;
+        queued_.store(0, std::memory_order_release);
+        if (play_) (*play_)->SetPlayState(play_, SL_PLAYSTATE_STOPPED);
+        if (queue_) (*queue_)->Clear(queue_);
+        if (player_object_) (*player_object_)->Destroy(player_object_);
+        if (output_mix_object_) (*output_mix_object_)->Destroy(output_mix_object_);
+        if (engine_object_) (*engine_object_)->Destroy(engine_object_);
+        player_object_ = nullptr;
+        output_mix_object_ = nullptr;
+        engine_object_ = nullptr;
+        play_ = nullptr;
+        queue_ = nullptr;
+        engine_ = nullptr;
+        sample_rate_ = 0;
+        write_index_ = 0;
+        for (auto& buffer : buffers_) buffer.clear();
+    }
+
+    std::uint32_t sample_rate() const { return sample_rate_; }
+    std::size_t queued() const { return queued_.load(std::memory_order_acquire); }
+
+private:
+    static void BufferQueueCallback(SLAndroidSimpleBufferQueueItf, void* context) {
+        auto* self = static_cast<AndroidAudioOutput*>(context);
+        if (!self) return;
+        std::size_t current = self->queued_.load(std::memory_order_acquire);
+        while (current != 0u &&
+               !self->queued_.compare_exchange_weak(current, current - 1u,
+                                                     std::memory_order_acq_rel,
+                                                     std::memory_order_acquire)) {}
+    }
+
+    SLObjectItf engine_object_ = nullptr;
+    SLEngineItf engine_ = nullptr;
+    SLObjectItf output_mix_object_ = nullptr;
+    SLObjectItf player_object_ = nullptr;
+    SLPlayItf play_ = nullptr;
+    SLAndroidSimpleBufferQueueItf queue_ = nullptr;
+    std::array<std::vector<std::uint8_t>, 4> buffers_{};
+    std::atomic<std::size_t> queued_{0};
+    std::size_t write_index_ = 0;
+    std::uint32_t sample_rate_ = 0;
+    bool configured_ = false;
+};
+#endif
+
 constexpr std::uint32_t kMainBase = 0x00100000;
 constexpr std::uint32_t kUnityBase = 0x01000000;
+constexpr std::uint32_t kCnrPreloadTrylockCaller = kUnityBase + 0x00313620u;
 constexpr std::uint32_t kMonoBase = 0x03000000;
 constexpr std::uint32_t kMonoMetadataDecodeRow = kMonoBase + 0x001c4310u;
 constexpr std::uint32_t kMonoMetadataDecodeRowCol = kMonoBase + 0x001c4520u;
-constexpr std::uint32_t kReturnStub = 0x00008000;
+ constexpr std::uint32_t kReturnStub = 0x00008000;
+constexpr std::uint32_t kJniDetachStub = 0x000087f0;
 constexpr std::uint32_t kJniAttachStub = 0x00008100;
 constexpr std::uint32_t kJniFindClassStub = 0x00008110;
 constexpr std::uint32_t kJniRegisterNativesStub = 0x00008120;
@@ -149,11 +317,20 @@ constexpr std::uint32_t kJniVmTable = 0x00009100;
 constexpr std::uint32_t kJniEnvObject = 0x00009200;
 constexpr std::uint32_t kJniEnvTable = 0x00009300;
 constexpr std::uint32_t kJniFakeClassHandle = 0x0000a000;
+constexpr std::uint32_t kJniInputEventClassHandle = 0x0000a010;
+constexpr std::uint32_t kJniKeyEventClassHandle = 0x0000a020;
+constexpr std::uint32_t kJniMotionEventClassHandle = 0x0000a030;
 constexpr std::uint32_t kJniFakeContextHandle = 0x0000a100;
 constexpr std::uint32_t kJniFakeFieldId = 0x0000a200;
 constexpr std::uint32_t kJniFakeObjectHandle = 0x0000a300;
 constexpr std::uint32_t kJniFakeStringHandle = 0x0000a400;
 constexpr std::uint32_t kJniFakeMethodId = 0x0000a500;
+constexpr std::uint32_t kJniFakeMotionEventHandle = 0x0000a600;
+constexpr std::uint32_t kJniSharedPreferencesHandle = 0x0000a700;
+constexpr std::uint32_t kJniSharedPreferencesEditorHandle = 0x0000a704;
+constexpr std::uint32_t kJniFakeDirectBufferHandle = 0x0000a708;
+constexpr std::uint32_t kJniDynamicMethodIdBase = 0x0000a800;
+constexpr std::uint32_t kJniDynamicStringHandleBase = 0x0f000000;
 constexpr std::uint32_t kGuestNativeWindowHandle = 0x0000b000;
 constexpr std::uint32_t kGuestLooperHandle = 0x0000b100;
 constexpr std::uint32_t kGuestConfigurationHandle = 0x0000b200;
@@ -227,6 +404,7 @@ constexpr std::uint32_t kSvcJniGetStaticMethodId = 0x00fff041;
 constexpr std::uint32_t kSvcJniCallStaticObjectMethod = 0x00fff042;
 constexpr std::uint32_t kSvcJniCallStaticPrimitiveMethod = 0x00fff043;
 constexpr std::uint32_t kSvcJniCallStaticVoidMethod = 0x00fff044;
+constexpr std::uint32_t kSvcJniDetach = 0x00fff045;
 constexpr std::uint32_t kSvcPthreadOnceReturn = 0x00fff100;
 constexpr std::uint32_t kSvcCxaThrowProbe = 0x00fff101;
 constexpr std::uint32_t kSvcUnwindRaiseProbe = 0x00fff102;
@@ -235,14 +413,22 @@ constexpr std::uint32_t kSvcQsortReturn = 0x00fff104;
 constexpr std::uint32_t kSvcSignalReturn = 0x00fff105;
 constexpr std::uint32_t kSvcMonoMetadataDecodeRow = 0x00fff106;
 constexpr std::uint32_t kSvcMonoMetadataDecodeRowCol = 0x00fff107;
-constexpr std::uint32_t kSvcJniUnknownBase = 0x00ffe000;
+ constexpr std::uint32_t kSvcJniUnknownBase = 0x00ffe000;
 constexpr std::uint32_t kJniEnvFunctionCount = 236;
 constexpr std::uint32_t kThunkStubStart = 0x00010000;
 constexpr std::uint32_t kDataSlotStart = 0x00050000;
 constexpr std::uint32_t kBootstrapRuntimeBase = 0x000d0000;
 constexpr std::uint32_t kBootstrapStringBase = 0x000e0000;
 constexpr std::uint32_t kGuestHeapStart = 0x05000000;
+// The original 0x06e00000 limit demonstrably exhausts during Mono JIT
+// compilation at interactive frame 145. A reversible 1 MiB extension can
+// use part of the otherwise unused 2 MiB gap below kStackTop. Keep the
+// last 1 MiB entirely reserved for the main guest stack.
+#if defined(PROJECTV7_TEST_HEAP_EXTEND_1M) && PROJECTV7_TEST_HEAP_EXTEND_1M
+constexpr std::uint32_t kGuestHeapEnd = 0x06f00000;
+#else
 constexpr std::uint32_t kGuestHeapEnd = 0x06e00000;
+#endif
 constexpr std::uint32_t kStackTop = 0x07000000;
 // Keep cooperative guest-thread stacks entirely above the main stack and heap.
 // The old 0x06ff0000-down layout eventually entered kGuestHeap and also left only
@@ -251,7 +437,46 @@ constexpr std::uint32_t kStackTop = 0x07000000;
 constexpr std::uint32_t kGuestThreadStackTop = 0x0bfc0000;
 constexpr std::uint32_t kGuestThreadStackStride = 0x00100000; // 1 MiB per guest thread
 constexpr std::uint32_t kGuestThreadStackFloor = 0x07fc0000;
+// Give Mono a completely separate allocator arena after the highest worker
+// stack. Unlike moving kGuestHeapEnd upwards, this preserves the main stack's
+// original 2 MiB reserve below kStackTop.
+#if defined(PROJECTV7_TEST_HEAP_OVERFLOW_32M) && PROJECTV7_TEST_HEAP_OVERFLOW_32M
+constexpr std::uint32_t kGuestOverflowHeapStart = 0x0c000000u;
+constexpr std::uint32_t kGuestOverflowHeapEnd = 0x0e000000u;
+#if !defined(PROJECTV7_CNR_CONTENT_HEAP) || !PROJECTV7_CNR_CONTENT_HEAP
+constexpr std::size_t kGuestMemorySize = 224u * 1024u * 1024u;
+#endif
+#else
+#if !defined(PROJECTV7_CNR_CONTENT_HEAP) || !PROJECTV7_CNR_CONTENT_HEAP
 constexpr std::size_t kGuestMemorySize = 192u * 1024u * 1024u;
+#endif
+#endif
+#if defined(PROJECTV7_CNR_CONTENT_HEAP) && PROJECTV7_CNR_CONTENT_HEAP
+// Preserve all ELF mappings, stacks, existing heap addresses, and the synthetic
+// JNI handle range below 0x10000000. DLC parsing needs multi-megabyte contiguous
+// allocations after Unity has consumed the small bootstrap arenas.
+constexpr std::uint32_t kGuestContentHeapStart = 0x10000000u;
+constexpr std::uint32_t kGuestContentHeapEnd = 0x30000000u;
+constexpr std::size_t kGuestMemorySize = kGuestContentHeapEnd;
+static_assert(kGuestContentHeapStart >= 0x10000000u, "Content heap must not overlap JNI handles");
+#endif
+// Discard zero-filled anonymous pages before ELF loading. Reserving guest address
+// space must not retain physical RAM for unused regions. Boundary pages containing
+// the host allocator's metadata are preserved.
+bool DiscardGuestPages(GuestMemory& memory, std::size_t offset, std::size_t size) {
+    if (offset > memory.size() || size > memory.size() - offset) return false;
+#if defined(__ANDROID__)
+    const long page_size = ::sysconf(_SC_PAGESIZE);
+    if (page_size <= 0) return false;
+    const auto page = static_cast<std::uintptr_t>(page_size);
+    const auto raw = reinterpret_cast<std::uintptr_t>(memory.data() + offset);
+    const auto begin = ((raw + page - 1u) / page) * page;
+    const auto end = ((raw + size) / page) * page;
+    if (end > begin) return ::madvise(reinterpret_cast<void*>(begin), end - begin, MADV_DONTNEED) == 0;
+#endif
+    return true;
+}
+
 constexpr std::uint32_t kGuestSignalInfoSize = 128u;
 constexpr std::uint32_t kGuestUcontextSize = 744u;
 constexpr std::uint32_t kGuestSignalFrameReserve = 1024u;
@@ -418,25 +643,25 @@ std::string ReadString(const GuestImage& image, const Elf32Shdr& strtab, std::ui
     return std::string(reinterpret_cast<const char*>(image.file.data() + start), end - start);
 }
 
-bool Read32(const std::vector<std::uint8_t>& memory, std::uint32_t address, std::uint32_t& value) {
+bool Read32(const GuestMemory& memory, std::uint32_t address, std::uint32_t& value) {
     if (address > memory.size() || sizeof(value) > memory.size() - address) return false;
     std::memcpy(&value, memory.data() + address, sizeof(value));
     return true;
 }
 
-bool Write32(std::vector<std::uint8_t>& memory, std::uint32_t address, std::uint32_t value) {
+bool Write32(GuestMemory& memory, std::uint32_t address, std::uint32_t value) {
     if (address > memory.size() || sizeof(value) > memory.size() - address) return false;
     std::memcpy(memory.data() + address, &value, sizeof(value));
     return true;
 }
 
-bool WriteBytes(std::vector<std::uint8_t>& memory, std::uint32_t address, const void* data, std::size_t size) {
+bool WriteBytes(GuestMemory& memory, std::uint32_t address, const void* data, std::size_t size) {
     if (address > memory.size() || size > memory.size() - address) return false;
     std::memcpy(memory.data() + address, data, size);
     return true;
 }
 
-bool LoadAndMapImage(GuestImage& image, std::vector<std::uint8_t>& memory, std::string& error) {
+bool LoadAndMapImage(GuestImage& image, GuestMemory& memory, std::string& error) {
     if (!LoadFile(image.path, image.file, error)) return false;
     if (!ReadStruct(image.file, 0, image.ehdr) ||
         image.ehdr.ident[0] != 0x7f || image.ehdr.ident[1] != 'E' ||
@@ -532,7 +757,7 @@ void AddExample(std::vector<std::string>& list, const std::string& value) {
 }
 
 bool ApplyRelocations(const GuestImage& image,
-                      std::vector<std::uint8_t>& memory,
+                      GuestMemory& memory,
                       const std::unordered_map<std::string, ExportSymbol>& exports,
                       LinkStats& stats,
                       std::vector<UnresolvedRelocation>& unresolved_out,
@@ -651,7 +876,7 @@ std::optional<ExportSymbol> FindExport(const std::unordered_map<std::string, Exp
 
 class BasicEnvironment : public Dynarmic::A32::UserCallbacks {
 public:
-    explicit BasicEnvironment(std::vector<std::uint8_t>& memory) : memory_(memory) {}
+    explicit BasicEnvironment(GuestMemory& memory) : memory_(memory) {}
     Dynarmic::A32::Jit* jit = nullptr;
     bool saw_return = false;
     bool failed = false;
@@ -668,6 +893,14 @@ public:
     std::uint32_t code_read_last_image = 0;
     std::uint32_t watched_write_address = 0;
     std::size_t watched_write_count = 0;
+#if defined(PROJECTV7_FAULT_CODE_WATCH) && PROJECTV7_FAULT_CODE_WATCH
+    std::size_t fault_code_watch_write_count = 0;
+#endif
+#if defined(PROJECTV7_FAULT_CODE_SNAPSHOT) && PROJECTV7_FAULT_CODE_SNAPSHOT
+    std::uint32_t fault_code_snapshot_last = 0u;
+    bool fault_code_snapshot_initialized = false;
+    std::size_t fault_code_snapshot_changes = 0;
+#endif
     std::uint32_t bad_write_address = 0;
     std::size_t bad_write_size = 0;
     std::uint32_t bad_write_pc = 0;
@@ -676,7 +909,83 @@ public:
     std::uint32_t bad_write_r1 = 0;
     std::uint32_t bad_write_r2 = 0;
     std::uint32_t bad_write_r3 = 0;
+    std::uint32_t bad_write_fp = 0;
+    std::uint32_t bad_write_sp = 0;
+    std::uint32_t bad_write_mono_cfg = 0;
+    std::uint32_t bad_write_mono_cfg_field14 = 0;
+    std::uint32_t bad_write_mono_field88 = 0;
+    std::uint32_t bad_write_mono_local144 = 0;
+    std::uint32_t bad_write_mono_cfg_field00 = 0;
+    std::uint32_t bad_write_mono_local84c = 0;
+    std::uint32_t bad_write_list_bad_link_source = 0;
+    std::uint32_t bad_write_list_bad_link_hops = 0;
+    std::uint32_t bad_write_list_source_word0 = 0;
+    std::uint32_t bad_write_list_source_word8 = 0;
+    std::uint32_t bad_write_list_end_node = 0;
+    std::uint32_t bad_write_list_end_next = 0;
+    std::uint32_t bad_write_list_stop_reason = 0;
     std::uint64_t ticks_left = 1000000;
+#if defined(PROJECTV7_STARTUP_HOTPAGE_TRACE) && PROJECTV7_STARTUP_HOTPAGE_TRACE
+    std::array<std::uint64_t, 16> guest_clock_id_counts{};
+    std::uint64_t guest_clock_getres_calls = 0;
+    std::uint64_t guest_clock_unknown_id_calls = 0;
+#endif
+    std::uint64_t total_cache_invalidation_us = 0;
+    std::size_t total_cache_invalidation_calls = 0;
+    std::unordered_map<std::uint32_t, std::unordered_set<std::uint32_t>> translated_code_words_by_page_;
+
+    bool HasTranslatedCodeOverlap(std::uint32_t start, std::uint32_t end) const {
+        if (end <= start) return false;
+        const std::uint32_t first_page = start >> 12;
+        const std::uint32_t last_page = (end - 1u) >> 12;
+        for (std::uint32_t page = first_page;; ++page) {
+            const auto page_it = translated_code_words_by_page_.find(page);
+            if (page_it != translated_code_words_by_page_.end()) {
+                for (const std::uint32_t code_address : page_it->second) {
+                    if (code_address < end && code_address + 4u > start) return true;
+                }
+            }
+            if (page == last_page) break;
+        }
+        return false;
+    }
+
+    void ForgetTranslatedCodeRange(std::uint32_t start, std::uint32_t size) {
+        if (size == 0u) return;
+        const std::uint64_t end64 = static_cast<std::uint64_t>(start) + size;
+        const std::uint32_t end = end64 > 0x100000000ull ? 0xffffffffu : static_cast<std::uint32_t>(end64);
+        const std::uint32_t first_page = start >> 12;
+        const std::uint32_t last_page = (end > start ? end - 1u : start) >> 12;
+        for (std::uint32_t page = first_page;; ++page) {
+            auto page_it = translated_code_words_by_page_.find(page);
+            if (page_it != translated_code_words_by_page_.end()) {
+                for (auto it = page_it->second.begin(); it != page_it->second.end();) {
+                    const std::uint32_t code_address = *it;
+                    if (code_address < end && code_address + 4u > start)
+                        it = page_it->second.erase(it);
+                    else
+                        ++it;
+                }
+                if (page_it->second.empty()) translated_code_words_by_page_.erase(page_it);
+            }
+            if (page == last_page) break;
+        }
+    }
+
+    void InvalidateTranslatedCodeRange(std::uint32_t start, std::uint32_t size) {
+        if (size == 0u || !jit) return;
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+        const auto invalidate_begin = std::chrono::steady_clock::now();
+#endif
+        jit->InvalidateCacheRange(start, size);
+        ForgetTranslatedCodeRange(start, size);
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+        total_cache_invalidation_us += static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - invalidate_begin).count());
+        ++total_cache_invalidation_calls;
+#endif
+    }
 
     std::optional<std::uint32_t> MemoryReadCode(std::uint32_t address) override {
         code_read_prev3 = code_read_prev2;
@@ -693,6 +1002,7 @@ public:
             if (!executed_heap_code) first_heap_code_pc = address;
             executed_heap_code = true;
         }
+        translated_code_words_by_page_[address >> 12].insert(address);
         return Read<std::uint32_t>(address);
     }
     std::uint8_t MemoryRead8(std::uint32_t a) override { return Read<std::uint8_t>(a); }
@@ -752,6 +1062,38 @@ public:
         failed = true;
         fault_pc = pc;
         fault_exception = static_cast<int>(exception);
+#if defined(__ANDROID__)
+        const std::uint32_t aligned_pc = pc & ~1u;
+        const std::uint32_t instruction = Read<std::uint32_t>(aligned_pc);
+        const std::uint16_t half0 = Read<std::uint16_t>(aligned_pc);
+        const std::uint16_t half1 = Read<std::uint16_t>(aligned_pc + 2u);
+        __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                            "PV7EXCEPTION pc=0x%08x type=%d cpsr=0x%08x thumb=%d insn32=0x%08x half0=0x%04x half1=0x%04x lr=0x%08x",
+                            pc, static_cast<int>(exception), jit ? jit->Cpsr() : 0u,
+                            jit && (jit->Cpsr() & 0x20u) ? 1 : 0,
+                            instruction, half0, half1, jit ? jit->Regs()[14] : 0u);
+        // Collect adjacent guest bytes only on a fatal fault. This distinguishes
+        // an unsupported ARM instruction from a corrupted Mono-generated code
+        // page without adding any work to the normal render loop.
+        __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                            "PV7EXCEPTION codewindow pc=0x%08x words=%08x,%08x,%08x,%08x,[%08x],%08x,%08x,%08x,%08x sp=%08x r0=%08x r1=%08x r2=%08x r3=%08x r12=%08x",
+                            aligned_pc,
+                            aligned_pc >= 16u ? Read<std::uint32_t>(aligned_pc - 16u) : 0u,
+                            aligned_pc >= 12u ? Read<std::uint32_t>(aligned_pc - 12u) : 0u,
+                            aligned_pc >= 8u ? Read<std::uint32_t>(aligned_pc - 8u) : 0u,
+                            aligned_pc >= 4u ? Read<std::uint32_t>(aligned_pc - 4u) : 0u,
+                            instruction,
+                            Read<std::uint32_t>(aligned_pc + 4u),
+                            Read<std::uint32_t>(aligned_pc + 8u),
+                            Read<std::uint32_t>(aligned_pc + 12u),
+                            Read<std::uint32_t>(aligned_pc + 16u),
+                            jit ? jit->Regs()[13] : 0u,
+                            jit ? jit->Regs()[0] : 0u,
+                            jit ? jit->Regs()[1] : 0u,
+                            jit ? jit->Regs()[2] : 0u,
+                            jit ? jit->Regs()[3] : 0u,
+                            jit ? jit->Regs()[12] : 0u);
+#endif
         if (jit) jit->HaltExecution();
     }
     void AddTicks(std::uint64_t ticks) override { ticks_left = ticks >= ticks_left ? 0 : ticks_left - ticks; }
@@ -767,6 +1109,23 @@ protected:
     }
     template <typename T>
     void Write(std::uint32_t address, T value) {
+#if defined(__ANDROID__) && defined(PROJECTV7_FAULT_CODE_WATCH) && PROJECTV7_FAULT_CODE_WATCH
+        // Trap direct CPU writes to the precise invalid Mono-generated opcode.
+        // Its page-table fast path is disabled only in the dedicated watch build.
+        constexpr std::uint32_t kFaultCodeAddress = 0x06bc3140u;
+        if (address <= kFaultCodeAddress + 3u &&
+            address + sizeof(T) > kFaultCodeAddress &&
+            fault_code_watch_write_count < 200u) {
+            __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                "PV7CODEWRITE n=%zu at=%08x size=%zu oldword=%08x val=%llx pc=%08x lr=%08x sp=%08x",
+                                fault_code_watch_write_count++, address, sizeof(T),
+                                Read<std::uint32_t>(kFaultCodeAddress),
+                                static_cast<unsigned long long>(value),
+                                jit ? jit->Regs()[15] : 0u,
+                                jit ? jit->Regs()[14] : 0u,
+                                jit ? jit->Regs()[13] : 0u);
+        }
+#endif
         if (address > memory_.size() || sizeof(T) > memory_.size() - address) {
             failed = true;
             fault_pc = address;
@@ -779,26 +1138,107 @@ protected:
                 bad_write_r1 = jit->Regs()[1];
                 bad_write_r2 = jit->Regs()[2];
                 bad_write_r3 = jit->Regs()[3];
+                bad_write_fp = jit->Regs()[11];
+                bad_write_sp = jit->Regs()[13];
+                // Disassembly at libmono +0x85014 loads the STR base from
+                // [fp-0x144]. Earlier +0x84fe4 normally initializes that
+                // local from [context+0x14]. Capture both independently to
+                // detect stale pointer/sentinel propagation. Read only.
+                if (bad_write_pc >= 0x03084ff0u && bad_write_pc < 0x03085020u) {
+                    auto safe_word = [&](std::uint32_t p, std::uint32_t& word) {
+                        if (p > memory_.size() || 4u > memory_.size() - p) return;
+                        std::memcpy(&word, memory_.data() + p, sizeof(word));
+                    };
+                    if (bad_write_fp >= 0x84cu) {
+                        safe_word(bad_write_fp - 0x144u, bad_write_mono_local144);
+                        safe_word(bad_write_fp - 0x84cu, bad_write_mono_local84c);
+                        safe_word(bad_write_fp - 0x848u, bad_write_mono_cfg);
+                        if (bad_write_mono_cfg != 0u && bad_write_mono_cfg < memory_.size()) {
+                            safe_word(bad_write_mono_cfg, bad_write_mono_cfg_field00);
+                            safe_word(bad_write_mono_cfg + 0x14u, bad_write_mono_cfg_field14);
+                            if (bad_write_mono_cfg_field14 != 0u &&
+                                bad_write_mono_cfg_field14 < memory_.size()) {
+                                safe_word(bad_write_mono_cfg_field14 + 0x88u, bad_write_mono_field88);
+                            }
+                            // Inspect this list only after a guest write fault.
+                            // 8192 bound, cycle protection, no guest mutations.
+                            // stop_reason: 1 null, 2 invalid, 3 cycle,
+                            // 4 sentinel next, 5 exhausted 8192 budget.
+                            std::uint32_t node = bad_write_mono_cfg_field14;
+                            std::unordered_set<std::uint32_t> visited;
+                            for (std::uint32_t hop = 0u; hop < 8192u; ++hop) {
+                                bad_write_list_bad_link_hops = hop;
+                                bad_write_list_end_node = node;
+                                if (node == 0u) { bad_write_list_stop_reason = 1u; break; }
+                                if (node > memory_.size() ||
+                                    12u > memory_.size() - node) {
+                                    bad_write_list_stop_reason = 2u; break;
+                                }
+                                if (!visited.insert(node).second) {
+                                    bad_write_list_stop_reason = 3u; break;
+                                }
+                                std::uint32_t next = 0u;
+                                safe_word(node + 4u, next);
+                                bad_write_list_end_next = next;
+                                if (next == 0xff000000u) {
+                                    bad_write_list_bad_link_source = node;
+                                    bad_write_list_bad_link_hops = hop + 1u;
+                                    bad_write_list_stop_reason = 4u;
+                                    safe_word(node, bad_write_list_source_word0);
+                                    safe_word(node + 8u, bad_write_list_source_word8);
+                                    break;
+                                }
+                                if (hop == 8191u) bad_write_list_stop_reason = 5u;
+                                node = next;
+                            }
+                        }
+                    }
+                }
                 jit->HaltExecution();
             }
             return;
         }
         std::memcpy(memory_.data() + address, &value, sizeof(T));
     }
-    std::vector<std::uint8_t>& memory_;
+    GuestMemory& memory_;
 };
 
-bool WriteSvcStub(std::vector<std::uint8_t>& memory, std::uint32_t address, std::uint32_t svc) {
+bool WriteSvcStub(GuestMemory& memory, std::uint32_t address, std::uint32_t svc) {
     return svc <= 0x00ffffffu &&
            Write32(memory, address, 0xef000000u | svc) &&
            Write32(memory, address + 4, 0xe12fff1eu);
 }
 
-bool WriteReturnStub(std::vector<std::uint8_t>& memory) {
+// Entries explicitly routed to a fallback still need executable code.
+// Skipping every nonzero entry left CallFloatMethod[VA] pointing at zero bytes.
+bool InitializeJniVmTable(GuestMemory& memory) {
+    return WriteSvcStub(memory,kJniAttachStub,kSvcJniAttach) &&
+           WriteSvcStub(memory,kJniDetachStub,kSvcJniDetach) &&
+           WriteSvcStub(memory,kJniGetEnvStub,kSvcJniGetEnv) &&
+           Write32(memory,kJniVmObject,kJniVmTable) &&
+           Write32(memory,kJniVmTable+4u*4u,kJniAttachStub) &&
+           Write32(memory,kJniVmTable+5u*4u,kJniDetachStub) &&
+           Write32(memory,kJniVmTable+6u*4u,kJniGetEnvStub) &&
+           Write32(memory,kJniVmTable+7u*4u,kJniAttachStub);
+}
+
+bool InitializeJniFallbackStubs(GuestMemory& memory) {
+    for (std::uint32_t slot = 4; slot < kJniEnvFunctionCount; ++slot) {
+        std::uint32_t entry = 0;
+        if (!Read32(memory, kJniEnvTable + slot * 4u, entry)) return false;
+        const std::uint32_t stub = kJniUnknownStubBase + slot * 8u;
+        if (entry != 0 && entry != stub) continue;
+        if (!WriteSvcStub(memory, stub, kSvcJniUnknownBase + slot) ||
+            !Write32(memory, kJniEnvTable + slot * 4u, stub)) return false;
+    }
+    return true;
+}
+
+bool WriteReturnStub(GuestMemory& memory) {
     return WriteSvcStub(memory, kReturnStub, 0);
 }
 
-bool ExecuteSharedMonoProbe(std::vector<std::uint8_t>& memory,
+bool ExecuteSharedMonoProbe(GuestMemory& memory,
                             const std::unordered_map<std::string, ExportSymbol>& exports,
                             std::uint32_t& root_domain,
                             std::uint32_t& fault_pc) {
@@ -812,6 +1252,7 @@ bool ExecuteSharedMonoProbe(std::vector<std::uint8_t>& memory,
     config.processor_id = 0;
     config.global_monitor = &global_monitor;
     config.arch_version = Dynarmic::A32::ArchVersion::v7;
+    config.define_unpredictable_behaviour = true;
     config.always_little_endian = true;
     config.enable_cycle_counting = true;
     config.code_cache_size = 32u * 1024u * 1024u;
@@ -858,7 +1299,7 @@ bool IsFunctionRelocation(const UnresolvedRelocation& rel) {
     return false;
 }
 
-bool InstallTrapThunks(std::vector<std::uint8_t>& memory,
+bool InstallTrapThunks(GuestMemory& memory,
                        const std::vector<UnresolvedRelocation>& unresolved,
                        ThunkInstallResult& out,
                        std::string& error) {
@@ -965,27 +1406,59 @@ std::string DeriveHotpatchDir(const std::string& managed_dir) {
 #endif
 
 class BootstrapEnvironment final : public BasicEnvironment {
+#ifdef PV7_CNR_BRIDGE_TEST
+    friend int RunCnrJniBridgeTests();
+#endif
 public:
-    BootstrapEnvironment(std::vector<std::uint8_t>& memory,
+    BootstrapEnvironment(GuestMemory& memory,
                          const std::unordered_map<std::uint32_t, std::string>& thunks,
                          const std::unordered_map<std::string, std::uint32_t>& name_to_stub,
                          const std::unordered_map<std::string, ExportSymbol>& exports,
                          std::string managed_dir,
-                         void* host_native_window)
+                         void* host_native_window,
+                         void* host_jni_env = nullptr)
         : BasicEnvironment(memory), thunks_(thunks), name_to_stub_(name_to_stub), exports_(exports),
-          managed_dir_(managed_dir), host_native_window_(host_native_window)
+          managed_dir_(managed_dir), host_native_window_(host_native_window), host_jni_env_(host_jni_env)
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+          , call_trace_recorder_(managed_dir)
+#endif
 #if defined(PROJECTV7_DEV_HOTPATCH) && PROJECTV7_DEV_HOTPATCH
           , hotpatch_runtime_(DeriveHotpatchDir(managed_dir))
 #endif
     {
+#if defined(__ANDROID__)
+        // Unity queries Java metrics during initJni, before nativeResize.
+        // Supplying 1x1 here lets it cache the minimum 128x128 render size.
+        if (host_native_window_) {
+            auto* window = static_cast<ANativeWindow*>(host_native_window_);
+            guest_display_width = std::max(1, ANativeWindow_getWidth(window));
+            guest_display_height = std::max(1, ANativeWindow_getHeight(window));
+        }
+#endif
         Write32(memory_, kBootstrapRuntimeBase, 0); // errno
         WriteSvcStub(memory_, kBsearchReturnStub, kSvcBsearchReturn);
         WriteSvcStub(memory_, kQsortReturnStub, kSvcQsortReturn);
         WriteSvcStub(memory_, kSignalReturnStub, kSvcSignalReturn);
         guest_thread_launches_.reserve(512);
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+        call_trace_recorder_.WriteNames(thunks_);
+#endif
         static constexpr char kLocaleC[] = "C";
         WriteBytes(memory_, kBootstrapRuntimeBase + 0x100, kLocaleC, sizeof(kLocaleC));
     }
+
+    ~BootstrapEnvironment() override {
+        CloseUrlStreams();
+        ShutdownHostGraphics();
+    }
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+    void TraceEvent(std::uint32_t type,std::uint32_t pc,std::uint32_t lr,
+                    std::uint32_t a0=0,std::uint32_t a1=0,
+                    std::uint32_t a2=0,std::uint32_t a3=0) {
+        call_trace_recorder_.Add(type,current_thread_id_,pc,lr,a0,a1,a2,a3);
+    }
+    void FlushTrace() { call_trace_recorder_.Flush(); }
+#endif
 
     std::string first_thunk;
     std::uint32_t first_thunk_id = 0;
@@ -999,6 +1472,11 @@ public:
     std::size_t handled_calls = 0;
     std::size_t executable_mprotect_calls = 0;
     std::size_t arm_cacheflush_calls = 0;
+    std::size_t total_executable_mprotect_calls = 0;
+    std::size_t total_arm_cacheflush_calls = 0;
+    std::size_t total_cacheflush_skipped_untranslated = 0;
+    std::size_t total_cacheflush_invalidated_translated = 0;
+    std::unordered_map<std::uint64_t, std::uint64_t> cacheflush_range_counts_;
     bool pending_cacheflush = false;
     std::uint32_t pending_cacheflush_start = 0;
     std::uint32_t pending_cacheflush_size = 0;
@@ -1009,6 +1487,51 @@ public:
     std::uint32_t last_mprotect_prot = 0;
     std::uint32_t last_mprotect_caller_lr = 0;
     std::vector<std::string> call_trace;
+    struct JniMotionEventRecord {
+        HostTouchEvent event;
+        std::uint64_t identity = 0;
+    };
+    std::optional<HostTouchEvent> active_touch_event;
+    std::uint32_t guest_display_width = 1;
+    std::uint32_t guest_display_height = 1;
+    // Unity 4.6 can keep a smaller logical default-framebuffer viewport even
+    // when Android gives it a larger Surface. The GLES bridge stretches that
+    // logical viewport to the host Surface, so input must be mapped into the
+    // same logical coordinate space or NGUI rejects it before raycasting.
+    std::uint32_t guest_logical_viewport_width = 0;
+    std::uint32_t guest_logical_viewport_height = 0;
+    std::unordered_map<std::uint64_t, bool> suspect_mutex_logged_;
+    std::uint64_t active_touch_identity = 0;
+    std::uint64_t next_touch_identity = 1;
+    std::uint32_t next_jni_motion_event_handle = 0x0e000000u;
+    std::unordered_map<std::uint32_t, JniMotionEventRecord> jni_motion_events;
+
+    const HostTouchEvent* MotionEventForHandle(std::uint32_t handle) const {
+        if (handle == kJniFakeMotionEventHandle && active_touch_event) return &*active_touch_event;
+        const auto found = jni_motion_events.find(handle);
+        return found == jni_motion_events.end() ? nullptr : &found->second.event;
+    }
+
+    std::uint64_t MotionEventIdentityForHandle(std::uint32_t handle) const {
+        if (handle == kJniFakeMotionEventHandle && active_touch_event) return active_touch_identity;
+        const auto found = jni_motion_events.find(handle);
+        return found == jni_motion_events.end() ? 0u : found->second.identity;
+    }
+
+    const HostTouchEvent* NativeMotionEventForHandle(std::uint32_t handle) const {
+        if (const HostTouchEvent* event = MotionEventForHandle(handle)) return event;
+        return active_touch_event ? &*active_touch_event : nullptr;
+    }
+
+    std::uint32_t NewMotionGlobalRef(std::uint32_t source_handle) {
+        const HostTouchEvent* event = MotionEventForHandle(source_handle);
+        if (!event) return source_handle;
+        std::uint32_t handle = next_jni_motion_event_handle;
+        next_jni_motion_event_handle += 4u;
+        if (next_jni_motion_event_handle < 0x0e000000u) next_jni_motion_event_handle = 0x0e000000u;
+        jni_motion_events[handle] = JniMotionEventRecord{*event, MotionEventIdentityForHandle(source_handle)};
+        return handle;
+    }
     struct JniNativeRegistration {
         std::string class_name;
         std::string name;
@@ -1019,6 +1542,13 @@ public:
         std::uint32_t length = 0;
         std::uint32_t element_size = 1;
         bool object_array = false;
+    };
+    struct GuestPrefValue {
+        enum class Type : std::uint8_t { Int = 1, Float = 2, String = 3 };
+        Type type = Type::Int;
+        std::int32_t int_value = 0;
+        float float_value = 0.0f;
+        std::string string_value;
     };
     struct BsearchFrame {
         std::uint32_t key = 0;
@@ -1056,8 +1586,28 @@ public:
     std::uint32_t jni_static_int_field_value = 0;
     std::string jni_new_string_utf;
     std::string jni_fake_object_string;
+    std::uint32_t next_jni_string_handle = kJniDynamicStringHandleBase;
+    std::unordered_map<std::uint32_t, std::string> jni_strings;
     std::string jni_method_name;
     std::string jni_method_signature;
+    std::unordered_map<std::string, std::uint32_t> jni_method_ids;
+    std::unordered_map<std::uint32_t, std::string> jni_method_names;
+    std::unordered_map<std::uint32_t, std::string> jni_method_signatures;
+    std::unordered_map<std::uint32_t, std::string> jni_method_classes;
+    std::uint32_t next_jni_method_id = kJniDynamicMethodIdBase;
+    std::unordered_map<std::string, std::uint32_t> jni_field_ids;
+    std::unordered_map<std::uint32_t, std::string> jni_field_names;
+    std::unordered_map<std::uint32_t, std::uint32_t> jni_reflected_methods;
+    std::unordered_map<std::uint32_t, std::uint32_t> jni_reflected_fields;
+    std::uint32_t next_jni_field_id = 0x0f300000u;
+    std::uint32_t next_jni_reflected_handle = 0x0f400000u;
+    static constexpr std::uint32_t kPackageManagerHandle = 0x0f500000u;
+    static constexpr std::uint32_t kPackageInfoHandle = 0x0f500004u;
+    static constexpr std::uint32_t kRestartIntentHandle = 0x0f500008u;
+    bool guest_prefs_loaded_ = false;
+    std::unordered_map<std::string, GuestPrefValue> guest_prefs_;
+    std::uint32_t jni_direct_buffer_address = 0;
+    std::uint32_t jni_direct_buffer_capacity = 0;
     std::uint32_t jni_call_object_method_count = 0;
     std::uint32_t jni_call_int_method_count = 0;
     std::uint32_t jni_call_boolean_method_count = 0;
@@ -1070,8 +1620,26 @@ public:
     std::uint32_t jni_unknown_r3 = 0;
     bool jni_fatal_error_seen = false;
     std::string jni_last_class;
+    std::uint32_t next_jni_class_handle = 0x0d000000u;
+    std::unordered_map<std::string, std::uint32_t> jni_class_handles;
+    std::unordered_map<std::uint32_t, std::string> jni_class_names;
     std::vector<std::string> jni_requested_classes;
     std::vector<JniNativeRegistration> jni_native_registrations;
+    std::uint32_t jni_www_class_handle = 0;
+    std::uint32_t www_done_callback_ = 0;
+    std::uint32_t www_error_callback_ = 0;
+    std::uint32_t www_header_callback_ = 0;
+    std::uint32_t www_progress_callback_ = 0;
+    std::uint32_t www_read_callback_ = 0;
+    struct HostHttpPending {
+        std::uint32_t request_id = 0;
+        int status = -1;
+        std::string headers;
+        std::string error;
+        std::vector<std::uint8_t> body;
+    };
+    std::deque<HostHttpPending> host_http_pending_;
+    std::uint32_t next_www_object_handle_ = 0x0d800000u;
     std::vector<std::string> diagnostic_formats;
     std::vector<std::pair<std::uint32_t, std::size_t>> allocation_trace;
     std::vector<std::string> file_trace;
@@ -1228,35 +1796,128 @@ public:
         return true;
     }
 
+     // Mango's standalone loader deliberately treats SVC as an ABI boundary: the
+    // CPU engine stops with the guest registers intact, and a compatibility layer
+    // decides what the syscall means. Dynarmic already gives us the equivalent
+    // callback, so keep all real ARM EABI syscalls here instead of growing ad-hoc
+    // SVC cases throughout the translator.
+    bool DispatchGuestSyscall(std::uint32_t syscall_nr) {
+        if (!jit) return false;
+        switch (syscall_nr) {
+            case 0x000f0002u: { // __ARM_NR_cacheflush
+                const std::uint32_t start = jit->Regs()[0];
+                const std::uint32_t end = jit->Regs()[1];
+                ++arm_cacheflush_calls;
+                ++total_arm_cacheflush_calls;
+
+                const bool valid_range =
+                    end > start && static_cast<std::size_t>(end) <= memory_.size();
+
+                if (valid_range) {
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                    const std::uint64_t range_key =
+                        (static_cast<std::uint64_t>(start) << 32u) | static_cast<std::uint64_t>(end - start);
+                    ++cacheflush_range_counts_[range_key];
+#endif
+                    ++total_cacheflush_invalidated_translated;
+                    pending_cacheflush = true;
+                    pending_cacheflush_start = start;
+                    pending_cacheflush_size = end - start;
+                    // Guest cacheflush is authoritative for self-modifying/JIT code.
+                    // Our translated-range bookkeeping can lag behind newly generated
+                    // Mono code, so always invalidate a valid requested range.
+                    // Do this after jit.Run() returns to avoid recursively taking
+                    // Dynarmic's cache lock from inside the SVC callback.
+                    jit->HaltExecution();
+                } else {
+                    ++total_cacheflush_skipped_untranslated;
+                }
+                jit->Regs()[0] = 0u;
+                return true;
+            }
+            case 0x000f0005u: // __ARM_NR_set_tls
+                arm_tls_value_ = jit->Regs()[0];
+                jit->Regs()[0] = 0u;
+                return true;
+            case 0x000f0006u: // __ARM_NR_get_tls
+                jit->Regs()[0] = arm_tls_value_;
+                return true;
+            case 175u: { // ARM EABI __NR_rt_sigprocmask
+                const std::uint32_t how = jit->Regs()[0];
+                const std::uint32_t set_ptr = jit->Regs()[1];
+                const std::uint32_t old_ptr = jit->Regs()[2];
+                const std::uint32_t sigset_size = jit->Regs()[3];
+                if (sigset_size != 4u && sigset_size != 8u) {
+                    jit->Regs()[0] = static_cast<std::uint32_t>(-22); // -EINVAL
+                    return true;
+                }
+                std::uint32_t mask = guest_signal_masks_[current_thread_id_];
+                if (old_ptr != 0u) {
+                    if (!Fits(old_ptr, sigset_size)) {
+                        jit->Regs()[0] = static_cast<std::uint32_t>(-14); // -EFAULT
+                        return true;
+                    }
+                    Write32(memory_, old_ptr, mask);
+                    if (sigset_size == 8u) Write32(memory_, old_ptr + 4u, 0u);
+                }
+                if (set_ptr != 0u) {
+                    if (!Fits(set_ptr, sigset_size)) {
+                        jit->Regs()[0] = static_cast<std::uint32_t>(-14); // -EFAULT
+                        return true;
+                    }
+                    std::uint32_t requested = 0u;
+                    Read32(memory_, set_ptr, requested);
+                    switch (how) {
+                        case 0u: mask |= requested; break;  // SIG_BLOCK
+                        case 1u: mask &= ~requested; break; // SIG_UNBLOCK
+                        case 2u: mask = requested; break;   // SIG_SETMASK
+                        default:
+                            jit->Regs()[0] = static_cast<std::uint32_t>(-22); // -EINVAL
+                            return true;
+                    }
+                    mask &= ~GuestSignalBit(9u);
+                    mask &= ~GuestSignalBit(19u);
+                    guest_signal_masks_[current_thread_id_] = mask;
+                    if (HasDeliverablePendingGuestSignal(current_thread_id_))
+                        MarkGuestThreadRunnable(current_thread_id_);
+                }
+                jit->Regs()[0] = 0u;
+                return true;
+            }
+            case 176u: { // ARM EABI __NR_rt_sigpending
+                const std::uint32_t set_ptr = jit->Regs()[0];
+                const std::uint32_t sigset_size = jit->Regs()[1];
+                if ((sigset_size != 4u && sigset_size != 8u) || !set_ptr || !Fits(set_ptr, sigset_size)) {
+                    jit->Regs()[0] = static_cast<std::uint32_t>(-22); // -EINVAL/-EFAULT is enough here
+                    return true;
+                }
+                std::uint32_t pending_mask = 0u;
+                const auto pending = guest_pending_signals_.find(current_thread_id_);
+                if (pending != guest_pending_signals_.end()) {
+                    for (const std::uint32_t signal : pending->second)
+                        pending_mask |= GuestSignalBit(signal);
+                }
+                Write32(memory_, set_ptr, pending_mask);
+                if (sigset_size == 8u) Write32(memory_, set_ptr + 4u, 0u);
+                jit->Regs()[0] = 0u;
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
     void CallSVC(std::uint32_t swi) override {
+        if (DispatchUrlStreamJni(swi)) return;
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+        pv7::trace::SvcScope svc_trace(call_trace_recorder_,swi,current_thread_id_,
+                                      jit ? jit->Regs().data() : nullptr);
+#endif
         if (swi == 0) {
             const std::uint32_t svc_pc = jit ? jit->Regs()[15] : 0;
             if (jit && (svc_pc < kReturnStub || svc_pc > kReturnStub + 8)) {
                 const std::uint32_t syscall_nr = jit->Regs()[7];
-                if (syscall_nr == 0x000f0002u) { // __ARM_NR_cacheflush
-                    const std::uint32_t start = jit->Regs()[0];
-                    const std::uint32_t end = jit->Regs()[1];
-                    if (end >= start) {
-                        pending_cacheflush = true;
-                        pending_cacheflush_start = start;
-                        pending_cacheflush_size = end - start;
-                    }
-                    ++arm_cacheflush_calls;
-                    jit->Regs()[0] = 0;
-                    // Invalidate after jit.Run() returns. Calling InvalidateCacheRange
-                    // from inside Dynarmic's SVC callback recursively takes its cache lock.
-                    jit->HaltExecution();
-                    return;
-                }
-                if (syscall_nr == 0x000f0005u) { // __ARM_NR_set_tls
-                    arm_tls_value_ = jit->Regs()[0];
-                    jit->Regs()[0] = 0;
-                    return;
-                }
-                if (syscall_nr == 0x000f0006u) { // __ARM_NR_get_tls
-                    jit->Regs()[0] = arm_tls_value_;
-                    return;
-                }
+                if (DispatchGuestSyscall(syscall_nr)) return;
                 unexpected_svc0_pc = svc_pc;
                 unexpected_svc0_r7 = syscall_nr;
                 first_thunk = "__kernel_svc0";
@@ -1329,7 +1990,7 @@ public:
             jit->HaltExecution();
             return;
         }
-        if (jit && (swi == kSvcMonoMetadataDecodeRow || swi == kSvcMonoMetadataDecodeRowCol)) {
+         if (jit && (swi == kSvcMonoMetadataDecodeRow || swi == kSvcMonoMetadataDecodeRowCol)) {
             const bool single_column = swi == kSvcMonoMetadataDecodeRowCol;
             if (FastMonoMetadataDecodeRow(single_column)) return;
 #if defined(__ANDROID__)
@@ -1414,6 +2075,7 @@ public:
             jit->ExtRegs() = frame.ext_regs;
             jit->SetCpsr(frame.cpsr);
             jit->SetFpscr(frame.fpscr);
+            guest_signal_masks_[current_thread_id_] = frame.signal_mask;
             const auto sigsuspend_stub = name_to_stub_.find("sigsuspend");
             if (sigsuspend_stub != name_to_stub_.end() && frame.regs[15] == sigsuspend_stub->second)
                 guest_signal_interrupted_[current_thread_id_] = true;
@@ -1447,6 +2109,12 @@ public:
             jit->HaltExecution();
             return;
         }
+        if (jit && swi == kSvcJniDetach) {
+            // Guest workers share a cooperative host thread. Detaching a guest
+            // must not detach that host thread from the real Android VM.
+            jit->Regs()[0] = 0;
+            return;
+        }
         if (jit && swi == kSvcJniAttach) {
             jni_attach_seen = true;
             if (jit->Regs()[1]) Write32(memory_, jit->Regs()[1], kJniEnvObject);
@@ -1467,34 +2135,125 @@ public:
         }
         if (jit && swi == kSvcJniNewGlobalRef) {
             jni_new_global_ref_seen = true;
-            jit->Regs()[0] = jit->Regs()[1];
+            const std::uint32_t source_handle = jit->Regs()[1];
+            jit->Regs()[0] = NewMotionGlobalRef(source_handle);
+#if defined(__ANDROID__)
+            if (MotionEventForHandle(jit->Regs()[0])) {
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7INPUT NewGlobalRef motion src=0x%08x dst=0x%08x identity=%llu refs=%zu",
+                                    source_handle, jit->Regs()[0],
+                                    static_cast<unsigned long long>(MotionEventIdentityForHandle(jit->Regs()[0])),
+                                    jni_motion_events.size());
+            }
+#endif
             return;
         }
-        if (jit && (swi == kSvcJniAllocObject || swi == kSvcJniNewObject ||
-                    swi == kSvcJniNewObjectV || swi == kSvcJniNewObjectA)) {
+        if (jit && swi == kSvcJniAllocObject) {
+            jit->Regs()[0] = kJniFakeObjectHandle;
+            return;
+        }
+        if (jit && (swi == kSvcJniNewObject || swi == kSvcJniNewObjectV || swi == kSvcJniNewObjectA)) {
+            const std::uint32_t class_handle = jit->Regs()[1];
+            const std::uint32_t method_id = jit->Regs()[2];
+            std::string class_name = JniClassNameFor(class_handle);
+            const auto method_class = jni_method_classes.find(method_id);
+            if (class_name.empty() && method_class != jni_method_classes.end()) class_name = method_class->second;
+            const std::string method_name = JniMethodNameFor(method_id);
+            const std::string method_signature = JniMethodSignatureFor(method_id);
+            if (class_name=="java/io/File" && method_name=="<init>" &&
+                method_signature=="(Ljava/lang/String;)V") {
+                const auto guest_path=JniStringValue(JniConstructorArg32(swi,0));
+                std::string mapped;
+                if (pv7::compat::NormalizeGuestPath(guest_path,managed_dir_,mapped) &&
+                    mapped.find("/GuestSharedStorage/")!=std::string::npos) {
+                    jit->Regs()[0]=Pv7FileRef(mapped); return;
+                }
+            }
+            if (class_name == "com/unity3d/player/WWW" && method_name == "<init>" &&
+                method_signature == "(ILjava/lang/String;[BLjava/util/Map;)V") {
+                const std::uint32_t request_id = JniConstructorArg32(swi, 0);
+                const std::string url = JniStringValue(JniConstructorArg32(swi, 1));
+                const std::uint32_t post_handle = JniConstructorArg32(swi, 2);
+                std::vector<std::uint8_t> post_data;
+                const bool has_post = CopyJniByteArray(post_handle, post_data);
+#if defined(__ANDROID__)
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7WWW construct id=%u url=%s post=%zu",
+                                    request_id, url.c_str(), has_post ? post_data.size() : 0u);
+#endif
+                if (!FetchHostHttp(request_id, url, has_post ? &post_data : nullptr)) {
+                    HostHttpPending pending;
+                    pending.request_id = request_id;
+                    pending.error = "CNR64 host HTTP bridge unavailable";
+                    host_http_pending_.push_back(std::move(pending));
+                }
+                const std::uint32_t object_handle = next_www_object_handle_;
+                next_www_object_handle_ += 4u;
+                jit->Regs()[0] = object_handle;
+                return;
+            }
             jit->Regs()[0] = kJniFakeObjectHandle;
             return;
         }
         if (jit && swi == kSvcJniDeleteGlobalRef) {
+            const std::uint32_t handle = jit->Regs()[1];
+            const bool was_motion = jni_motion_events.erase(handle) != 0;
+#if defined(__ANDROID__)
+            if (was_motion) {
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7INPUT DeleteGlobalRef motion handle=0x%08x refs=%zu",
+                                    handle, jni_motion_events.size());
+            }
+#endif
             jit->Regs()[0] = 0;
             return;
         }
         if (jit && swi == kSvcJniGetObjectClass) {
             jni_get_object_class_seen = true;
-            jit->Regs()[0] = kJniFakeClassHandle;
+            const std::uint32_t object_handle = jit->Regs()[1];
+            if (pv7_guest_file_objects_.find(object_handle)!=pv7_guest_file_objects_.end()) {
+                jit->Regs()[0]=EnsureJniClassHandle("java/io/File");
+                return;
+            }
+            if (MotionEventForHandle(object_handle)) {
+                const auto motion_class = jni_class_handles.find("android/view/MotionEvent");
+                jit->Regs()[0] = motion_class != jni_class_handles.end()
+                    ? motion_class->second : kJniMotionEventClassHandle;
+            } else {
+                jit->Regs()[0] = kJniFakeClassHandle;
+            }
             return;
         }
         if (jit && swi == kSvcJniGetFieldId) {
             jni_static_field_name = ReadCString(jit->Regs()[2]);
             jni_static_field_signature = ReadCString(jit->Regs()[3]);
-            jit->Regs()[0] = kJniFakeFieldId;
+            jit->Regs()[0] = InternJniField(jni_static_field_name);
             return;
         }
         if (jit && swi == kSvcJniGetObjectField) {
+            const auto field = jni_field_names.find(jit->Regs()[2]);
+            if (jit->Regs()[1] == kPackageInfoHandle && field != jni_field_names.end() &&
+                field->second == "versionName") {
+                if (const char* version = pv7::compat::GuestVersionName()) {
+                    jit->Regs()[0] = NewJniString(version);
+                    return;
+                }
+            }
             jit->Regs()[0] = kJniFakeObjectHandle;
             return;
         }
         if (jit && swi == kSvcJniGetPrimitiveField) {
+            const auto field = jni_field_names.find(jit->Regs()[2]);
+            if (field != jni_field_names.end()) {
+                if (field->second == "widthPixels") { jit->Regs()[0] = guest_display_width; return; }
+                if (field->second == "heightPixels") { jit->Regs()[0] = guest_display_height; return; }
+                if (field->second == "densityDpi") { jit->Regs()[0] = 160u; return; }
+                if (field->second == "density" || field->second == "scaledDensity" ||
+                    field->second == "xdpi" || field->second == "ydpi") {
+                    const float value = (field->second == "xdpi" || field->second == "ydpi") ? 160.0f : 1.0f;
+                    std::memcpy(&jit->Regs()[0], &value, sizeof(value)); return;
+                }
+            }
             jit->Regs()[0] = 0;
             jit->Regs()[1] = 0;
             return;
@@ -1530,15 +2289,104 @@ public:
         if (jit && swi == kSvcJniGetStaticMethodId) {
             jni_method_name = ReadCString(jit->Regs()[2]);
             jni_method_signature = ReadCString(jit->Regs()[3]);
-            jit->Regs()[0] = kJniFakeMethodId;
+            jit->Regs()[0] = InternJniMethod(JniClassNameFor(jit->Regs()[1]), jni_method_name, jni_method_signature);
             return;
         }
-        if (jit && swi == kSvcJniCallStaticObjectMethod) {
+        if (jit && (swi == kSvcJniCallStaticObjectMethod ||
+                    swi == kSvcJniUnknownBase + 115u || swi == kSvcJniUnknownBase + 116u)) {
+            const auto method = jni_method_names.find(jit->Regs()[2]);
+            const std::string name = method != jni_method_names.end() ? method->second : jni_method_name;
+            const auto owner = jni_method_classes.find(jit->Regs()[2]);
+            std::uint32_t pv7_static_return=0;
+            if (Pv7GuestStorageStaticMethod(name,JniMethodSignatureFor(jit->Regs()[2]),
+                                            pv7_static_return)) {
+                jit->Regs()[0]=pv7_static_return; return;
+            }
+            if (owner != jni_method_classes.end() && owner->second == "java/lang/Class" && name == "forName") {
+                std::string class_name = JniStringValue(JniArg32(jit, swi, 0));
+                std::replace(class_name.begin(), class_name.end(), '.', '/');
+                jit->Regs()[0] = class_name.empty() ? 0u : GetOrCreateJniClassHandle(class_name);
+                return;
+            }
+            if (owner != jni_method_classes.end() &&
+                owner->second == "com/unity3d/player/ReflectionHelper" &&
+                (name == "getMethodID" || name == "getFieldID" || name == "getConstructorID")) {
+                const auto clazz = JniArg32(jit, swi, 0);
+                const bool constructor = name == "getConstructorID";
+                const std::string member = constructor ? "<init>" : JniStringValue(JniArg32(jit, swi, 1));
+                const std::string signature = JniStringValue(JniArg32(jit, swi, constructor ? 1 : 2));
+                const auto reflected = next_jni_reflected_handle;
+                next_jni_reflected_handle += 4u;
+                if (name == "getMethodID" || constructor)
+                    jni_reflected_methods[reflected] = InternJniMethod(JniClassNameFor(clazz), member, signature);
+                else jni_reflected_fields[reflected] = InternJniField(member);
+                jit->Regs()[0] = reflected;
+                return;
+            }
             jni_fake_object_string.clear();
             jit->Regs()[0] = kJniFakeObjectHandle;
             return;
         }
         if (jit && swi == kSvcJniCallStaticPrimitiveMethod) {
+            std::string method = jni_method_name;
+            const auto found_method = jni_method_names.find(jit->Regs()[2]);
+            if (found_method != jni_method_names.end()) method = found_method->second;
+#if defined(__ANDROID__)
+            if (active_touch_event) {
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7INPUT JNI primitive method=%s obj=0x%08x mid=0x%08x arg=0x%08x",
+                                    method.c_str(), jit->Regs()[1], jit->Regs()[2], jit->Regs()[3]);
+            }
+#endif
+            const HostTouchEvent* motion = MotionEventForHandle(jit->Regs()[1]);
+            if (motion) {
+#if defined(__ANDROID__)
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7INPUT JNI primitive resolved method=%s obj=0x%08x identity=%llu",
+                                    method.c_str(), jit->Regs()[1],
+                                    static_cast<unsigned long long>(MotionEventIdentityForHandle(jit->Regs()[1])));
+#endif
+                std::uint32_t pointer_index = jit->Regs()[3];
+                if (pointer_index >= motion->points.size() && Fits(pointer_index, 4u)) {
+                    std::uint32_t indirect_index = 0;
+                    if (Read32(memory_, pointer_index, indirect_index)) pointer_index = indirect_index;
+                }
+                const HostTouchPoint* point = pointer_index < motion->points.size()
+                    ? &motion->points[pointer_index] : nullptr;
+                auto return_float = [&](float value) {
+                    std::uint32_t bits = 0;
+                    static_assert(sizeof(bits) == sizeof(value));
+                    std::memcpy(&bits, &value, sizeof(bits));
+                    jit->Regs()[0] = bits;
+                    jit->Regs()[1] = 0;
+                };
+                if (method == "getX") {
+                    return_float(point ? point->x : 0.0f);
+                    return;
+                }
+                if (method == "getY") {
+                    return_float(point ? point->y : 0.0f);
+                    return;
+                }
+                if (method == "getPressure") { return_float(point ? point->pressure : 0.0f); return; }
+                if (method == "getSize") { return_float(point ? point->size : 0.0f); return; }
+                if (method == "getTouchMajor" || method == "getTouchMinor" ||
+                    method == "getToolMajor" || method == "getToolMinor") {
+                    return_float(point ? std::max(point->size, 1.0f) : 0.0f); return;
+                }
+                if (method == "getXPrecision" || method == "getYPrecision") { return_float(1.0f); return; }
+                if (method == "getOrientation" || method.rfind("getHistorical", 0) == 0) {
+                    return_float(0.0f); return;
+                }
+                if (method == "getDownTime" || method == "getEventTime") {
+                    const std::int64_t nanos = method == "getDownTime"
+                        ? motion->downTimeNanos : motion->eventTimeNanos;
+                    const std::uint64_t millis = static_cast<std::uint64_t>(std::max<std::int64_t>(0, nanos / 1000000));
+                    jit->Regs()[0] = static_cast<std::uint32_t>(millis);
+                    jit->Regs()[1] = static_cast<std::uint32_t>(millis >> 32u);
+                    return;
+                }
+            }
             jit->Regs()[0] = 0;
             jit->Regs()[1] = 0;
             return;
@@ -1566,19 +2414,16 @@ public:
         }
         if (jit && swi == kSvcJniNewStringUtf) {
             jni_new_string_utf = ReadCString(jit->Regs()[1]);
-            jit->Regs()[0] = kJniFakeStringHandle;
+            jit->Regs()[0] = NewJniString(jni_new_string_utf);
             return;
         }
         if (jit && swi == kSvcJniGetStringUtfLength) {
-            if (jit->Regs()[1] == kJniFakeStringHandle) jit->Regs()[0] = static_cast<std::uint32_t>(jni_new_string_utf.size());
-            else if (jit->Regs()[1] == kJniFakeObjectHandle) jit->Regs()[0] = static_cast<std::uint32_t>(jni_fake_object_string.size());
-            else jit->Regs()[0] = 0;
+            const std::string value = JniStringValue(jit->Regs()[1]);
+            jit->Regs()[0] = static_cast<std::uint32_t>(value.size());
             return;
         }
         if (jit && swi == kSvcJniGetStringUtfChars) {
-            std::string value;
-            if (jit->Regs()[1] == kJniFakeStringHandle) value = jni_new_string_utf;
-            else if (jit->Regs()[1] == kJniFakeObjectHandle) value = jni_fake_object_string;
+            const std::string value = JniStringValue(jit->Regs()[1]);
             const std::uint32_t ptr = Allocate(value.size() + 1u, 1u);
             if (!ptr || !WriteCString(ptr, value)) {
                 jit->Regs()[0] = 0;
@@ -1595,35 +2440,267 @@ public:
         if (jit && swi == kSvcJniGetMethodId) {
             jni_method_name = ReadCString(jit->Regs()[2]);
             jni_method_signature = ReadCString(jit->Regs()[3]);
-            jit->Regs()[0] = kJniFakeMethodId;
+            if (jit->Regs()[1] == 0x0dffff00u && jni_method_name == "getKeyCode") {
+                jit->Regs()[0] = 0;
+                return;
+            }
+#if defined(__ANDROID__)
+            if (active_touch_event) {
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7INPUT JNI GetMethodID name=%s sig=%s",
+                                    jni_method_name.c_str(), jni_method_signature.c_str());
+            }
+#endif
+            const std::string class_name = JniClassNameFor(jit->Regs()[1]);
+            const std::string key = class_name + "\n" + jni_method_name + "\n" + jni_method_signature;
+            auto found_method = jni_method_ids.find(key);
+            if (found_method == jni_method_ids.end()) {
+                const std::uint32_t id = next_jni_method_id;
+                next_jni_method_id += 4u;
+                jni_method_ids.emplace(key, id);
+                jni_method_names.emplace(id, jni_method_name);
+                jni_method_signatures.emplace(id, jni_method_signature);
+                jni_method_classes.emplace(id, class_name);
+                jit->Regs()[0] = id;
+            } else {
+                jit->Regs()[0] = found_method->second;
+                if (!class_name.empty()) jni_method_classes[found_method->second] = class_name;
+            }
             return;
         }
         if (jit && (swi == kSvcJniCallObjectMethod || swi == kSvcJniCallObjectMethodV || swi == kSvcJniCallObjectMethodA)) {
             ++jni_call_object_method_count;
-            if (jni_method_name == "getPackageName") {
-                jni_fake_object_string = "me.jacqueb.cnr64poc";
-            } else {
-                jni_fake_object_string.clear();
+            const std::uint32_t object = jit->Regs()[1];
+            const std::uint32_t method_id = jit->Regs()[2];
+            const std::string method = JniMethodNameFor(method_id);
+
+            std::uint32_t pv7_file_return=0;
+            if (Pv7GuestStorageObjectMethod(method, JniMethodSignatureFor(method_id),
+                object, pv7_file_return)) { jit->Regs()[0]=pv7_file_return; return; }
+            if (method == "getPackageManager") { jit->Regs()[0] = kPackageManagerHandle; return; }
+            if (method == "getPackageInfo" && object == kPackageManagerHandle) {
+                jit->Regs()[0] = kPackageInfoHandle; return;
             }
+            if (method == "getLaunchIntentForPackage" && object == kPackageManagerHandle &&
+                pv7::compat::SupportsHostRestart()) {
+                const char* package = pv7::compat::GuestPackageName();
+                const auto requested = JniStringValue(JniArg32(jit, swi, 0));
+                jit->Regs()[0] = package && requested == package ? kRestartIntentHandle : 0u; return;
+            }
+            if (method == "addFlags" && object == kRestartIntentHandle) {
+                jit->Regs()[0] = object; return;
+            }
+            if (method == "getPackageName") {
+                if (const char* compat_package = pv7::compat::GuestPackageName()) {
+                    jit->Regs()[0] = NewJniString(compat_package);
+                    return;
+                }
+            }
+            if (method == "getSharedPreferences") {
+                LoadGuestPrefs();
+                jit->Regs()[0] = kJniSharedPreferencesHandle;
+                return;
+            }
+            if (object == kJniSharedPreferencesHandle && method == "edit") {
+                LoadGuestPrefs();
+                jit->Regs()[0] = kJniSharedPreferencesEditorHandle;
+                return;
+            }
+            if (object == kJniSharedPreferencesHandle && method == "getString") {
+                LoadGuestPrefs();
+                const std::string key = JniStringValue(JniArg32(jit, swi, 0));
+                const std::string fallback = JniStringValue(JniArg32(jit, swi, 1));
+                const auto found = guest_prefs_.find(key);
+                const std::string value = found != guest_prefs_.end() &&
+                                          found->second.type == GuestPrefValue::Type::String
+                    ? found->second.string_value : fallback;
+                jit->Regs()[0] = NewJniString(value);
+                return;
+            }
+            if (object == kJniSharedPreferencesEditorHandle && method == "putString") {
+                LoadGuestPrefs();
+                GuestPrefValue value;
+                value.type = GuestPrefValue::Type::String;
+                const std::string key = JniStringValue(JniArg32(jit, swi, 0));
+                value.string_value = JniStringValue(JniArg32(jit, swi, 1));
+                guest_prefs_[key] = std::move(value);
+                jit->Regs()[0] = kJniSharedPreferencesEditorHandle;
+                return;
+            }
+            if (object == kJniSharedPreferencesEditorHandle && method == "putInt") {
+                LoadGuestPrefs();
+                GuestPrefValue value;
+                value.type = GuestPrefValue::Type::Int;
+                const std::string key = JniStringValue(JniArg32(jit, swi, 0));
+                value.int_value = static_cast<std::int32_t>(JniArg32(jit, swi, 1));
+                guest_prefs_[key] = value;
+                jit->Regs()[0] = kJniSharedPreferencesEditorHandle;
+                return;
+            }
+            if (object == kJniSharedPreferencesEditorHandle && method == "putFloat") {
+                LoadGuestPrefs();
+                const auto key=JniStringValue(JniArg32(jit,swi,0));
+                GuestPrefValue value;value.type=GuestPrefValue::Type::Float;
+                if(swi==kSvcJniCallObjectMethodA) {
+                    const auto bits=JniArg32(jit,swi,1);std::memcpy(&value.float_value,&bits,4);
+                } else {
+                    const auto address=swi==kSvcJniCallObjectMethodV?
+                        (jit->Regs()[3]+11u)&~7u:jit->Regs()[13];
+                    value.float_value=static_cast<float>(Read<double>(address));
+                }
+                guest_prefs_[key]=value;jit->Regs()[0]=kJniSharedPreferencesEditorHandle;return;
+            }
+            if (object == kJniSharedPreferencesEditorHandle && method == "remove") {
+                LoadGuestPrefs();
+                guest_prefs_.erase(JniStringValue(JniArg32(jit, swi, 0)));
+                jit->Regs()[0] = kJniSharedPreferencesEditorHandle;
+                return;
+            }
+
+            jni_fake_object_string.clear();
             jit->Regs()[0] = kJniFakeObjectHandle;
             return;
         }
         if (jit && (swi == kSvcJniCallIntMethod || swi == kSvcJniCallIntMethodV || swi == kSvcJniCallIntMethodA)) {
             ++jni_call_int_method_count;
-            jit->Regs()[0] = 0;
+            std::string method = JniMethodNameFor(jit->Regs()[2]);
+            if (jit->Regs()[1] == kJniSharedPreferencesHandle && method == "getInt") {
+                LoadGuestPrefs();
+                const std::string key = JniStringValue(JniArg32(jit, swi, 0));
+                const std::int32_t fallback = static_cast<std::int32_t>(JniArg32(jit, swi, 1));
+                const auto found = guest_prefs_.find(key);
+                jit->Regs()[0] = static_cast<std::uint32_t>(
+                    found != guest_prefs_.end() && found->second.type == GuestPrefValue::Type::Int
+                        ? found->second.int_value : fallback);
+                return;
+            }
+#if defined(__ANDROID__)
+            if (active_touch_event) {
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7INPUT JNI int method=%s obj=0x%08x mid=0x%08x arg=0x%08x",
+                                    method.c_str(), jit->Regs()[1], jit->Regs()[2], jit->Regs()[3]);
+            }
+#endif
+            const HostTouchEvent* motion = MotionEventForHandle(jit->Regs()[1]);
+            if (motion) {
+#if defined(__ANDROID__)
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7INPUT JNI int resolved method=%s obj=0x%08x identity=%llu",
+                                    method.c_str(), jit->Regs()[1],
+                                    static_cast<unsigned long long>(MotionEventIdentityForHandle(jit->Regs()[1])));
+#endif
+                if (method == "getAction") jit->Regs()[0] = static_cast<std::uint32_t>(motion->action);
+                else if (method == "getMetaState") jit->Regs()[0] = static_cast<std::uint32_t>(motion->metaState);
+                else if (method == "getButtonState") jit->Regs()[0] = static_cast<std::uint32_t>(motion->buttonState);
+                else if (method == "getSource") jit->Regs()[0] = static_cast<std::uint32_t>(motion->source);
+                else if (method == "getDeviceId") jit->Regs()[0] = static_cast<std::uint32_t>(motion->deviceId);
+                else if (method == "getPointerCount") jit->Regs()[0] = static_cast<std::uint32_t>(motion->points.size());
+                else if (method == "getPointerId") {
+                    std::uint32_t index = jit->Regs()[3];
+                    if (swi != kSvcJniCallIntMethod && Fits(index, 4u)) {
+                        std::uint32_t indirect_index = 0;
+                        if (Read32(memory_, index, indirect_index)) index = indirect_index;
+                    }
+                    jit->Regs()[0] = index < motion->points.size()
+                        ? static_cast<std::uint32_t>(motion->points[index].id) : 0xffffffffu;
+                } else if (method == "getToolType") jit->Regs()[0] = 1u;
+                else if (method == "getHistorySize") jit->Regs()[0] = 0u;
+                else jit->Regs()[0] = 0u;
+            } else {
+                if (method == "getWidth" || method == "getRawWidth")
+                    jit->Regs()[0] = guest_display_width;
+                else if (method == "getHeight" || method == "getRawHeight")
+                    jit->Regs()[0] = guest_display_height;
+                else if (method == "getDisplayId" || method == "getRotation")
+                    jit->Regs()[0] = 0u;
+                else
+                    jit->Regs()[0] = 0u;
+#if defined(__ANDROID__)
+                if (active_touch_event && (method == "getWidth" || method == "getRawWidth" ||
+                                           method == "getHeight" || method == "getRawHeight")) {
+                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                        "PV7INPUT display method=%s value=%u",
+                                        method.c_str(), jit->Regs()[0]);
+                }
+#endif
+            }
             return;
         }
         if (jit && (swi == kSvcJniCallBooleanMethod || swi == kSvcJniCallBooleanMethodV || swi == kSvcJniCallBooleanMethodA)) {
             ++jni_call_boolean_method_count;
+            const std::string method = JniMethodNameFor(jit->Regs()[2]);
+            std::uint32_t pv7_boolean_return=0;
+            if (Pv7GuestStorageFileBoolean(method,jit->Regs()[1],pv7_boolean_return)) {
+                jit->Regs()[0]=pv7_boolean_return; return;
+            }
+            if (jit->Regs()[1] == kJniSharedPreferencesHandle && method == "contains") {
+                LoadGuestPrefs();
+                const std::string key = JniStringValue(JniArg32(jit, swi, 0));
+                jit->Regs()[0] = guest_prefs_.find(key) != guest_prefs_.end() ? 1u : 0u;
+                return;
+            }
+            if (jit->Regs()[1] == kJniSharedPreferencesEditorHandle && method == "commit") {
+                SaveGuestPrefs();
+                jit->Regs()[0] = 1u;
+                return;
+            }
             jit->Regs()[0] = 0;
             return;
         }
         if (jit && (swi == kSvcJniCallVoidMethod || swi == kSvcJniCallVoidMethodV || swi == kSvcJniCallVoidMethodA)) {
+            const std::string method = JniMethodNameFor(jit->Regs()[2]);
+            if(method=="showSoftInput" || method=="hideSoftInput") {
+#if defined(__ANDROID__)
+                auto h=static_cast<JNIEnv*>(host_jni_env_);
+                if(h) {
+                    auto c=h->FindClass("me/jacqueb/cnr64poc/HostKeyboard");
+                    if(!c && h->ExceptionCheck())h->ExceptionClear();
+                    if(!c)c=h->FindClass("app/projectv7/wrapper/HostKeyboard");
+                    if(c) {
+                        if(method=="showSoftInput") {
+                            auto m=h->GetStaticMethodID(c,"show","(Ljava/lang/String;Ljava/lang/String;IZZ)V");
+                            auto text=h->NewStringUTF(JniStringValue(JniArg32(jit,swi,0)).c_str());
+                            auto hint=h->NewStringUTF(JniStringValue(JniArg32(jit,swi,6)).c_str());
+                            if(m)h->CallStaticVoidMethod(c,m,text,hint,static_cast<jint>(JniArg32(jit,swi,1)),
+                                static_cast<jboolean>(JniArg32(jit,swi,3)!=0),static_cast<jboolean>(JniArg32(jit,swi,4)!=0));
+                            h->DeleteLocalRef(text);h->DeleteLocalRef(hint);
+                        } else {
+                            auto m=h->GetStaticMethodID(c,"hide","()V");if(m)h->CallStaticVoidMethod(c,m);
+                        }
+                        h->DeleteLocalRef(c);
+                    }
+                    if(h->ExceptionCheck()){h->ExceptionDescribe();h->ExceptionClear();}
+                }
+#endif
+                jit->Regs()[0]=0;return;
+            }
+            if (method == "startActivity" && JniArg32(jit, swi, 0) == kRestartIntentHandle &&
+                pv7::compat::SupportsHostRestart()) {
+                SaveGuestPrefs();
+                g_guest_restart_requested.store(true);
+                SetGuestGameLoopRunning(false);
+#if defined(__ANDROID__)
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC", "PV7CNR restart requested through module");
+#endif
+            }
+            if (jit->Regs()[1] == kJniSharedPreferencesEditorHandle && method == "apply") {
+                SaveGuestPrefs();
+            }
             jit->Regs()[0] = 0;
             return;
         }
         if (jit && swi == kSvcJniIsInstanceOf) {
-            jit->Regs()[0] = (jit->Regs()[1] != 0 && jit->Regs()[2] != 0) ? 1u : 0u;
+            const std::uint32_t object = jit->Regs()[1];
+            const std::uint32_t clazz = jit->Regs()[2];
+            const bool is_motion = MotionEventForHandle(object) != nullptr;
+            bool result = object != 0 && clazz != 0;
+            std::string class_name;
+            const auto named_class = jni_class_names.find(clazz);
+            if (named_class != jni_class_names.end()) class_name = named_class->second;
+            if (clazz == kJniMotionEventClassHandle || class_name == "android/view/MotionEvent") result = is_motion;
+            else if (clazz == kJniKeyEventClassHandle || class_name == "android/view/KeyEvent") result = false;
+            else if (clazz == kJniInputEventClassHandle || class_name == "android/view/InputEvent") result = is_motion;
+            jit->Regs()[0] = result ? 1u : 0u;
             return;
         }
         if (jit && swi == kSvcJniDeleteLocalRef) {
@@ -1635,7 +2712,11 @@ public:
             return;
         }
         if (jit && swi == kSvcJniIsSameObject) {
-            jit->Regs()[0] = jit->Regs()[1] == jit->Regs()[2] ? 1u : 0u;
+            const std::uint32_t lhs = jit->Regs()[1];
+            const std::uint32_t rhs = jit->Regs()[2];
+            const std::uint64_t lhs_identity = MotionEventIdentityForHandle(lhs);
+            const std::uint64_t rhs_identity = MotionEventIdentityForHandle(rhs);
+            jit->Regs()[0] = (lhs == rhs || (lhs_identity != 0 && lhs_identity == rhs_identity)) ? 1u : 0u;
             return;
         }
         if (jit && (swi == kSvcJniNewBooleanArray || swi == kSvcJniNewByteArray ||
@@ -1732,14 +2813,95 @@ public:
             jit->Regs()[0] = 0;
             return;
         }
+        if(jit && swi>=kSvcJniUnknownBase+55u && swi<=kSvcJniUnknownBase+57u) {
+            const auto slot=swi-kSvcJniUnknownBase;
+            if(jit->Regs()[1]!=kJniSharedPreferencesHandle || JniMethodNameFor(jit->Regs()[2])!="getFloat") {
+                CallSVC(kSvcJniCallStaticPrimitiveMethod);return;
+            }
+            float value=0;
+            if(jit->Regs()[1]==kJniSharedPreferencesHandle && JniMethodNameFor(jit->Regs()[2])=="getFloat") {
+                LoadGuestPrefs();std::uint32_t keyHandle=0;
+                if(slot==57u) {
+                    keyHandle=Read<std::uint32_t>(jit->Regs()[3]);
+                    const auto bits=Read<std::uint32_t>(jit->Regs()[3]+8u);std::memcpy(&value,&bits,4);
+                } else {
+                    keyHandle=slot==56u?Read<std::uint32_t>(jit->Regs()[3]):jit->Regs()[3];
+                    const auto address=slot==56u?(jit->Regs()[3]+11u)&~7u:jit->Regs()[13];
+                    value=static_cast<float>(Read<double>(address));
+                }
+                const auto found=guest_prefs_.find(JniStringValue(keyHandle));
+                if(found!=guest_prefs_.end() && found->second.type==GuestPrefValue::Type::Float)value=found->second.float_value;
+            }
+            std::memcpy(&jit->Regs()[0],&value,4);return;
+        }
         if (jit && swi >= kSvcJniUnknownBase && swi < kSvcJniUnknownBase + kJniEnvFunctionCount) {
-            jni_unknown_slot = swi - kSvcJniUnknownBase;
+            const auto compatibility_slot = swi - kSvcJniUnknownBase;
             jni_unknown_lr = jit->Regs()[14];
             Read32(memory_, jit->Regs()[13] + 20u, jni_unknown_caller_lr);
             jni_unknown_r0 = jit->Regs()[0];
             jni_unknown_r1 = jit->Regs()[1];
             jni_unknown_r2 = jit->Regs()[2];
             jni_unknown_r3 = jit->Regs()[3];
+
+            // JNI's first metadata/reflection entries have stable table indices across
+            // Android releases. Handle the whole low-index compatibility cluster here
+            // instead of discovering each one through a hotpatch stop. This mirrors the
+            // ABI-boundary approach used elsewhere in the guest runtime.
+            switch (compatibility_slot) {
+                case 4:  // GetVersion
+                    jit->Regs()[0] = 0x00010006u; // JNI_VERSION_1_6
+                    return;
+                case 5:  // DefineClass
+                    jit->Regs()[0] = kJniFakeClassHandle;
+                    return;
+                case 7:  // FromReflectedMethod
+                    { const auto found = jni_reflected_methods.find(jit->Regs()[1]);
+                      jit->Regs()[0] = found == jni_reflected_methods.end() ? kJniFakeMethodId : found->second; }
+                    return;
+                case 8:  // FromReflectedField
+                    { const auto found = jni_reflected_fields.find(jit->Regs()[1]);
+                      jit->Regs()[0] = found == jni_reflected_fields.end() ? kJniFakeFieldId : found->second; }
+                    return;
+                case 9:  // ToReflectedMethod
+                case 12: // ToReflectedField
+                    jit->Regs()[0] = kJniFakeObjectHandle;
+                    return;
+                case 10: // GetSuperclass
+                    jit->Regs()[0] = jit->Regs()[1] ? kJniFakeClassHandle : 0u;
+                    return;
+                case 11: // IsAssignableFrom
+                    jit->Regs()[0] = (jit->Regs()[1] != 0u && jit->Regs()[2] != 0u) ? 1u : 0u;
+                    return;
+                case 26: // EnsureLocalCapacity
+                    jit->Regs()[0] = 0u;
+                    return;
+                case 229: { // NewDirectByteBuffer
+                    const std::uint64_t capacity = static_cast<std::uint64_t>(jit->Regs()[2]) |
+                                                   (static_cast<std::uint64_t>(jit->Regs()[3]) << 32u);
+                    jni_direct_buffer_address = jit->Regs()[1];
+                    jni_direct_buffer_capacity = capacity > UINT32_MAX
+                        ? UINT32_MAX : static_cast<std::uint32_t>(capacity);
+                    jit->Regs()[0] = kJniFakeDirectBufferHandle;
+                    return;
+                }
+                case 230: // GetDirectBufferAddress
+                    jit->Regs()[0] = (jit->Regs()[1] == kJniFakeDirectBufferHandle)
+                        ? jni_direct_buffer_address : 0u;
+                    return;
+                case 231: { // GetDirectBufferCapacity (jlong)
+                    const std::uint64_t capacity = (jit->Regs()[1] == kJniFakeDirectBufferHandle)
+                        ? static_cast<std::uint64_t>(jni_direct_buffer_capacity) : 0u;
+                    jit->Regs()[0] = static_cast<std::uint32_t>(capacity);
+                    jit->Regs()[1] = static_cast<std::uint32_t>(capacity >> 32u);
+                    return;
+                }
+                case 232: // GetObjectRefType
+                    jit->Regs()[0] = jit->Regs()[1] ? 1u : 0u; // JNILocalRefType / JNIInvalidRefType
+                    return;
+                default:
+                    break;
+            }
+            jni_unknown_slot = compatibility_slot;
 #if defined(PROJECTV7_DEV_HOTPATCH) && PROJECTV7_DEV_HOTPATCH
             const std::string hotpatch_name = "jni.slot." + std::to_string(jni_unknown_slot);
             if (TryApplyHotpatch(hotpatch_name, swi) || WaitForHotpatch(hotpatch_name, swi)) return;
@@ -1752,20 +2914,44 @@ public:
         if (jit && swi == kSvcJniFindClass) {
             jni_last_class = ReadCString(jit->Regs()[1]);
             jni_requested_classes.push_back(jni_last_class);
-            jit->Regs()[0] = kJniFakeClassHandle;
+            auto class_it = jni_class_handles.find(jni_last_class);
+            if (class_it == jni_class_handles.end()) {
+                const std::uint32_t class_handle = next_jni_class_handle;
+                next_jni_class_handle += 4u;
+                jni_class_handles.emplace(jni_last_class, class_handle);
+                jni_class_names.emplace(class_handle, jni_last_class);
+                jit->Regs()[0] = class_handle;
+            } else {
+                jit->Regs()[0] = class_it->second;
+            }
             return;
         }
         if (jit && swi == kSvcJniRegisterNatives) {
             const std::uint32_t methods = jit->Regs()[2];
             const std::uint32_t count = jit->Regs()[3];
+            std::string registration_class = JniClassNameFor(jit->Regs()[1]);
+            if (registration_class.empty()) registration_class = jni_last_class;
             if (count <= 256 && Fits(methods, static_cast<std::size_t>(count) * 12u)) {
                 for (std::uint32_t i = 0; i < count; ++i) {
                     const std::uint32_t entry = methods + i * 12u;
                     JniNativeRegistration reg;
-                    reg.class_name = jni_last_class;
+                    reg.class_name = registration_class;
                     reg.name = ReadCString(Read<std::uint32_t>(entry));
                     reg.signature = ReadCString(Read<std::uint32_t>(entry + 4));
                     reg.function = Read<std::uint32_t>(entry + 8);
+                    if (registration_class == "com/unity3d/player/WWW") {
+                        jni_www_class_handle = jit->Regs()[1];
+                        if (reg.name == "doneCallback") www_done_callback_ = reg.function;
+                        else if (reg.name == "errorCallback") www_error_callback_ = reg.function;
+                        else if (reg.name == "headerCallback") www_header_callback_ = reg.function;
+                        else if (reg.name == "progressCallback") www_progress_callback_ = reg.function;
+                        else if (reg.name == "readCallback") www_read_callback_ = reg.function;
+#if defined(__ANDROID__)
+                        __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                            "PV7WWW RegisterNatives %s%s -> 0x%08x",
+                                            reg.name.c_str(), reg.signature.c_str(), reg.function);
+#endif
+                    }
                     jni_native_registrations.push_back(std::move(reg));
                 }
             }
@@ -1825,12 +3011,372 @@ public:
             return;
         }
 #endif
+#if defined(__ANDROID__)
+        if ((name == "abort" || name == "exit" || name == "_exit") && jit) {
+            const auto& regs = jit->Regs();
+            const std::uint32_t lr = regs[14];
+            std::string nearest_name;
+            std::string nearest_owner;
+            std::uint32_t nearest_address = 0u;
+            for (const auto& item : exports_) {
+                const std::uint32_t address = item.second.address & ~1u;
+                if (address <= (lr & ~1u) && address >= nearest_address) {
+                    nearest_address = address;
+                    nearest_name = item.first;
+                    nearest_owner = item.second.owner;
+                }
+            }
+            std::uint32_t stack_words[8]{};
+            for (std::size_t i = 0; i < 8; ++i) {
+                const std::uint32_t address = regs[13] + static_cast<std::uint32_t>(i * 4u);
+                if (Fits(address, 4u)) stack_words[i] = Read<std::uint32_t>(address);
+            }
+            __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                "PV7TERM name=%s thread=%u pc=0x%08x lr=0x%08x sp=0x%08x fp=0x%08x status_r0=0x%08x r1=0x%08x r2=0x%08x r3=0x%08x nearest=%s:%s+0x%x",
+                                name.c_str(), current_thread_id_, regs[15], lr, regs[13], regs[11], regs[0], regs[1], regs[2], regs[3],
+                                nearest_owner.empty() ? "?" : nearest_owner.c_str(),
+                                nearest_name.empty() ? "?" : nearest_name.c_str(),
+                                nearest_address ? ((lr & ~1u) - nearest_address) : 0u);
+            __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                "PV7TERM stack=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x",
+                                stack_words[0], stack_words[1], stack_words[2], stack_words[3],
+                                stack_words[4], stack_words[5], stack_words[6], stack_words[7]);
+            for (const auto& text : diagnostic_formats) {
+                __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                    "PV7TERM guest-log %s", text.c_str());
+            }
+        }
+#endif
         first_thunk_id = swi;
         first_thunk = name;
         if (jit) jit->HaltExecution();
     }
 
+#if defined(__ANDROID__)
+    void ShutdownHostGraphics() {
+        // SurfaceView destruction can race the translated Unity render loop. Tear down
+        // the EGL objects on the same worker thread that created them before Java
+        // releases the ANativeWindow. Do not terminate EGL_DEFAULT_DISPLAY here,
+        // because Android's UI renderer in this process may share that display.
+        const EGLDisplay display = eglGetCurrentDisplay();
+        const EGLSurface draw = eglGetCurrentSurface(EGL_DRAW);
+        const EGLSurface read = eglGetCurrentSurface(EGL_READ);
+        const EGLContext context = eglGetCurrentContext();
+        if (display != EGL_NO_DISPLAY) {
+            if (draw != EGL_NO_SURFACE) owned_egl_surfaces_.emplace(draw, display);
+            if (read != EGL_NO_SURFACE) owned_egl_surfaces_.emplace(read, display);
+            if (context != EGL_NO_CONTEXT) owned_egl_contexts_.emplace(context, display);
+            eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        }
+        // Unity can unbind before nativePause returns. Ownership survives unbinding,
+        // so the old window connection must be destroyed even with no current context.
+        std::size_t surfaces_destroyed = 0, contexts_destroyed = 0;
+        for (const auto& [surface, owner_display] : owned_egl_surfaces_)
+            if (eglDestroySurface(owner_display, surface) == EGL_TRUE) ++surfaces_destroyed;
+        for (const auto& [owned_context, owner_display] : owned_egl_contexts_)
+            if (eglDestroyContext(owner_display, owned_context) == EGL_TRUE) ++contexts_destroyed;
+        if (!owned_egl_surfaces_.empty() || !owned_egl_contexts_.empty())
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                "PV7EGL cleanup surfaces=%zu/%zu contexts=%zu/%zu",
+                surfaces_destroyed, owned_egl_surfaces_.size(), contexts_destroyed, owned_egl_contexts_.size());
+        owned_egl_surfaces_.clear();
+        owned_egl_contexts_.clear();
+        eglReleaseThread();
+        egl_handles_.clear();
+        host_native_window_ = nullptr;
+    }
+#else
+    void ShutdownHostGraphics() { host_native_window_ = nullptr; }
+#endif
+
+    std::string DescribeStoppedCall() const {
+        std::ostringstream out;
+        if (!jit) return "No active guest CPU";
+        const auto& r=jit->Regs();
+        out << "Stopped guest pc=0x" << std::hex << r[15] << " lr=0x" << r[14]
+            << " r0=0x" << r[0] << std::dec;
+        const auto mutex=guest_mutexes_.find(r[0]);
+        if (mutex!=guest_mutexes_.end()) {
+            out << " mutex_owner=" << mutex->second.owner << " type=" << mutex->second.type
+                << " recursion=" << mutex->second.recursion;
+            for (const auto& thread : guest_thread_launches_) {
+                if (thread.id!=mutex->second.owner) continue;
+                out << " owner_state=" << static_cast<int>(thread.state)
+                    << " owner_finished=" << thread.finished << " owner_pc=0x" << std::hex
+                    << thread.regs[15] << " owner_lr=0x" << thread.regs[14]
+                    << " owner_wait=0x" << thread.wait_object << std::dec;
+            }
+        }
+        const auto sem=guest_semaphores_.find(r[0]);
+        if (sem!=guest_semaphores_.end()) out << " semaphore_value=" << sem->second;
+        for (const auto& thread : guest_thread_launches_) {
+            const auto pending=guest_pending_signals_.find(thread.id);
+            const auto mask=guest_signal_masks_.find(thread.id);
+            const auto frames=guest_signal_frames_.find(thread.id);
+            out << "\n      thread=" << thread.id << " state=" << static_cast<int>(thread.state)
+                << " finished=" << thread.finished << " pc=" << std::hex << thread.regs[15]
+                << " lr=" << thread.regs[14] << " wait=" << thread.wait_object
+                << " mask=" << (mask==guest_signal_masks_.end()?0:mask->second) << std::dec
+                << " pending=" << (pending==guest_pending_signals_.end()?0:pending->second.size())
+                << " signal_frames=" << (frames==guest_signal_frames_.end()?0:frames->second.size());
+        }
+        for (const auto& [signal,action] : guest_signal_actions_)
+            out << "\n      action signal=" << signal << " handler=" << std::hex << action.handler
+                << " mask=" << action.mask << " flags=" << action.flags << std::dec;
+        return out.str();
+    }
+
+    std::uint32_t AllocateGuestBuffer(std::size_t size, std::uint32_t alignment = 16u) {
+        return Allocate(size, alignment);
+    }
+
+    void SetJniDirectBuffer(std::uint32_t address, std::uint32_t capacity) {
+        jni_direct_buffer_address = address;
+        jni_direct_buffer_capacity = capacity;
+    }
+
+    const std::uint8_t* GuestBytes(std::uint32_t address, std::size_t size) const {
+        return Fits(address, size) ? memory_.data() + address : nullptr;
+    }
+
 private:
+    std::string JniClassNameFor(std::uint32_t handle) const {
+        const auto found = jni_class_names.find(handle);
+        return found == jni_class_names.end() ? std::string{} : found->second;
+    }
+
+    std::uint32_t EnsureJniClassHandle(const std::string& class_name) {
+        const auto found = jni_class_handles.find(class_name);
+        if (found != jni_class_handles.end()) return found->second;
+        const std::uint32_t handle = next_jni_class_handle;
+        next_jni_class_handle += 4u;
+        jni_class_handles.emplace(class_name, handle);
+        jni_class_names.emplace(handle, class_name);
+        return handle;
+    }
+
+    std::uint32_t JniConstructorArg32(std::uint32_t swi, std::size_t index) const {
+        if (!jit) return 0u;
+        if (swi == kSvcJniNewObjectA) {
+            const std::uint32_t args = jit->Regs()[3];
+            std::uint32_t value = 0;
+            return args && Read32(memory_, args + static_cast<std::uint32_t>(index * 8u), value) ? value : 0u;
+        }
+        if (swi == kSvcJniNewObjectV) {
+            const std::uint32_t args = jit->Regs()[3];
+            std::uint32_t value = 0;
+            return args && Read32(memory_, args + static_cast<std::uint32_t>(index * 4u), value) ? value : 0u;
+        }
+        if (index == 0u) return jit->Regs()[3];
+        std::uint32_t value = 0;
+        return Read32(memory_, jit->Regs()[13] + static_cast<std::uint32_t>((index - 1u) * 4u), value)
+            ? value : 0u;
+    }
+
+    bool CopyJniByteArray(std::uint32_t handle, std::vector<std::uint8_t>& out) const {
+        if (handle == 0u) return false;
+        const auto found = jni_arrays_.find(handle);
+        if (found == jni_arrays_.end() || found->second.object_array || found->second.element_size != 1u)
+            return false;
+        if (!Fits(handle + 16u, found->second.length)) return false;
+        out.assign(memory_.begin() + handle + 16u,
+                   memory_.begin() + handle + 16u + found->second.length);
+        return true;
+    }
+
+#if defined(__ANDROID__)
+    bool FetchHostHttp(std::uint32_t request_id, const std::string& url,
+                       const std::vector<std::uint8_t>* post_data) {
+        JNIEnv* host = static_cast<JNIEnv*>(host_jni_env_);
+        if (!host || url.empty()) return false;
+
+        jclass http_class = nullptr;
+        jmethodID fetch = nullptr;
+        const char* http_classes[] = {
+            "app/projectv7/wrapper/HostHttp",
+            "me/jacqueb/cnr64poc/HostHttp",
+        };
+        const char* result_signatures[] = {
+            "(Ljava/lang/String;[B)Lapp/projectv7/wrapper/HostHttp$Result;",
+            "(Ljava/lang/String;[B)Lme/jacqueb/cnr64poc/HostHttp$Result;",
+        };
+        for (std::size_t i = 0; i < 2u && !fetch; ++i) {
+            http_class = host->FindClass(http_classes[i]);
+            if (!http_class) {
+                if (host->ExceptionCheck()) host->ExceptionClear();
+                continue;
+            }
+            fetch = host->GetStaticMethodID(http_class, "fetch", result_signatures[i]);
+            if (!fetch) {
+                if (host->ExceptionCheck()) host->ExceptionClear();
+                host->DeleteLocalRef(http_class);
+                http_class = nullptr;
+            }
+        }
+        if (!http_class || !fetch) return false;
+
+        jstring host_url = host->NewStringUTF(url.c_str());
+        jbyteArray host_post = nullptr;
+        if (post_data) {
+            host_post = host->NewByteArray(static_cast<jsize>(post_data->size()));
+            if (host_post && !post_data->empty()) {
+                host->SetByteArrayRegion(host_post, 0, static_cast<jsize>(post_data->size()),
+                                         reinterpret_cast<const jbyte*>(post_data->data()));
+            }
+        }
+        jobject result = host->CallStaticObjectMethod(http_class, fetch, host_url, host_post);
+        if (host->ExceptionCheck()) {
+            host->ExceptionDescribe();
+            host->ExceptionClear();
+            if (host_post) host->DeleteLocalRef(host_post);
+            if (host_url) host->DeleteLocalRef(host_url);
+            host->DeleteLocalRef(http_class);
+            return false;
+        }
+
+        HostHttpPending pending;
+        pending.request_id = request_id;
+        if (result) {
+            jclass result_class = host->GetObjectClass(result);
+            jfieldID body_field = host->GetFieldID(result_class, "body", "[B");
+            jfieldID headers_field = host->GetFieldID(result_class, "headers", "Ljava/lang/String;");
+            jfieldID error_field = host->GetFieldID(result_class, "error", "Ljava/lang/String;");
+            jfieldID status_field = host->GetFieldID(result_class, "status", "I");
+            pending.status = status_field ? host->GetIntField(result, status_field) : -1;
+
+            auto copy_string = [&](jfieldID field) -> std::string {
+                if (!field) return {};
+                auto value = static_cast<jstring>(host->GetObjectField(result, field));
+                if (!value) return {};
+                const char* chars = host->GetStringUTFChars(value, nullptr);
+                std::string text = chars ? chars : "";
+                if (chars) host->ReleaseStringUTFChars(value, chars);
+                host->DeleteLocalRef(value);
+                return text;
+            };
+            pending.headers = copy_string(headers_field);
+            pending.error = copy_string(error_field);
+
+            if (body_field) {
+                auto body = static_cast<jbyteArray>(host->GetObjectField(result, body_field));
+                if (body) {
+                    const jsize length = host->GetArrayLength(body);
+                    if (length > 0) {
+                        pending.body.resize(static_cast<std::size_t>(length));
+                        host->GetByteArrayRegion(body, 0, length,
+                                                reinterpret_cast<jbyte*>(pending.body.data()));
+                    }
+                    host->DeleteLocalRef(body);
+                }
+            }
+            host->DeleteLocalRef(result_class);
+            host->DeleteLocalRef(result);
+        } else {
+            pending.error = "Host HTTP bridge returned no result";
+        }
+
+        if (host_post) host->DeleteLocalRef(host_post);
+        if (host_url) host->DeleteLocalRef(host_url);
+        host->DeleteLocalRef(http_class);
+        host_http_pending_.push_back(std::move(pending));
+        __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                            "PV7WWW host fetch id=%u url=%s queued=%zu",
+                            request_id, url.c_str(), host_http_pending_.size());
+        return true;
+    }
+#else
+    bool FetchHostHttp(std::uint32_t, const std::string&, const std::vector<std::uint8_t>*) { return false; }
+#endif
+
+    bool InvokeWwwGuestCallback(std::uint32_t function, std::uint32_t arg2,
+                                std::uint32_t arg3,
+                                const std::vector<std::uint32_t>& stack_args,
+                                std::uint32_t& result) {
+        if (!jit || function == 0u) return false;
+        constexpr std::uint32_t kWwwCallbackStackTop = 0x06f80000u;
+        const auto saved_regs = jit->Regs();
+        const auto saved_ext_regs = jit->ExtRegs();
+        const std::uint32_t saved_cpsr = jit->Cpsr();
+        const std::uint32_t saved_fpscr = jit->Fpscr();
+        const auto saved_tls = tls_values_;
+        const std::uint32_t saved_arm_tls = arm_tls_value_;
+        const std::uint32_t saved_thread = current_thread_id_;
+
+        ResetPhaseDiagnostics();
+        saw_return = false;
+        premature_return = false;
+        failed = false;
+        current_thread_id_ = 0x7ffffffeu;
+        jit->ClearHalt();
+        jit->Regs().fill(0);
+        jit->Regs()[0] = kJniEnvObject;
+        jit->Regs()[1] = jni_www_class_handle ? jni_www_class_handle : kJniFakeClassHandle;
+        jit->Regs()[2] = arg2;
+        jit->Regs()[3] = arg3;
+        for (std::size_t i = 0; i < stack_args.size(); ++i)
+            Write32(memory_, kWwwCallbackStackTop + static_cast<std::uint32_t>(i * 4u), stack_args[i]);
+        jit->Regs()[13] = kWwwCallbackStackTop;
+        jit->Regs()[14] = kReturnStub;
+        jit->Regs()[15] = function & ~1u;
+        jit->SetCpsr((function & 1u) ? 0x20u : 0u);
+
+        for (int slice = 0; slice < 1024 && !saw_return && !failed && first_thunk.empty(); ++slice) {
+            ticks_left = 1000000u;
+            const auto reason = jit->Run();
+            if (saw_return || failed || !first_thunk.empty()) break;
+            if (pending_guest_callback) {
+                pending_guest_callback = false;
+                jit->ClearHalt();
+                continue;
+            }
+            if (pending_cacheflush) {
+                const std::uint32_t start = pending_cacheflush_start;
+                const std::uint32_t size = pending_cacheflush_size;
+                pending_cacheflush = false;
+                pending_cacheflush_start = 0;
+                pending_cacheflush_size = 0;
+                jit->ClearHalt();
+                if (size) InvalidateTranslatedCodeRange(start, size);
+                continue;
+            }
+            if (Dynarmic::Has(reason, Dynarmic::HaltReason::CacheInvalidation)) {
+                jit->ClearHalt();
+                continue;
+            }
+            if (cooperative_yield_requested_) {
+                cooperative_yield_requested_ = false;
+                jit->ClearHalt();
+                continue;
+            }
+            jit->ClearHalt();
+        }
+        const bool ok = saw_return && !failed && first_thunk.empty();
+        result = ok ? jit->Regs()[0] : 0u;
+#if defined(__ANDROID__)
+        if (!ok) {
+            __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                "PV7WWW callback failed func=0x%08x thunk=%s pc=0x%08x",
+                                function, first_thunk.empty() ? "-" : first_thunk.c_str(), jit->Regs()[15]);
+        }
+#endif
+        jit->ClearHalt();
+        jit->Regs() = saved_regs;
+        jit->ExtRegs() = saved_ext_regs;
+        jit->SetCpsr(saved_cpsr);
+        jit->SetFpscr(saved_fpscr);
+        tls_values_ = saved_tls;
+        arm_tls_value_ = saved_arm_tls;
+        current_thread_id_ = saved_thread;
+        saw_return = false;
+        failed = false;
+        premature_return = false;
+        first_thunk.clear();
+        first_thunk_id = 0;
+        thread_exit_requested_ = false;
+        cooperative_yield_requested_ = false;
+        return ok;
+    }
+
 #if defined(PROJECTV7_DEV_HOTPATCH) && PROJECTV7_DEV_HOTPATCH
     bool TryApplyHotpatch(const std::string& name, std::uint32_t svc_id) {
         if (!jit) return false;
@@ -1891,6 +3437,26 @@ private:
             auto* self = static_cast<BootstrapEnvironment*>(opaque);
             if (self) self->preferred_guest_thread_id_ = thread_id;
         };
+        context.find_guest_thread_by_name = [](void* opaque, const char* name) -> std::uint32_t {
+            auto* self = static_cast<BootstrapEnvironment*>(opaque);
+            if (!self || !name) return 0u;
+            for (const auto& item : self->guest_thread_names_) {
+                if (item.second == name) return item.first;
+            }
+            return 0u;
+        };
+        context.configure_guest_thread_sampling =
+            [](void* opaque, std::uint32_t thread_id, std::uint64_t ticks_per_slice,
+               std::uint32_t sample_limit) {
+                auto* self = static_cast<BootstrapEnvironment*>(opaque);
+                if (!self || thread_id == 0u) return;
+                if (ticks_per_slice == 0u || sample_limit == 0u) {
+                    self->guest_thread_sampling_.erase(thread_id);
+                    return;
+                }
+                self->guest_thread_sampling_[thread_id] = {
+                    std::max<std::uint64_t>(ticks_per_slice, 1000u), sample_limit};
+            };
 
         std::string detail;
         const int result = hotpatch_runtime_.DispatchPlugins(context, detail);
@@ -1968,6 +3534,11 @@ private:
             ? managed_dir_.substr(0, managed_dir_.size() - managed_suffix.size())
             : managed_dir_;
 
+        std::string compat_path;
+        if (pv7::compat::NormalizeGuestPath(path, managed_dir_, compat_path)) {
+            return compat_path;
+        }
+
         if (path == packaged_data_prefix) return data_dir;
         if (path.rfind(packaged_data_prefix + "/", 0) == 0) {
             return data_dir + path.substr(packaged_data_prefix.size());
@@ -1992,6 +3563,164 @@ private:
         return path;
     }
 
+    std::string GuestPrefsPath() const {
+        const std::size_t files_marker = managed_dir_.find("/files/");
+        if (files_marker == std::string::npos) return {};
+        return managed_dir_.substr(0, files_marker + 6u) + "/GuestPlayerPrefs.bin";
+    }
+
+    void LoadGuestPrefs() {
+        if (guest_prefs_loaded_) return;
+        guest_prefs_loaded_ = true;
+        guest_prefs_.clear();
+        const std::string path = GuestPrefsPath();
+        if (path.empty()) return;
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return;
+        auto read_u32 = [&in](std::uint32_t& value) -> bool {
+            in.read(reinterpret_cast<char*>(&value), sizeof(value));
+            return static_cast<bool>(in);
+        };
+        std::uint32_t magic = 0, version = 0, count = 0;
+        if (!read_u32(magic) || !read_u32(version) || !read_u32(count) ||
+            magic != 0x50563750u || version != 1u || count > 4096u) return;
+        for (std::uint32_t i = 0; i < count; ++i) {
+            std::uint32_t key_len = 0;
+            if (!read_u32(key_len) || key_len > 4096u) break;
+            std::string key(key_len, '\0');
+            if (key_len) in.read(key.data(), static_cast<std::streamsize>(key_len));
+            std::uint8_t type_byte = 0;
+            in.read(reinterpret_cast<char*>(&type_byte), sizeof(type_byte));
+            if (!in) break;
+            GuestPrefValue value;
+            value.type = static_cast<GuestPrefValue::Type>(type_byte);
+            if (value.type == GuestPrefValue::Type::Int) {
+                in.read(reinterpret_cast<char*>(&value.int_value), sizeof(value.int_value));
+            } else if (value.type == GuestPrefValue::Type::Float) {
+                in.read(reinterpret_cast<char*>(&value.float_value), sizeof(value.float_value));
+            } else if (value.type == GuestPrefValue::Type::String) {
+                std::uint32_t len = 0;
+                if (!read_u32(len) || len > 1024u * 1024u) break;
+                value.string_value.resize(len);
+                if (len) in.read(value.string_value.data(), static_cast<std::streamsize>(len));
+            } else {
+                break;
+            }
+            if (!in) break;
+            guest_prefs_[std::move(key)] = std::move(value);
+        }
+    }
+
+    void SaveGuestPrefs() {
+        LoadGuestPrefs();
+        const std::string path = GuestPrefsPath();
+        if (path.empty()) return;
+        const std::string temp_path = path + ".tmp";
+        std::ofstream out(temp_path, std::ios::binary | std::ios::trunc);
+        if (!out) return;
+        auto write_u32 = [&out](std::uint32_t value) {
+            out.write(reinterpret_cast<const char*>(&value), sizeof(value));
+        };
+        write_u32(0x50563750u); // PV7P
+        write_u32(1u);
+        write_u32(static_cast<std::uint32_t>(guest_prefs_.size()));
+        for (const auto& pair : guest_prefs_) {
+            write_u32(static_cast<std::uint32_t>(pair.first.size()));
+            if (!pair.first.empty()) out.write(pair.first.data(), static_cast<std::streamsize>(pair.first.size()));
+            const std::uint8_t type_byte = static_cast<std::uint8_t>(pair.second.type);
+            out.write(reinterpret_cast<const char*>(&type_byte), sizeof(type_byte));
+            if (pair.second.type == GuestPrefValue::Type::Int) {
+                out.write(reinterpret_cast<const char*>(&pair.second.int_value), sizeof(pair.second.int_value));
+            } else if (pair.second.type == GuestPrefValue::Type::Float) {
+                out.write(reinterpret_cast<const char*>(&pair.second.float_value), sizeof(pair.second.float_value));
+            } else {
+                write_u32(static_cast<std::uint32_t>(pair.second.string_value.size()));
+                if (!pair.second.string_value.empty())
+                    out.write(pair.second.string_value.data(), static_cast<std::streamsize>(pair.second.string_value.size()));
+            }
+        }
+        out.flush();
+        out.close();
+        if (!out) {
+            std::remove(temp_path.c_str());
+            return;
+        }
+        std::remove(path.c_str());
+        std::rename(temp_path.c_str(), path.c_str());
+    }
+
+    #include "pv7_guest_storage_jni_members.inc"
+
+    std::string JniStringValue(std::uint32_t handle) const {
+        if (handle == kJniFakeStringHandle) return jni_new_string_utf;
+        if (handle == kJniFakeObjectHandle) return jni_fake_object_string;
+        const auto it = jni_strings.find(handle);
+        return it == jni_strings.end() ? std::string() : it->second;
+    }
+
+    std::uint32_t NewJniString(const std::string& value) {
+        const std::uint32_t handle = next_jni_string_handle;
+        next_jni_string_handle += 4u;
+        std::string mapped;
+        const bool translated=pv7::compat::NormalizeGuestPath(value,managed_dir_,mapped);
+        jni_strings[handle] = translated ? mapped : value;
+        return handle;
+    }
+
+#include "jni_url_stream_methods.inc"
+
+    std::uint32_t InternJniField(const std::string& name) {
+        const auto found = jni_field_ids.find(name);
+        if (found != jni_field_ids.end()) return found->second;
+        const auto id = next_jni_field_id; next_jni_field_id += 4u;
+        jni_field_ids[name] = id; jni_field_names[id] = name; return id;
+    }
+    std::uint32_t InternJniMethod(const std::string& clazz, const std::string& name, const std::string& signature) {
+        const std::string key = clazz + "\n" + name + "\n" + signature;
+        const auto found = jni_method_ids.find(key);
+        if (found != jni_method_ids.end()) return found->second;
+        const auto id = next_jni_method_id; next_jni_method_id += 4u;
+        jni_method_ids[key] = id; jni_method_names[id] = name;
+        jni_method_signatures[id] = signature; jni_method_classes[id] = clazz;
+        return id;
+    }
+    std::string JniMethodNameFor(std::uint32_t method_id) const {
+        const auto it = jni_method_names.find(method_id);
+        return it == jni_method_names.end() ? jni_method_name : it->second;
+    }
+
+    std::string JniMethodSignatureFor(std::uint32_t method_id) const {
+        const auto it = jni_method_signatures.find(method_id);
+        return it == jni_method_signatures.end() ? jni_method_signature : it->second;
+    }
+
+    std::uint32_t JniArg32(Dynarmic::A32::Jit* jit, std::uint32_t swi,
+                           std::size_t index, bool object_call = true) const {
+        if (!jit) return 0u;
+        const bool is_a = swi == kSvcJniCallObjectMethodA || swi == kSvcJniCallIntMethodA ||
+                          swi == kSvcJniCallBooleanMethodA || swi == kSvcJniCallVoidMethodA || swi == kSvcJniUnknownBase + 116u;
+        const bool is_v = swi == kSvcJniCallObjectMethodV || swi == kSvcJniCallIntMethodV ||
+                          swi == kSvcJniCallBooleanMethodV || swi == kSvcJniCallVoidMethodV || swi == kSvcJniUnknownBase + 115u;
+        (void)object_call;
+        if (is_a) {
+            const std::uint32_t args = jit->Regs()[3];
+            std::uint32_t value = 0;
+            if (args && Read32(memory_, args + static_cast<std::uint32_t>(index * 8u), value)) return value;
+            return 0u;
+        }
+        if (is_v) {
+            const std::uint32_t args = jit->Regs()[3];
+            std::uint32_t value = 0;
+            if (args && Read32(memory_, args + static_cast<std::uint32_t>(index * 4u), value)) return value;
+            return 0u;
+        }
+        if (index == 0u) return jit->Regs()[3];
+        std::uint32_t value = 0;
+        const std::uint32_t stack_address = jit->Regs()[13] + static_cast<std::uint32_t>((index - 1u) * 4u);
+        if (Read32(memory_, stack_address, value)) return value;
+        return 0u;
+    }
+
     std::string ReadCString(std::uint32_t address, std::size_t max_len = 4096) const {
         if (!Fits(address, 1)) return {};
         std::string out;
@@ -2003,6 +3732,22 @@ private:
         return out;
     }
 
+    std::string ReadFullCString(std::uint32_t address) const {
+        if (!Fits(address, 1u)) return {};
+        const char* start = reinterpret_cast<const char*>(memory_.data() + address);
+        const std::size_t available = memory_.size() - address;
+        const char* end = static_cast<const char*>(std::memchr(start, 0, available));
+        return std::string(start, end ? static_cast<std::size_t>(end - start) : available);
+    }
+
+public:
+    void MapNormalizedHostTouch(HostTouchEvent& touch) const {
+        const float width = guest_logical_viewport_width ? guest_logical_viewport_width : 128u;
+        const float height = guest_logical_viewport_height ? guest_logical_viewport_height : 128u;
+        for (auto& point : touch.points) { point.x *= width / 128.0f; point.y *= height / 128.0f; }
+    }
+
+private:
     bool WriteCString(std::uint32_t address, const std::string& value, std::size_t max_bytes = SIZE_MAX) {
         const std::size_t count = std::min(value.size(), max_bytes == 0 ? 0 : max_bytes - 1);
         if (!Fits(address, count + 1)) return false;
@@ -2012,9 +3757,24 @@ private:
     }
 
     void AddFreeBlock(std::uint32_t address, std::size_t size) {
-        if (size == 0 || address < kGuestHeapStart || address >= kGuestHeapEnd) return;
+        if (size == 0) return;
+        std::uint32_t region_end = 0u;
+        if (address >= kGuestHeapStart && address < kGuestHeapEnd) {
+            region_end = kGuestHeapEnd;
+        }
+#if defined(PROJECTV7_TEST_HEAP_OVERFLOW_32M) && PROJECTV7_TEST_HEAP_OVERFLOW_32M
+        else if (address >= kGuestOverflowHeapStart && address < kGuestOverflowHeapEnd) {
+            region_end = kGuestOverflowHeapEnd;
+        }
+#endif
+#if defined(PROJECTV7_CNR_CONTENT_HEAP) && PROJECTV7_CNR_CONTENT_HEAP
+        else if (address >= kGuestContentHeapStart && address < kGuestContentHeapEnd) {
+            region_end = kGuestContentHeapEnd;
+        }
+#endif
+        if (!region_end) return;
         std::uint64_t end64 = static_cast<std::uint64_t>(address) + size;
-        if (end64 > kGuestHeapEnd) end64 = kGuestHeapEnd;
+        if (end64 > region_end) end64 = region_end;
         std::uint32_t end = static_cast<std::uint32_t>(end64);
 
         auto next = free_blocks_.lower_bound(address);
@@ -2041,15 +3801,24 @@ private:
         // If the highest free block reaches the bump pointer, return that whole tail
         // to the bump allocator as well. This keeps short-lived large allocations from
         // permanently ratcheting heap_next_ toward the main guest stack.
-        for (;;) {
-            auto tail = free_blocks_.lower_bound(heap_next_);
-            if (tail == free_blocks_.begin()) break;
-            --tail;
-            const std::uint64_t tail_end = static_cast<std::uint64_t>(tail->first) + tail->second;
-            if (tail_end != heap_next_) break;
-            heap_next_ = tail->first;
-            free_blocks_.erase(tail);
-        }
+        const auto reclaim_tail = [&](std::uint32_t& bump) {
+            for (;;) {
+                auto tail = free_blocks_.lower_bound(bump);
+                if (tail == free_blocks_.begin()) break;
+                --tail;
+                const std::uint64_t tail_end = static_cast<std::uint64_t>(tail->first) + tail->second;
+                if (tail_end != bump) break;
+                bump = tail->first;
+                free_blocks_.erase(tail);
+            }
+        };
+#if defined(PROJECTV7_CNR_CONTENT_HEAP) && PROJECTV7_CNR_CONTENT_HEAP
+        reclaim_tail(heap_content_next_);
+#endif
+        reclaim_tail(heap_next_);
+#if defined(PROJECTV7_TEST_HEAP_OVERFLOW_32M) && PROJECTV7_TEST_HEAP_OVERFLOW_32M
+        reclaim_tail(heap_overflow_next_);
+#endif
     }
 
     bool FreeAllocation(std::uint32_t address) {
@@ -2061,13 +3830,33 @@ private:
         const std::size_t reserved = static_cast<std::size_t>(
             AlignUp(static_cast<std::uint32_t>(std::max<std::size_t>(requested, 1u)), 16u));
         AddFreeBlock(address, reserved);
+        if (reserved >= 65536u) DiscardGuestPages(memory_, address, reserved);
         return true;
     }
 
     std::uint32_t Allocate(std::size_t size, std::uint32_t alignment = 16) {
         if (size == 0) size = 1;
         if (alignment == 0) alignment = 1;
-        if (size > static_cast<std::size_t>(kGuestHeapEnd - kGuestHeapStart)) return 0;
+#if defined(PROJECTV7_CNR_CONTENT_HEAP) && PROJECTV7_CNR_CONTENT_HEAP
+        constexpr std::size_t max_arena_size = kGuestContentHeapEnd - kGuestContentHeapStart;
+#elif defined(PROJECTV7_TEST_HEAP_OVERFLOW_32M) && PROJECTV7_TEST_HEAP_OVERFLOW_32M
+        constexpr std::size_t max_arena_size =
+            static_cast<std::size_t>(kGuestOverflowHeapEnd - kGuestOverflowHeapStart);
+#else
+        constexpr std::size_t max_arena_size =
+            static_cast<std::size_t>(kGuestHeapEnd - kGuestHeapStart);
+#endif
+        if (size > max_arena_size) {
+#if defined(__ANDROID__)
+            ++guest_heap_oom_count_;
+            if (guest_heap_oom_count_ <= 16u) {
+                __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                    "PV7HEAPOOM oversized requested=%zu heap_next=%08x heap_end=%08x free_blocks=%zu count=%zu",
+                                    size, heap_next_, kGuestHeapEnd, free_blocks_.size(), guest_heap_oom_count_);
+            }
+#endif
+            return 0;
+        }
         const std::uint32_t reserved = AlignUp(static_cast<std::uint32_t>(size), 16u);
 
         // First fit from recycled guest blocks. Free blocks include allocation padding,
@@ -2092,7 +3881,51 @@ private:
 
         const std::uint32_t aligned = AlignUp(heap_next_, alignment);
         const std::uint64_t end = static_cast<std::uint64_t>(aligned) + reserved;
-        if (end > kGuestHeapEnd) return 0;
+        if (end > kGuestHeapEnd) {
+#if defined(PROJECTV7_TEST_HEAP_OVERFLOW_32M) && PROJECTV7_TEST_HEAP_OVERFLOW_32M
+            const std::uint32_t overflow_aligned = AlignUp(heap_overflow_next_, alignment);
+            const std::uint64_t overflow_end =
+                static_cast<std::uint64_t>(overflow_aligned) + reserved;
+            if (overflow_end <= kGuestOverflowHeapEnd) {
+                heap_overflow_next_ = static_cast<std::uint32_t>(overflow_end);
+                allocations_[overflow_aligned] = size;
+                if (allocation_trace.size() < 32)
+                    allocation_trace.emplace_back(overflow_aligned, size);
+                std::memset(memory_.data() + overflow_aligned, 0, size);
+#if defined(PROJECTV7_MONO_FATAL_CONTEXT_TRACE) && PROJECTV7_MONO_FATAL_CONTEXT_TRACE && defined(__ANDROID__)
+                ++guest_overflow_alloc_count_;
+                if (guest_overflow_alloc_count_ <= 12u) {
+                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                        "PV7HEAPOVERFLOW alloc=%zu addr=%08x high_next=%08x low_next=%08x count=%zu",
+                                        size, overflow_aligned, heap_overflow_next_,
+                                        heap_next_, guest_overflow_alloc_count_);
+                }
+#endif
+                return overflow_aligned;
+            }
+#endif
+#if defined(PROJECTV7_CNR_CONTENT_HEAP) && PROJECTV7_CNR_CONTENT_HEAP
+            const std::uint32_t content_aligned = AlignUp(heap_content_next_, alignment);
+            const std::uint64_t content_end = static_cast<std::uint64_t>(content_aligned) + reserved;
+            if (content_end <= kGuestContentHeapEnd) {
+                heap_content_next_ = static_cast<std::uint32_t>(content_end);
+                allocations_[content_aligned] = size;
+                if (allocation_trace.size() < 32) allocation_trace.emplace_back(content_aligned, size);
+                std::memset(memory_.data() + content_aligned, 0, size);
+                return content_aligned;
+            }
+#endif
+#if defined(__ANDROID__)
+            ++guest_heap_oom_count_;
+            if (guest_heap_oom_count_ <= 16u) {
+                __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                    "PV7HEAPOOM exhausted requested=%zu aligned=%08x end=%08llx heap_next=%08x heap_end=%08x free_blocks=%zu count=%zu",
+                                    size, aligned, static_cast<unsigned long long>(end), heap_next_,
+                                    kGuestHeapEnd, free_blocks_.size(), guest_heap_oom_count_);
+            }
+#endif
+            return 0;
+        }
         heap_next_ = static_cast<std::uint32_t>(end);
         allocations_[aligned] = size;
         if (allocation_trace.size() < 32) allocation_trace.emplace_back(aligned, size);
@@ -2227,8 +4060,8 @@ private:
 #endif
 
 #if defined(__ANDROID__)
-    std::uint32_t RegisterEglHandle(std::uintptr_t host_handle) {
-        if (host_handle == 0) return 0;
+    std::uint32_t RegisterEglHandle(std::uintptr_t host_handle, bool allow_zero = false) {
+        if (host_handle == 0 && !allow_zero) return 0;
         for (const auto& entry : egl_handles_) {
             if (entry.second == host_handle) return entry.first;
         }
@@ -2237,10 +4070,17 @@ private:
         return guest_handle;
     }
 
-    std::uintptr_t LookupEglHandle(std::uint32_t guest_handle) const {
-        if (guest_handle == 0) return 0;
+    bool LookupEglHandleValue(std::uint32_t guest_handle, std::uintptr_t& host_handle) const {
+        if (guest_handle == 0) return false;
         const auto found = egl_handles_.find(guest_handle);
-        return found == egl_handles_.end() ? 0 : found->second;
+        if (found == egl_handles_.end()) return false;
+        host_handle = found->second;
+        return true;
+    }
+
+    std::uintptr_t LookupEglHandle(std::uint32_t guest_handle) const {
+        std::uintptr_t host_handle = 0;
+        return LookupEglHandleValue(guest_handle, host_handle) ? host_handle : 0;
     }
 
     void UnregisterEglHandle(std::uint32_t guest_handle) {
@@ -2372,7 +4212,11 @@ private:
     }
 
     bool DispatchZlib(const std::string& name) {
-        if (name == "crc32") {
+#if PROJECTV7_FAST_SYMBOL_DISPATCH
+        if (name.empty() || (name.front() != 'c' && name.front() != 'd' && name.front() != 'i')) return false;
+#endif
+        const Pv7DispatchNameKey& fast_name{name};
+        if (fast_name == "crc32") {
             const std::uint32_t guest_buffer = Arg(1);
             const std::uint32_t length = Arg(2);
             if (length != 0 && (guest_buffer == 0 || !Fits(guest_buffer, length))) {
@@ -2384,10 +4228,10 @@ private:
             return true;
         }
 
-        if (name == "inflateInit_" || name == "inflateInit2_" || name == "deflateInit2_") {
+        if (fast_name == "inflateInit_" || fast_name == "inflateInit2_" || fast_name == "deflateInit2_") {
             const std::uint32_t guest_address = Arg(0);
-            const std::uint32_t guest_stream_size = name == "deflateInit2_" ? Arg(7)
-                                                   : name == "inflateInit2_" ? Arg(3)
+            const std::uint32_t guest_stream_size = fast_name == "deflateInit2_" ? Arg(7)
+                                                   : fast_name == "inflateInit2_" ? Arg(3)
                                                    : Arg(2);
             if (guest_address == 0 || !Fits(guest_address, sizeof(GuestZStream32)) ||
                 guest_stream_size != sizeof(GuestZStream32)) {
@@ -2409,10 +4253,10 @@ private:
             state.stream.zfree = Z_NULL;
             state.stream.opaque = Z_NULL;
             int rc = Z_STREAM_ERROR;
-            if (name == "inflateInit_") {
+            if (fast_name == "inflateInit_") {
                 state.kind = HostZlibKind::Inflate;
                 rc = ::inflateInit(&state.stream);
-            } else if (name == "inflateInit2_") {
+            } else if (fast_name == "inflateInit2_") {
                 state.kind = HostZlibKind::Inflate;
                 rc = ::inflateInit2(&state.stream, static_cast<int>(Arg(1)));
             } else {
@@ -2436,9 +4280,9 @@ private:
             return true;
         }
 
-        if (name == "inflate" || name == "deflate" ||
-            name == "inflateReset" || name == "deflateReset" ||
-            name == "inflateEnd" || name == "deflateEnd") {
+        if (fast_name == "inflate" || fast_name == "deflate" ||
+            fast_name == "inflateReset" || fast_name == "deflateReset" ||
+            fast_name == "inflateEnd" || fast_name == "deflateEnd") {
             const std::uint32_t guest_address = Arg(0);
             auto it = zlib_streams_.find(guest_address);
             if (it == zlib_streams_.end() || !it->second.initialized) {
@@ -2455,7 +4299,7 @@ private:
             }
 
             int rc = Z_STREAM_ERROR;
-            if (name == "inflate" || name == "deflate") {
+            if (fast_name == "inflate" || fast_name == "deflate") {
                 if (!SyncGuestZlibBuffersToHost(guest_address, state)) {
                     Ret(static_cast<std::uint32_t>(Z_STREAM_ERROR));
                     return true;
@@ -2464,7 +4308,7 @@ private:
                     ? ::inflate(&state.stream, static_cast<int>(Arg(1)))
                     : ::deflate(&state.stream, static_cast<int>(Arg(1)));
                 SyncHostZlibStateToGuest(guest_address, state, true);
-            } else if (name == "inflateReset" || name == "deflateReset") {
+            } else if (fast_name == "inflateReset" || fast_name == "deflateReset") {
                 rc = wants_inflate ? ::inflateReset(&state.stream) : ::deflateReset(&state.stream);
                 SyncHostZlibStateToGuest(guest_address, state, rc == Z_OK);
             } else {
@@ -2490,8 +4334,14 @@ private:
 #include "compat_bridge_methods.inc"
 
 public:
+    // Retain the initial one-shot guest worker report, but allow the frequent
+    // per-frame pumps to skip string formatting/allocations in production.
+    bool record_pump_trace = true;
     std::vector<std::string> guest_thread_pump_trace;
+    std::string last_trylock_busy_detail;
+    std::uint64_t trylock_busy_total = 0;
     bool allow_main_thread_cooperative_yield = false;
+    std::uint32_t main_thread_wait_mutex_ = 0u;
     struct WorkerBoundaryRecord {
         std::uint32_t thread_id = 0;
         std::uint32_t thread_start = 0;
@@ -2524,6 +4374,63 @@ public:
         return true;
     }
 
+    bool MainTrylockWaitPending() const { return main_thread_wait_mutex_ != 0u; }
+
+    bool MainTrylockWaitOwnerActive() const {
+        if (main_thread_wait_mutex_ == 0u) return false;
+        const auto mutex = guest_mutexes_.find(main_thread_wait_mutex_);
+        if (mutex == guest_mutexes_.end() || mutex->second.owner == 0u || mutex->second.owner == 1u)
+            return false;
+        const auto owner = std::find_if(guest_thread_launches_.begin(), guest_thread_launches_.end(),
+                                        [&](const GuestThreadLaunch& item) {
+                                            return item.id == mutex->second.owner;
+                                        });
+        return owner != guest_thread_launches_.end() && !owner->finished &&
+               (owner->state == GuestThreadState::New ||
+                owner->state == GuestThreadState::Runnable);
+    }
+
+    void PreferMainTrylockWaitOwner() {
+        if (!MainTrylockWaitOwnerActive()) return;
+        const auto mutex = guest_mutexes_.find(main_thread_wait_mutex_);
+        preferred_guest_thread_id_ = mutex->second.owner;
+        trylock_preferred_guest_thread_id_ = mutex->second.owner;
+    }
+
+    void ClearMainTrylockWait() { main_thread_wait_mutex_ = 0u; }
+
+    static std::uint32_t GuestSignalBit(std::uint32_t signal) {
+        return signal >= 1u && signal <= 32u ? (1u << (signal - 1u)) : 0u;
+    }
+
+    bool GuestSignalIsBlocked(std::uint32_t thread_id, std::uint32_t signal) const {
+        const std::uint32_t bit = GuestSignalBit(signal);
+        if (bit == 0u) return false;
+        const auto mask = guest_signal_masks_.find(thread_id);
+        return mask != guest_signal_masks_.end() && (mask->second & bit) != 0u;
+    }
+
+    bool HasDeliverablePendingGuestSignal(std::uint32_t thread_id) const {
+        const auto pending = guest_pending_signals_.find(thread_id);
+        if (pending == guest_pending_signals_.end()) return false;
+        return std::any_of(pending->second.begin(), pending->second.end(),
+                           [&](std::uint32_t signal) { return !GuestSignalIsBlocked(thread_id, signal); });
+    }
+
+    void MarkGuestThreadRunnable(std::uint32_t thread_id) {
+        if (thread_id == 1u) return;
+        const auto thread = std::find_if(guest_thread_launches_.begin(), guest_thread_launches_.end(),
+                                         [&](const GuestThreadLaunch& item) {
+                                             return item.id == thread_id && !item.finished;
+                                         });
+        if (thread == guest_thread_launches_.end()) return;
+        thread->state = GuestThreadState::Runnable;
+        thread->wait_object = 0u;
+        thread->wait_aux = 0u;
+        thread->wait_owner = 0u;
+        preferred_guest_thread_id_ = thread_id;
+    }
+
     bool QueueGuestSignal(std::uint32_t target_thread, std::uint32_t signal) {
         if (signal == 0) return target_thread == 1 ||
             std::any_of(guest_thread_launches_.begin(), guest_thread_launches_.end(),
@@ -2536,6 +4443,14 @@ public:
             if (target == guest_thread_launches_.end()) return false;
         }
         guest_pending_signals_[target_thread].push_back(signal);
+        if (!GuestSignalIsBlocked(target_thread, signal) && target_thread != 1u) {
+            const auto target = std::find_if(guest_thread_launches_.begin(), guest_thread_launches_.end(),
+                                             [&](const GuestThreadLaunch& item) {
+                                                 return item.id == target_thread && !item.finished;
+                                             });
+            if (target != guest_thread_launches_.end() && target->state == GuestThreadState::BlockedSignal)
+                MarkGuestThreadRunnable(target_thread);
+        }
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
         __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
                             "PV7SIGNAL queue sender=%u target=%u signal=%u",
@@ -2548,8 +4463,12 @@ public:
         if (!jit) return false;
         auto pending = guest_pending_signals_.find(current_thread_id_);
         if (pending == guest_pending_signals_.end() || pending->second.empty()) return false;
-        const std::uint32_t signal = pending->second.front();
-        pending->second.erase(pending->second.begin());
+        const auto deliverable = std::find_if(
+            pending->second.begin(), pending->second.end(),
+            [&](std::uint32_t signal) { return !GuestSignalIsBlocked(current_thread_id_, signal); });
+        if (deliverable == pending->second.end()) return false;
+        const std::uint32_t signal = *deliverable;
+        pending->second.erase(deliverable);
         if (pending->second.empty()) guest_pending_signals_.erase(pending);
 
         const auto action_it = guest_signal_actions_.find(signal);
@@ -2570,8 +4489,13 @@ public:
         frame.cpsr = jit->Cpsr();
         frame.fpscr = jit->Fpscr();
         frame.signal = signal;
+        frame.signal_mask = guest_signal_masks_[current_thread_id_];
 
         const GuestSignalAction action = action_it->second;
+        std::uint32_t handler_mask = frame.signal_mask | action.mask;
+        constexpr std::uint32_t kSaNoDefer = 0x40000000u;
+        if ((action.flags & kSaNoDefer) == 0u) handler_mask |= GuestSignalBit(signal);
+        guest_signal_masks_[current_thread_id_] = handler_mask;
         const bool uses_siginfo = (action.flags & 0x4u) != 0u; // SA_SIGINFO
         std::uint32_t handler_sp = frame.regs[13];
         if (uses_siginfo) {
@@ -2616,7 +4540,7 @@ public:
                 constexpr std::uint32_t mcontext = 20u;
                 Write32(memory_, uc + mcontext + 0u, 0u); // trap_no
                 Write32(memory_, uc + mcontext + 4u, 0u); // error_code
-                Write32(memory_, uc + mcontext + 8u, 0u); // oldmask
+                Write32(memory_, uc + mcontext + 8u, frame.signal_mask); // oldmask
                 for (std::uint32_t reg = 0; reg <= 10u; ++reg)
                     Write32(memory_, uc + mcontext + 12u + reg * 4u, frame.regs[reg]);
                 Write32(memory_, uc + mcontext + 56u, frame.regs[11]);
@@ -2656,6 +4580,11 @@ public:
         const auto saved_tls_values = tls_values_;
         const std::uint32_t saved_arm_tls = arm_tls_value_;
         const std::uint32_t saved_thread_id = current_thread_id_;
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+        TraceEvent(pv7::trace::WorkerEnter, jit->Regs()[15], jit->Regs()[14],
+                   static_cast<std::uint32_t>(max_threads),
+                   static_cast<std::uint32_t>(max_slices_per_thread));
+#endif
         std::size_t pumped = 0;
         guest_thread_pump_trace.clear();
         const std::size_t thread_count_at_entry = guest_thread_launches_.size();
@@ -2665,11 +4594,16 @@ public:
         // receive the next cooperative quantum. This mirrors the normal OS behavior
         // where a thread explicitly awakened by a synchronization primitive is made
         // runnable immediately instead of waiting for a full round-robin scan.
-        if (preferred_guest_thread_id_ != 0u && !guest_thread_launches_.empty()) {
+        const std::uint32_t preferred_thread_at_entry = preferred_guest_thread_id_;
+        const bool trylock_preferred_only =
+            preferred_thread_at_entry != 0u &&
+            preferred_thread_at_entry == trylock_preferred_guest_thread_id_;
+        trylock_preferred_guest_thread_id_ = 0u;
+        if (preferred_thread_at_entry != 0u && !guest_thread_launches_.empty()) {
             const auto preferred = std::find_if(
                 guest_thread_launches_.begin(), guest_thread_launches_.end(),
                 [&](const GuestThreadLaunch& item) {
-                    return item.id == preferred_guest_thread_id_ && !item.finished;
+                    return item.id == preferred_thread_at_entry && !item.finished;
                 });
             if (preferred != guest_thread_launches_.end())
                 guest_thread_pump_cursor_ = static_cast<std::size_t>(
@@ -2692,6 +4626,49 @@ public:
             auto wait_key = [&](std::uint32_t object) -> std::uint64_t {
                 return (static_cast<std::uint64_t>(launch.id) << 32) | object;
             };
+
+            if (HasDeliverablePendingGuestSignal(launch.id)) {
+#if defined(PROJECTV7_TEST_WORKER_NANOSLEEP_DEADLINES) && PROJECTV7_TEST_WORKER_NANOSLEEP_DEADLINES
+                guest_nanosleep_deadlines_.erase(launch.id);
+#endif
+                return true;
+            }
+#if defined(PROJECTV7_TEST_WORKER_NANOSLEEP_DEADLINES) && PROJECTV7_TEST_WORKER_NANOSLEEP_DEADLINES
+            const auto wake = guest_nanosleep_deadlines_.find(launch.id);
+            if (wake != guest_nanosleep_deadlines_.end()) {
+                if (std::chrono::steady_clock::now() < wake->second) return false;
+                guest_nanosleep_deadlines_.erase(wake);
+            }
+#endif
+
+            if (at_stub("sigsuspend")) return false;
+
+            if (at_stub("pthread_mutex_lock")) {
+                const auto mutex = guest_mutexes_.find(launch.regs[0]);
+                return mutex == guest_mutexes_.end() || mutex->second.owner == 0u ||
+                       mutex->second.owner == launch.id;
+            }
+
+            if (at_stub("sem_wait") || at_stub("sem_timedwait")) {
+                const std::uint32_t sem = launch.regs[0];
+                const auto value = guest_semaphores_.find(sem);
+                if (value != guest_semaphores_.end() && value->second > 0) return true;
+                if (at_stub("sem_timedwait")) {
+                    const auto deadline = guest_sem_deadlines_.find(wait_key(sem));
+                    if (deadline != guest_sem_deadlines_.end() &&
+                        std::chrono::system_clock::now() >= deadline->second)
+                        return true;
+                }
+                return false;
+            }
+
+            if (at_stub("pthread_join")) {
+                const std::uint32_t target_id = launch.regs[0];
+                const auto target = std::find_if(
+                    guest_thread_launches_.begin(), guest_thread_launches_.end(),
+                    [&](const GuestThreadLaunch& item) { return item.id == target_id; });
+                return target == guest_thread_launches_.end() || target->finished;
+            }
 
             if (at_stub("pthread_cond_wait") || at_stub("pthread_cond_timedwait") ||
                 at_stub("pthread_cond_timedwait_monotonic_np")) {
@@ -2728,6 +4705,12 @@ public:
             auto& launch = guest_thread_launches_[launch_index];
             if (launch.finished || launch.start < kMainBase || launch.start >= kGuestHeapStart) continue;
             if (!blocked_wait_is_ready(launch)) continue;
+            if (launch.state != GuestThreadState::New) {
+                launch.state = GuestThreadState::Runnable;
+                launch.wait_object = 0;
+                launch.wait_aux = 0;
+                launch.wait_owner = 0;
+            }
 
             if (!launch.started) {
                 launch.started = true;
@@ -2786,7 +4769,13 @@ public:
             int slices_run = 0;
             std::size_t cooperative_yields = 0;
             for (; slices_run < max_slices_per_thread; ++slices_run) {
-                ticks_left = 1000000;
+                const auto sampling_before = guest_thread_sampling_.find(current_thread_id_);
+                const bool pc_sampling =
+                    sampling_before != guest_thread_sampling_.end() &&
+                    sampling_before->second.samples_remaining != 0u;
+                const std::uint64_t slice_tick_budget =
+                    pc_sampling ? sampling_before->second.ticks_per_slice : 1000000u;
+                ticks_left = slice_tick_budget;
                 DeliverPendingGuestSignal();
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
                 const std::uint32_t watched_before = watched_write_address != 0
@@ -2800,6 +4789,20 @@ public:
                 const std::uint64_t worker_slice_us = static_cast<std::uint64_t>(
                     std::chrono::duration_cast<std::chrono::microseconds>(
                         std::chrono::steady_clock::now() - worker_slice_begin).count());
+                if (pc_sampling) {
+                    const auto sampling_after = guest_thread_sampling_.find(current_thread_id_);
+                    if (sampling_after != guest_thread_sampling_.end() &&
+                        sampling_after->second.samples_remaining != 0u) {
+                        __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                            "PV7SAMPLE thread=%u us=%llu slice=%d ticks=%llu pc_before=0x%08x lr_before=0x%08x pc_after=0x%08x lr_after=0x%08x last=%s",
+                                            current_thread_id_,
+                                            static_cast<unsigned long long>(worker_slice_us), slices_run,
+                                            static_cast<unsigned long long>(slice_tick_budget),
+                                            watched_pc_before, watched_lr_before, jit->Regs()[15], jit->Regs()[14],
+                                            call_trace.empty() ? "-" : call_trace.back().c_str());
+                        --sampling_after->second.samples_remaining;
+                    }
+                }
                 if (current_thread_id_ == unity_preload_thread_id_ && worker_slice_us >= 20000u) {
                     __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
                                         "PV7PERF preload-slice us=%llu slice=%d pc_before=0x%08x lr_before=0x%08x pc_after=0x%08x lr_after=0x%08x ticks_left=%lld last=%s",
@@ -2842,7 +4845,7 @@ public:
                     pending_cacheflush_start = 0;
                     pending_cacheflush_size = 0;
                     jit->ClearHalt();
-                    if (size != 0) jit->InvalidateCacheRange(start, size);
+                    if (size != 0) InvalidateTranslatedCodeRange(start, size);
                     continue;
                 }
                 if (Dynarmic::Has(halt_reason, Dynarmic::HaltReason::CacheInvalidation)) {
@@ -2856,6 +4859,8 @@ public:
             const std::uint64_t worker_quantum_us = static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - worker_quantum_begin).count());
+            guest_thread_perf_us_[current_thread_id_] += worker_quantum_us;
+            ++guest_thread_perf_visits_[current_thread_id_];
             if (worker_quantum_us >= 100000u) {
                 __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
                                     "PV7PERF slow-worker thread=%u elapsed_us=%llu slices=%d yields=%zu pc=0x%08x lr=0x%08x last=%s",
@@ -2871,7 +4876,17 @@ public:
             launch.tls_values = tls_values_;
             launch.arm_tls = arm_tls_value_;
             launch.total_slices += static_cast<std::size_t>(slices_run);
-            if (saw_return || thread_exit_requested_) launch.finished = true;
+            if (saw_return || thread_exit_requested_) {
+                launch.finished = true;
+                launch.state = GuestThreadState::Finished;
+                for (auto& waiter : guest_thread_launches_) {
+                    if (!waiter.finished && waiter.state == GuestThreadState::BlockedJoin &&
+                        waiter.wait_object == launch.id) {
+                        waiter.state = GuestThreadState::Runnable;
+                        preferred_guest_thread_id_ = waiter.id;
+                    }
+                }
+            }
 
             if (failed || premature_return || !first_thunk.empty() || jni_unknown_slot != 0xffffffffu) {
                 WorkerBoundaryRecord boundary;
@@ -2902,9 +4917,14 @@ public:
                 // useful forward progress until a shim is supplied. Quarantine it
                 // for the remainder of this diagnostic pass so other workers and
                 // the Unity main thread can continue and expose more boundaries.
+                std::ostringstream detail;
+                detail<<" fault="<<std::hex<<fault_pc<<" jni="<<jni_unknown_slot<<std::dec
+                      <<" failed="<<failed<<" premature="<<premature_return<<" thunk="<<first_thunk;
+                launch.terminal_detail=detail.str();
                 launch.finished = true;
             }
 
+            if (record_pump_trace) {
             std::ostringstream thread_line;
             thread_line << "id=" << launch.id << " start=0x" << std::hex << launch.start
                         << " pc=0x" << launch.regs[15] << std::dec
@@ -2935,12 +4955,19 @@ public:
             }
 #endif
             guest_thread_pump_trace.push_back(thread_line.str());
+            }
             ++pumped;
+            if (trylock_preferred_only && launch.id == preferred_thread_at_entry) break;
         }
 
         tls_values_ = saved_tls_values;
         arm_tls_value_ = saved_arm_tls;
         current_thread_id_ = saved_thread_id;
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+        TraceEvent(pv7::trace::WorkerExit, jit->Regs()[15], jit->Regs()[14],
+                   static_cast<std::uint32_t>(pumped),
+                   static_cast<std::uint32_t>(max_slices_per_thread));
+#endif
         cooperative_yield_requested_ = false;
         thread_exit_requested_ = false;
         jit->ClearHalt();
@@ -2951,140 +4978,277 @@ public:
         return pumped;
     }
 
+    bool DispatchClocks(const std::string& name) {
+        const Pv7DispatchNameKey& fast_name{name};
+        if (fast_name == "clock") { Ret(0); return true; }
+        if (fast_name == "clock_gettime" || fast_name == "clock_getres") {
+            const std::uint32_t clock_id = Arg(0);
+            const std::uint32_t ts = Arg(1);
+#if defined(PROJECTV7_STARTUP_HOTPAGE_TRACE) && PROJECTV7_STARTUP_HOTPAGE_TRACE
+            if (clock_id < guest_clock_id_counts.size()) ++guest_clock_id_counts[clock_id];
+            else ++guest_clock_unknown_id_calls;
+            if (fast_name == "clock_getres") ++guest_clock_getres_calls;
+#endif
+            if (!Fits(ts, 8)) return false;
+#if defined(PROJECTV7_TEST_NATIVE_CLOCKS) && PROJECTV7_TEST_NATIVE_CLOCKS && defined(__ANDROID__)
+            // Android and the ARMv7 bionic guest use Linux clock IDs. Keep
+            // REALTIME (0) and MONOTONIC (1) distinct. Returning wall time for
+            // CLOCK_MONOTONIC breaks Unity/Mono timeout arithmetic.
+            ::timespec now{};
+            const ::clockid_t host_id = static_cast<::clockid_t>(clock_id);
+            const int result = fast_name == "clock_getres"
+                ? ::clock_getres(host_id, &now)
+                : ::clock_gettime(host_id, &now);
+            if (result != 0) {
+                Write32(memory_, kBootstrapRuntimeBase, static_cast<std::uint32_t>(errno));
+                Ret(0xffffffffu);
+                return true;
+            }
+            Write32(memory_, ts, static_cast<std::uint32_t>(now.tv_sec));
+            Write32(memory_, ts + 4u, static_cast<std::uint32_t>(now.tv_nsec));
+#else
+            const auto now = std::chrono::system_clock::now().time_since_epoch();
+            const auto sec = std::chrono::duration_cast<std::chrono::seconds>(now);
+            const auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec);
+            Write32(memory_, ts, static_cast<std::uint32_t>(sec.count()));
+            Write32(memory_, ts + 4, fast_name == "clock_getres" ? 1000000u : static_cast<std::uint32_t>(nsec.count()));
+#endif
+            Ret(0);
+            return true;
+        }
+        if (fast_name == "gettimeofday") {
+            const std::uint32_t tv = Arg(0);
+            if (tv) {
+                if (!Fits(tv, 8)) return false;
+                const auto now = std::chrono::system_clock::now().time_since_epoch();
+                const auto sec = std::chrono::duration_cast<std::chrono::seconds>(now);
+                const auto usec = std::chrono::duration_cast<std::chrono::microseconds>(now - sec);
+                Write32(memory_, tv, static_cast<std::uint32_t>(sec.count()));
+                Write32(memory_, tv + 4, static_cast<std::uint32_t>(usec.count()));
+            }
+            Ret(0);
+            return true;
+        }
+        if (fast_name == "time") {
+            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            if (Arg(0)) Write32(memory_, Arg(0), static_cast<std::uint32_t>(seconds));
+            Ret(static_cast<std::uint32_t>(seconds));
+            return true;
+        }
+        return false;
+    }
+
     bool Dispatch(const std::string& name) {
+        const Pv7DispatchNameKey& fast_name{name};
         if (!jit) return false;
+#if PROJECTV7_FAST_SYMBOL_DISPATCH
+        if (DispatchClocks(name)) return true;
+#endif
+#if defined(__ANDROID__)
+        if ((fast_name == "socket" || fast_name == "connect" || fast_name == "recv" || fast_name == "send" ||
+             fast_name == "recvfrom" || fast_name == "sendto" || fast_name == "recvmsg" || fast_name == "sendmsg" ||
+             fast_name == "getaddrinfo" || fast_name == "gethostbyname" || fast_name == "gethostbyaddr" ||
+             fast_name == "poll" || fast_name == "select" || fast_name == "epoll_wait" || fast_name == "getsockopt" ||
+             fast_name == "fcntl" || fast_name == "ioctl") && g_net_trace_count.fetch_add(1) < 160u) {
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7NET call=%s a0=0x%08x a1=0x%08x a2=0x%08x a3=0x%08x tid=%u pc=0x%08x",
+                                name.c_str(), Arg(0), Arg(1), Arg(2), Arg(3),
+                                current_thread_id_, jit->Regs()[15]);
+        }
+#endif
         if (DispatchCompatExtras(name)) return true;
 #if defined(__ANDROID__)
         if (DispatchGles(name)) return true;
         if (DispatchZlib(name)) return true;
 #endif
-        if (name == "ALooper_forThread" || name == "ALooper_prepare") {
+        if (fast_name == "ALooper_forThread" || fast_name == "ALooper_prepare") {
             Ret(kGuestLooperHandle);
             return true;
         }
-        if (name == "ALooper_wake" || name == "AInputQueue_attachLooper" ||
-            name == "AInputQueue_detachLooper" || name == "AInputQueue_finishEvent") {
+        if (fast_name == "ALooper_wake" || fast_name == "AInputQueue_attachLooper" ||
+            fast_name == "AInputQueue_detachLooper" || fast_name == "AInputQueue_finishEvent") {
             Ret(0);
             return true;
         }
-        if (name == "ALooper_pollAll") {
+        if (fast_name == "ALooper_pollAll") {
             if (Arg(1) != 0) Write32(memory_, Arg(1), 0u);
             if (Arg(2) != 0) Write32(memory_, Arg(2), 0u);
             if (Arg(3) != 0) Write32(memory_, Arg(3), 0u);
             Ret(0xffffffffu); // ALOOPER_POLL_TIMEOUT
             return true;
         }
-        if (name == "AInputQueue_getEvent") {
+        if (fast_name == "AInputQueue_getEvent") {
             if (Arg(1) != 0) Write32(memory_, Arg(1), 0u);
             Ret(0xffffffffu);
             return true;
         }
-        if (name == "AInputQueue_preDispatchEvent") { Ret(0); return true; }
-        if (name == "AConfiguration_new") { Ret(kGuestConfigurationHandle); return true; }
-        if (name == "AConfiguration_delete" || name == "AConfiguration_fromAssetManager") { Ret(0); return true; }
-        if (name == "AInputEvent_getType" || name == "AInputEvent_getSource" ||
-            name == "AInputEvent_getDeviceId" || name == "AKeyEvent_getAction" ||
-            name == "AKeyEvent_getKeyCode" || name == "AKeyEvent_getMetaState" ||
-            name == "AMotionEvent_getAction" || name == "AMotionEvent_getFlags" ||
-            name == "AMotionEvent_getMetaState" || name == "AMotionEvent_getEdgeFlags" ||
-            name == "AMotionEvent_getHistorySize" || name == "AMotionEvent_getPointerId") {
+        if (fast_name == "AInputQueue_preDispatchEvent") { Ret(0); return true; }
+        if (fast_name == "AConfiguration_new") { Ret(kGuestConfigurationHandle); return true; }
+        if (fast_name == "AConfiguration_delete" || fast_name == "AConfiguration_fromAssetManager") { Ret(0); return true; }
+        if (fast_name == "AInputEvent_getType") {
+            Ret(NativeMotionEventForHandle(Arg(0)) ? 2u : 0u); // AINPUT_EVENT_TYPE_MOTION
+            return true;
+        }
+        if (fast_name == "AInputEvent_getSource") {
+            const HostTouchEvent* touch = NativeMotionEventForHandle(Arg(0));
+            Ret(touch ? static_cast<std::uint32_t>(touch->source) : 0u);
+            return true;
+        }
+        if (fast_name == "AInputEvent_getDeviceId") {
+            const HostTouchEvent* touch = NativeMotionEventForHandle(Arg(0));
+            Ret(touch ? static_cast<std::uint32_t>(touch->deviceId) : 0u);
+            return true;
+        }
+        if (fast_name == "AKeyEvent_getAction" || fast_name == "AKeyEvent_getKeyCode" || fast_name == "AKeyEvent_getMetaState") {
             Ret(0);
             return true;
         }
-        if (name == "AMotionEvent_getPointerCount") { Ret(1); return true; }
-        if (name == "AMotionEvent_getDownTime" || name == "AMotionEvent_getEventTime" ||
-            name == "AMotionEvent_getHistoricalEventTime") {
+        if (fast_name == "AMotionEvent_getAction") {
+            const HostTouchEvent* touch = NativeMotionEventForHandle(Arg(0));
+            Ret(touch ? static_cast<std::uint32_t>(touch->action) : 0u);
+            return true;
+        }
+        if (fast_name == "AMotionEvent_getMetaState") {
+            const HostTouchEvent* touch = NativeMotionEventForHandle(Arg(0));
+            Ret(touch ? static_cast<std::uint32_t>(touch->metaState) : 0u);
+            return true;
+        }
+        if (fast_name == "AMotionEvent_getFlags" || fast_name == "AMotionEvent_getEdgeFlags" ||
+            fast_name == "AMotionEvent_getHistorySize") {
+            Ret(0);
+            return true;
+        }
+        if (fast_name == "AMotionEvent_getPointerId") {
+            const HostTouchEvent* touch = NativeMotionEventForHandle(Arg(0));
+            const std::uint32_t index = Arg(1);
+            Ret(touch && index < touch->points.size()
+                ? static_cast<std::uint32_t>(touch->points[index].id) : 0xffffffffu);
+            return true;
+        }
+        if (fast_name == "AMotionEvent_getPointerCount") {
+            const HostTouchEvent* touch = NativeMotionEventForHandle(Arg(0));
+            Ret(touch ? static_cast<std::uint32_t>(touch->points.size()) : 0u);
+            return true;
+        }
+        if (fast_name == "AMotionEvent_getDownTime") {
+            const HostTouchEvent* touch = NativeMotionEventForHandle(Arg(0));
+            Ret64(touch ? static_cast<std::uint64_t>(touch->downTimeNanos) : 0u);
+            return true;
+        }
+        if (fast_name == "AMotionEvent_getEventTime") {
+            const HostTouchEvent* touch = NativeMotionEventForHandle(Arg(0));
+            Ret64(touch ? static_cast<std::uint64_t>(touch->eventTimeNanos) : 0u);
+            return true;
+        }
+        if (fast_name == "AMotionEvent_getHistoricalEventTime") {
             Ret64(0);
             return true;
         }
-        if (name == "AMotionEvent_getX" || name == "AMotionEvent_getY" ||
-            name == "AMotionEvent_getPressure" || name == "AMotionEvent_getSize" ||
-            name == "AMotionEvent_getTouchMajor" || name == "AMotionEvent_getTouchMinor" ||
-            name == "AMotionEvent_getToolMajor" || name == "AMotionEvent_getToolMinor" ||
-            name == "AMotionEvent_getOrientation" || name == "AMotionEvent_getXPrecision" ||
-            name == "AMotionEvent_getYPrecision" || name == "AMotionEvent_getHistoricalX" ||
-            name == "AMotionEvent_getHistoricalY" || name == "AMotionEvent_getHistoricalPressure" ||
-            name == "AMotionEvent_getHistoricalSize") {
+        if (fast_name == "AMotionEvent_getX" || fast_name == "AMotionEvent_getY" ||
+            fast_name == "AMotionEvent_getPressure" || fast_name == "AMotionEvent_getSize" ||
+            fast_name == "AMotionEvent_getTouchMajor" || fast_name == "AMotionEvent_getTouchMinor" ||
+            fast_name == "AMotionEvent_getToolMajor" || fast_name == "AMotionEvent_getToolMinor" ||
+            fast_name == "AMotionEvent_getOrientation" || fast_name == "AMotionEvent_getXPrecision" ||
+            fast_name == "AMotionEvent_getYPrecision") {
+            const HostTouchEvent* touch = NativeMotionEventForHandle(Arg(0));
+            const std::uint32_t index = Arg(1);
+            const HostTouchPoint* point = touch && index < touch->points.size()
+                ? &touch->points[index] : nullptr;
+            float value = 0.0f;
+            if (fast_name == "AMotionEvent_getX") value = point ? point->x : 0.0f;
+            else if (fast_name == "AMotionEvent_getY") value = point ? point->y : 0.0f;
+            else if (fast_name == "AMotionEvent_getPressure") value = point ? point->pressure : 0.0f;
+            else if (fast_name == "AMotionEvent_getSize") value = point ? point->size : 0.0f;
+            else if (fast_name == "AMotionEvent_getXPrecision" || fast_name == "AMotionEvent_getYPrecision") value = 1.0f;
+            else if (fast_name == "AMotionEvent_getTouchMajor" || fast_name == "AMotionEvent_getTouchMinor" ||
+                     fast_name == "AMotionEvent_getToolMajor" || fast_name == "AMotionEvent_getToolMinor")
+                value = point ? std::max(point->size, 1.0f) : 0.0f;
+            RetFloat(value);
+            return true;
+        }
+        if (fast_name == "AMotionEvent_getHistoricalX" || fast_name == "AMotionEvent_getHistoricalY" ||
+            fast_name == "AMotionEvent_getHistoricalPressure" || fast_name == "AMotionEvent_getHistoricalSize") {
             RetFloat(0.0f);
             return true;
         }
-        if (name == "ASensorManager_getInstance") { Ret(kGuestSensorManagerHandle); return true; }
-        if (name == "ASensorManager_getDefaultSensor") { Ret(0); return true; }
-        if (name == "ASensorManager_getSensorList") {
+        if (fast_name == "ASensorManager_getInstance") { Ret(kGuestSensorManagerHandle); return true; }
+        if (fast_name == "ASensorManager_getDefaultSensor") { Ret(0); return true; }
+        if (fast_name == "ASensorManager_getSensorList") {
             if (Arg(1) != 0) Write32(memory_, Arg(1), 0u);
             Ret(0);
             return true;
         }
-        if (name == "ASensorManager_createEventQueue") { Ret(kGuestSensorQueueHandle); return true; }
-        if (name == "ASensorManager_destroyEventQueue" ||
-            name == "ASensorEventQueue_disableSensor" || name == "ASensorEventQueue_enableSensor" ||
-            name == "ASensorEventQueue_setEventRate") {
+        if (fast_name == "ASensorManager_createEventQueue") { Ret(kGuestSensorQueueHandle); return true; }
+        if (fast_name == "ASensorManager_destroyEventQueue" ||
+            fast_name == "ASensorEventQueue_disableSensor" || fast_name == "ASensorEventQueue_enableSensor" ||
+            fast_name == "ASensorEventQueue_setEventRate") {
             Ret(0);
             return true;
         }
-        if (name == "ASensorEventQueue_getEvents" || name == "ASensorEventQueue_hasEvents") {
+        if (fast_name == "ASensorEventQueue_getEvents" || fast_name == "ASensorEventQueue_hasEvents") {
             Ret(0);
             return true;
         }
-        if (name == "ASensor_getName" || name == "ASensor_getVendor") { Ret(0); return true; }
-        if (name == "ASensor_getType" || name == "ASensor_getMinDelay") { Ret(0); return true; }
-        if (name == "ASensor_getResolution") { RetFloat(0.0f); return true; }
+        if (fast_name == "ASensor_getName" || fast_name == "ASensor_getVendor") { Ret(0); return true; }
+        if (fast_name == "ASensor_getType" || fast_name == "ASensor_getMinDelay") { Ret(0); return true; }
+        if (fast_name == "ASensor_getResolution") { RetFloat(0.0f); return true; }
 
         // ARM Android uses the soft-float AAPCS at shared-library boundaries, so
         // scalar float/double libm calls arrive in the core-register word stream.
-        if (name == "sinf") { RetFloat(std::sin(ArgFloat(0))); return true; }
-        if (name == "cosf") { RetFloat(std::cos(ArgFloat(0))); return true; }
-        if (name == "tanf") { RetFloat(std::tan(ArgFloat(0))); return true; }
-        if (name == "asinf") { RetFloat(std::asin(ArgFloat(0))); return true; }
-        if (name == "acosf") { RetFloat(std::acos(ArgFloat(0))); return true; }
-        if (name == "atanf") { RetFloat(std::atan(ArgFloat(0))); return true; }
-        if (name == "atan2f") { RetFloat(std::atan2(ArgFloat(0), ArgFloat(1))); return true; }
-        if (name == "expf") { RetFloat(std::exp(ArgFloat(0))); return true; }
-        if (name == "logf") { RetFloat(std::log(ArgFloat(0))); return true; }
-        if (name == "sqrtf") { RetFloat(std::sqrt(ArgFloat(0))); return true; }
-        if (name == "ceilf") { RetFloat(std::ceil(ArgFloat(0))); return true; }
-        if (name == "floorf") { RetFloat(std::floor(ArgFloat(0))); return true; }
-        if (name == "fmodf") { RetFloat(std::fmod(ArgFloat(0), ArgFloat(1))); return true; }
-        if (name == "powf") { RetFloat(std::pow(ArgFloat(0), ArgFloat(1))); return true; }
-        if (name == "__fpclassifyf") { Ret(static_cast<std::uint32_t>(std::fpclassify(ArgFloat(0)))); return true; }
-        if (name == "isnan") { Ret(std::isnan(ArgDouble(0)) ? 1u : 0u); return true; }
-        if (name == "sin") { RetDouble(std::sin(ArgDouble(0))); return true; }
-        if (name == "cos") { RetDouble(std::cos(ArgDouble(0))); return true; }
-        if (name == "tan") { RetDouble(std::tan(ArgDouble(0))); return true; }
-        if (name == "asin") { RetDouble(std::asin(ArgDouble(0))); return true; }
-        if (name == "acos") { RetDouble(std::acos(ArgDouble(0))); return true; }
-        if (name == "atan") { RetDouble(std::atan(ArgDouble(0))); return true; }
-        if (name == "atan2") { RetDouble(std::atan2(ArgDouble(0), ArgDouble(2))); return true; }
-        if (name == "exp") { RetDouble(std::exp(ArgDouble(0))); return true; }
-        if (name == "log") { RetDouble(std::log(ArgDouble(0))); return true; }
-        if (name == "log10") { RetDouble(std::log10(ArgDouble(0))); return true; }
-        if (name == "sqrt") { RetDouble(std::sqrt(ArgDouble(0))); return true; }
-        if (name == "ceil") { RetDouble(std::ceil(ArgDouble(0))); return true; }
-        if (name == "floor") { RetDouble(std::floor(ArgDouble(0))); return true; }
-        if (name == "rint") { RetDouble(std::rint(ArgDouble(0))); return true; }
-        if (name == "round") { RetDouble(std::round(ArgDouble(0))); return true; }
-        if (name == "trunc") { RetDouble(std::trunc(ArgDouble(0))); return true; }
-        if (name == "sinh") { RetDouble(std::sinh(ArgDouble(0))); return true; }
-        if (name == "cosh") { RetDouble(std::cosh(ArgDouble(0))); return true; }
-        if (name == "tanh") { RetDouble(std::tanh(ArgDouble(0))); return true; }
-        if (name == "fmod") { RetDouble(std::fmod(ArgDouble(0), ArgDouble(2))); return true; }
-        if (name == "pow") { RetDouble(std::pow(ArgDouble(0), ArgDouble(2))); return true; }
-        if (name == "ldexp") { RetDouble(std::ldexp(ArgDouble(0), static_cast<int>(Arg(2)))); return true; }
-        if (name == "frexp") {
+        if (fast_name == "sinf") { RetFloat(std::sin(ArgFloat(0))); return true; }
+        if (fast_name == "cosf") { RetFloat(std::cos(ArgFloat(0))); return true; }
+        if (fast_name == "tanf") { RetFloat(std::tan(ArgFloat(0))); return true; }
+        if (fast_name == "asinf") { RetFloat(std::asin(ArgFloat(0))); return true; }
+        if (fast_name == "acosf") { RetFloat(std::acos(ArgFloat(0))); return true; }
+        if (fast_name == "atanf") { RetFloat(std::atan(ArgFloat(0))); return true; }
+        if (fast_name == "atan2f") { RetFloat(std::atan2(ArgFloat(0), ArgFloat(1))); return true; }
+        if (fast_name == "expf") { RetFloat(std::exp(ArgFloat(0))); return true; }
+        if (fast_name == "logf") { RetFloat(std::log(ArgFloat(0))); return true; }
+        if (fast_name == "sqrtf") { RetFloat(std::sqrt(ArgFloat(0))); return true; }
+        if (fast_name == "ceilf") { RetFloat(std::ceil(ArgFloat(0))); return true; }
+        if (fast_name == "floorf") { RetFloat(std::floor(ArgFloat(0))); return true; }
+        if (fast_name == "fmodf") { RetFloat(std::fmod(ArgFloat(0), ArgFloat(1))); return true; }
+        if (fast_name == "powf") { RetFloat(std::pow(ArgFloat(0), ArgFloat(1))); return true; }
+        if (fast_name == "__fpclassifyf") { Ret(static_cast<std::uint32_t>(std::fpclassify(ArgFloat(0)))); return true; }
+        if (fast_name == "isnan") { Ret(std::isnan(ArgDouble(0)) ? 1u : 0u); return true; }
+        if (fast_name == "sin") { RetDouble(std::sin(ArgDouble(0))); return true; }
+        if (fast_name == "cos") { RetDouble(std::cos(ArgDouble(0))); return true; }
+        if (fast_name == "tan") { RetDouble(std::tan(ArgDouble(0))); return true; }
+        if (fast_name == "asin") { RetDouble(std::asin(ArgDouble(0))); return true; }
+        if (fast_name == "acos") { RetDouble(std::acos(ArgDouble(0))); return true; }
+        if (fast_name == "atan") { RetDouble(std::atan(ArgDouble(0))); return true; }
+        if (fast_name == "atan2") { RetDouble(std::atan2(ArgDouble(0), ArgDouble(2))); return true; }
+        if (fast_name == "exp") { RetDouble(std::exp(ArgDouble(0))); return true; }
+        if (fast_name == "log") { RetDouble(std::log(ArgDouble(0))); return true; }
+        if (fast_name == "log10") { RetDouble(std::log10(ArgDouble(0))); return true; }
+        if (fast_name == "sqrt") { RetDouble(std::sqrt(ArgDouble(0))); return true; }
+        if (fast_name == "ceil") { RetDouble(std::ceil(ArgDouble(0))); return true; }
+        if (fast_name == "floor") { RetDouble(std::floor(ArgDouble(0))); return true; }
+        if (fast_name == "rint") { RetDouble(std::rint(ArgDouble(0))); return true; }
+        if (fast_name == "round") { RetDouble(std::round(ArgDouble(0))); return true; }
+        if (fast_name == "trunc") { RetDouble(std::trunc(ArgDouble(0))); return true; }
+        if (fast_name == "sinh") { RetDouble(std::sinh(ArgDouble(0))); return true; }
+        if (fast_name == "cosh") { RetDouble(std::cosh(ArgDouble(0))); return true; }
+        if (fast_name == "tanh") { RetDouble(std::tanh(ArgDouble(0))); return true; }
+        if (fast_name == "fmod") { RetDouble(std::fmod(ArgDouble(0), ArgDouble(2))); return true; }
+        if (fast_name == "pow") { RetDouble(std::pow(ArgDouble(0), ArgDouble(2))); return true; }
+        if (fast_name == "ldexp") { RetDouble(std::ldexp(ArgDouble(0), static_cast<int>(Arg(2)))); return true; }
+        if (fast_name == "frexp") {
             int exponent = 0;
             const double value = std::frexp(ArgDouble(0), &exponent);
             if (Arg(2)) Write32(memory_, Arg(2), static_cast<std::uint32_t>(exponent));
             RetDouble(value);
             return true;
         }
-        if (name == "modff") {
+        if (fast_name == "modff") {
             float integral = 0.0f;
             const float fraction = std::modf(ArgFloat(0), &integral);
             if (Arg(1) && Fits(Arg(1), 4)) std::memcpy(memory_.data() + Arg(1), &integral, 4);
             RetFloat(fraction);
             return true;
         }
-        if (name == "div") {
+        if (fast_name == "div") {
             const std::int32_t denom = static_cast<std::int32_t>(Arg(1));
             const std::int32_t numer = static_cast<std::int32_t>(Arg(0));
             if (!denom) return false;
@@ -3093,28 +5257,28 @@ public:
             return true;
         }
 
-        if (name == "__aeabi_memmove") {
+        if (fast_name == "__aeabi_memmove") {
             const std::uint32_t dst = Arg(0), src = Arg(1), n = Arg(2);
             if (!Fits(dst, n) || !Fits(src, n)) return false;
             std::memmove(memory_.data() + dst, memory_.data() + src, n);
             Ret(dst);
             return true;
         }
-        if (name == "__aeabi_memset") {
+        if (fast_name == "__aeabi_memset") {
             const std::uint32_t dst = Arg(0), n = Arg(1);
             if (!Fits(dst, n)) return false;
             std::memset(memory_.data() + dst, static_cast<int>(Arg(2) & 0xffu), n);
             Ret(dst);
             return true;
         }
-        if (name == "memchr") {
+        if (fast_name == "memchr") {
             const std::uint32_t ptr = Arg(0), n = Arg(2);
             if (!Fits(ptr, n)) return false;
             void* found = std::memchr(memory_.data() + ptr, static_cast<int>(Arg(1)), n);
             Ret(found ? ptr + static_cast<std::uint32_t>(static_cast<std::uint8_t*>(found) - (memory_.data() + ptr)) : 0u);
             return true;
         }
-        if (name == "memmem") {
+        if (fast_name == "memmem") {
             const std::uint32_t hay = Arg(0), hay_len = Arg(1), needle = Arg(2), needle_len = Arg(3);
             if (!Fits(hay, hay_len) || !Fits(needle, needle_len)) return false;
             if (needle_len == 0) { Ret(hay); return true; }
@@ -3125,15 +5289,15 @@ public:
             Ret(result);
             return true;
         }
-        if (name == "memalign") { Ret(Allocate(Arg(1), std::max<std::uint32_t>(Arg(0), 1u))); return true; }
+        if (fast_name == "memalign") { Ret(Allocate(Arg(1), std::max<std::uint32_t>(Arg(0), 1u))); return true; }
 
-        if (name == "strpbrk") {
+        if (fast_name == "strpbrk") {
             const std::string src = ReadCString(Arg(0)), accept = ReadCString(Arg(1));
             const std::size_t pos = src.find_first_of(accept);
             Ret(pos == std::string::npos ? 0u : Arg(0) + static_cast<std::uint32_t>(pos));
             return true;
         }
-        if (name == "strcasestr") {
+        if (fast_name == "strcasestr") {
             std::string hay = ReadCString(Arg(0)), needle = ReadCString(Arg(1));
             std::transform(hay.begin(), hay.end(), hay.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
             std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
@@ -3141,26 +5305,26 @@ public:
             Ret(pos == std::string::npos ? 0u : Arg(0) + static_cast<std::uint32_t>(pos));
             return true;
         }
-        if (name == "strncat") {
+        if (fast_name == "strncat") {
             const std::uint32_t dst = Arg(0);
             const std::string addition = ReadCString(Arg(1)).substr(0, Arg(2));
             if (!WriteCString(dst, ReadCString(dst) + addition)) return false;
             Ret(dst); return true;
         }
-        if (name == "strcoll") { Ret(static_cast<std::uint32_t>(ReadCString(Arg(0)).compare(ReadCString(Arg(1))))); return true; }
-        if (name == "strxfrm") {
+        if (fast_name == "strcoll") { Ret(static_cast<std::uint32_t>(ReadCString(Arg(0)).compare(ReadCString(Arg(1))))); return true; }
+        if (fast_name == "strxfrm") {
             const std::string src = ReadCString(Arg(1));
             if (Arg(2) && Arg(0)) WriteCString(Arg(0), src, Arg(2));
             Ret(static_cast<std::uint32_t>(src.size())); return true;
         }
-        if (name == "strtoull") {
+        if (fast_name == "strtoull") {
             const std::string text = ReadCString(Arg(0));
             char* end = nullptr;
             const unsigned long long value = std::strtoull(text.c_str(), &end, static_cast<int>(Arg(2)));
             if (Arg(1)) Write32(memory_, Arg(1), Arg(0) + static_cast<std::uint32_t>(end - text.c_str()));
             Ret64(static_cast<std::uint64_t>(value)); return true;
         }
-        if (name == "strtod") {
+        if (fast_name == "strtod") {
             const std::string text = ReadCString(Arg(0));
             char* end = nullptr;
             const double value = std::strtod(text.c_str(), &end);
@@ -3168,7 +5332,7 @@ public:
             RetDouble(value); return true;
         }
 
-        if (name == "access") {
+        if (fast_name == "access") {
             const std::string path = NormalizeGuestPath(ReadCString(Arg(0)));
             if (file_trace.size() < 24) file_trace.push_back("access " + path);
             errno = 0;
@@ -3181,25 +5345,25 @@ public:
             Ret(static_cast<std::uint32_t>(result));
             return true;
         }
-        if (name == "__errno" || name == "__get_h_errno") {
+        if (fast_name == "__errno" || fast_name == "__get_h_errno") {
             Ret(kBootstrapRuntimeBase);
             return true;
         }
-        if (name == "malloc") {
+        if (fast_name == "malloc") {
             Ret(Allocate(Arg(0)));
             return true;
         }
-        if (name == "calloc") {
+        if (fast_name == "calloc") {
             const std::uint64_t bytes = static_cast<std::uint64_t>(Arg(0)) * Arg(1);
             Ret(bytes > 0x01000000u ? 0 : Allocate(static_cast<std::size_t>(bytes)));
             return true;
         }
-        if (name == "free") {
+        if (fast_name == "free") {
             FreeAllocation(Arg(0));
             Ret(0);
             return true;
         }
-        if (name == "realloc") {
+        if (fast_name == "realloc") {
             const std::uint32_t old_ptr = Arg(0);
             const std::size_t new_size = Arg(1);
             if (!old_ptr) {
@@ -3226,42 +5390,42 @@ public:
             Ret(fresh);
             return true;
         }
-        if (name == "memcpy" || name == "__aeabi_memcpy") {
+        if (fast_name == "memcpy" || fast_name == "__aeabi_memcpy") {
             const std::uint32_t dst = Arg(0), src = Arg(1), n = Arg(2);
             if (!Fits(dst, n) || !Fits(src, n)) return false;
             std::memcpy(memory_.data() + dst, memory_.data() + src, n);
             Ret(dst);
             return true;
         }
-        if (name == "memmove") {
+        if (fast_name == "memmove") {
             const std::uint32_t dst = Arg(0), src = Arg(1), n = Arg(2);
             if (!Fits(dst, n) || !Fits(src, n)) return false;
             std::memmove(memory_.data() + dst, memory_.data() + src, n);
             Ret(dst);
             return true;
         }
-        if (name == "memset") {
+        if (fast_name == "memset") {
             const std::uint32_t dst = Arg(0), n = Arg(2);
             if (!Fits(dst, n)) return false;
             std::memset(memory_.data() + dst, static_cast<int>(Arg(1) & 0xffu), n);
             Ret(dst);
             return true;
         }
-        if (name == "memcmp") {
+        if (fast_name == "memcmp") {
             const std::uint32_t a = Arg(0), b = Arg(1), n = Arg(2);
             if (!Fits(a, n) || !Fits(b, n)) return false;
             Ret(static_cast<std::uint32_t>(std::memcmp(memory_.data() + a, memory_.data() + b, n)));
             return true;
         }
-        if (name == "strlen") {
-            Ret(static_cast<std::uint32_t>(ReadCString(Arg(0)).size()));
+        if (fast_name == "strlen") {
+            Ret(static_cast<std::uint32_t>(ReadFullCString(Arg(0)).size()));
             return true;
         }
-        if (name == "strcmp" || name == "strcasecmp" || name == "strncmp" || name == "strncasecmp") {
-            std::string a = ReadCString(Arg(0));
-            std::string b = ReadCString(Arg(1));
-            std::size_t limit = (name == "strncmp" || name == "strncasecmp") ? Arg(2) : SIZE_MAX;
-            if (name == "strcasecmp" || name == "strncasecmp") {
+        if (fast_name == "strcmp" || fast_name == "strcasecmp" || fast_name == "strncmp" || fast_name == "strncasecmp") {
+            std::string a = ReadFullCString(Arg(0));
+            std::string b = ReadFullCString(Arg(1));
+            std::size_t limit = (fast_name == "strncmp" || fast_name == "strncasecmp") ? Arg(2) : SIZE_MAX;
+            if (fast_name == "strcasecmp" || fast_name == "strncasecmp") {
                 std::transform(a.begin(), a.end(), a.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
                 std::transform(b.begin(), b.end(), b.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             }
@@ -3276,13 +5440,13 @@ public:
             Ret(static_cast<std::uint32_t>(result));
             return true;
         }
-        if (name == "strcpy" || name == "strncpy" || name == "strlcpy") {
+        if (fast_name == "strcpy" || fast_name == "strncpy" || fast_name == "strlcpy") {
             const std::uint32_t dst = Arg(0);
-            const std::string src = ReadCString(Arg(1));
-            if (name == "strcpy") {
+            const std::string src = ReadFullCString(Arg(1));
+            if (fast_name == "strcpy") {
                 if (!WriteCString(dst, src)) return false;
                 Ret(dst);
-            } else if (name == "strncpy") {
+            } else if (fast_name == "strncpy") {
                 const std::size_t n = Arg(2);
                 if (!Fits(dst, n)) return false;
                 const std::size_t copy = std::min(n, src.size());
@@ -3296,66 +5460,66 @@ public:
             }
             return true;
         }
-        if (name == "strdup") {
-            const std::string src = ReadCString(Arg(0));
+        if (fast_name == "strdup") {
+            const std::string src = ReadFullCString(Arg(0));
             const std::uint32_t dst = Allocate(src.size() + 1);
             if (dst) WriteCString(dst, src);
             Ret(dst);
             return true;
         }
-        if (name == "strchr" || name == "strrchr") {
-            const std::string src = ReadCString(Arg(0));
+        if (fast_name == "strchr" || fast_name == "strrchr") {
+            const std::string src = ReadFullCString(Arg(0));
             const char needle = static_cast<char>(Arg(1));
-            const std::size_t pos = name == "strchr" ? src.find(needle) : src.rfind(needle);
+            const std::size_t pos = fast_name == "strchr" ? src.find(needle) : src.rfind(needle);
             Ret(pos == std::string::npos ? 0 : Arg(0) + static_cast<std::uint32_t>(pos));
             return true;
         }
-        if (name == "strstr") {
-            const std::string hay = ReadCString(Arg(0));
-            const std::string needle = ReadCString(Arg(1));
+        if (fast_name == "strstr") {
+            const std::string hay = ReadFullCString(Arg(0));
+            const std::string needle = ReadFullCString(Arg(1));
             const std::size_t pos = hay.find(needle);
             Ret(pos == std::string::npos ? 0 : Arg(0) + static_cast<std::uint32_t>(pos));
             return true;
         }
-        if (name == "strcat") {
+        if (fast_name == "strcat") {
             const std::uint32_t dst = Arg(0);
-            const std::string combined = ReadCString(dst) + ReadCString(Arg(1));
+            const std::string combined = ReadFullCString(dst) + ReadFullCString(Arg(1));
             if (!WriteCString(dst, combined)) return false;
             Ret(dst);
             return true;
         }
-        if (name == "getenv") {
+        if (fast_name == "getenv") {
             Ret(0);
             return true;
         }
-        if (name == "setenv" || name == "unsetenv" || name == "chdir" || name == "chmod") {
+        if (fast_name == "setenv" || fast_name == "unsetenv" || fast_name == "chdir" || fast_name == "chmod") {
             Ret(0);
             return true;
         }
-        if (name == "getcwd") {
+        if (fast_name == "getcwd") {
             const std::uint32_t buffer = Arg(0), size = Arg(1);
             if (!buffer || size < 2 || !WriteCString(buffer, "/", size)) Ret(0);
             else Ret(buffer);
             return true;
         }
-        if (name == "setlocale") {
+        if (fast_name == "setlocale") {
             Ret(kBootstrapRuntimeBase + 0x100);
             return true;
         }
         // Minimal C-locale wide-character support used by libstdc++ locale facets
         // during Unity's global constructor phase. Android ARM32 wchar_t/wint_t are
         // 32-bit here, and the C locale maps bytes 1:1 to Unicode code points 0..255.
-        if (name == "wctob") {
+        if (fast_name == "wctob") {
             const std::uint32_t wc = Arg(0);
             Ret(wc <= 0xffu ? wc : 0xffffffffu); // EOF if not single-byte representable
             return true;
         }
-        if (name == "btowc") {
+        if (fast_name == "btowc") {
             const std::uint32_t c = Arg(0);
             Ret(c == 0xffffffffu ? 0xffffffffu : (c & 0xffu)); // WEOF or byte value
             return true;
         }
-        if (name == "mbrtowc") {
+        if (fast_name == "mbrtowc") {
             const std::uint32_t out = Arg(0);
             const std::uint32_t src = Arg(1);
             const std::uint32_t count = Arg(2);
@@ -3366,7 +5530,7 @@ public:
             Ret(c == 0 ? 0u : 1u);
             return true;
         }
-        if (name == "wcrtomb") {
+        if (fast_name == "wcrtomb") {
             const std::uint32_t out = Arg(0);
             const std::uint32_t wc = Arg(1);
             if (!out) { Ret(1); return true; } // reset conversion state in C locale
@@ -3375,7 +5539,7 @@ public:
             Ret(1);
             return true;
         }
-        if (name == "wctype") {
+        if (fast_name == "wctype") {
             const std::string cls = ReadCString(Arg(0));
             static const std::unordered_map<std::string, std::uint32_t> classes = {
                 {"alnum",1},{"alpha",2},{"blank",3},{"cntrl",4},{"digit",5},{"graph",6},
@@ -3385,7 +5549,7 @@ public:
             Ret(it == classes.end() ? 0u : it->second);
             return true;
         }
-        if (name == "iswctype") {
+        if (fast_name == "iswctype") {
             const std::uint32_t wc = Arg(0);
             const std::uint32_t cls = Arg(1);
             const bool ascii = wc <= 0x7fu;
@@ -3411,17 +5575,17 @@ public:
             Ret(match ? 1u : 0u);
             return true;
         }
-        if (name == "towlower" || name == "towupper") {
+        if (fast_name == "towlower" || fast_name == "towupper") {
             const std::uint32_t wc = Arg(0);
             if (wc <= 0x7fu) {
                 const unsigned char c = static_cast<unsigned char>(wc);
-                Ret(static_cast<std::uint32_t>(name == "towlower" ? std::tolower(c) : std::toupper(c)));
+                Ret(static_cast<std::uint32_t>(fast_name == "towlower" ? std::tolower(c) : std::toupper(c)));
             } else {
                 Ret(wc);
             }
             return true;
         }
-        if (name == "wcslen") {
+        if (fast_name == "wcslen") {
             const std::uint32_t src = Arg(0);
             std::uint32_t length = 0;
             if (src) {
@@ -3435,7 +5599,7 @@ public:
             Ret(length);
             return true;
         }
-        if (name == "wcscoll") {
+        if (fast_name == "wcscoll") {
             std::uint32_t a = Arg(0), b = Arg(1);
             for (std::size_t i = 0; i < 0x100000u; ++i) {
                 std::uint32_t ca = 0, cb = 0;
@@ -3449,7 +5613,7 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "wcsxfrm") {
+        if (fast_name == "wcsxfrm") {
             const std::uint32_t dst = Arg(0), src = Arg(1), count = Arg(2);
             std::uint32_t length = 0;
             while (length < 0x100000u) {
@@ -3469,41 +5633,44 @@ public:
             Ret(length);
             return true;
         }
-        if (name == "wcsftime") {
+        if (fast_name == "wcsftime") {
             // Locale facet construction only needs this symbol to be callable.
             // Full date formatting is deferred until real gameplay requests it.
             if (Arg(0) && Arg(1) > 0 && Fits(Arg(0), 4)) Write32(memory_, Arg(0), 0u);
             Ret(0);
             return true;
         }
-        if (name == "__system_property_get") {
+        if (fast_name == "__system_property_get") {
             const std::string property = ReadCString(Arg(0), 256);
-            static const std::unordered_map<std::string, std::string> properties = {
-                {"ro.build.version.sdk", "35"},
-                {"ro.build.version.release", "15"},
-                {"ro.build.version.codename", "REL"},
-                {"ro.product.cpu.abi", "armeabi-v7a"},
-                {"ro.product.cpu.abi2", "armeabi"},
-                {"ro.product.cpu.abilist", "arm64-v8a,armeabi-v7a,armeabi"},
-                {"ro.product.cpu.abilist32", "armeabi-v7a,armeabi"},
-                {"ro.product.cpu.abilist64", "arm64-v8a"},
-                {"ro.product.manufacturer", "Google"},
-                {"ro.product.brand", "google"},
-                {"ro.product.model", "CNR64"},
-                {"ro.product.device", "cnr64"},
-                {"ro.hardware", "goldfish"},
-                {"ro.kernel.qemu", "1"},
-                {"ro.debuggable", "0"},
-                {"ro.secure", "1"}
-            };
-            const auto found = properties.find(property);
-            const std::string value = found == properties.end() ? std::string{} : found->second;
+            std::string value;
+            if (!pv7::compat::GetSystemProperty(property, value)) {
+                static const std::unordered_map<std::string, std::string> properties = {
+                    {"ro.build.version.sdk", "35"},
+                    {"ro.build.version.release", "15"},
+                    {"ro.build.version.codename", "REL"},
+                    {"ro.product.cpu.abi", "armeabi-v7a"},
+                    {"ro.product.cpu.abi2", "armeabi"},
+                    {"ro.product.cpu.abilist", "arm64-v8a,armeabi-v7a,armeabi"},
+                    {"ro.product.cpu.abilist32", "armeabi-v7a,armeabi"},
+                    {"ro.product.cpu.abilist64", "arm64-v8a"},
+                    {"ro.product.manufacturer", "Google"},
+                    {"ro.product.brand", "google"},
+                    {"ro.product.model", "ProjectV7"},
+                    {"ro.product.device", "pv7"},
+                    {"ro.hardware", "goldfish"},
+                    {"ro.kernel.qemu", "1"},
+                    {"ro.debuggable", "0"},
+                    {"ro.secure", "1"}
+                };
+                const auto found = properties.find(property);
+                if (found != properties.end()) value = found->second;
+            }
             if (Arg(1) != 0 && !WriteCString(Arg(1), value, 92)) return false;
             if (file_trace.size() < 32) file_trace.push_back("property " + property + "=" + value);
             Ret(static_cast<std::uint32_t>(value.size()));
             return true;
         }
-        if (name == "sysconf") {
+        if (fast_name == "sysconf") {
             const std::uint32_t key = Arg(0);
             if (key == 39) Ret(4096);             // _SC_PAGESIZE on bionic/glibc
             else if (key == 84) Ret(4);           // _SC_NPROCESSORS_ONLN
@@ -3511,7 +5678,7 @@ public:
             else Ret(4);
             return true;
         }
-        if (name == "getdtablesize") {
+        if (fast_name == "getdtablesize") {
 #if !defined(_WIN32)
             const long limit = ::sysconf(_SC_OPEN_MAX);
             Ret(limit > 0 ? static_cast<std::uint32_t>(std::min<long>(limit, 0x7fffffffL)) : 1024u);
@@ -3520,10 +5687,10 @@ public:
 #endif
             return true;
         }
-        if (name == "getpid") { Ret(1234); return true; }
-        if (name == "gettid") { Ret(current_thread_id_); return true; }
-        if (name == "getuid" || name == "geteuid" || name == "getresuid") { Ret(1000); return true; }
-        if (name == "nanosleep") {
+        if (fast_name == "getpid") { Ret(1234); return true; }
+        if (fast_name == "gettid") { Ret(current_thread_id_); return true; }
+        if (fast_name == "getuid" || fast_name == "geteuid" || fast_name == "getresuid") { Ret(1000); return true; }
+        if (fast_name == "nanosleep") {
             // Old Unity uses nanosleep for main-thread pacing. A pure no-op makes
             // some render paths spin far faster than the original Android runtime.
             // Preserve cooperative waits on guest workers, but give the guest main
@@ -3544,20 +5711,61 @@ public:
                     Write32(memory_, Arg(1) + 4u, 0u);
                 }
                 Ret(0);
+                if (jit && allow_main_thread_cooperative_yield) {
+                    // Sleeping inside a translated render call must let queued guest
+                    // workers run. Resume after this completed SVC, as usleep does.
+                    const auto stub = name_to_stub_.find(name);
+                    if (stub != name_to_stub_.end() && jit->Regs()[15] == stub->second)
+                        jit->Regs()[15] = stub->second + 4u;
+                    cooperative_yield_requested_ = true;
+                    jit->HaltExecution();
+                }
                 return true;
             }
+#if defined(PROJECTV7_TEST_WORKER_NANOSLEEP_DEADLINES) && PROJECTV7_TEST_WORKER_NANOSLEEP_DEADLINES
+            // Diagnostic A/B: preserve the guest worker sleep duration without
+            // blocking the native host thread that schedules all guest workers.
+            // The bounded 25 ms deadline preserves the original observed 20 ms
+            // guest worker wait, while capping longer requests. OFF is unchanged.
+            std::uint64_t requested_ns = 0u;
+            const std::uint32_t request = Arg(0);
+            if (request != 0u && Fits(request, 8u)) {
+                std::uint32_t seconds = 0u, nanoseconds = 0u;
+                Read32(memory_, request, seconds);
+                Read32(memory_, request + 4u, nanoseconds);
+                if (nanoseconds < 1000000000u) {
+                    requested_ns = static_cast<std::uint64_t>(seconds) * 1000000000ull + nanoseconds;
+                    const std::uint64_t bounded_ns = std::min<std::uint64_t>(requested_ns, 25000000ull);
+                    if (bounded_ns != 0u)
+                        guest_nanosleep_deadlines_[current_thread_id_] =
+                            std::chrono::steady_clock::now() + std::chrono::nanoseconds(bounded_ns);
+                }
+            }
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+            if (guest_nanosleep_trace_count_[current_thread_id_]++ < 8u) {
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7SLEEP worker-nanosleep tid=%u requested_ns=%llu capped_ns=%llu",
+                                    current_thread_id_, static_cast<unsigned long long>(requested_ns),
+                                    static_cast<unsigned long long>(std::min<std::uint64_t>(requested_ns, 25000000ull)));
+            }
+#endif
+#endif
             Ret(0);
             if (jit) {
-                // The guest call is complete. CallSVC exposes the already-advanced
-                // guest PC, so preserve it while yielding and let the thunk return normally.
+                // Dynarmic stops at the SVC instruction itself when the callback
+                // requests a cooperative halt. This call has already completed, so
+                // resume at the thunk's BX LR instead of re-entering nanosleep forever.
+                const auto stub = name_to_stub_.find(name);
+                if (stub != name_to_stub_.end() && jit->Regs()[15] == stub->second)
+                    jit->Regs()[15] = stub->second + 4u;
                 cooperative_yield_requested_ = true;
                 jit->HaltExecution();
             }
             return true;
         }
-        if (name == "sched_yield" || name == "sleep" || name == "usleep") {
+        if (fast_name == "sched_yield" || fast_name == "sleep" || fast_name == "usleep") {
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
-            if (name == "usleep" && guest_sleep_log_counts_[current_thread_id_]++ < 4u) {
+            if (fast_name == "usleep" && guest_sleep_log_counts_[current_thread_id_]++ < 4u) {
                 __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
                                     "PV7SLEEP usleep thread=%u usec=%u sp=0x%08x lr=0x%08x pc=0x%08x",
                                     current_thread_id_, Arg(0), jit ? jit->Regs()[13] : 0u,
@@ -3566,46 +5774,21 @@ public:
 #endif
             Ret(0);
             if (jit && (current_thread_id_ != 1 || allow_main_thread_cooperative_yield)) {
-                // These calls have completed too. Preserve Dynarmic's advanced PC
-                // while the scheduler runs another guest thread.
+                // The SVC callback halts before the thunk's BX LR executes. Advance
+                // to that return instruction so the next quantum continues past the
+                // completed sleep/yield call instead of invoking it again forever.
+                const auto stub = name_to_stub_.find(name);
+                if (stub != name_to_stub_.end() && jit->Regs()[15] == stub->second)
+                    jit->Regs()[15] = stub->second + 4u;
                 cooperative_yield_requested_ = true;
                 jit->HaltExecution();
             }
             return true;
         }
-        if (name == "clock") { Ret(0); return true; }
-        if (name == "clock_gettime" || name == "clock_getres") {
-            const std::uint32_t ts = Arg(1);
-            if (!Fits(ts, 8)) return false;
-            const auto now = std::chrono::system_clock::now().time_since_epoch();
-            const auto sec = std::chrono::duration_cast<std::chrono::seconds>(now);
-            const auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec);
-            Write32(memory_, ts, static_cast<std::uint32_t>(sec.count()));
-            Write32(memory_, ts + 4, name == "clock_getres" ? 1000000u : static_cast<std::uint32_t>(nsec.count()));
-            Ret(0);
-            return true;
-        }
-        if (name == "gettimeofday") {
-            const std::uint32_t tv = Arg(0);
-            if (tv) {
-                if (!Fits(tv, 8)) return false;
-                const auto now = std::chrono::system_clock::now().time_since_epoch();
-                const auto sec = std::chrono::duration_cast<std::chrono::seconds>(now);
-                const auto usec = std::chrono::duration_cast<std::chrono::microseconds>(now - sec);
-                Write32(memory_, tv, static_cast<std::uint32_t>(sec.count()));
-                Write32(memory_, tv + 4, static_cast<std::uint32_t>(usec.count()));
-            }
-            Ret(0);
-            return true;
-        }
-        if (name == "time") {
-            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-            if (Arg(0)) Write32(memory_, Arg(0), static_cast<std::uint32_t>(seconds));
-            Ret(static_cast<std::uint32_t>(seconds));
-            return true;
-        }
-        if (name == "mmap") {
+#if !PROJECTV7_FAST_SYMBOL_DISPATCH
+        if (DispatchClocks(name)) return true;
+#endif
+        if (fast_name == "mmap") {
             const std::uint32_t requested = Arg(0);
             const std::size_t length = Arg(1);
             const std::uint32_t prot = Arg(2);
@@ -3613,8 +5796,25 @@ public:
             const int fd = static_cast<int>(Arg(4));
             const std::uint32_t offset = Arg(5);
             if (length == 0 || length > UINT32_MAX) { SetErrno(22); Ret(0xffffffffu); return true; }
-            const std::uint32_t ptr = Allocate(AlignUp(static_cast<std::uint32_t>(length), 4096), 4096);
-            if (!ptr) { SetErrno(12); Ret(0xffffffffu); return true; }
+
+            // Linux/Android MAP_FIXED (0x10) requires mmap() to return exactly
+            // the requested address, replacing the existing mapping there. Boehm GC
+            // relies on this when it remaps portions of its heap as PROT_NONE. The
+            // guest address space is already backed by our flat memory vector, so
+            // honor the fixed address in-place instead of consuming a new heap block.
+            std::uint32_t ptr = 0;
+            if ((flags & 0x10u) != 0u && requested != 0u) {
+                if ((requested & 0xfffu) != 0u || !Fits(requested, length)) {
+                    SetErrno((requested & 0xfffu) != 0u ? 22u : 12u);
+                    Ret(0xffffffffu);
+                    return true;
+                }
+                ptr = requested;
+                std::memset(memory_.data() + ptr, 0, length);
+            } else {
+                ptr = Allocate(AlignUp(static_cast<std::uint32_t>(length), 4096), 4096);
+                if (!ptr) { SetErrno(12); Ret(0xffffffffu); return true; }
+            }
             if (file_trace.size() < 32) {
                 std::ostringstream line;
                 line << "mmap req=0x" << std::hex << requested << " len=0x" << length
@@ -3646,7 +5846,7 @@ public:
             Ret(ptr);
             return true;
         }
-        if (name == "mprotect") {
+        if (fast_name == "mprotect") {
             const std::uint32_t address = Arg(0);
             const std::uint32_t length = Arg(1);
             const std::uint32_t prot = Arg(2);
@@ -3665,6 +5865,7 @@ public:
             }
             if ((prot & 0x4u) != 0) { // PROT_EXEC
                 ++executable_mprotect_calls;
+                ++total_executable_mprotect_calls;
                 if (first_exec_region == 0) {
                     first_exec_region = address;
                     first_exec_region_size = length;
@@ -3679,7 +5880,7 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "munmap") {
+        if (fast_name == "munmap") {
             // mmap() allocations are tracked by their returned base address, so release
             // the whole mapping when the legacy runtime unmaps it. The length is advisory
             // here because this compatibility layer does not support partial unmaps yet.
@@ -3687,8 +5888,8 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "madvise") { Ret(0); return true; }
-        if (name == "mremap") {
+        if (fast_name == "madvise") { Ret(0); return true; }
+        if (fast_name == "mremap") {
             const std::uint32_t old_ptr = Arg(0);
             const std::size_t old_size = Arg(1);
             const std::size_t new_size = Arg(2);
@@ -3700,7 +5901,7 @@ public:
             Ret(fresh ? fresh : 0xffffffffu);
             return true;
         }
-        if (name == "pthread_once") {
+        if (fast_name == "pthread_once") {
             const std::uint32_t control = Arg(0);
             const std::uint32_t initializer = Arg(1);
             if (!control || !initializer) {
@@ -3725,11 +5926,11 @@ public:
             jit->HaltExecution();
             return true;
         }
-        if (name == "pthread_create") {
+        if (fast_name == "pthread_create") {
             const std::uint32_t thread_id = next_thread_id_++;
             if (Arg(0)) Write32(memory_, Arg(0), thread_id);
             guest_thread_launches_.push_back({thread_id, Arg(2), Arg(3), false});
-#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+            guest_signal_masks_[thread_id] = guest_signal_masks_[current_thread_id_];
             const std::uint32_t thread_start = Arg(2);
             const std::uint32_t thread_arg = Arg(3);
             std::uint32_t wrapped_arg = 0u;
@@ -3744,12 +5945,16 @@ public:
                 Read32(memory_, thread_arg + 20u, wrapped_start);
                 Read32(memory_, thread_arg + 32u, wrapped_name_ptr);
                 wrapped_name = ReadCString(wrapped_name_ptr, 96u);
+                if (!wrapped_name.empty()) guest_thread_names_[thread_id] = wrapped_name;
                 if (wrapped_name == "UnityPreload") unity_preload_thread_id_ = thread_id;
             }
-            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
-                                "PV7SYNC pthread_create creator=%u id=%u start=0x%08x arg=0x%08x wrapped_start=0x%08x wrapped_arg=0x%08x wrapped_name='%s'",
-                                current_thread_id_, thread_id, thread_start, thread_arg,
-                                wrapped_start, wrapped_arg, wrapped_name.c_str());
+#if defined(__ANDROID__)
+            if (g_thread_trace_count.fetch_add(1) < 120u) {
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7THREAD create creator=%u id=%u start=0x%08x arg=0x%08x wrapped_start=0x%08x wrapped_arg=0x%08x name='%s'",
+                                    current_thread_id_, thread_id, thread_start, thread_arg,
+                                    wrapped_start, wrapped_arg, wrapped_name.c_str());
+            }
 #endif
             if (jit) {
                 // Let the newly-created guest thread reach its initial wait point
@@ -3771,15 +5976,15 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "pthread_getschedparam") {
+        if (fast_name == "pthread_getschedparam") {
             if (Arg(1) != 0 && !Write32(memory_, Arg(1), 0u)) return false; // SCHED_OTHER
             if (Arg(2) != 0 && !Write32(memory_, Arg(2), 0u)) return false; // sched_priority
             Ret(0);
             return true;
         }
-        if (name == "sched_get_priority_max" || name == "sched_get_priority_min") {
+        if (fast_name == "sched_get_priority_max" || fast_name == "sched_get_priority_min") {
             const int policy = static_cast<int>(Arg(0));
-            if (policy == 1 || policy == 2) Ret(name == "sched_get_priority_max" ? 99u : 1u);
+            if (policy == 1 || policy == 2) Ret(fast_name == "sched_get_priority_max" ? 99u : 1u);
             else Ret(0);
             return true;
         }
@@ -3787,6 +5992,32 @@ public:
             if (!jit) return false;
             const auto stub = name_to_stub_.find(symbol);
             if (stub == name_to_stub_.end()) return false;
+            const auto thread = std::find_if(guest_thread_launches_.begin(), guest_thread_launches_.end(),
+                                             [&](const GuestThreadLaunch& item) { return item.id == current_thread_id_; });
+            if (thread != guest_thread_launches_.end()) {
+                thread->wait_object = Arg(0);
+                thread->wait_aux = 0;
+                thread->wait_owner = 0;
+                if (symbol == "pthread_mutex_lock") {
+                    thread->state = GuestThreadState::BlockedMutex;
+                    const auto mutex = guest_mutexes_.find(Arg(0));
+                    if (mutex != guest_mutexes_.end()) {
+                        thread->wait_owner = mutex->second.owner;
+                        if (mutex->second.owner != 0u && mutex->second.owner != current_thread_id_)
+                            preferred_guest_thread_id_ = mutex->second.owner;
+                    }
+                } else if (symbol == "pthread_cond_wait" || symbol == "pthread_cond_timedwait" ||
+                           symbol == "pthread_cond_timedwait_monotonic_np") {
+                    thread->state = GuestThreadState::BlockedCond;
+                    thread->wait_aux = Arg(1);
+                } else if (symbol == "sem_wait" || symbol == "sem_timedwait") {
+                    thread->state = GuestThreadState::BlockedSemaphore;
+                } else if (symbol == "pthread_join") {
+                    thread->state = GuestThreadState::BlockedJoin;
+                } else if (symbol == "sigsuspend") {
+                    thread->state = GuestThreadState::BlockedSignal;
+                }
+            }
             jit->Regs()[15] = stub->second;
             cooperative_yield_requested_ = true;
             jit->HaltExecution();
@@ -3809,7 +6040,7 @@ public:
             return true;
         };
 
-        if (name == "pthread_exit") {
+        if (fast_name == "pthread_exit") {
             Ret(0);
             if (current_thread_id_ != 1 && jit) {
                 thread_exit_requested_ = true;
@@ -3817,22 +6048,22 @@ public:
             }
             return true;
         }
-        if (name == "pthread_mutexattr_init") {
+        if (fast_name == "pthread_mutexattr_init") {
             guest_mutex_attr_types_[Arg(0)] = 0u;
             Ret(0);
             return true;
         }
-        if (name == "pthread_mutexattr_destroy") {
+        if (fast_name == "pthread_mutexattr_destroy") {
             guest_mutex_attr_types_.erase(Arg(0));
             Ret(0);
             return true;
         }
-        if (name == "pthread_mutexattr_settype") {
+        if (fast_name == "pthread_mutexattr_settype") {
             guest_mutex_attr_types_[Arg(0)] = Arg(1);
             Ret(0);
             return true;
         }
-        if (name == "pthread_mutex_init") {
+        if (fast_name == "pthread_mutex_init") {
             GuestMutexState state{};
             const auto attr = guest_mutex_attr_types_.find(Arg(1));
             if (Arg(1) != 0 && attr != guest_mutex_attr_types_.end()) state.type = attr->second;
@@ -3840,17 +6071,22 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "pthread_mutex_destroy") {
+        if (fast_name == "pthread_mutex_destroy") {
             guest_mutexes_.erase(Arg(0));
             Ret(0);
             return true;
         }
-        if (name == "pthread_mutex_lock" || name == "pthread_mutex_trylock") {
+        if (fast_name == "pthread_mutex_lock" || fast_name == "pthread_mutex_trylock") {
             if (Arg(0) == 0) { Ret(22u); return true; } // EINVAL
             auto& mutex = guest_mutexes_[Arg(0)];
             if (mutex.owner == 0) {
                 mutex.owner = current_thread_id_;
                 mutex.recursion = 1;
+                if (fast_name == "pthread_mutex_trylock") {
+                    const std::uint64_t trylock_key =
+                        (static_cast<std::uint64_t>(current_thread_id_) << 32) | Arg(0);
+                    guest_trylock_spin_counts_.erase(trylock_key);
+                }
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
                 mutex.acquire_lr = jit ? jit->Regs()[14] : 0u;
                 mutex.acquire_sp = jit ? jit->Regs()[13] : 0u;
@@ -3874,7 +6110,7 @@ public:
                 Ret(0);
                 return true;
             }
-            if (name == "pthread_mutex_trylock") {
+            if (fast_name == "pthread_mutex_trylock") {
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
                 const std::uint64_t trylock_key =
                     (static_cast<std::uint64_t>(current_thread_id_) << 32) | Arg(0);
@@ -3910,12 +6146,26 @@ public:
 #endif
                 Ret(16u); // EBUSY
                 if (jit) {
-                    // trylock itself must remain non-blocking, but on the cooperative
-                    // guest scheduler a contended spin must still give the owning
-                    // guest thread a chance to run. Otherwise legacy spin loops can
-                    // burn an entire JIT quantum while the lock owner is starved.
-                    cooperative_yield_requested_ = true;
-                    jit->HaltExecution();
+                    // A real pthread_mutex_trylock returns immediately. Forcing a
+                    // cooperative scheduler pass on every EBUSY turns Unity spin loops
+                    // into thousands of expensive worker quanta. Spin cheaply for a
+                    // short bounded interval, then let the lock owner run.
+                    const std::uint64_t trylock_key =
+                        (static_cast<std::uint64_t>(current_thread_id_) << 32) | Arg(0);
+                    std::uint32_t& spin_count = guest_trylock_spin_counts_[trylock_key];
+                    ++spin_count;
+                    if (mutex.owner != 0u && mutex.owner != current_thread_id_) {
+                        preferred_guest_thread_id_ = mutex.owner;
+                        trylock_preferred_guest_thread_id_ = mutex.owner;
+                    }
+                    if ((spin_count & 31u) == 0u) {
+                        if (current_thread_id_ == 1u && mutex.owner == unity_preload_thread_id_ &&
+                            jit->Regs()[14] == kCnrPreloadTrylockCaller) {
+                            main_thread_wait_mutex_ = Arg(0);
+                        }
+                        cooperative_yield_requested_ = true;
+                        jit->HaltExecution();
+                    }
                 }
                 return true;
             }
@@ -3943,10 +6193,21 @@ public:
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
             RecordSyncEvent("block", Arg(0), mutex.owner);
 #endif
+#if defined(__ANDROID__)
+            const std::uint64_t suspect_key = (static_cast<std::uint64_t>(current_thread_id_) << 32) | Arg(0);
+            if (current_thread_id_ == 1u && suspect_mutex_logged_.size() < 64u && !suspect_mutex_logged_[suspect_key]) {
+                suspect_mutex_logged_[suspect_key] = true;
+                __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                    "PV7MUTEX main-block thread=%u mutex=%08x owner=%u recursion=%u type=%u lr=%08x sp=%08x r4=%08x r5=%08x r6=%08x r7=%08x r8=%08x r9=%08x r10=%08x r11=%08x",
+                    current_thread_id_, Arg(0), mutex.owner, mutex.recursion, mutex.type,
+                    jit->Regs()[14], jit->Regs()[13], jit->Regs()[4], jit->Regs()[5], jit->Regs()[6],
+                    jit->Regs()[7], jit->Regs()[8], jit->Regs()[9], jit->Regs()[10], jit->Regs()[11]);
+            }
+#endif
             if (!block_current_sync_call(name)) return false;
             return true;
         }
-        if (name == "pthread_mutex_unlock") {
+        if (fast_name == "pthread_mutex_unlock") {
             auto found = guest_mutexes_.find(Arg(0));
             if (found == guest_mutexes_.end() || found->second.owner == 0) {
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
@@ -3974,23 +6235,24 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "pthread_cond_init") {
+        if (fast_name == "pthread_cond_init") {
             guest_conds_[Arg(0)] = {};
             Ret(0);
             return true;
         }
-        if (name == "pthread_cond_destroy") {
+        if (fast_name == "pthread_cond_destroy") {
             guest_conds_.erase(Arg(0));
             Ret(0);
             return true;
         }
-        if (name == "pthread_cond_signal") {
+        if (fast_name == "pthread_cond_signal") {
             const std::uint32_t cond = Arg(0);
             bool signaled_waiter = false;
             for (auto& waiter : guest_cond_waits_) {
                 if (static_cast<std::uint32_t>(waiter.first) == cond && !waiter.second.signaled) {
                     waiter.second.signaled = true;
                     signaled_waiter = true;
+                    preferred_guest_thread_id_ = static_cast<std::uint32_t>(waiter.first >> 32);
                     break;
                 }
             }
@@ -4002,9 +6264,15 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "pthread_cond_broadcast") {
+        if (fast_name == "pthread_cond_broadcast") {
             const std::uint32_t cond = Arg(0);
             ++guest_conds_[cond].broadcast_generation;
+            for (const auto& waiter : guest_cond_waits_) {
+                if (static_cast<std::uint32_t>(waiter.first) == cond) {
+                    preferred_guest_thread_id_ = static_cast<std::uint32_t>(waiter.first >> 32);
+                    break;
+                }
+            }
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
             __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
                                 "PV7COND broadcast thread=%u cond=0x%08x generation=%llu",
@@ -4014,8 +6282,8 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "pthread_cond_wait" || name == "pthread_cond_timedwait" ||
-            name == "pthread_cond_timedwait_monotonic_np") {
+        if (fast_name == "pthread_cond_wait" || fast_name == "pthread_cond_timedwait" ||
+            fast_name == "pthread_cond_timedwait_monotonic_np") {
             const std::uint32_t cond = Arg(0);
             const std::uint32_t mutex_address = Arg(1);
             const std::uint64_t wait_key = make_wait_key(cond);
@@ -4024,7 +6292,7 @@ public:
                 GuestCondWaitState state{};
                 state.broadcast_generation = guest_conds_[cond].broadcast_generation;
                 state.mutex = mutex_address;
-                state.timed = name != "pthread_cond_wait";
+                state.timed = fast_name != "pthread_cond_wait";
                 if (state.timed && !decode_deadline(Arg(2), state.deadline)) {
                     Ret(22u); // EINVAL
                     return true;
@@ -4083,7 +6351,7 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "sem_init") {
+        if (fast_name == "sem_init") {
             guest_semaphores_[Arg(0)] = static_cast<std::int64_t>(Arg(2));
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
             __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
@@ -4093,12 +6361,12 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "sem_destroy") {
+        if (fast_name == "sem_destroy") {
             guest_semaphores_.erase(Arg(0));
             Ret(0);
             return true;
         }
-        if (name == "sem_getvalue") {
+        if (fast_name == "sem_getvalue") {
             const auto found = guest_semaphores_.find(Arg(0));
             const std::uint32_t value = found == guest_semaphores_.end()
                                             ? 0u
@@ -4107,9 +6375,16 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "sem_post") {
+        if (fast_name == "sem_post") {
             auto& value = guest_semaphores_[Arg(0)];
             ++value;
+            const auto waiter = std::find_if(
+                guest_thread_launches_.begin(), guest_thread_launches_.end(),
+                [&](const GuestThreadLaunch& item) {
+                    return !item.finished && item.state == GuestThreadState::BlockedSemaphore &&
+                           item.wait_object == Arg(0);
+                });
+            if (waiter != guest_thread_launches_.end()) preferred_guest_thread_id_ = waiter->id;
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
             __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
                                 "PV7SYNC sem_post thread=%u sem=0x%08x value=%lld",
@@ -4118,7 +6393,7 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "sem_trywait") {
+        if (fast_name == "sem_trywait") {
             auto& value = guest_semaphores_[Arg(0)];
             if (value > 0) {
                 --value;
@@ -4129,7 +6404,7 @@ public:
             }
             return true;
         }
-        if (name == "sem_wait" || name == "sem_timedwait") {
+        if (fast_name == "sem_wait" || fast_name == "sem_timedwait") {
             auto& value = guest_semaphores_[Arg(0)];
             const std::uint64_t wait_key = make_wait_key(Arg(0));
             if (value > 0) {
@@ -4144,7 +6419,7 @@ public:
                 Ret(0);
                 return true;
             }
-            if (name == "sem_timedwait") {
+            if (fast_name == "sem_timedwait") {
                 auto deadline = guest_sem_deadlines_.find(wait_key);
                 if (deadline == guest_sem_deadlines_.end()) {
                     std::chrono::system_clock::time_point parsed{};
@@ -4174,7 +6449,7 @@ public:
             if (!block_current_sync_call(name)) return false;
             return true;
         }
-        if (name == "pthread_kill") {
+        if (fast_name == "pthread_kill") {
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
             __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
                                 "PV7SIGNAL source=pthread_kill sender=%u target=%u signal=%u lr=0x%08x sp=0x%08x",
@@ -4184,7 +6459,7 @@ public:
             Ret(QueueGuestSignal(Arg(0), Arg(1)) ? 0u : 3u); // ESRCH
             return true;
         }
-        if (name == "pthread_join") {
+        if (fast_name == "pthread_join") {
             const std::uint32_t target = Arg(0);
             const auto thread = std::find_if(guest_thread_launches_.begin(), guest_thread_launches_.end(),
                                              [&](const GuestThreadLaunch& item) { return item.id == target; });
@@ -4197,34 +6472,34 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "pthread_attr_init") {
+        if (fast_name == "pthread_attr_init") {
             guest_pthread_attr_threads_.erase(Arg(0));
             Ret(0);
             return true;
         }
-        if (name == "pthread_attr_destroy") {
+        if (fast_name == "pthread_attr_destroy") {
             guest_pthread_attr_threads_.erase(Arg(0));
             Ret(0);
             return true;
         }
-        if (name == "pthread_attr_setstacksize" || name == "pthread_attr_setdetachstate" ||
-            name == "pthread_attr_setschedparam" || name == "pthread_attr_setschedpolicy" ||
-            name == "pthread_setschedparam" || name == "pthread_detach" || name == "pthread_sigmask") {
+        if (fast_name == "pthread_attr_setstacksize" || fast_name == "pthread_attr_setdetachstate" ||
+            fast_name == "pthread_attr_setschedparam" || fast_name == "pthread_attr_setschedpolicy" ||
+            fast_name == "pthread_setschedparam" || fast_name == "pthread_detach") {
             Ret(0);
             return true;
         }
-        if (name == "pthread_self") { Ret(current_thread_id_); return true; }
-        if (name == "pthread_equal") { Ret(Arg(0) == Arg(1) ? 1u : 0u); return true; }
-        if (name == "pthread_key_create") {
+        if (fast_name == "pthread_self") { Ret(current_thread_id_); return true; }
+        if (fast_name == "pthread_equal") { Ret(Arg(0) == Arg(1) ? 1u : 0u); return true; }
+        if (fast_name == "pthread_key_create") {
             const std::uint32_t key = next_tls_key_++;
             if (Arg(0)) Write32(memory_, Arg(0), key);
             Ret(0);
             return true;
         }
-        if (name == "pthread_key_delete") { tls_values_.erase(Arg(0)); Ret(0); return true; }
-        if (name == "pthread_setspecific") { tls_values_[Arg(0)] = Arg(1); Ret(0); return true; }
-        if (name == "pthread_getspecific") { Ret(tls_values_[Arg(0)]); return true; }
-        if (name == "pthread_getattr_np") {
+        if (fast_name == "pthread_key_delete") { tls_values_.erase(Arg(0)); Ret(0); return true; }
+        if (fast_name == "pthread_setspecific") { tls_values_[Arg(0)] = Arg(1); Ret(0); return true; }
+        if (fast_name == "pthread_getspecific") { Ret(tls_values_[Arg(0)]); return true; }
+        if (fast_name == "pthread_getattr_np") {
             const std::uint32_t thread_id = Arg(0);
             const std::uint32_t attr = Arg(1);
             const bool known_thread = thread_id == 1u ||
@@ -4235,7 +6510,7 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "setjmp" || name == "sigsetjmp") {
+        if (fast_name == "setjmp" || fast_name == "sigsetjmp") {
             const std::uint32_t buffer = Arg(0);
             if (!jit || buffer == 0) {
                 Ret(0);
@@ -4250,7 +6525,7 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "longjmp" || name == "siglongjmp") {
+        if (fast_name == "longjmp" || fast_name == "siglongjmp") {
             const std::uint32_t buffer = Arg(0);
             const auto saved = jump_contexts_.find(buffer);
             if (!jit || saved == jump_contexts_.end()) {
@@ -4266,11 +6541,11 @@ public:
             jit->HaltExecution();
             return true;
         }
-        if (name == "pthread_attr_getdetachstate") {
+        if (fast_name == "pthread_attr_getdetachstate") {
             if (Arg(1)) Write32(memory_, Arg(1), 0);
             Ret(0); return true;
         }
-        if (name == "pthread_attr_getstack") {
+        if (fast_name == "pthread_attr_getstack") {
             std::uint32_t thread_id = current_thread_id_;
             if (const auto it = guest_pthread_attr_threads_.find(Arg(0)); it != guest_pthread_attr_threads_.end())
                 thread_id = it->second;
@@ -4300,11 +6575,11 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "__pthread_cleanup_push" || name == "__pthread_cleanup_pop") { Ret(0); return true; }
-        if (name == "dlopen") { Ret(1); return true; }
-        if (name == "dlclose") { Ret(0); return true; }
-        if (name == "dlerror") { Ret(0); return true; }
-        if (name == "dlsym") {
+        if (fast_name == "__pthread_cleanup_push" || fast_name == "__pthread_cleanup_pop") { Ret(0); return true; }
+        if (fast_name == "dlopen") { Ret(1); return true; }
+        if (fast_name == "dlclose") { Ret(0); return true; }
+        if (fast_name == "dlerror") { Ret(0); return true; }
+        if (fast_name == "dlsym") {
             const std::string symbol = ReadCString(Arg(1));
             const auto guest = exports_.find(symbol);
             if (guest != exports_.end()) Ret(guest->second.address);
@@ -4314,10 +6589,10 @@ public:
             }
             return true;
         }
-        if (name == "sprintf" || name == "snprintf" || name == "vsprintf" || name == "vsnprintf" || name == "vasprintf") {
-            const bool allocate_result = name == "vasprintf";
-            const bool bounded = name == "snprintf" || name == "vsnprintf";
-            const bool va_list_mode = name == "vsprintf" || name == "vsnprintf" || allocate_result;
+        if (fast_name == "sprintf" || fast_name == "snprintf" || fast_name == "vsprintf" || fast_name == "vsnprintf" || fast_name == "vasprintf") {
+            const bool allocate_result = fast_name == "vasprintf";
+            const bool bounded = fast_name == "snprintf" || fast_name == "vsnprintf";
+            const bool va_list_mode = fast_name == "vsprintf" || fast_name == "vsnprintf" || allocate_result;
             const std::uint32_t dst = Arg(0);
             const std::size_t capacity = bounded ? static_cast<std::size_t>(Arg(1)) : SIZE_MAX;
             const std::uint32_t fmt_addr = allocate_result ? Arg(1) : Arg(bounded ? 2 : 1);
@@ -4405,12 +6680,16 @@ public:
             return true;
         }
 #if defined(__ANDROID__)
-        if (name == "eglGetDisplay") {
+        if (fast_name == "eglGetDisplay") {
             const EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-            Ret(RegisterEglHandle(reinterpret_cast<std::uintptr_t>(display)));
+            const std::uint32_t guest_display = RegisterEglHandle(reinterpret_cast<std::uintptr_t>(display));
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7EGL eglGetDisplay -> guest=0x%08x host=%p",
+                                guest_display, display);
+            Ret(guest_display);
             return true;
         }
-        if (name == "eglInitialize") {
+        if (fast_name == "eglInitialize") {
             const EGLDisplay display = reinterpret_cast<EGLDisplay>(LookupEglHandle(Arg(0)));
             EGLint major = 0;
             EGLint minor = 0;
@@ -4421,10 +6700,13 @@ public:
                 if (Arg(1)) Write32(memory_, Arg(1), static_cast<std::uint32_t>(major));
                 if (Arg(2)) Write32(memory_, Arg(2), static_cast<std::uint32_t>(minor));
             }
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7EGL eglInitialize display=0x%08x ok=%d version=%d.%d",
+                                Arg(0), ok == EGL_TRUE ? 1 : 0, major, minor);
             Ret(ok == EGL_TRUE ? 1u : 0u);
             return true;
         }
-        if (name == "eglChooseConfig") {
+        if (fast_name == "eglChooseConfig") {
             const EGLDisplay display = reinterpret_cast<EGLDisplay>(LookupEglHandle(Arg(0)));
             const auto attributes = ReadEglAttribList(Arg(1));
             EGLint capacity = static_cast<EGLint>(Arg(3));
@@ -4443,50 +6725,81 @@ public:
                 const EGLint written = std::min(count, capacity);
                 for (EGLint index = 0; index < written; ++index) {
                     Write32(memory_, Arg(2) + static_cast<std::uint32_t>(index * 4),
-                            RegisterEglHandle(reinterpret_cast<std::uintptr_t>(configs[static_cast<std::size_t>(index)])));
+                            RegisterEglHandle(reinterpret_cast<std::uintptr_t>(configs[static_cast<std::size_t>(index)]), true));
                 }
             }
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7EGL eglChooseConfig display=0x%08x ok=%d count=%d cap=%d attr_count=%zu first_guest=0x%08x",
+                                Arg(0), ok == EGL_TRUE ? 1 : 0, count, capacity, attributes.size(),
+                                (ok == EGL_TRUE && Arg(2) && count > 0 && capacity > 0)
+                                    ? Read<std::uint32_t>(Arg(2)) : 0u);
             Ret(ok == EGL_TRUE ? 1u : 0u);
             return true;
         }
-        if (name == "eglGetConfigAttrib") {
+        if (fast_name == "eglGetConfigAttrib") {
             const EGLDisplay display = reinterpret_cast<EGLDisplay>(LookupEglHandle(Arg(0)));
-            const EGLConfig config = reinterpret_cast<EGLConfig>(LookupEglHandle(Arg(1)));
+            std::uintptr_t config_host = 0;
+            const bool has_config = LookupEglHandleValue(Arg(1), config_host);
+            const EGLConfig config = reinterpret_cast<EGLConfig>(config_host);
             EGLint value = 0;
-            const EGLBoolean ok = display != EGL_NO_DISPLAY && config != nullptr
+            const EGLBoolean ok = display != EGL_NO_DISPLAY && has_config
                 ? eglGetConfigAttrib(display, config, static_cast<EGLint>(Arg(2)), &value)
                 : EGL_FALSE;
             if (ok == EGL_TRUE && Arg(3)) Write32(memory_, Arg(3), static_cast<std::uint32_t>(value));
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7EGL eglGetConfigAttrib display=0x%08x config=0x%08x attr=0x%04x ok=%d value=%d",
+                                Arg(0), Arg(1), Arg(2), ok == EGL_TRUE ? 1 : 0, value);
             Ret(ok == EGL_TRUE ? 1u : 0u);
             return true;
         }
-        if (name == "eglCreateWindowSurface") {
+        if (fast_name == "eglCreateWindowSurface") {
+            // Once Java has asked the translated game loop to stop, the SurfaceView's
+            // BufferQueue may already be on its way out. Never reconnect Unity to an
+            // abandoned ANativeWindow while the current guest call is winding down.
+            if (!IsGuestGameLoopRunning()) {
+                Ret(0u);
+                return true;
+            }
             const EGLDisplay display = reinterpret_cast<EGLDisplay>(LookupEglHandle(Arg(0)));
-            const EGLConfig config = reinterpret_cast<EGLConfig>(LookupEglHandle(Arg(1)));
+            std::uintptr_t config_host = 0;
+            const bool has_config = LookupEglHandleValue(Arg(1), config_host);
+            const EGLConfig config = reinterpret_cast<EGLConfig>(config_host);
             const auto attributes = ReadEglAttribList(Arg(3));
             ANativeWindow* window = Arg(2) == kGuestNativeWindowHandle
                 ? static_cast<ANativeWindow*>(host_native_window_)
                 : nullptr;
-            const EGLSurface surface = display != EGL_NO_DISPLAY && config != nullptr && window
+            const EGLSurface surface = display != EGL_NO_DISPLAY && has_config && window
                 ? eglCreateWindowSurface(display, config, window,
                                          attributes.empty() ? nullptr : attributes.data())
                 : EGL_NO_SURFACE;
-            Ret(RegisterEglHandle(reinterpret_cast<std::uintptr_t>(surface)));
+            if (surface != EGL_NO_SURFACE) owned_egl_surfaces_[surface] = display;
+            const std::uint32_t guest_surface = RegisterEglHandle(reinterpret_cast<std::uintptr_t>(surface));
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7EGL eglCreateWindowSurface display=0x%08x config=0x%08x native=0x%08x hostWindow=%p attrs=%zu -> guest=0x%08x host=%p",
+                                Arg(0), Arg(1), Arg(2), window, attributes.size(), guest_surface, surface);
+            Ret(guest_surface);
             return true;
         }
-        if (name == "eglCreateContext") {
+        if (fast_name == "eglCreateContext") {
             const EGLDisplay display = reinterpret_cast<EGLDisplay>(LookupEglHandle(Arg(0)));
-            const EGLConfig config = reinterpret_cast<EGLConfig>(LookupEglHandle(Arg(1)));
+            std::uintptr_t config_host = 0;
+            const bool has_config = LookupEglHandleValue(Arg(1), config_host);
+            const EGLConfig config = reinterpret_cast<EGLConfig>(config_host);
             const EGLContext shared = reinterpret_cast<EGLContext>(LookupEglHandle(Arg(2)));
             const auto attributes = ReadEglAttribList(Arg(3));
-            const EGLContext context = display != EGL_NO_DISPLAY && config != nullptr
+            const EGLContext context = display != EGL_NO_DISPLAY && has_config
                 ? eglCreateContext(display, config, shared,
                                    attributes.empty() ? nullptr : attributes.data())
                 : EGL_NO_CONTEXT;
-            Ret(RegisterEglHandle(reinterpret_cast<std::uintptr_t>(context)));
+            if (context != EGL_NO_CONTEXT) owned_egl_contexts_[context] = display;
+            const std::uint32_t guest_context = RegisterEglHandle(reinterpret_cast<std::uintptr_t>(context));
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7EGL eglCreateContext display=0x%08x config=0x%08x shared=0x%08x attrs=%zu -> guest=0x%08x host=%p",
+                                Arg(0), Arg(1), Arg(2), attributes.size(), guest_context, context);
+            Ret(guest_context);
             return true;
         }
-        if (name == "eglMakeCurrent") {
+        if (fast_name == "eglMakeCurrent") {
             const EGLDisplay display = reinterpret_cast<EGLDisplay>(LookupEglHandle(Arg(0)));
             const EGLSurface draw = reinterpret_cast<EGLSurface>(LookupEglHandle(Arg(1)));
             const EGLSurface read = reinterpret_cast<EGLSurface>(LookupEglHandle(Arg(2)));
@@ -4494,10 +6807,17 @@ public:
             const EGLBoolean ok = display != EGL_NO_DISPLAY
                 ? eglMakeCurrent(display, draw, read, context)
                 : EGL_FALSE;
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7EGL eglMakeCurrent display=0x%08x draw=0x%08x read=0x%08x context=0x%08x ok=%d",
+                                Arg(0), Arg(1), Arg(2), Arg(3), ok == EGL_TRUE ? 1 : 0);
             Ret(ok == EGL_TRUE ? 1u : 0u);
             return true;
         }
-        if (name == "eglSwapBuffers") {
+        if (fast_name == "eglSwapBuffers") {
+            if (!IsGuestGameLoopRunning()) {
+                Ret(0u);
+                return true;
+            }
             const EGLDisplay display = reinterpret_cast<EGLDisplay>(LookupEglHandle(Arg(0)));
             const EGLSurface surface = reinterpret_cast<EGLSurface>(LookupEglHandle(Arg(1)));
             const EGLBoolean ok = display != EGL_NO_DISPLAY && surface != EGL_NO_SURFACE
@@ -4506,38 +6826,38 @@ public:
             Ret(ok == EGL_TRUE ? 1u : 0u);
             return true;
         }
-        if (name == "eglDestroySurface") {
+        if (fast_name == "eglDestroySurface") {
             const EGLDisplay display = reinterpret_cast<EGLDisplay>(LookupEglHandle(Arg(0)));
             const EGLSurface surface = reinterpret_cast<EGLSurface>(LookupEglHandle(Arg(1)));
             const EGLBoolean ok = display != EGL_NO_DISPLAY && surface != EGL_NO_SURFACE
                 ? eglDestroySurface(display, surface)
                 : EGL_FALSE;
-            if (ok == EGL_TRUE) UnregisterEglHandle(Arg(1));
+            if (ok == EGL_TRUE) { owned_egl_surfaces_.erase(surface); UnregisterEglHandle(Arg(1)); }
             Ret(ok == EGL_TRUE ? 1u : 0u);
             return true;
         }
-        if (name == "eglDestroyContext") {
+        if (fast_name == "eglDestroyContext") {
             const EGLDisplay display = reinterpret_cast<EGLDisplay>(LookupEglHandle(Arg(0)));
             const EGLContext context = reinterpret_cast<EGLContext>(LookupEglHandle(Arg(1)));
             const EGLBoolean ok = display != EGL_NO_DISPLAY && context != EGL_NO_CONTEXT
                 ? eglDestroyContext(display, context)
                 : EGL_FALSE;
-            if (ok == EGL_TRUE) UnregisterEglHandle(Arg(1));
+            if (ok == EGL_TRUE) { owned_egl_contexts_.erase(context); UnregisterEglHandle(Arg(1)); }
             Ret(ok == EGL_TRUE ? 1u : 0u);
             return true;
         }
-        if (name == "eglTerminate") {
+        if (fast_name == "eglTerminate") {
             const EGLDisplay display = reinterpret_cast<EGLDisplay>(LookupEglHandle(Arg(0)));
             const EGLBoolean ok = display != EGL_NO_DISPLAY ? eglTerminate(display) : EGL_FALSE;
             if (ok == EGL_TRUE) UnregisterEglHandle(Arg(0));
             Ret(ok == EGL_TRUE ? 1u : 0u);
             return true;
         }
-        if (name == "eglGetError") {
+        if (fast_name == "eglGetError") {
             Ret(static_cast<std::uint32_t>(eglGetError()));
             return true;
         }
-        if (name == "eglGetProcAddress") {
+        if (fast_name == "eglGetProcAddress") {
             // Never expose an arm64 host function pointer to the ARM32 guest. Return a
             // guest SVC thunk only for extension entry points implemented by this bridge.
             const std::string symbol = ReadCString(Arg(0), 256);
@@ -4546,7 +6866,7 @@ public:
             return true;
         }
 #endif
-        if (name == "ANativeWindow_fromSurface") {
+        if (fast_name == "ANativeWindow_fromSurface") {
             Ret(host_native_window_ ? kGuestNativeWindowHandle : 0u);
             if (file_trace.size() < 64) {
                 file_trace.push_back(host_native_window_
@@ -4555,36 +6875,283 @@ public:
             }
             return true;
         }
-        if (name == "ANativeWindow_setBuffersGeometry") {
+        if (fast_name == "ANativeWindow_setBuffersGeometry") {
             int result = -1;
 #if defined(__ANDROID__)
+            const int32_t requested_width = static_cast<int32_t>(Arg(1));
+            const int32_t requested_height = static_cast<int32_t>(Arg(2));
+            const int32_t requested_format = static_cast<int32_t>(Arg(3));
             if (host_native_window_ && Arg(0) == kGuestNativeWindowHandle) {
                 result = ANativeWindow_setBuffersGeometry(
                     static_cast<ANativeWindow*>(host_native_window_),
-                    static_cast<int32_t>(Arg(1)),
-                    static_cast<int32_t>(Arg(2)),
-                    static_cast<int32_t>(Arg(3)));
+                    requested_width, requested_height, requested_format);
+                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                    "PV7WINDOW setBuffersGeometry req=%dx%d fmt=%d result=%d hostNow=%dx%d",
+                                    requested_width, requested_height, requested_format, result,
+                                    ANativeWindow_getWidth(static_cast<ANativeWindow*>(host_native_window_)),
+                                    ANativeWindow_getHeight(static_cast<ANativeWindow*>(host_native_window_)));
             }
 #endif
             Ret(static_cast<std::uint32_t>(result));
             return true;
         }
-        if (name == "__android_log_print" || name == "__android_log_vprint" ||
-            name == "printf" || name == "vprintf" || name == "fprintf" || name == "vfprintf" ||
-            name == "puts" || name == "putchar" || name == "fputs" || name == "fputc" ||
-            name == "fflush" || name == "perror") {
+        if (fast_name == "__android_log_print" || fast_name == "__android_log_vprint" ||
+            fast_name == "printf" || fast_name == "vprintf" || fast_name == "fprintf" || fast_name == "vfprintf" ||
+            fast_name == "puts" || fast_name == "putchar" || fast_name == "fputs" || fast_name == "fputc" ||
+            fast_name == "fflush" || fast_name == "perror") {
             std::uint32_t text_arg = 0;
-            if (name == "printf" || name == "vprintf" || name == "puts" || name == "perror") text_arg = Arg(0);
-            else if (name == "fprintf" || name == "vfprintf" || name == "fputs") text_arg = Arg(1);
-            else if (name == "__android_log_print" || name == "__android_log_vprint") text_arg = Arg(2);
-            if (text_arg && diagnostic_formats.size() < 16) {
+            if (fast_name == "printf" || fast_name == "vprintf" || fast_name == "puts" || fast_name == "perror") text_arg = Arg(0);
+            else if (fast_name == "fprintf" || fast_name == "vfprintf" || fast_name == "fputs") text_arg = Arg(1);
+            else if (fast_name == "__android_log_print" || fast_name == "__android_log_vprint") text_arg = Arg(2);
+            if (text_arg) {
                 const std::string text = ReadCString(text_arg);
-                if (!text.empty()) diagnostic_formats.push_back(name + ": " + text);
+                if (!text.empty()) {
+                    std::string display_text = text;
+                    if (text == "%s") {
+                        std::vector<std::uint32_t> candidates;
+                        const std::uint32_t arg3 = Arg(3);
+                        if (arg3) candidates.push_back(arg3);
+                        if (fast_name == "__android_log_vprint" && arg3) {
+                            for (std::uint32_t offset = 0; offset <= 28u; offset += 4u) {
+                                if (Fits(arg3 + offset, 4u))
+                                    candidates.push_back(Read<std::uint32_t>(arg3 + offset));
+                            }
+                        }
+                        for (const std::uint32_t candidate : candidates) {
+                            if (!candidate) continue;
+                            const std::string expanded = ReadCString(candidate);
+                            if (expanded.empty()) continue;
+                            if (expanded.find("initialization") != std::string::npos ||
+                                expanded.find("[EGL]") != std::string::npos ||
+                                expanded.find("failed") != std::string::npos) {
+                                display_text = expanded;
+                                break;
+                            }
+                            if (display_text == text && expanded.size() >= 4u && expanded.size() < 256u)
+                                display_text = expanded;
+                        }
+                    }
+                    // Mono's fatal diagnostics often arrive as `%s%s%s` or
+                    // `  %s`. Decode *only* these simple string-only variadics
+                    // from the original guest ARM EABI argument slots. Do not
+                    // reinterpret unknown printf specifiers or dereference host
+                    // pointers. This is logging only, not guest execution.
+                    if (text != "%s" &&
+                        (fast_name == "__android_log_print" || fast_name == "printf" ||
+                         fast_name == "fprintf") && text.find("%s") != std::string::npos) {
+                        std::uint32_t arg_index = fast_name == "__android_log_print" ? 3u :
+                                                  fast_name == "fprintf" ? 2u : 1u;
+                        std::string expanded;
+                        bool valid_string_format = true;
+                        bool did_expand = false;
+                        for (std::size_t i = 0; i < text.size() && expanded.size() < 2048u; ++i) {
+                            if (text[i] != '%') { expanded.push_back(text[i]); continue; }
+                            if (i + 1u >= text.size()) { valid_string_format = false; break; }
+                            const char spec = text[++i];
+                            if (spec == '%') { expanded.push_back('%'); continue; }
+                            if (spec != 's' || arg_index > 9u) {
+                                valid_string_format = false;
+                                break;
+                            }
+                            const std::uint32_t guest_ptr = Arg(arg_index++);
+                            if (guest_ptr != 0u && Fits(guest_ptr, 1u)) {
+                                std::string value = ReadCString(guest_ptr);
+                                if (value.size() > 512u) value.resize(512u);
+                                expanded += value;
+                            } else {
+                                expanded += guest_ptr == 0u ? "(null)" : "<invalid guest string>";
+                            }
+                            did_expand = true;
+                        }
+                        if (valid_string_format && did_expand) display_text = std::move(expanded);
+                    }
+                    if (diagnostic_formats.size() < 16) diagnostic_formats.push_back(name + ": " + display_text);
+#if defined(__ANDROID__)
+                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC", "PV7GUESTLOG %s: %s", name.c_str(), display_text.c_str());
+#if defined(PROJECTV7_MONO_FATAL_CONTEXT_TRACE) && PROJECTV7_MONO_FATAL_CONTEXT_TRACE
+                    if (jit && (display_text.find("unknown opcode") != std::string::npos ||
+                                display_text.find("unknown type") != std::string::npos ||
+                                display_text.find("Assertion:") != std::string::npos)) {
+                        const auto& regs = jit->Regs();
+                        const std::uint32_t sp = regs[13];
+                        __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                            "PV7MONOFATAL pc=%08x lr=%08x sp=%08x fp=%08x r0=%08x r1=%08x r2=%08x r3=%08x r4=%08x r5=%08x r6=%08x r7=%08x r8=%08x r9=%08x r10=%08x r12=%08x",
+                                            regs[15], regs[14], sp, regs[11],
+                                            regs[0], regs[1], regs[2], regs[3],
+                                            regs[4], regs[5], regs[6], regs[7],
+                                            regs[8], regs[9], regs[10], regs[12]);
+                        if (Fits(sp, 48u)) {
+                            __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                "PV7MONOFATAL stack=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x",
+                                                Read<std::uint32_t>(sp), Read<std::uint32_t>(sp + 4u),
+                                                Read<std::uint32_t>(sp + 8u), Read<std::uint32_t>(sp + 12u),
+                                                Read<std::uint32_t>(sp + 16u), Read<std::uint32_t>(sp + 20u),
+                                                Read<std::uint32_t>(sp + 24u), Read<std::uint32_t>(sp + 28u),
+                                                Read<std::uint32_t>(sp + 32u), Read<std::uint32_t>(sp + 36u),
+                                                Read<std::uint32_t>(sp + 40u), Read<std::uint32_t>(sp + 44u));
+                        }
+                        // Dev-only Mono ARM emitter frame recovery. Ghidra mapped
+                        // mono_arch_output_basic_block's unknown-opcode log call
+                        // to original ELF offset 0x00123a74 (return 0x00123a78).
+                        // Scan the current guest stack once at fatal time. Do not
+                        // patch JIT code, interrupt threads, or skip instructions.
+                        static bool captured_emitter_frame = false;
+                        if (!captured_emitter_frame &&
+                            display_text.find("unknown opcode") != std::string::npos) {
+                            captured_emitter_frame = true;
+                            constexpr std::uint32_t kEmitterLogReturn = kMonoBase + 0x00123a78u;
+                            constexpr std::uint32_t kGuestStackTop = 0x07000000u;
+                            std::size_t hits = 0u;
+                            if (sp < kGuestStackTop) {
+                                for (std::uint32_t addr = sp;
+                                     addr + 4u <= kGuestStackTop && addr - sp <= 0x3000u;
+                                     addr += 4u) {
+                                    if (!Fits(addr, 4u) ||
+                                        Read<std::uint32_t>(addr) != kEmitterLogReturn)
+                                        continue;
+                                    ++hits;
+                                    __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                        "PV7MONOFRAME return=%08x slot=%08x",
+                                                        kEmitterLogReturn, addr);
+                                    // At the gcc EABI logging call, the word
+                                    // immediately before the saved return PC is
+                                    // the caller's frame pointer. The offending
+                                    // MonoInst* lives at [r11-0x18] in the
+                                    // Ghidra-confirmed ARM emitter default arm.
+                                    if (addr >= 4u && Fits(addr - 4u, 4u)) {
+                                        const auto compiler_fp = Read<std::uint32_t>(addr - 4u);
+                                        if (compiler_fp >= 0x474u && Fits(compiler_fp - 0x474u, 4u)) {
+                                            const auto ins_ptr = Read<std::uint32_t>(compiler_fp - 0x18u);
+                                            const auto local_src = Read<std::uint32_t>(compiler_fp - 0x474u);
+                                            __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                                "PV7MONOINST fp=%08x ins=%08x local474=%08x local01c=%08x",
+                                                                compiler_fp, ins_ptr, local_src,
+                                                                Read<std::uint32_t>(compiler_fp - 0x1cu));
+                                            // The Mono ARM emitter's current instruction is
+                                            // seeded from basic_block->code (+8), advanced via
+                                            // current->next (+0x14), or set by an alternate
+                                            // path. Read pointers once, only after the fatal.
+                                            const std::uint32_t previous_inst =
+                                                Read<std::uint32_t>(compiler_fp - 0x34u);
+                                            const std::uint32_t bb =
+                                                compiler_fp >= 0x484u
+                                                    ? Read<std::uint32_t>(compiler_fp - 0x484u) : 0u;
+                                            const std::uint32_t cfg =
+                                                compiler_fp >= 0x480u
+                                                    ? Read<std::uint32_t>(compiler_fp - 0x480u) : 0u;
+                                            const std::uint32_t head =
+                                                bb <= 0xfffffff7u && Fits(bb + 8u, 4u)
+                                                    ? Read<std::uint32_t>(bb + 8u) : 0u;
+                                            const std::uint32_t prev_next =
+                                                previous_inst <= 0xffffffebu &&
+                                                Fits(previous_inst + 0x14u, 4u)
+                                                    ? Read<std::uint32_t>(previous_inst + 0x14u) : 0u;
+                                            const std::uint32_t prev_opcode =
+                                                Fits(previous_inst, 2u)
+                                                    ? Read<std::uint16_t>(previous_inst) : 0u;
+                                            __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                                "PV7MONOLINK cfg=%08x bb=%08x head=%08x prev=%08x prev_opcode=%04x prev_next=%08x current=%08x",
+                                                                cfg, bb, head, previous_inst,
+                                                                prev_opcode, prev_next, ins_ptr);
+                                            // The caller at Mono ELF +0x1e49c passes
+                                            // r1 from its [fp-0x10], seeded from
+                                            // cfg->0x14. Compare the live list
+                                            // head with the saved callee argument.
+                                            if (cfg <= 0xffffffe3u && Fits(cfg, 0x20u)) {
+                                                __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                                    "PV7MONOCFG cfg=%08x bb_arg=%08x list14=%08x list18=%08x fields00=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x",
+                                                                    cfg, bb,
+                                                                    Read<std::uint32_t>(cfg + 0x14u),
+                                                                    Read<std::uint32_t>(cfg + 0x18u),
+                                                                    Read<std::uint32_t>(cfg),
+                                                                    Read<std::uint32_t>(cfg + 4u),
+                                                                    Read<std::uint32_t>(cfg + 8u),
+                                                                    Read<std::uint32_t>(cfg + 12u),
+                                                                    Read<std::uint32_t>(cfg + 16u),
+                                                                    Read<std::uint32_t>(cfg + 20u),
+                                                                    Read<std::uint32_t>(cfg + 24u),
+                                                                    Read<std::uint32_t>(cfg + 28u));
+                                            }
+                                            if (bb <= 0xffffffe7u && Fits(bb, 0x18u)) {
+                                                __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                                    "PV7MONOBLOCK bb=%08x words=%08x,%08x,%08x,%08x,%08x,%08x",
+                                                                    bb,
+                                                                    Read<std::uint32_t>(bb),
+                                                                    Read<std::uint32_t>(bb + 4u),
+                                                                    Read<std::uint32_t>(bb + 8u),
+                                                                    Read<std::uint32_t>(bb + 12u),
+                                                                    Read<std::uint32_t>(bb + 16u),
+                                                                    Read<std::uint32_t>(bb + 20u));
+                                            }
+                                            if (Fits(ins_ptr, 32u)) {
+                                                __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                                    "PV7MONOINST opcode=%04x words=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x",
+                                                                    Read<std::uint16_t>(ins_ptr),
+                                                                    Read<std::uint32_t>(ins_ptr),
+                                                                    Read<std::uint32_t>(ins_ptr + 4u),
+                                                                    Read<std::uint32_t>(ins_ptr + 8u),
+                                                                    Read<std::uint32_t>(ins_ptr + 12u),
+                                                                    Read<std::uint32_t>(ins_ptr + 16u),
+                                                                    Read<std::uint32_t>(ins_ptr + 20u),
+                                                                    Read<std::uint32_t>(ins_ptr + 24u),
+                                                                    Read<std::uint32_t>(ins_ptr + 28u));
+                                            }
+                                        }
+                                    }
+                                    for (int delta = -16; delta <= 32; delta += 16) {
+                                        const std::uint32_t pos =
+                                            static_cast<std::uint32_t>(
+                                                static_cast<std::int64_t>(addr) + delta);
+                                        if (Fits(pos, 16u)) {
+                                            __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                                "PV7MONOFRAME words at=%08x %08x,%08x,%08x,%08x",
+                                                                pos, Read<std::uint32_t>(pos),
+                                                                Read<std::uint32_t>(pos + 4u),
+                                                                Read<std::uint32_t>(pos + 8u),
+                                                                Read<std::uint32_t>(pos + 12u));
+                                        }
+                                    }
+                                    std::size_t candidates = 0u;
+                                    for (int delta = -96; delta <= 128 && candidates < 8u;
+                                         delta += 4) {
+                                        const std::int64_t cand64 = static_cast<std::int64_t>(addr) + delta;
+                                        if (cand64 < static_cast<std::int64_t>(sp) ||
+                                            cand64 >= kGuestStackTop)
+                                            continue;
+                                        const auto candidate_fp = Read<std::uint32_t>(
+                                            static_cast<std::uint32_t>(cand64));
+                                        if (candidate_fp < sp + 0x18u ||
+                                            candidate_fp >= kGuestStackTop ||
+                                            !Fits(candidate_fp - 0x18u, 4u))
+                                            continue;
+                                        const auto ins_ptr = Read<std::uint32_t>(candidate_fp - 0x18u);
+                                        if (ins_ptr < 0x04000000u || !Fits(ins_ptr, 16u))
+                                            continue;
+                                        const auto opcode = Read<std::uint16_t>(ins_ptr);
+                                        if (opcode > 0x1000u)
+                                            continue;
+                                        ++candidates;
+                                        __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                            "PV7MONOFRAME candidate fp=%08x ins=%08x opcode=%04x aux=%08x",
+                                                            candidate_fp, ins_ptr, opcode,
+                                                            Read<std::uint32_t>(ins_ptr + 4u));
+                                    }
+                                    if (hits >= 4u) break;
+                                }
+                            }
+                            __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                "PV7MONOFRAME summary hits=%zu sp=%08x expectedRet=%08x",
+                                                hits, sp, kEmitterLogReturn);
+                        }
+                    }
+#endif
+#endif
+                }
             }
             Ret(0);
             return true;
         }
-        if (name == "__cxa_guard_acquire") {
+        if (fast_name == "__cxa_guard_acquire") {
             const std::uint32_t guard = Arg(0);
             if (!guard || !Fits(guard, 1)) { Ret(0); return true; }
             if (Read<std::uint8_t>(guard) != 0) { Ret(0); return true; }
@@ -4593,22 +7160,22 @@ public:
             Ret(1);
             return true;
         }
-        if (name == "__cxa_guard_release") {
+        if (fast_name == "__cxa_guard_release") {
             const std::uint32_t guard = Arg(0);
             if (guard && Fits(guard, 1)) Write(guard, static_cast<std::uint8_t>(1));
             cxa_guards_in_progress_.erase(guard);
             Ret(0);
             return true;
         }
-        if (name == "__cxa_guard_abort") {
+        if (fast_name == "__cxa_guard_abort") {
             const std::uint32_t guard = Arg(0);
             if (guard && Fits(guard, 1)) Write(guard, static_cast<std::uint8_t>(0));
             cxa_guards_in_progress_.erase(guard);
             Ret(0);
             return true;
         }
-        if (name == "__cxa_atexit" || name == "__aeabi_atexit" || name == "__cxa_finalize") { Ret(0); return true; }
-        if (name == "__gnu_Unwind_Find_exidx") {
+        if (fast_name == "__cxa_atexit" || fast_name == "__aeabi_atexit" || fast_name == "__cxa_finalize") { Ret(0); return true; }
+        if (fast_name == "__gnu_Unwind_Find_exidx") {
             const std::uint32_t pc = Arg(0);
             const std::uint32_t count_out = Arg(1);
             std::uint32_t table = 0;
@@ -4641,7 +7208,7 @@ public:
             Ret(table);
             return true;
         }
-        if (name == "sigaction") {
+        if (fast_name == "sigaction") {
             const std::uint32_t signal = Arg(0);
             const std::uint32_t action_ptr = Arg(1);
             const std::uint32_t old_action_ptr = Arg(2);
@@ -4673,7 +7240,7 @@ public:
             Ret(0);
             return true;
         }
-        if (name == "bsd_signal" || name == "signal") {
+        if (fast_name == "bsd_signal" || fast_name == "signal") {
             const std::uint32_t signal = Arg(0);
             const std::uint32_t handler = Arg(1);
             const auto existing = guest_signal_actions_.find(signal);
@@ -4682,17 +7249,21 @@ public:
             Ret(old_handler);
             return true;
         }
-        if (name == "tkill") {
+        if (fast_name == "tkill") {
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
             __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
                                 "PV7SIGNAL source=tkill sender=%u target=%u signal=%u lr=0x%08x sp=0x%08x",
                                 current_thread_id_, Arg(0), Arg(1), jit ? jit->Regs()[14] : 0u,
                                 jit ? jit->Regs()[13] : 0u);
 #endif
-            Ret(QueueGuestSignal(Arg(0), Arg(1)) ? 0u : 0xffffffffu);
+            const bool queued = QueueGuestSignal(Arg(0), Arg(1));
+            // Mono reads errno after a failed tkill to exclude vanished threads
+            // from its GC suspension acknowledgement count.
+            if (!queued) Write32(memory_, kBootstrapRuntimeBase, 3u); // ESRCH
+            Ret(queued ? 0u : 0xffffffffu);
             return true;
         }
-        if (name == "kill") {
+        if (fast_name == "kill") {
             const std::uint32_t target = (Arg(0) == 0u || Arg(0) == 1234u) ? current_thread_id_ : Arg(0);
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
             __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
@@ -4703,7 +7274,7 @@ public:
             Ret(QueueGuestSignal(target, Arg(1)) ? 0u : 0xffffffffu);
             return true;
         }
-        if (name == "raise") {
+        if (fast_name == "raise") {
             const std::uint32_t signal = Arg(0);
 #if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
             __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
@@ -4751,22 +7322,92 @@ public:
             }
             return true;
         }
-        if (name == "sigsuspend") {
+        if (fast_name == "sigsuspend") {
             auto interrupted = guest_signal_interrupted_.find(current_thread_id_);
             if (interrupted != guest_signal_interrupted_.end() && interrupted->second) {
                 interrupted->second = false;
+                const auto saved = guest_sigsuspend_saved_masks_.find(current_thread_id_);
+                if (saved != guest_sigsuspend_saved_masks_.end()) {
+                    guest_signal_masks_[current_thread_id_] = saved->second;
+                    guest_sigsuspend_saved_masks_.erase(saved);
+                }
+                MarkGuestThreadRunnable(current_thread_id_);
                 Write32(memory_, kBootstrapRuntimeBase, 4u); // EINTR
                 Ret(0xffffffffu);
                 return true;
             }
+
+            const std::uint32_t mask_ptr = Arg(0);
+            if (!mask_ptr || !Fits(mask_ptr, 4u)) {
+                Write32(memory_, kBootstrapRuntimeBase, 22u); // EINVAL
+                Ret(0xffffffffu);
+                return true;
+            }
+            if (guest_sigsuspend_saved_masks_.find(current_thread_id_) ==
+                guest_sigsuspend_saved_masks_.end()) {
+                std::uint32_t temporary_mask = 0u;
+                Read32(memory_, mask_ptr, temporary_mask);
+                guest_sigsuspend_saved_masks_[current_thread_id_] = guest_signal_masks_[current_thread_id_];
+                // SIGKILL and SIGSTOP may never be blocked.
+                temporary_mask &= ~GuestSignalBit(9u);
+                temporary_mask &= ~GuestSignalBit(19u);
+                guest_signal_masks_[current_thread_id_] = temporary_mask;
+            }
+
+            if (HasDeliverablePendingGuestSignal(current_thread_id_)) {
+                const std::uint32_t before_pc = jit ? jit->Regs()[15] : 0u;
+                if (DeliverPendingGuestSignal() && jit && jit->Regs()[15] != before_pc) {
+                    pending_guest_callback = true;
+                    jit->HaltExecution();
+                    return true;
+                }
+            }
             if (!block_current_sync_call(name)) return false;
             return true;
         }
-        if (name == "sigprocmask" || name == "pthread_sigmask" ||
-            name == "setitimer" || name == "prctl") {
+        if (fast_name == "sigprocmask" || fast_name == "pthread_sigmask") {
+            const std::uint32_t how = Arg(0);
+            const std::uint32_t set_ptr = Arg(1);
+            const std::uint32_t old_ptr = Arg(2);
+            std::uint32_t mask = guest_signal_masks_[current_thread_id_];
+            if (old_ptr != 0u) {
+                if (!Fits(old_ptr, 4u)) {
+                    Ret(fast_name == "pthread_sigmask" ? 22u : 0xffffffffu);
+                    if (fast_name == "sigprocmask") Write32(memory_, kBootstrapRuntimeBase, 22u);
+                    return true;
+                }
+                Write32(memory_, old_ptr, mask);
+            }
+            if (set_ptr != 0u) {
+                if (!Fits(set_ptr, 4u)) {
+                    Ret(fast_name == "pthread_sigmask" ? 22u : 0xffffffffu);
+                    if (fast_name == "sigprocmask") Write32(memory_, kBootstrapRuntimeBase, 22u);
+                    return true;
+                }
+                std::uint32_t requested = 0u;
+                Read32(memory_, set_ptr, requested);
+                switch (how) {
+                    case 0u: mask |= requested; break;  // SIG_BLOCK
+                    case 1u: mask &= ~requested; break; // SIG_UNBLOCK
+                    case 2u: mask = requested; break;   // SIG_SETMASK
+                    default:
+                        Ret(fast_name == "pthread_sigmask" ? 22u : 0xffffffffu);
+                        if (fast_name == "sigprocmask") Write32(memory_, kBootstrapRuntimeBase, 22u);
+                        return true;
+                }
+                mask &= ~GuestSignalBit(9u);
+                mask &= ~GuestSignalBit(19u);
+                guest_signal_masks_[current_thread_id_] = mask;
+                if (HasDeliverablePendingGuestSignal(current_thread_id_))
+                    MarkGuestThreadRunnable(current_thread_id_);
+            }
+            Ret(0u);
+            return true;
+        }
+        if (fast_name == "setitimer" || fast_name == "prctl") {
             Ret(0); return true;
         }
-        if (name == "fopen") {
+        if (fast_name == "fopen") {
             const std::string path = NormalizeGuestPath(ReadCString(Arg(0)));
             const std::string mode = ReadCString(Arg(1));
             if (file_trace.size() < 24) file_trace.push_back("fopen " + path + " mode=" + mode);
@@ -4800,7 +7441,7 @@ public:
             Ret(handle);
             return true;
         }
-        if (name == "fclose") {
+        if (fast_name == "fclose") {
             const std::uint32_t handle = Arg(0);
             const auto virtual_it = virtual_files_.find(handle);
             if (virtual_it != virtual_files_.end()) {
@@ -4816,7 +7457,7 @@ public:
             Ret(static_cast<std::uint32_t>(rc));
             return true;
         }
-        if (name == "fread" || name == "fwrite") {
+        if (fast_name == "fread" || fast_name == "fwrite") {
             const std::uint32_t guest = Arg(0);
             const std::size_t size = Arg(1);
             const std::size_t count = Arg(2);
@@ -4827,7 +7468,7 @@ public:
             }
             auto virtual_it = virtual_files_.find(handle);
             if (virtual_it != virtual_files_.end()) {
-                if (name != "fread" || size == 0) { Ret(0); return true; }
+                if (fast_name != "fread" || size == 0) { Ret(0); return true; }
                 VirtualFile& vf = virtual_it->second;
                 const std::size_t available = vf.data.size() - std::min(vf.pos, vf.data.size());
                 const std::size_t copied = std::min<std::size_t>(available, static_cast<std::size_t>(bytes));
@@ -4839,11 +7480,11 @@ public:
             std::FILE* file = LookupFileHandle(handle);
             if (!file) { SetErrno(9); Ret(0); return true; }
             const long before = std::ftell(file);
-            const std::size_t done = name == "fread"
+            const std::size_t done = fast_name == "fread"
                 ? std::fread(memory_.data() + guest, size, count, file)
                 : std::fwrite(memory_.data() + guest, size, count, file);
             const auto path_it = file_paths_.find(handle);
-            if (name == "fread" && path_it != file_paths_.end() &&
+            if (fast_name == "fread" && path_it != file_paths_.end() &&
                 path_it->second.find("mscorlib.dll") != std::string::npos && file_trace.size() < 96) {
                 std::ostringstream trace;
                 trace << "fread mscorlib pos=" << before << " request=" << bytes << " result=" << done * size << " head=";
@@ -4858,7 +7499,7 @@ public:
             Ret(static_cast<std::uint32_t>(done));
             return true;
         }
-        if (name == "fseek") {
+        if (fast_name == "fseek") {
             const std::uint32_t handle = Arg(0);
             std::FILE* file = LookupFileHandle(handle);
             if (!file) { SetErrno(9); Ret(0xffffffffu); return true; }
@@ -4874,13 +7515,13 @@ public:
             Ret(static_cast<std::uint32_t>(rc));
             return true;
         }
-        if (name == "ftell") {
+        if (fast_name == "ftell") {
             std::FILE* file = LookupFileHandle(Arg(0));
             if (!file) { SetErrno(9); Ret(0xffffffffu); return true; }
             Ret(static_cast<std::uint32_t>(std::ftell(file)));
             return true;
         }
-        if (name == "fgets") {
+        if (fast_name == "fgets") {
             const std::uint32_t dst = Arg(0);
             const int size = static_cast<int>(Arg(1));
             const std::uint32_t handle = Arg(2);
@@ -4905,116 +7546,388 @@ public:
             Ret(std::fgets(reinterpret_cast<char*>(memory_.data() + dst), size, file) ? dst : 0u);
             return true;
         }
-        if (name == "fflush") {
+        if (fast_name == "fflush") {
             std::FILE* file = LookupFileHandle(Arg(0));
             Ret(static_cast<std::uint32_t>(file ? std::fflush(file) : 0));
             return true;
         }
-        if (name == "ferror" || name == "clearerr") {
+        if (fast_name == "ferror" || fast_name == "clearerr") {
             std::FILE* file = LookupFileHandle(Arg(0));
-            if (!file) { Ret(name == "ferror" ? 1u : 0u); return true; }
-            if (name == "clearerr") { std::clearerr(file); Ret(0); }
+            if (!file) { Ret(fast_name == "ferror" ? 1u : 0u); return true; }
+            if (fast_name == "clearerr") { std::clearerr(file); Ret(0); }
             else Ret(static_cast<std::uint32_t>(std::ferror(file)));
             return true;
         }
-        if (name == "getc" || name == "ungetc") {
-            std::FILE* file = LookupFileHandle(name == "getc" ? Arg(0) : Arg(1));
+        if (fast_name == "getc" || fast_name == "ungetc") {
+            std::FILE* file = LookupFileHandle(fast_name == "getc" ? Arg(0) : Arg(1));
             if (!file) { Ret(0xffffffffu); return true; }
-            const int rc = name == "getc" ? std::getc(file) : std::ungetc(static_cast<int>(Arg(0)), file);
+            const int rc = fast_name == "getc" ? std::getc(file) : std::ungetc(static_cast<int>(Arg(0)), file);
             Ret(static_cast<std::uint32_t>(rc));
             return true;
         }
-        if (name == "socket") {
-            const std::uint32_t handle = next_socket_handle_++;
-            socket_handles_[handle] = true;
+        if (fast_name == "socket") {
+#if !defined(_WIN32)
+            errno = 0;
+            const int fd = ::socket(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)), static_cast<int>(Arg(2)));
+            if (fd >= 0) socket_handles_[static_cast<std::uint32_t>(fd)] = true;
+            SetErrno(fd >= 0 ? 0u : static_cast<std::uint32_t>(errno));
             if (file_trace.size() < 32) {
                 std::ostringstream line;
                 line << "socket domain=" << static_cast<int>(Arg(0))
                      << " type=" << static_cast<int>(Arg(1))
                      << " protocol=" << static_cast<int>(Arg(2))
-                     << " handle=0x" << std::hex << handle;
+                     << " fd=" << fd;
                 file_trace.push_back(line.str());
             }
-            SetErrno(0);
+            Ret(static_cast<std::uint32_t>(fd));
+#else
+            const std::uint32_t handle = next_socket_handle_++;
+            socket_handles_[handle] = true;
             Ret(handle);
+#endif
             return true;
         }
-        if (name == "bind" || name == "listen" || name == "setsockopt" || name == "shutdown") {
+        if (fast_name == "bind") {
+#if !defined(_WIN32)
+            const std::uint32_t address = Arg(1);
+            const socklen_t length = static_cast<socklen_t>(Arg(2));
+            if (address == 0 || !Fits(address, length)) { SetErrno(EFAULT); Ret(0xffffffffu); return true; }
+            errno = 0;
+            const int rc = ::bind(static_cast<int>(Arg(0)),
+                                  reinterpret_cast<const sockaddr*>(memory_.data() + address), length);
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
             Ret(0);
+#endif
             return true;
         }
-        if (name == "connect") {
-            SetErrno(111); // ECONNREFUSED: offline adapter
-            Ret(0xffffffffu);
-            return true;
-        }
-        if (name == "accept" || name == "recv" || name == "recvfrom" || name == "recvmsg") {
-            SetErrno(11); // EAGAIN
-            Ret(0xffffffffu);
-            return true;
-        }
-        if (name == "send" || name == "sendto") {
-            Ret(Arg(2));
-            return true;
-        }
-        if (name == "sendmsg") {
+        if (fast_name == "listen") {
+#if !defined(_WIN32)
+            errno = 0;
+            const int rc = ::listen(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)));
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
             Ret(0);
+#endif
             return true;
         }
-        if (name == "getsockname" || name == "getpeername") {
+        if (fast_name == "setsockopt") {
+#if !defined(_WIN32)
+            const std::uint32_t value = Arg(3);
+            const socklen_t length = static_cast<socklen_t>(Arg(4));
+            if (value != 0 && !Fits(value, length)) { SetErrno(EFAULT); Ret(0xffffffffu); return true; }
+            errno = 0;
+            const int rc = ::setsockopt(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)),
+                                        static_cast<int>(Arg(2)),
+                                        value ? memory_.data() + value : nullptr, length);
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            Ret(0);
+#endif
+            return true;
+        }
+        if (fast_name == "shutdown") {
+#if !defined(_WIN32)
+            errno = 0;
+            const int rc = ::shutdown(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)));
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            Ret(0);
+#endif
+            return true;
+        }
+        if (fast_name == "connect") {
+#if !defined(_WIN32)
+            const std::uint32_t address = Arg(1);
+            const socklen_t length = static_cast<socklen_t>(Arg(2));
+            if (address == 0 || !Fits(address, length)) { SetErrno(EFAULT); Ret(0xffffffffu); return true; }
+            errno = 0;
+            const int rc = ::connect(static_cast<int>(Arg(0)),
+                                     reinterpret_cast<const sockaddr*>(memory_.data() + address), length);
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            SetErrno(111); Ret(0xffffffffu);
+#endif
+            return true;
+        }
+        if (fast_name == "accept") {
+#if !defined(_WIN32)
             const std::uint32_t address = Arg(1);
             const std::uint32_t length_ptr = Arg(2);
-            std::uint32_t length = 16;
-            if (length_ptr != 0) Read32(memory_, length_ptr, length);
-            length = std::min<std::uint32_t>(length, 16u);
-            if (address != 0) {
-                if (!Fits(address, length)) return false;
-                std::memset(memory_.data() + address, 0, length);
-                if (length >= 2) {
-                    memory_[address] = 2; // AF_INET in bionic sockaddr.sa_family
-                    memory_[address + 1] = 0;
-                }
+            std::uint32_t guest_length = 0;
+            if (length_ptr && !Read32(memory_, length_ptr, guest_length)) {
+                SetErrno(EFAULT); Ret(0xffffffffu); return true;
             }
-            if (length_ptr != 0 && !Write32(memory_, length_ptr, 16u)) return false;
-            Ret(0);
+            socklen_t length = static_cast<socklen_t>(guest_length);
+            sockaddr* host_address = address && length && Fits(address, length)
+                ? reinterpret_cast<sockaddr*>(memory_.data() + address) : nullptr;
+            errno = 0;
+            const int fd = ::accept(static_cast<int>(Arg(0)), host_address, length_ptr ? &length : nullptr);
+            if (fd >= 0) socket_handles_[static_cast<std::uint32_t>(fd)] = true;
+            if (length_ptr) Write32(memory_, length_ptr, static_cast<std::uint32_t>(length));
+            SetErrno(fd >= 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(fd));
+#else
+            SetErrno(11); Ret(0xffffffffu);
+#endif
             return true;
         }
-        if (name == "getsockopt") {
-            std::uint32_t length = 0;
-            if (Arg(4) != 0 && !Read32(memory_, Arg(4), length)) return false;
-            if (Arg(3) != 0 && length != 0) {
-                if (!Fits(Arg(3), length)) return false;
-                std::memset(memory_.data() + Arg(3), 0, length);
-            }
-            Ret(0);
+        if (fast_name == "recv" || fast_name == "send") {
+#if !defined(_WIN32)
+            const std::uint32_t buffer = Arg(1);
+            const std::size_t length = Arg(2);
+            if (!Fits(buffer, length)) { SetErrno(EFAULT); Ret(0xffffffffu); return true; }
+            errno = 0;
+            const ssize_t rc = fast_name == "recv"
+                ? ::recv(static_cast<int>(Arg(0)), memory_.data() + buffer, length, static_cast<int>(Arg(3)))
+                : ::send(static_cast<int>(Arg(0)), memory_.data() + buffer, length, static_cast<int>(Arg(3)));
+            SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            SetErrno(11); Ret(0xffffffffu);
+#endif
             return true;
         }
-        if (name == "gethostname") {
-            const std::string hostname = "localhost";
-            if (!WriteCString(Arg(0), hostname, Arg(1))) {
-                SetErrno(14);
-                Ret(0xffffffffu);
+        if (fast_name == "recvfrom" || fast_name == "sendto") {
+#if !defined(_WIN32)
+            const std::uint32_t buffer = Arg(1);
+            const std::size_t length = Arg(2);
+            if (!Fits(buffer, length)) { SetErrno(EFAULT); Ret(0xffffffffu); return true; }
+            errno = 0;
+            ssize_t rc = -1;
+            if (fast_name == "recvfrom") {
+                const std::uint32_t address = Arg(4);
+                const std::uint32_t length_ptr = Arg(5);
+                std::uint32_t guest_length = 0;
+                if (length_ptr) Read32(memory_, length_ptr, guest_length);
+                socklen_t addr_length = static_cast<socklen_t>(guest_length);
+                sockaddr* host_address = address && addr_length && Fits(address, addr_length)
+                    ? reinterpret_cast<sockaddr*>(memory_.data() + address) : nullptr;
+                rc = ::recvfrom(static_cast<int>(Arg(0)), memory_.data() + buffer, length,
+                                static_cast<int>(Arg(3)), host_address,
+                                length_ptr ? &addr_length : nullptr);
+                if (length_ptr) Write32(memory_, length_ptr, static_cast<std::uint32_t>(addr_length));
             } else {
-                Ret(0);
+                const std::uint32_t address = Arg(4);
+                const socklen_t addr_length = static_cast<socklen_t>(Arg(5));
+                if (address && !Fits(address, addr_length)) { SetErrno(EFAULT); Ret(0xffffffffu); return true; }
+                rc = ::sendto(static_cast<int>(Arg(0)), memory_.data() + buffer, length,
+                              static_cast<int>(Arg(3)),
+                              address ? reinterpret_cast<const sockaddr*>(memory_.data() + address) : nullptr,
+                              addr_length);
             }
+            SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            SetErrno(11); Ret(0xffffffffu);
+#endif
             return true;
         }
-        if (name == "getaddrinfo") {
-            if (Arg(3) != 0) Write32(memory_, Arg(3), 0u);
-            Ret(static_cast<std::uint32_t>(-2)); // EAI_NONAME
+        if (fast_name == "recvmsg" || fast_name == "sendmsg") {
+            SetErrno(38); // ENOSYS: translate msghdr only if a guest path actually needs it.
+            Ret(0xffffffffu);
             return true;
         }
-        if (name == "freeaddrinfo") { Ret(0); return true; }
-        if (name == "gai_strerror") {
-            static const std::string message = "Name or service not known";
+        if (fast_name == "getsockname" || fast_name == "getpeername") {
+#if !defined(_WIN32)
+            const std::uint32_t address = Arg(1);
+            const std::uint32_t length_ptr = Arg(2);
+            std::uint32_t guest_length = 0;
+            if (!length_ptr || !Read32(memory_, length_ptr, guest_length) ||
+                (address && !Fits(address, guest_length))) {
+                SetErrno(EFAULT); Ret(0xffffffffu); return true;
+            }
+            socklen_t length = static_cast<socklen_t>(guest_length);
+            errno = 0;
+            const int rc = fast_name == "getsockname"
+                ? ::getsockname(static_cast<int>(Arg(0)), reinterpret_cast<sockaddr*>(memory_.data() + address), &length)
+                : ::getpeername(static_cast<int>(Arg(0)), reinterpret_cast<sockaddr*>(memory_.data() + address), &length);
+            Write32(memory_, length_ptr, static_cast<std::uint32_t>(length));
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            Ret(0);
+#endif
+            return true;
+        }
+        if (fast_name == "getsockopt") {
+#if !defined(_WIN32)
+            std::uint32_t guest_length = 0;
+            if (!Arg(4) || !Read32(memory_, Arg(4), guest_length) ||
+                (Arg(3) && !Fits(Arg(3), guest_length))) {
+                SetErrno(EFAULT); Ret(0xffffffffu); return true;
+            }
+            socklen_t length = static_cast<socklen_t>(guest_length);
+            errno = 0;
+            const int rc = ::getsockopt(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)),
+                                        static_cast<int>(Arg(2)),
+                                        Arg(3) ? memory_.data() + Arg(3) : nullptr, &length);
+            Write32(memory_, Arg(4), static_cast<std::uint32_t>(length));
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            Ret(0);
+#endif
+            return true;
+        }
+        if (fast_name == "gethostname") {
+#if !defined(_WIN32)
+            if (!Fits(Arg(0), Arg(1))) { SetErrno(EFAULT); Ret(0xffffffffu); return true; }
+            errno = 0;
+            const int rc = ::gethostname(reinterpret_cast<char*>(memory_.data() + Arg(0)), Arg(1));
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            const std::string hostname = "localhost";
+            Ret(WriteCString(Arg(0), hostname, Arg(1)) ? 0u : 0xffffffffu);
+#endif
+            return true;
+        }
+        if (fast_name == "getaddrinfo") {
+#if !defined(_WIN32)
+            const std::string node = Arg(0) ? ReadCString(Arg(0)) : std::string();
+            const std::string service = Arg(1) ? ReadCString(Arg(1)) : std::string();
+            addrinfo hints{};
+            addrinfo* hints_ptr = nullptr;
+            if (Arg(2) && Fits(Arg(2), 20u)) {
+                hints.ai_flags = static_cast<int>(Read<std::uint32_t>(Arg(2) + 0u));
+                hints.ai_family = static_cast<int>(Read<std::uint32_t>(Arg(2) + 4u));
+                hints.ai_socktype = static_cast<int>(Read<std::uint32_t>(Arg(2) + 8u));
+                hints.ai_protocol = static_cast<int>(Read<std::uint32_t>(Arg(2) + 12u));
+                hints_ptr = &hints;
+            }
+            addrinfo* results = nullptr;
+            const int rc = ::getaddrinfo(node.empty() ? nullptr : node.c_str(),
+                                         service.empty() ? nullptr : service.c_str(), hints_ptr, &results);
+            if (Arg(3)) Write32(memory_, Arg(3), 0u);
+            if (rc != 0 || !results) { if (results) ::freeaddrinfo(results); Ret(static_cast<std::uint32_t>(rc)); return true; }
+
+            std::vector<std::uint32_t> guest_entries;
+            for (addrinfo* it = results; it && guest_entries.size() < 32u; it = it->ai_next) {
+                if (!it->ai_addr || it->ai_addrlen == 0 || it->ai_addrlen > 256u) continue;
+                const std::uint32_t guest_addr = Allocate(it->ai_addrlen, 4u);
+                const std::uint32_t guest_info = Allocate(32u, 4u);
+                if (!guest_addr || !guest_info) break;
+                std::memcpy(memory_.data() + guest_addr, it->ai_addr, it->ai_addrlen);
+                std::uint32_t canon = 0;
+                if (it->ai_canonname && *it->ai_canonname) {
+                    const std::string canon_name(it->ai_canonname);
+                    canon = Allocate(canon_name.size() + 1u, 1u);
+                    if (canon) WriteCString(canon, canon_name);
+                }
+                Write32(memory_, guest_info + 0u, static_cast<std::uint32_t>(it->ai_flags));
+                Write32(memory_, guest_info + 4u, static_cast<std::uint32_t>(it->ai_family));
+                Write32(memory_, guest_info + 8u, static_cast<std::uint32_t>(it->ai_socktype));
+                Write32(memory_, guest_info + 12u, static_cast<std::uint32_t>(it->ai_protocol));
+                Write32(memory_, guest_info + 16u, static_cast<std::uint32_t>(it->ai_addrlen));
+                Write32(memory_, guest_info + 20u, canon);
+                Write32(memory_, guest_info + 24u, guest_addr);
+                Write32(memory_, guest_info + 28u, 0u);
+                if (!guest_entries.empty()) Write32(memory_, guest_entries.back() + 28u, guest_info);
+                guest_entries.push_back(guest_info);
+            }
+            ::freeaddrinfo(results);
+            if (guest_entries.empty()) { Ret(static_cast<std::uint32_t>(EAI_MEMORY)); return true; }
+            if (Arg(3)) Write32(memory_, Arg(3), guest_entries.front());
+            Ret(0u);
+#else
+            if (Arg(3)) Write32(memory_, Arg(3), 0u);
+            Ret(static_cast<std::uint32_t>(-2));
+#endif
+            return true;
+        }
+        if (fast_name == "freeaddrinfo") { Ret(0); return true; }
+        if (fast_name == "gai_strerror") {
+#if !defined(_WIN32)
+            const char* text = ::gai_strerror(static_cast<int>(Arg(0)));
+            const std::string message = text ? text : "getaddrinfo error";
+#else
+            const std::string message = "Name or service not known";
+#endif
             const std::uint32_t guest = Allocate(message.size() + 1, 1);
             if (guest != 0) WriteCString(guest, message);
             Ret(guest);
             return true;
         }
-        if (name == "gethostbyname" || name == "gethostbyaddr") { Ret(0); return true; }
+        if (fast_name == "gethostbyname" || fast_name == "gethostbyaddr") {
 #if !defined(_WIN32)
-        if (name == "inet_pton") {
+            hostent* result = nullptr;
+            std::string query;
+            if (fast_name == "gethostbyname") {
+                query = ReadCString(Arg(0));
+                result = query.empty() ? nullptr : ::gethostbyname(query.c_str());
+            } else {
+                const std::size_t address_length = static_cast<std::size_t>(Arg(1));
+                if (Arg(0) != 0 && address_length != 0 && Fits(Arg(0), address_length)) {
+                    result = ::gethostbyaddr(memory_.data() + Arg(0),
+                                             static_cast<socklen_t>(address_length),
+                                             static_cast<int>(Arg(2)));
+                }
+            }
+
+            if (!result || !result->h_addr_list || result->h_length <= 0) {
+                // Bionic exposes h_errno through __get_h_errno(). The guest bridge maps
+                // that TLS-style integer onto our small runtime errno cell as well.
+                Write32(memory_, kBootstrapRuntimeBase, static_cast<std::uint32_t>(h_errno));
+#if defined(__ANDROID__)
+                __android_log_print(ANDROID_LOG_WARN, "CNR64POC",
+                                    "PV7NET %s query=%s failed h_errno=%d",
+                                    name.c_str(), query.c_str(), h_errno);
+#endif
+                Ret(0u);
+                return true;
+            }
+
+            std::size_t address_count = 0;
+            while (result->h_addr_list[address_count] && address_count < 64u) ++address_count;
+            if (address_count == 0u) { Ret(0u); return true; }
+
+            const std::string canonical = result->h_name ? result->h_name : query;
+            const std::uint32_t guest_name = Allocate(canonical.size() + 1u, 1u);
+            const std::uint32_t guest_aliases = Allocate(4u, 4u); // null-only char**
+            const std::uint32_t guest_addr_list = Allocate((address_count + 1u) * 4u, 4u);
+            const std::uint32_t guest_hostent = Allocate(20u, 4u);
+            if (!guest_name || !guest_aliases || !guest_addr_list || !guest_hostent) {
+                Ret(0u);
+                return true;
+            }
+            WriteCString(guest_name, canonical);
+            Write32(memory_, guest_aliases, 0u);
+            for (std::size_t i = 0; i < address_count; ++i) {
+                const std::uint32_t guest_address = Allocate(static_cast<std::size_t>(result->h_length), 4u);
+                if (!guest_address) { Ret(0u); return true; }
+                std::memcpy(memory_.data() + guest_address,
+                            result->h_addr_list[i], static_cast<std::size_t>(result->h_length));
+                Write32(memory_, guest_addr_list + static_cast<std::uint32_t>(i * 4u), guest_address);
+            }
+            Write32(memory_, guest_addr_list + static_cast<std::uint32_t>(address_count * 4u), 0u);
+
+            // 32-bit Bionic struct hostent layout.
+            Write32(memory_, guest_hostent + 0u, guest_name);
+            Write32(memory_, guest_hostent + 4u, guest_aliases);
+            Write32(memory_, guest_hostent + 8u, static_cast<std::uint32_t>(result->h_addrtype));
+            Write32(memory_, guest_hostent + 12u, static_cast<std::uint32_t>(result->h_length));
+            Write32(memory_, guest_hostent + 16u, guest_addr_list);
+            Write32(memory_, kBootstrapRuntimeBase, 0u);
+#if defined(__ANDROID__)
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7NET %s query=%s ok family=%d len=%d addrs=%zu guest=0x%08x",
+                                name.c_str(), query.c_str(), result->h_addrtype,
+                                result->h_length, address_count, guest_hostent);
+#endif
+            Ret(guest_hostent);
+#else
+            Ret(0u);
+#endif
+            return true;
+        }
+#if !defined(_WIN32)
+        if (fast_name == "inet_pton") {
             const std::string source = ReadCString(Arg(1));
             const std::size_t destination_size = Arg(0) == AF_INET6 ? 16u : 4u;
             void* destination = Arg(2) != 0 && Fits(Arg(2), destination_size)
@@ -5023,7 +7936,7 @@ public:
             Ret(static_cast<std::uint32_t>(::inet_pton(static_cast<int>(Arg(0)), source.c_str(), destination)));
             return true;
         }
-        if (name == "inet_ntop") {
+        if (fast_name == "inet_ntop") {
             const std::size_t source_size = Arg(0) == AF_INET6 ? 16u : 4u;
             const void* source = Arg(1) != 0 && Fits(Arg(1), source_size)
                 ? static_cast<const void*>(memory_.data() + Arg(1)) : nullptr;
@@ -5033,19 +7946,19 @@ public:
             Ret(::inet_ntop(static_cast<int>(Arg(0)), source, destination, static_cast<socklen_t>(Arg(3))) ? Arg(2) : 0u);
             return true;
         }
-        if (name == "inet_addr") {
+        if (fast_name == "inet_addr") {
             const std::string source = ReadCString(Arg(0));
             Ret(static_cast<std::uint32_t>(::inet_addr(source.c_str())));
             return true;
         }
-        if (name == "inet_aton") {
+        if (fast_name == "inet_aton") {
             const std::string source = ReadCString(Arg(0));
             in_addr* destination = Arg(1) != 0 && Fits(Arg(1), sizeof(in_addr))
                 ? reinterpret_cast<in_addr*>(memory_.data() + Arg(1)) : nullptr;
             Ret(destination ? static_cast<std::uint32_t>(::inet_aton(source.c_str(), destination)) : 0u);
             return true;
         }
-        if (name == "inet_ntoa") {
+        if (fast_name == "inet_ntoa") {
             in_addr address{};
             const std::uint32_t raw = Arg(0);
             std::memcpy(&address, &raw, sizeof(raw));
@@ -5056,38 +7969,157 @@ public:
             return true;
         }
 #endif
-        if (name == "ioctl" || name == "fcntl") {
-            if (socket_handles_.find(Arg(0)) != socket_handles_.end()) {
-                SetErrno(0);
-                Ret(0);
-            } else {
-                SetErrno(25); // ENOTTY
-                Ret(0xffffffffu);
-            }
+        if (fast_name == "ioctl") {
+#if !defined(_WIN32)
+            errno = 0;
+            void* argp = Arg(2) && Fits(Arg(2), 8u) ? memory_.data() + Arg(2) : nullptr;
+            const int rc = ::ioctl(static_cast<int>(Arg(0)), static_cast<unsigned long>(Arg(1)), argp);
+            SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            SetErrno(25); Ret(0xffffffffu);
+#endif
             return true;
         }
-        if (name == "poll") {
+        if (fast_name == "fcntl") {
+#if !defined(_WIN32)
+            errno = 0;
+            const int rc = ::fcntl(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)), static_cast<int>(Arg(2)));
+            SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            SetErrno(25); Ret(0xffffffffu);
+#endif
+            return true;
+        }
+        if (fast_name == "poll") {
+#if !defined(_WIN32)
             const std::uint32_t descriptors = Arg(0);
             const std::uint32_t count = Arg(1);
-            if (count > 4096u || (count != 0 && !Fits(descriptors, static_cast<std::size_t>(count) * 8u))) return false;
-            for (std::uint32_t index = 0; index < count; ++index) {
-                const std::uint32_t revents = descriptors + index * 8u + 6u;
-                memory_[revents] = 0;
-                memory_[revents + 1u] = 0;
+            if (count > 4096u || (count && !Fits(descriptors, static_cast<std::size_t>(count) * 8u))) return false;
+            std::vector<pollfd> host_poll(count);
+            for (std::uint32_t i = 0; i < count; ++i) {
+                const std::uint32_t base = descriptors + i * 8u;
+                host_poll[i].fd = static_cast<int>(Read<std::uint32_t>(base));
+                host_poll[i].events = Read<std::int16_t>(base + 4u);
+                host_poll[i].revents = 0;
             }
+            errno = 0;
+            const int rc = ::poll(host_poll.data(), host_poll.size(), static_cast<int>(Arg(2)));
+            for (std::uint32_t i = 0; i < count; ++i)
+                std::memcpy(memory_.data() + descriptors + i * 8u + 6u, &host_poll[i].revents, sizeof(host_poll[i].revents));
+            SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
             Ret(0);
+#endif
             return true;
         }
-        if (name == "select") { Ret(0); return true; }
-        if (name == "epoll_create") {
+        if (fast_name == "select") {
+#if !defined(_WIN32)
+            const int nfds = static_cast<int>(Arg(0));
+            fd_set readfds{}, writefds{}, exceptfds{};
+            fd_set* read_ptr = nullptr; fd_set* write_ptr = nullptr; fd_set* except_ptr = nullptr;
+            auto import_set = [&](std::uint32_t guest, fd_set& set, fd_set*& ptr) -> bool {
+                if (!guest) return true;
+                if (!Fits(guest, 128u)) return false;
+                std::memcpy(&set, memory_.data() + guest, std::min<std::size_t>(sizeof(fd_set), 128u));
+                ptr = &set;
+                return true;
+            };
+            if (!import_set(Arg(1), readfds, read_ptr) || !import_set(Arg(2), writefds, write_ptr) ||
+                !import_set(Arg(3), exceptfds, except_ptr)) { SetErrno(EFAULT); Ret(0xffffffffu); return true; }
+            timeval timeout{}; timeval* timeout_ptr = nullptr;
+            if (Arg(4)) {
+                if (!Fits(Arg(4), 8u)) { SetErrno(EFAULT); Ret(0xffffffffu); return true; }
+                timeout.tv_sec = static_cast<std::int32_t>(Read<std::uint32_t>(Arg(4)));
+                timeout.tv_usec = static_cast<std::int32_t>(Read<std::uint32_t>(Arg(4) + 4u));
+                timeout_ptr = &timeout;
+            }
+            errno = 0;
+            const int rc = ::select(nfds, read_ptr, write_ptr, except_ptr, timeout_ptr);
+            auto export_set = [&](std::uint32_t guest, fd_set* ptr) {
+                if (guest && ptr) std::memcpy(memory_.data() + guest, ptr, std::min<std::size_t>(sizeof(fd_set), 128u));
+            };
+            export_set(Arg(1), read_ptr); export_set(Arg(2), write_ptr); export_set(Arg(3), except_ptr);
+            if (Arg(4) && timeout_ptr) {
+                Write32(memory_, Arg(4), static_cast<std::uint32_t>(timeout.tv_sec));
+                Write32(memory_, Arg(4) + 4u, static_cast<std::uint32_t>(timeout.tv_usec));
+            }
+            SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            Ret(0);
+#endif
+            return true;
+        }
+        if (fast_name == "epoll_create") {
+#if !defined(_WIN32)
+            errno = 0;
+            const int fd = ::epoll_create(static_cast<int>(Arg(0)));
+            if (fd >= 0) socket_handles_[static_cast<std::uint32_t>(fd)] = true;
+            SetErrno(fd >= 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(fd));
+#else
             const std::uint32_t handle = next_socket_handle_++;
             socket_handles_[handle] = true;
             Ret(handle);
+#endif
             return true;
         }
-        if (name == "epoll_ctl" || name == "epoll_wait") { Ret(0); return true; }
-        if (name == "pipe") {
+        if (fast_name == "epoll_ctl") {
+#if !defined(_WIN32)
+            epoll_event event{};
+            epoll_event* event_ptr = nullptr;
+            if (Arg(3)) {
+                if (!Fits(Arg(3), 12u)) { SetErrno(EFAULT); Ret(0xffffffffu); return true; }
+                std::memcpy(&event, memory_.data() + Arg(3), std::min<std::size_t>(sizeof(event), 12u));
+                event_ptr = &event;
+            }
+            errno = 0;
+            const int rc = ::epoll_ctl(static_cast<int>(Arg(0)), static_cast<int>(Arg(1)),
+                                       static_cast<int>(Arg(2)), event_ptr);
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            Ret(0);
+#endif
+            return true;
+        }
+        if (fast_name == "epoll_wait") {
+#if !defined(_WIN32)
+            const int maxevents = static_cast<int>(Arg(2));
+            if (maxevents < 0 || maxevents > 4096 || !Fits(Arg(1), static_cast<std::size_t>(maxevents) * 12u)) return false;
+            std::vector<epoll_event> events(static_cast<std::size_t>(maxevents));
+            errno = 0;
+            const int rc = ::epoll_wait(static_cast<int>(Arg(0)), events.data(), maxevents, static_cast<int>(Arg(3)));
+            if (rc > 0) {
+                for (int i = 0; i < rc; ++i)
+                    std::memcpy(memory_.data() + Arg(1) + static_cast<std::uint32_t>(i * 12u),
+                                &events[static_cast<std::size_t>(i)], std::min<std::size_t>(sizeof(epoll_event), 12u));
+            }
+            SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
+            Ret(0);
+#endif
+            return true;
+        }
+        if (fast_name == "pipe") {
             if (Arg(0) == 0 || !Fits(Arg(0), 8u)) return false;
+#if !defined(_WIN32)
+            int fds[2] = {-1, -1};
+            errno = 0;
+            const int rc = ::pipe(fds);
+            if (rc == 0) {
+                socket_handles_[static_cast<std::uint32_t>(fds[0])] = true;
+                socket_handles_[static_cast<std::uint32_t>(fds[1])] = true;
+                Write32(memory_, Arg(0), static_cast<std::uint32_t>(fds[0]));
+                Write32(memory_, Arg(0) + 4u, static_cast<std::uint32_t>(fds[1]));
+            }
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
             const std::uint32_t read_handle = next_socket_handle_++;
             const std::uint32_t write_handle = next_socket_handle_++;
             socket_handles_[read_handle] = true;
@@ -5095,9 +8127,10 @@ public:
             Write32(memory_, Arg(0), read_handle);
             Write32(memory_, Arg(0) + 4u, write_handle);
             Ret(0);
+#endif
             return true;
         }
-        if (name == "open") {
+        if (fast_name == "open") {
 #if !defined(_WIN32)
             const std::string path = NormalizeGuestPath(ReadCString(Arg(0)));
             if (file_trace.size() < 24) file_trace.push_back("open " + path);
@@ -5110,30 +8143,33 @@ public:
 #endif
             return true;
         }
-        if (name == "close") {
+        if (fast_name == "close") {
+#if !defined(_WIN32)
+            errno = 0;
+            const int rc = ::close(static_cast<int>(Arg(0)));
+            socket_handles_.erase(Arg(0));
+            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
+            Ret(static_cast<std::uint32_t>(rc));
+#else
             const auto fake_socket = socket_handles_.find(Arg(0));
             if (fake_socket != socket_handles_.end()) {
                 socket_handles_.erase(fake_socket);
                 SetErrno(0);
                 Ret(0);
-                return true;
+            } else {
+                SetErrno(38);
+                Ret(0xffffffffu);
             }
-#if !defined(_WIN32)
-            const int rc = ::close(static_cast<int>(Arg(0)));
-            SetErrno(rc == 0 ? 0u : static_cast<std::uint32_t>(errno));
-            Ret(static_cast<std::uint32_t>(rc));
-#else
-            SetErrno(38); Ret(0xffffffffu);
 #endif
             return true;
         }
-        if (name == "read" || name == "write") {
+        if (fast_name == "read" || fast_name == "write") {
 #if !defined(_WIN32)
             const int fd = static_cast<int>(Arg(0));
             const std::uint32_t guest = Arg(1);
             const std::size_t count = Arg(2);
             if (!Fits(guest, count)) { SetErrno(14); Ret(0xffffffffu); return true; }
-            const ssize_t rc = name == "read"
+            const ssize_t rc = fast_name == "read"
                 ? ::read(fd, memory_.data() + guest, count)
                 : ::write(fd, memory_.data() + guest, count);
             SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno));
@@ -5143,7 +8179,7 @@ public:
 #endif
             return true;
         }
-        if (name == "lseek") {
+        if (fast_name == "lseek") {
 #if !defined(_WIN32)
             const off_t rc = ::lseek(static_cast<int>(Arg(0)), static_cast<off_t>(static_cast<std::int32_t>(Arg(1))), static_cast<int>(Arg(2)));
             SetErrno(rc >= 0 ? 0u : static_cast<std::uint32_t>(errno));
@@ -5153,17 +8189,17 @@ public:
 #endif
             return true;
         }
-        if (name == "fstat" || name == "stat" || name == "lstat") {
+        if (fast_name == "fstat" || fast_name == "stat" || fast_name == "lstat") {
 #if !defined(_WIN32)
             struct stat st{};
             int rc = -1;
             std::uint32_t guest_stat = 0;
-            if (name == "fstat") {
+            if (fast_name == "fstat") {
                 rc = ::fstat(static_cast<int>(Arg(0)), &st);
                 guest_stat = Arg(1);
             } else {
                 const std::string path = NormalizeGuestPath(ReadCString(Arg(0)));
-                rc = name == "stat" ? ::stat(path.c_str(), &st) : ::lstat(path.c_str(), &st);
+                rc = fast_name == "stat" ? ::stat(path.c_str(), &st) : ::lstat(path.c_str(), &st);
                 guest_stat = Arg(1);
             }
             if (rc == 0 && !WriteGuestStat(guest_stat, st)) { SetErrno(14); Ret(0xffffffffu); return true; }
@@ -5174,7 +8210,7 @@ public:
 #endif
             return true;
         }
-        if (name == "readlink") {
+        if (fast_name == "readlink") {
 #if !defined(_WIN32)
             const std::string path = NormalizeGuestPath(ReadCString(Arg(0)));
             const std::uint32_t dst = Arg(1);
@@ -5188,52 +8224,54 @@ public:
 #endif
             return true;
         }
-        if (name == "opendir") {
+        if (fast_name == "opendir") {
             SetErrno(2); Ret(0); return true;
         }
-        if (name == "closedir") { Ret(0); return true; }
-        if (name == "isatty") { Ret(0); return true; }
-        if (name == "atoi" || name == "atol") {
+        if (fast_name == "closedir") { Ret(0); return true; }
+        if (fast_name == "isatty") { Ret(0); return true; }
+        if (fast_name == "atoi" || fast_name == "atol") {
             const std::string text = ReadCString(Arg(0));
             Ret(static_cast<std::uint32_t>(std::strtol(text.c_str(), nullptr, 10)));
             return true;
         }
-        if (name == "strtol" || name == "strtoul") {
+        if (fast_name == "strtol" || fast_name == "strtoul") {
             const std::string text = ReadCString(Arg(0));
             char* end = nullptr;
             const int base = static_cast<int>(Arg(2));
-            unsigned long value = name == "strtol"
+            unsigned long value = fast_name == "strtol"
                 ? static_cast<unsigned long>(std::strtol(text.c_str(), &end, base))
                 : std::strtoul(text.c_str(), &end, base);
             if (Arg(1)) Write32(memory_, Arg(1), Arg(0) + static_cast<std::uint32_t>(end - text.c_str()));
             Ret(static_cast<std::uint32_t>(value));
             return true;
         }
-        if (name == "tolower") { Ret(static_cast<std::uint32_t>(std::tolower(static_cast<unsigned char>(Arg(0))))); return true; }
-        if (name == "isalnum") { Ret(std::isalnum(static_cast<unsigned char>(Arg(0))) ? 1u : 0u); return true; }
-        if (name == "isalpha") { Ret(std::isalpha(static_cast<unsigned char>(Arg(0))) ? 1u : 0u); return true; }
-        if (name == "isspace") { Ret(std::isspace(static_cast<unsigned char>(Arg(0))) ? 1u : 0u); return true; }
-        if (name == "isxdigit") { Ret(std::isxdigit(static_cast<unsigned char>(Arg(0))) ? 1u : 0u); return true; }
-        if (name == "strerror") {
-            static constexpr char kError[] = "CNR64 guest errno";
+        if (fast_name == "tolower") { Ret(static_cast<std::uint32_t>(std::tolower(static_cast<unsigned char>(Arg(0))))); return true; }
+        if (fast_name == "isalnum") { Ret(std::isalnum(static_cast<unsigned char>(Arg(0))) ? 1u : 0u); return true; }
+        if (fast_name == "isalpha") { Ret(std::isalpha(static_cast<unsigned char>(Arg(0))) ? 1u : 0u); return true; }
+        if (fast_name == "isspace") { Ret(std::isspace(static_cast<unsigned char>(Arg(0))) ? 1u : 0u); return true; }
+        if (fast_name == "isxdigit") { Ret(std::isxdigit(static_cast<unsigned char>(Arg(0))) ? 1u : 0u); return true; }
+        if (fast_name == "strerror") {
+            static constexpr char kError[] = "ProjectV7 guest errno";
             WriteBytes(memory_, kBootstrapRuntimeBase + 0x200, kError, sizeof(kError));
             Ret(kBootstrapRuntimeBase + 0x200); return true;
         }
-        if (name == "uname") {
+        if (fast_name == "uname") {
             const std::uint32_t p = Arg(0);
             if (!Fits(p, 390)) return false;
             std::memset(memory_.data() + p, 0, 390);
+            std::string node_name = "pv7";
+            pv7::compat::GetSystemProperty("ro.product.device", node_name);
             WriteCString(p, "Linux", 65);
-            WriteCString(p + 65, "cnr64", 65);
+            WriteCString(p + 65, node_name, 65);
             WriteCString(p + 130, "6.0", 65);
             WriteCString(p + 260, "aarch64", 65);
             Ret(0); return true;
         }
-        if (name == "getrusage") {
+        if (fast_name == "getrusage") {
             if (Arg(1) && Fits(Arg(1), 72)) std::memset(memory_.data() + Arg(1), 0, 72);
             Ret(0); return true;
         }
-        if (name == "bsearch") {
+        if (fast_name == "bsearch") {
             const std::uint32_t key = Arg(0);
             const std::uint32_t base = Arg(1);
             const std::uint32_t nmemb = Arg(2);
@@ -5386,6 +8424,7 @@ public:
         std::uint32_t cpsr = 0;
         std::uint32_t fpscr = 0;
         std::uint32_t signal = 0;
+        std::uint32_t signal_mask = 0;
         std::uint32_t guest_siginfo = 0;
         std::uint32_t guest_ucontext = 0;
         bool uses_siginfo = false;
@@ -5395,13 +8434,41 @@ public:
     const std::unordered_map<std::string, std::uint32_t>& name_to_stub_;
     const std::unordered_map<std::string, ExportSymbol>& exports_;
     std::uint32_t heap_next_ = kGuestHeapStart;
+#if defined(PROJECTV7_CNR_CONTENT_HEAP) && PROJECTV7_CNR_CONTENT_HEAP
+    std::uint32_t heap_content_next_ = kGuestContentHeapStart;
+#endif
+#if defined(PROJECTV7_TEST_HEAP_OVERFLOW_32M) && PROJECTV7_TEST_HEAP_OVERFLOW_32M
+    std::uint32_t heap_overflow_next_ = kGuestOverflowHeapStart;
+#if defined(PROJECTV7_MONO_FATAL_CONTEXT_TRACE) && PROJECTV7_MONO_FATAL_CONTEXT_TRACE && defined(__ANDROID__)
+    std::size_t guest_overflow_alloc_count_ = 0u;
+#endif
+#endif
+#if defined(__ANDROID__)
+    std::size_t guest_heap_oom_count_ = 0u;
+#endif
     std::uint32_t next_tls_key_ = 1;
+    enum class GuestThreadState : std::uint8_t {
+        New,
+        Runnable,
+        BlockedMutex,
+        BlockedCond,
+        BlockedSemaphore,
+        BlockedJoin,
+        BlockedSignal,
+        Finished,
+        Faulted,
+    };
     struct GuestThreadLaunch {
         std::uint32_t id = 0;
         std::uint32_t start = 0;
         std::uint32_t arg = 0;
         bool started = false;
         bool finished = false;
+        GuestThreadState state = GuestThreadState::New;
+        std::uint32_t wait_object = 0;
+        std::uint32_t wait_aux = 0;
+        std::uint32_t wait_owner = 0;
+        std::string terminal_detail;
         std::array<std::uint32_t, 16> regs{};
         std::array<std::uint32_t, 64> ext_regs{};
         std::uint32_t cpsr = 0;
@@ -5413,12 +8480,30 @@ public:
     std::uint32_t next_thread_id_ = 2;
     std::uint32_t current_thread_id_ = 1;
     std::uint32_t preferred_guest_thread_id_ = 0;
+    std::uint32_t trylock_preferred_guest_thread_id_ = 0;
     std::uint32_t unity_preload_thread_id_ = 0;
-    std::uint64_t mono_metadata_decode_row_fast_calls_ = 0;
+    struct GuestThreadSamplingConfig {
+        std::uint64_t ticks_per_slice = 1000000u;
+        std::uint32_t samples_remaining = 0u;
+    };
+    std::unordered_map<std::uint32_t, std::string> guest_thread_names_;
+    std::unordered_map<std::uint32_t, GuestThreadSamplingConfig> guest_thread_sampling_;
+#if defined(PROJECTV7_TEST_WORKER_NANOSLEEP_DEADLINES) && PROJECTV7_TEST_WORKER_NANOSLEEP_DEADLINES
+    // Test-only monotonic wakeups: completed worker nanosleep calls remain parked
+    // until their requested delay elapses instead of consuming every guest pump.
+    std::unordered_map<std::uint32_t, std::chrono::steady_clock::time_point> guest_nanosleep_deadlines_;
+    std::unordered_map<std::uint32_t, std::uint32_t> guest_nanosleep_trace_count_;
+#endif
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+    std::unordered_map<std::uint32_t, std::uint64_t> guest_thread_perf_us_;
+    std::unordered_map<std::uint32_t, std::uint64_t> guest_thread_perf_visits_;
+#endif
+     std::uint64_t mono_metadata_decode_row_fast_calls_ = 0;
     std::uint64_t mono_metadata_decode_row_col_fast_calls_ = 0;
     bool cooperative_yield_requested_ = false;
     bool thread_exit_requested_ = false;
     std::vector<GuestThreadLaunch> guest_thread_launches_;
+    std::unordered_map<std::uint64_t, std::chrono::steady_clock::time_point> guest_receive_deadlines_;
     std::size_t guest_thread_pump_cursor_ = 0;
     struct GuestMutexState {
         std::uint32_t owner = 0;
@@ -5448,6 +8533,7 @@ public:
     std::unordered_map<std::uint32_t, GuestCondState> guest_conds_;
     std::unordered_map<std::uint64_t, GuestCondWaitState> guest_cond_waits_;
     std::unordered_map<std::uint32_t, std::int64_t> guest_semaphores_;
+    std::unordered_map<std::uint64_t, std::uint32_t> guest_trylock_spin_counts_;
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
     std::unordered_map<std::uint64_t, bool> guest_sem_wait_logged_;
     std::unordered_map<std::uint64_t, bool> guest_mutex_block_logged_;
@@ -5462,6 +8548,8 @@ public:
     std::unordered_map<std::uint32_t, std::uint32_t> tls_values_;
     std::unordered_map<std::uint32_t, GuestJumpContext> jump_contexts_;
     std::unordered_map<std::uint32_t, GuestSignalAction> guest_signal_actions_;
+    std::unordered_map<std::uint32_t, std::uint32_t> guest_signal_masks_;
+    std::unordered_map<std::uint32_t, std::uint32_t> guest_sigsuspend_saved_masks_;
     std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> guest_pending_signals_;
     std::unordered_map<std::uint32_t, std::vector<GuestSignalFrame>> guest_signal_frames_;
     std::unordered_map<std::uint32_t, bool> guest_signal_interrupted_;
@@ -5494,23 +8582,225 @@ public:
 #if defined(__ANDROID__)
     std::uint32_t next_egl_handle_ = 0x71000000u;
     std::unordered_map<std::uint32_t, std::uintptr_t> egl_handles_;
+    std::unordered_map<EGLSurface, EGLDisplay> owned_egl_surfaces_;
+    std::unordered_map<EGLContext, EGLDisplay> owned_egl_contexts_;
     std::unordered_map<std::uint32_t, std::uint32_t> gl_string_cache_;
     std::unordered_map<std::uint32_t, GuestGlMappedRange> gl_mapped_ranges_;
     std::unordered_map<std::uint32_t, HostZlibStream> zlib_streams_;
 #endif
     std::string managed_dir_;
     void* host_native_window_ = nullptr;
+    void* host_jni_env_ = nullptr;
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+    pv7::trace::Recorder call_trace_recorder_;
+#endif
 #if defined(PROJECTV7_DEV_HOTPATCH) && PROJECTV7_DEV_HOTPATCH
     HotpatchRuntime hotpatch_runtime_;
 #endif
+
+public:
+    std::uint32_t GetOrCreateJniClassHandle(const std::string& class_name) {
+        const std::uint32_t handle = EnsureJniClassHandle(class_name);
+        if (class_name == "com/unity3d/player/WWW") jni_www_class_handle = handle;
+        return handle;
+    }
+
+    std::size_t PumpHostHttpCallbacks(std::size_t max_requests = 2u) {
+        if (host_http_pending_.empty() || max_requests == 0u) return 0u;
+        if (!www_done_callback_ || !www_error_callback_ || !www_header_callback_ || !www_read_callback_) {
+#if defined(__ANDROID__)
+            __android_log_print(ANDROID_LOG_WARN, "CNR64POC",
+                                "PV7WWW response waiting for callbacks done=0x%08x error=0x%08x header=0x%08x read=0x%08x",
+                                www_done_callback_, www_error_callback_, www_header_callback_, www_read_callback_);
+#endif
+            return 0u;
+        }
+
+        std::size_t pumped = 0u;
+        while (pumped < max_requests && !host_http_pending_.empty()) {
+            HostHttpPending pending = std::move(host_http_pending_.front());
+            host_http_pending_.pop_front();
+            bool aborted = false;
+            std::uint32_t callback_result = 0u;
+
+            if (!pending.error.empty() || pending.status >= 400 || pending.status < 0) {
+                std::string message = !pending.error.empty()
+                    ? pending.error : ("HTTP " + std::to_string(pending.status));
+                const std::uint32_t string_handle = NewJniString(message);
+                InvokeWwwGuestCallback(www_error_callback_, pending.request_id, string_handle, {}, callback_result);
+                aborted = true;
+            } else {
+                if (!pending.headers.empty()) {
+                    const std::uint32_t header_handle = NewJniString(pending.headers);
+                    if (!InvokeWwwGuestCallback(www_header_callback_, pending.request_id, header_handle,
+                                                {}, callback_result) || callback_result != 0u) {
+                        aborted = true;
+                    }
+                }
+
+                constexpr std::size_t kChunkSize = 32u * 1024u;
+                for (std::size_t offset = 0; !aborted && offset < pending.body.size(); offset += kChunkSize) {
+                    const std::size_t count = std::min(kChunkSize, pending.body.size() - offset);
+                    const std::uint32_t array = Allocate(count + 16u, 4u);
+                    if (!array || !Fits(array + 16u, count)) {
+                        const std::uint32_t error_handle = NewJniString("CNR64 WWW guest buffer allocation failed");
+                        InvokeWwwGuestCallback(www_error_callback_, pending.request_id, error_handle, {}, callback_result);
+                        aborted = true;
+                        break;
+                    }
+                    jni_arrays_[array] = {static_cast<std::uint32_t>(count), 1u, false};
+                    std::memcpy(memory_.data() + array + 16u, pending.body.data() + offset, count);
+                    if (!InvokeWwwGuestCallback(www_read_callback_, pending.request_id, array,
+                                                {static_cast<std::uint32_t>(count)}, callback_result) ||
+                        callback_result != 0u) {
+                        const std::uint32_t error_handle = NewJniString("CNR64 WWW request aborted");
+                        InvokeWwwGuestCallback(www_error_callback_, pending.request_id, error_handle, {}, callback_result);
+                        aborted = true;
+                    }
+                }
+
+                if (!aborted) {
+                    InvokeWwwGuestCallback(www_done_callback_, pending.request_id, 0u, {}, callback_result);
+                }
+            }
+#if defined(__ANDROID__)
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7WWW delivered id=%u status=%d bytes=%zu aborted=%d",
+                                pending.request_id, pending.status, pending.body.size(), aborted ? 1 : 0);
+#endif
+            ++pumped;
+        }
+        return pumped;
+    }
+
+    std::uint32_t NewHostInputString(const std::string& text) { return NewJniString(text); }
+
+    void PumpFrameBackgroundWork() {
+        PumpQueuedGuestThreads(32, 4);
+        PumpHostHttpCallbacks(2);
+        if (++background_snapshot_frames_ % 120u == 0u) {
+            std::ofstream snapshot(GuestPrefsPath()+".threads",std::ios::trunc);
+            for (const auto& state:DebugGuestThreadStates()) snapshot<<state<<"\n";
+            snapshot<<"URL proxies="<<url_streams_.size()<<"\n";
+        }
+    }
+    unsigned background_snapshot_frames_=0;
+
+
+    std::uint32_t DebugAllocateGuest(std::size_t size, std::uint32_t alignment = 16u) {
+        return Allocate(size, alignment);
+    }
+
+    bool DebugReadGuest32(std::uint32_t address, std::uint32_t& value) const {
+        return Read32(memory_, address, value);
+    }
+
+    std::string DebugThunkNameForPc(std::uint32_t pc) const {
+        for (const auto& item : name_to_stub_) {
+            if (pc == item.second || pc == item.second + 4u) return item.first;
+        }
+        return {};
+    }
+
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+    void ResetGuestThreadPerf() {
+        guest_thread_perf_us_.clear();
+        guest_thread_perf_visits_.clear();
+    }
+
+    void ResetCacheflushRangeSummary() {
+        cacheflush_range_counts_.clear();
+    }
+
+    void LogGuestThreadPerf(const char* label) const {
+        std::vector<std::pair<std::uint64_t, std::uint32_t>> ranked;
+        ranked.reserve(guest_thread_perf_us_.size());
+        for (const auto& item : guest_thread_perf_us_)
+            ranked.emplace_back(item.second, item.first);
+        std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+            return a.first > b.first;
+        });
+        const std::size_t count = std::min<std::size_t>(ranked.size(), 16u);
+        for (std::size_t i = 0; i < count; ++i) {
+            const std::uint32_t id = ranked[i].second;
+            const auto name = guest_thread_names_.find(id);
+            const auto visits = guest_thread_perf_visits_.find(id);
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7PERF worker-total label=%s thread=%u name=%s total_us=%llu visits=%llu",
+                                label, id,
+                                name == guest_thread_names_.end() || name->second.empty() ? "-" : name->second.c_str(),
+                                static_cast<unsigned long long>(ranked[i].first),
+                                static_cast<unsigned long long>(visits == guest_thread_perf_visits_.end() ? 0u : visits->second));
+        }
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> hot_ranges;
+        hot_ranges.reserve(cacheflush_range_counts_.size());
+        for (const auto& item : cacheflush_range_counts_)
+            hot_ranges.emplace_back(item.second, item.first);
+        std::sort(hot_ranges.begin(), hot_ranges.end(), [](const auto& a, const auto& b) {
+            return a.first > b.first;
+        });
+        __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                            "PV7PERF cacheflush-ranges label=%s unique=%zu", label,
+                            cacheflush_range_counts_.size());
+        const std::size_t range_count = std::min<std::size_t>(hot_ranges.size(), 8u);
+        for (std::size_t i = 0; i < range_count; ++i) {
+            const std::uint64_t key = hot_ranges[i].second;
+            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                "PV7PERF cacheflush-range label=%s start=0x%08x size=%u calls=%llu",
+                                label, static_cast<std::uint32_t>(key >> 32u),
+                                static_cast<std::uint32_t>(key),
+                                static_cast<unsigned long long>(hot_ranges[i].first));
+        }
+    }
+#endif
+    std::vector<std::string> DebugGuestThreadStates() const {
+        std::vector<std::string> result;
+        result.reserve(guest_thread_launches_.size());
+        auto state_name = [](GuestThreadState state) -> const char* {
+            switch (state) {
+                case GuestThreadState::New: return "new";
+                case GuestThreadState::Runnable: return "runnable";
+                case GuestThreadState::BlockedMutex: return "mutex";
+                case GuestThreadState::BlockedCond: return "cond";
+                case GuestThreadState::BlockedSemaphore: return "sem";
+                case GuestThreadState::BlockedJoin: return "join";
+                case GuestThreadState::BlockedSignal: return "signal";
+                case GuestThreadState::Finished: return "finished";
+                case GuestThreadState::Faulted: return "faulted";
+            }
+            return "unknown";
+        };
+        for (const auto& thread : guest_thread_launches_) {
+            std::ostringstream line;
+            line << "id=" << thread.id;
+            const auto name = guest_thread_names_.find(thread.id);
+            if (name != guest_thread_names_.end() && !name->second.empty())
+                line << " name='" << name->second << "'";
+            line << " state=" << state_name(thread.state)
+                 << " started=" << (thread.started ? "yes" : "no")
+                 << " finished=" << (thread.finished ? "yes" : "no")
+                 << " pc=0x" << std::hex << thread.regs[15]
+                 << " lr=0x" << thread.regs[14]
+                 << " wait=0x" << thread.wait_object
+                 << " aux=0x" << thread.wait_aux
+                 << std::dec << " owner=" << thread.wait_owner
+                 << " slices=" << thread.total_slices;
+            const std::string thunk = DebugThunkNameForPc(thread.regs[15]);
+            if (!thunk.empty()) line << " thunk='" << thunk << "'";
+            line << thread.terminal_detail;
+            result.push_back(line.str());
+        }
+        return result;
+    }
 };
 
-std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
+std::string RunMonoBootstrapTrapProbe(GuestMemory memory,
                                       const std::unordered_map<std::string, ExportSymbol>& exports,
                                       const std::vector<UnresolvedRelocation>& unresolved,
                                       const std::string& managed_dir,
                                       const std::string& package_code_path,
-                                      void* host_native_window) {
+                                      void* host_native_window,
+                                      void* host_jni_env) {
     std::ostringstream report;
     report << "  Mono JIT bootstrap trap probe:\n";
 
@@ -5562,7 +8852,7 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
     // and this exact legacy libmono build spends millions of guest instructions in
     // them. Replace only the verified ARM prologues with SVC+BX LR stubs so the
     // compatibility layer can perform the same little-endian row decode natively.
-    std::uint32_t mono_decode_row_word0 = 0u, mono_decode_row_word1 = 0u;
+     std::uint32_t mono_decode_row_word0 = 0u, mono_decode_row_word1 = 0u;
     std::uint32_t mono_decode_col_word0 = 0u, mono_decode_col_word1 = 0u;
     const bool mono_metadata_prologues_match =
         Read32(memory, kMonoMetadataDecodeRow, mono_decode_row_word0) &&
@@ -5571,7 +8861,12 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
         Read32(memory, kMonoMetadataDecodeRowCol + 4u, mono_decode_col_word1) &&
         mono_decode_row_word0 == 0xe92d4810u && mono_decode_row_word1 == 0xe28db008u &&
         mono_decode_col_word0 == 0xe92d4830u && mono_decode_col_word1 == 0xe28db00cu;
-    if (mono_metadata_prologues_match) {
+#if defined(PROJECTV7_TEST_ORIGINAL_MONO_METADATA) && PROJECTV7_TEST_ORIGINAL_MONO_METADATA
+    constexpr bool kUseMonoMetadataFastpath = false;
+#else
+    constexpr bool kUseMonoMetadataFastpath = true;
+#endif
+    if (mono_metadata_prologues_match && kUseMonoMetadataFastpath) {
         if (!WriteSvcStub(memory, kMonoMetadataDecodeRow, kSvcMonoMetadataDecodeRow) ||
             !WriteSvcStub(memory, kMonoMetadataDecodeRowCol, kSvcMonoMetadataDecodeRowCol)) {
             report << "    Mono metadata native fastpaths: PATCH FAILED\n";
@@ -5581,10 +8876,12 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                << kMonoMetadataDecodeRow << " row_col=0x" << kMonoMetadataDecodeRowCol
                << std::dec << "\n";
     } else {
-        report << "    Mono metadata native fastpaths: SKIPPED (unexpected libmono prologues)\n";
+        report << (kUseMonoMetadataFastpath
+                       ? "    Mono metadata native fastpaths: SKIPPED (unexpected libmono prologues)\n"
+                       : "    Mono metadata native fastpaths: DISABLED for original guest ARM comparison\n");
     }
 
-    BootstrapEnvironment env(memory, thunks.id_to_name, thunks.name_to_stub, exports, managed_dir, host_native_window);
+     BootstrapEnvironment env(memory, thunks.id_to_name, thunks.name_to_stub, exports, managed_dir, host_native_window, host_jni_env);
 #if defined(PROJECTV7_DEV_HOTPATCH) && PROJECTV7_DEV_HOTPATCH
     report << "    Developer hotpatch runtime: " << env.HotpatchStatusLine() << "\n";
 #endif
@@ -5594,16 +8891,37 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
     constexpr std::size_t kGuestPageSize = 1u << Dynarmic::A32::UserConfig::PAGE_BITS;
     for (std::size_t offset = 0; offset + kGuestPageSize <= memory.size(); offset += kGuestPageSize)
         (*guest_page_table)[offset >> Dynarmic::A32::UserConfig::PAGE_BITS] = memory.data() + offset;
+#if defined(PROJECTV7_FAULT_CODE_WATCH) && PROJECTV7_FAULT_CODE_WATCH
+    // One guest JIT-code page is routed through MemoryWrite callbacks for a
+    // causal trace. Production retains the original direct page-table mapping.
+    constexpr std::uint32_t kWatchedFaultAddress = 0x06bc3140u;
+    (*guest_page_table)[kWatchedFaultAddress >> Dynarmic::A32::UserConfig::PAGE_BITS] = nullptr;
+    report << "    Developer JIT-code write watch: " << std::hex
+           << kWatchedFaultAddress << std::dec << " (single-page slow memory)\n";
+#endif
 
     Dynarmic::A32::UserConfig config;
     config.callbacks = &env;
     config.processor_id = 0;
     config.global_monitor = &global_monitor;
     config.arch_version = Dynarmic::A32::ArchVersion::v7;
+    config.define_unpredictable_behaviour = true;
     config.always_little_endian = true;
     config.enable_cycle_counting = true;
     config.code_cache_size = 32u * 1024u * 1024u;
+#if defined(PROJECTV7_TEST_ARM64_NO_BLOCK_LINKING) && PROJECTV7_TEST_ARM64_NO_BLOCK_LINKING && defined(__aarch64__)
+    // Dev-only A/B: prevent ARM64 Dynarmic from chaining cached translated
+    // blocks. This retains guest instruction semantics and all other
+    // optimizations, isolating possible stale ARM64 block links during Mono JIT.
+    config.optimizations &= ~Dynarmic::OptimizationFlag::BlockLinking;
+#endif
     config.page_table = guest_page_table.get();
+#if defined(__ANDROID__) && defined(__aarch64__) && PROJECTV7_TEST_ARM64_FASTMEM
+    config.fastmem_pointer = reinterpret_cast<std::uintptr_t>(memory.data());
+    config.fastmem_exclusive_access = false;
+    report << "    ARM64 guarded fastmem: enabled\n";
+#endif
+
     config.detect_misaligned_access_via_page_table = 8u | 16u | 32u | 64u;
     config.only_detect_misalignment_via_page_table_on_page_boundary = true;
     report << "    Dynarmic guest page table: ENABLED (" << (memory.size() / kGuestPageSize)
@@ -5688,7 +9006,7 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                 env.pending_cacheflush_start = 0;
                 env.pending_cacheflush_size = 0;
                 jit.ClearHalt();
-                if (size != 0) jit.InvalidateCacheRange(start, size);
+                if (size != 0) env.InvalidateTranslatedCodeRange(start, size);
                 ++cache_restarts;
                 previous_pc = 0xffffffffu;
                 same_pc_slices = 0;
@@ -5839,7 +9157,7 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
             env.pending_cacheflush_start = 0;
             env.pending_cacheflush_size = 0;
             jit.ClearHalt();
-            if (size != 0) jit.InvalidateCacheRange(start, size);
+            if (size != 0) env.InvalidateTranslatedCodeRange(start, size);
             ++cache_invalidation_restarts;
             previous_pc = 0xffffffffu;
             same_pc_slices = 0;
@@ -6077,9 +9395,7 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                 WriteSvcStub(memory, kJniExceptionDescribeStub, kSvcJniExceptionDescribe) &&
                 WriteSvcStub(memory, kJniExceptionClearStub, kSvcJniExceptionClear) &&
                 WriteSvcStub(memory, kPthreadOnceReturnStub, kSvcPthreadOnceReturn) &&
-                Write32(memory, kJniVmObject, kJniVmTable) &&
-                Write32(memory, kJniVmTable + 0x10u, kJniAttachStub) &&
-                Write32(memory, kJniVmTable + 0x18u, kJniGetEnvStub) &&
+                InitializeJniVmTable(memory) &&
                 Write32(memory, kJniEnvObject, kJniEnvTable) &&
                 Write32(memory, kJniEnvTable + 0x18u, kJniFindClassStub) &&
                 Write32(memory, kJniEnvTable + 0x3cu, kJniExceptionOccurredStub) &&
@@ -6100,18 +9416,71 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                 Write32(memory, kJniEnvTable + 0x7cu, kJniGetObjectClassStub) &&
                 Write32(memory, kJniEnvTable + 0x80u, kJniIsInstanceOfStub) &&
                 Write32(memory, kJniEnvTable + 0x84u, kJniGetMethodIdStub) &&
-                Write32(memory, kJniEnvTable + 0x88u, kJniCallObjectMethodStub) &&
-                Write32(memory, kJniEnvTable + 0x8cu, kJniCallObjectMethodVStub) &&
-                Write32(memory, kJniEnvTable + 0x90u, kJniCallObjectMethodAStub) &&
-                Write32(memory, kJniEnvTable + 0xc8u, kJniCallIntMethodStub) &&
-                Write32(memory, kJniEnvTable + 0xccu, kJniCallIntMethodVStub) &&
-                Write32(memory, kJniEnvTable + 0xd0u, kJniCallIntMethodAStub) &&
-                Write32(memory, kJniEnvTable + 0x98u, kJniCallBooleanMethodStub) &&
-                Write32(memory, kJniEnvTable + 0x9cu, kJniCallBooleanMethodVStub) &&
-                Write32(memory, kJniEnvTable + 0xa0u, kJniCallBooleanMethodAStub) &&
-                Write32(memory, kJniEnvTable + 0xf8u, kJniCallVoidMethodStub) &&
-                Write32(memory, kJniEnvTable + 0xfcu, kJniCallVoidMethodVStub) &&
-                Write32(memory, kJniEnvTable + 0x100u, kJniCallVoidMethodAStub) &&
+                // JNINativeInterface instance method-call families. Keep the table
+                // indices exactly aligned with jni.h, including the primitive groups
+                // that this old Unity build reaches through ReflectionHelper.
+                Write32(memory, kJniEnvTable + 34u * 4u, kJniCallObjectMethodStub) &&
+                Write32(memory, kJniEnvTable + 35u * 4u, kJniCallObjectMethodVStub) &&
+                Write32(memory, kJniEnvTable + 36u * 4u, kJniCallObjectMethodAStub) &&
+                Write32(memory, kJniEnvTable + 37u * 4u, kJniCallBooleanMethodStub) &&
+                Write32(memory, kJniEnvTable + 38u * 4u, kJniCallBooleanMethodVStub) &&
+                Write32(memory, kJniEnvTable + 39u * 4u, kJniCallBooleanMethodAStub) &&
+                Write32(memory, kJniEnvTable + 40u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 41u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 42u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 43u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 44u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 45u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 46u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 47u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 48u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 49u * 4u, kJniCallIntMethodStub) &&
+                Write32(memory, kJniEnvTable + 50u * 4u, kJniCallIntMethodVStub) &&
+                Write32(memory, kJniEnvTable + 51u * 4u, kJniCallIntMethodAStub) &&
+                Write32(memory, kJniEnvTable + 52u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 53u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 54u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 55u * 4u, kJniUnknownStubBase + 55u * 8u) &&
+                Write32(memory, kJniEnvTable + 56u * 4u, kJniUnknownStubBase + 56u * 8u) &&
+                Write32(memory, kJniEnvTable + 57u * 4u, kJniUnknownStubBase + 57u * 8u) &&
+                Write32(memory, kJniEnvTable + 58u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 59u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 60u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 61u * 4u, kJniCallVoidMethodStub) &&
+                Write32(memory, kJniEnvTable + 62u * 4u, kJniCallVoidMethodVStub) &&
+                Write32(memory, kJniEnvTable + 63u * 4u, kJniCallVoidMethodAStub) &&
+                // Nonvirtual calls have the same return ABI. The extra jclass argument
+                // does not need interpretation for the compatibility object model.
+                Write32(memory, kJniEnvTable + 64u * 4u, kJniCallObjectMethodStub) &&
+                Write32(memory, kJniEnvTable + 65u * 4u, kJniCallObjectMethodVStub) &&
+                Write32(memory, kJniEnvTable + 66u * 4u, kJniCallObjectMethodAStub) &&
+                Write32(memory, kJniEnvTable + 67u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 68u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 69u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 70u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 71u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 72u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 73u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 74u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 75u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 76u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 77u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 78u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 79u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 80u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 81u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 82u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 83u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 84u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 85u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 86u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 87u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 88u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 89u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 90u * 4u, kJniCallStaticPrimitiveMethodStub) &&
+                Write32(memory, kJniEnvTable + 91u * 4u, kJniCallVoidMethodStub) &&
+                Write32(memory, kJniEnvTable + 92u * 4u, kJniCallVoidMethodVStub) &&
+                Write32(memory, kJniEnvTable + 93u * 4u, kJniCallVoidMethodAStub) &&
                 Write32(memory, kJniEnvTable + 0x178u, kJniGetFieldIdStub) &&
                 Write32(memory, kJniEnvTable + 0x17cu, kJniGetObjectFieldStub) &&
                 Write32(memory, kJniEnvTable + 0x180u, kJniGetPrimitiveFieldStub) &&
@@ -6189,26 +9558,14 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
             if (jni_stubs_ok) {
                 jni_stubs_ok =
                     Write32(memory, kJniEnvTable + 113u * 4u, kJniGetStaticMethodIdStub) &&
-                    Write32(memory, kJniEnvTable + 114u * 4u, kJniCallStaticObjectMethodStub) &&
-                    Write32(memory, kJniEnvTable + 115u * 4u, kJniCallStaticObjectMethodStub) &&
-                    Write32(memory, kJniEnvTable + 116u * 4u, kJniCallStaticObjectMethodStub);
+                    Write32(memory, kJniEnvTable + 114u * 4u, kJniCallStaticObjectMethodStub);
                 for (std::uint32_t slot = 117u; jni_stubs_ok && slot <= 140u; ++slot)
                     jni_stubs_ok = Write32(memory, kJniEnvTable + slot * 4u, kJniCallStaticPrimitiveMethodStub);
                 for (std::uint32_t slot = 141u; jni_stubs_ok && slot <= 143u; ++slot)
                     jni_stubs_ok = Write32(memory, kJniEnvTable + slot * 4u, kJniCallStaticVoidMethodStub);
             }
 
-            for (std::uint32_t slot = 4; jni_stubs_ok && slot < kJniEnvFunctionCount; ++slot) {
-                std::uint32_t entry = 0;
-                if (!Read32(memory, kJniEnvTable + slot * 4u, entry)) {
-                    jni_stubs_ok = false;
-                    break;
-                }
-                if (entry != 0) continue;
-                const std::uint32_t stub = kJniUnknownStubBase + slot * 8u;
-                jni_stubs_ok = WriteSvcStub(memory, stub, kSvcJniUnknownBase + slot) &&
-                               Write32(memory, kJniEnvTable + slot * 4u, stub);
-            }
+            if (jni_stubs_ok) jni_stubs_ok = InitializeJniFallbackStubs(memory);
 
             if (!jni_stubs_ok) {
                 report << "    Shared-state Unity JNI setup: FAIL writing VM/env tables\n";
@@ -6249,7 +9606,7 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                         env.pending_cacheflush_start = 0;
                         env.pending_cacheflush_size = 0;
                         jit.ClearHalt();
-                        if (size != 0) jit.InvalidateCacheRange(start, size);
+                        if (size != 0) env.InvalidateTranslatedCodeRange(start, size);
                         ++unity_jni_cache_restarts;
                         unity_previous_pc = 0xffffffffu;
                         unity_same_pc_slices = 0;
@@ -6288,8 +9645,22 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                 std::uint32_t unity_native_recreate_gfx_state = 0;
                 std::uint32_t unity_native_resize = 0;
                 std::uint32_t unity_native_resume = 0;
+                std::uint32_t unity_native_pause = 0;
+                std::uint32_t unity_native_focus_changed = 0;
                 std::uint32_t unity_native_render = 0;
+                std::uint32_t unity_native_inject_event = 0;
+                std::uint32_t unity_input_string=0,unity_input_closed=0,unity_input_canceled=0;
+                std::uint32_t unity_fmod_init_jni = 0;
+                std::uint32_t unity_fmod_get_info = 0;
+                std::uint32_t unity_fmod_process = 0;
+                std::uint32_t unity_fmod_block_streaming = 0;
+                std::uint32_t unity_fmod_unblock_streaming = 0;
                 for (const auto& reg : env.jni_native_registrations) {
+                    if(reg.class_name=="com/unity3d/player/UnityPlayer") {
+                        if(reg.name=="nativeSetInputString")unity_input_string=reg.function;
+                        else if(reg.name=="nativeSoftInputClosed")unity_input_closed=reg.function;
+                        else if(reg.name=="nativeSetInputCanceled")unity_input_canceled=reg.function;
+                    }
                     report << "      " << reg.class_name << " :: " << reg.name << reg.signature
                            << " -> 0x" << std::hex << reg.function << std::dec << "\n";
                     if (reg.class_name == "com/unity3d/player/UnityPlayer" &&
@@ -6314,8 +9685,34 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                                reg.name == "nativeResume" && reg.signature == "()V") {
                         unity_native_resume = reg.function;
                     } else if (reg.class_name == "com/unity3d/player/UnityPlayer" &&
+                               reg.name == "nativePause" && reg.signature == "()Z") {
+                        unity_native_pause = reg.function;
+                    } else if (reg.class_name == "com/unity3d/player/UnityPlayer" &&
+                               reg.name == "nativeFocusChanged" && reg.signature == "(Z)V") {
+                        unity_native_focus_changed = reg.function;
+                    } else if (reg.class_name == "com/unity3d/player/UnityPlayer" &&
                                reg.name == "nativeRender" && reg.signature == "()Z") {
                         unity_native_render = reg.function;
+                    } else if (reg.class_name == "com/unity3d/player/UnityPlayer" &&
+                               reg.name == "nativeInjectEvent" &&
+                               reg.signature == "(Landroid/view/InputEvent;)Z") {
+                        unity_native_inject_event = reg.function;
+                    } else if (reg.class_name == "org/fmod/FMODAudioDevice" &&
+                               reg.name == "fmodInitJni" && reg.signature == "()I") {
+                        unity_fmod_init_jni = reg.function;
+                    } else if (reg.class_name == "org/fmod/FMODAudioDevice" &&
+                               reg.name == "fmodGetInfo" && reg.signature == "(I)I") {
+                        unity_fmod_get_info = reg.function;
+                    } else if (reg.class_name == "org/fmod/FMODAudioDevice" &&
+                               reg.name == "fmodProcess" &&
+                               reg.signature == "(Ljava/nio/ByteBuffer;)I") {
+                        unity_fmod_process = reg.function;
+                    } else if (reg.class_name == "org/fmod/FMODAudioDevice" &&
+                               reg.name == "fmodBlockStreaming" && reg.signature == "()I") {
+                        unity_fmod_block_streaming = reg.function;
+                    } else if (reg.class_name == "org/fmod/FMODAudioDevice" &&
+                               reg.name == "fmodUnblockStreaming" && reg.signature == "()I") {
+                        unity_fmod_unblock_streaming = reg.function;
                     }
                 }
                 const bool unity_jni_ready = env.saw_return && !env.failed && env.first_thunk.empty() &&
@@ -6340,23 +9737,19 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                 } else {
                     report << "PASS @ 0x" << std::hex << unity_init_jni << std::dec << "\n";
 
-                    // Unity 4.6.1f1's per-thread Android state getter performs a legacy
-                    // process-signal initialization during its first allocation. Unity 5.5's
-                    // initJni path no longer does this. The ARM32 guest must not install host
-                    // process signal handlers, so bypass this one version-verified call while
-                    // retaining the TLS object allocation itself.
-                    constexpr std::uint32_t kLegacySignalInitCall = kUnityBase + 0x003d29b8u;
-                    constexpr std::uint32_t kLegacySignalInitBl = 0xeb0010f3u;
-                    constexpr std::uint32_t kArmNop = 0xe1a00000u;
-                    std::uint32_t legacy_signal_instruction = 0;
-                    const bool legacy_signal_patch =
-                        Read32(memory, kLegacySignalInitCall, legacy_signal_instruction) &&
-                        legacy_signal_instruction == kLegacySignalInitBl &&
-                        Write32(memory, kLegacySignalInitCall, kArmNop);
-                    if (legacy_signal_patch) jit.InvalidateCacheRange(kLegacySignalInitCall, 4);
-                    report << "    Unity 4.6 legacy signal-init bypass: "
-                           << (legacy_signal_patch ? "APPLIED" : "SKIPPED")
-                           << " instruction=0x" << std::hex << legacy_signal_instruction << std::dec << "\n";
+                    for (const auto& patch : pv7::compat::StartupInstructionPatches()) {
+                        std::uint32_t actual_instruction = 0;
+                        const bool applied =
+                            Read32(memory, patch.address, actual_instruction) &&
+                            actual_instruction == patch.expected_instruction &&
+                            Write32(memory, patch.address, patch.replacement_instruction);
+                        if (applied) env.InvalidateTranslatedCodeRange(patch.address, 4);
+                        report << "    Compat patch "
+                               << (patch.name ? patch.name : "(unnamed)") << ": "
+                               << (applied ? "APPLIED" : "SKIPPED")
+                               << " instruction=0x" << std::hex << actual_instruction
+                               << " address=0x" << patch.address << std::dec << "\n";
+                    }
 
                     env.ResetPhaseDiagnostics();
                     env.saw_return = false;
@@ -6395,7 +9788,7 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                             env.pending_cacheflush_start = 0;
                             env.pending_cacheflush_size = 0;
                             jit.ClearHalt();
-                            if (size != 0) jit.InvalidateCacheRange(start, size);
+                            if (size != 0) env.InvalidateTranslatedCodeRange(start, size);
                             ++unity_init_jni_cache_restarts;
                             unity_init_previous_pc = 0xffffffffu;
                             unity_init_same_pc_slices = 0;
@@ -6509,18 +9902,36 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                                                            std::uint32_t arg3,
                                                            std::uint32_t arg4,
                                                            std::uint32_t arg5,
-                                                           const std::string* jni_string_arg = nullptr) -> bool {
-                        report << "    Shared-state Unity " << label << " lookup: ";
+                                                           const std::string* jni_string_arg = nullptr,
+                                                           bool quiet = false) -> bool {
+                        if (!quiet) report << "    Shared-state Unity " << label << " lookup: ";
                         if (function == 0) {
-                            report << "FAIL (registered native not found)\n";
+                            if (!quiet) report << "FAIL (registered native not found)\n";
                             return false;
                         }
-                        report << "PASS @ 0x" << std::hex << function << std::dec << "\n";
+                        if (!quiet) report << "PASS @ 0x" << std::hex << function << std::dec << "\n";
 
                         env.ResetPhaseDiagnostics();
                         env.ResetWorkerBoundaryDiagnostics();
                         const bool is_render_call = std::strncmp(label, "nativeRender", 12) == 0;
-                        env.allow_main_thread_cooperative_yield = is_render_call;
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                        if (is_render_call) env.ResetCacheflushRangeSummary();
+#endif
+                        const bool is_interactive_render = std::strcmp(label, "nativeRenderLoop") == 0;
+                        const bool is_input_call = std::strcmp(label, "nativeInjectEvent") == 0;
+                        const bool is_audio_call = std::strncmp(label, "fmod", 4) == 0;
+                        const bool is_pause_call = std::strcmp(label, "nativePause") == 0;
+                        const bool needs_worker_pump = is_render_call || is_input_call || is_audio_call || is_pause_call;
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                        if (is_render_call) env.ResetGuestThreadPerf();
+#endif
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+                        std::uint32_t pv7_phase_hash=2166136261u;
+                        for(const char* c=label;*c;++c)
+                            pv7_phase_hash=(pv7_phase_hash ^ static_cast<std::uint8_t>(*c))*16777619u;
+                        env.TraceEvent(pv7::trace::Phase, function, 0u, pv7_phase_hash, 1u);
+#endif
+                        env.allow_main_thread_cooperative_yield = needs_worker_pump;
                         if (jni_string_arg) env.jni_new_string_utf = *jni_string_arg;
                         env.saw_return = false;
                         env.premature_return = false;
@@ -6539,19 +9950,56 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                         jit.Regs()[14] = kReturnStub;
                         jit.Regs()[15] = function & ~1u;
                         jit.SetCpsr((function & 1u) ? 0x20u : 0u);
+                        env.ClearMainTrylockWait();
 
-#if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
-                        const int kUnityFollowupMaxSlices = is_render_call ? 8000 : 1000;
-#else
-                        const int kUnityFollowupMaxSlices = is_render_call ? 2000 : 1000;
-#endif
+                        // Render/input calls can legitimately need thousands of cooperative
+                        // slices while Unity's preload and worker threads make progress. A
+                        // lower release-only cap can make clean builds appear frozen during
+                        // early Unity startup even when developer builds continue normally.
+                        const int kUnityFollowupMaxSlices = is_interactive_render ? 120000 : (is_render_call ? 16000 : (needs_worker_pump ? 8000 : 1000));
                         constexpr int kUnityPeriodicWorkerPumpSlices = 16;
                         int followup_slices = 0;
                         std::size_t followup_cache_restarts = 0;
+                        std::size_t followup_pending_cache_restarts = 0;
+                        std::size_t followup_dynarmic_cache_restarts = 0;
                         std::size_t followup_worker_pumps = 0;
+                        std::size_t followup_preload_wait_pumps = 0;
+                        std::size_t followup_guest_callbacks = 0;
+                        std::size_t followup_cooperative_yields = 0;
+                        std::size_t followup_periodic_pumps = 0;
+                        std::size_t followup_tick_exhaustions = 0;
+#if defined(PROJECTV7_STARTUP_HOTPAGE_TRACE) && PROJECTV7_STARTUP_HOTPAGE_TRACE && defined(__ANDROID__)
+                        std::unordered_map<std::uint32_t, std::size_t> exhausted_guest_pc_pages;
+                        const auto clock_ids_at_start = env.guest_clock_id_counts;
+                        const auto clock_getres_at_start = env.guest_clock_getres_calls;
+                        const auto clock_unknown_at_start = env.guest_clock_unknown_id_calls;
+#endif
+                        const std::size_t total_cacheflush_at_start = env.total_arm_cacheflush_calls;
+                        const std::uint64_t cache_invalidation_us_at_start = env.total_cache_invalidation_us;
+                        const std::size_t cache_invalidation_calls_at_start = env.total_cache_invalidation_calls;
+                        const std::size_t total_exec_mprotect_at_start = env.total_executable_mprotect_calls;
+                        const std::size_t skipped_cacheflush_at_start = env.total_cacheflush_skipped_untranslated;
+                        const std::size_t invalidated_cacheflush_at_start = env.total_cacheflush_invalidated_translated;
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
                         std::uint64_t followup_main_run_us = 0;
                         std::uint64_t followup_worker_pump_us = 0;
+#endif
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                        std::size_t queue_probe_empty = 0;
+                        std::size_t queue_probe_nonempty = 0;
+                        std::size_t queue_probe_state_changes = 0;
+                        std::size_t queue_probe_invalid = 0;
+                        std::uint32_t queue_probe_last_object = 0;
+                        std::uint32_t queue_probe_last_head = 0;
+                        std::uint32_t queue_probe_last_tail = 0;
+                        bool queue_probe_had_state = false;
+                        bool queue_probe_previous_nonempty = false;
+                        std::size_t queue_probe_head_changes = 0;
+                        std::size_t queue_probe_tail_changes = 0;
+                        std::size_t queue_probe_empty_streak = 0;
+                        std::size_t queue_probe_max_empty_streak = 0;
+                        int queue_probe_last_transition_slice = -1;
+                        const auto queue_probe_started = std::chrono::steady_clock::now();
 #endif
                         std::array<std::uint32_t, 8> followup_previous_state{};
                         bool followup_have_previous_state = false;
@@ -6560,7 +10008,10 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
                             const auto worker_pump_begin = std::chrono::steady_clock::now();
 #endif
-                            followup_worker_pumps += env.PumpQueuedGuestThreads(32, 4);
+                            // Default 4 matches historical release scheduling exactly.
+                            // Override only in isolated A/B builds; do not alter guest sync semantics.
+                            followup_worker_pumps += env.PumpQueuedGuestThreads(32, PROJECTV7_WORKER_QUANTUM_SLICES);
+                            followup_worker_pumps += env.PumpHostHttpCallbacks(2);
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
                             followup_worker_pump_us += static_cast<std::uint64_t>(
                                 std::chrono::duration_cast<std::chrono::microseconds>(
@@ -6571,19 +10022,167 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                             env.premature_return = false;
                             env.failed = false;
                             env.fault_pc = 0;
-                            env.allow_main_thread_cooperative_yield = is_render_call;
+                            env.allow_main_thread_cooperative_yield = needs_worker_pump;
                             jit.ClearHalt();
                             followup_have_previous_state = false;
                             followup_same_state_slices = 0;
                             return true;
                         };
                         for (; followup_slices < kUnityFollowupMaxSlices; ++followup_slices) {
+                            if (needs_worker_pump && !is_interactive_render && !IsGuestGameLoopRunning()) break;
+                            if (env.MainTrylockWaitPending()) {
+                                const bool main_signal_ready = env.HasDeliverablePendingGuestSignal(1u) ||
+                                                               env.pending_guest_callback;
+                                if (!main_signal_ready && env.MainTrylockWaitOwnerActive() &&
+                                    followup_preload_wait_pumps < 2048u) {
+                                    env.PreferMainTrylockWaitOwner();
+                                    ++followup_preload_wait_pumps;
+                                    if (!pump_render_workers()) break;
+                                    continue;
+                                }
+                                env.ClearMainTrylockWait();
+                            }
+#if defined(__ANDROID__)
+                            if (is_render_call && followup_slices != 0 && (followup_slices % 256) == 0) {
+                                const std::string startup_thunk = env.DebugThunkNameForPc(jit.Regs()[15]);
+                                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                    "PV7STARTUP %s slice=%d pc=0x%08x lr=0x%08x sp=0x%08x r0=0x%08x workers=%zu thunk=%s",
+                                                    label, followup_slices, jit.Regs()[15], jit.Regs()[14],
+                                                    jit.Regs()[13], jit.Regs()[0], followup_worker_pumps,
+                                                    startup_thunk.empty() ? "-" : startup_thunk.c_str());
+                                if (followup_slices == 256 && startup_thunk == "pthread_mutex_trylock") {
+                                    for (const auto& thread_state : env.DebugGuestThreadStates())
+                                        __android_log_print(ANDROID_LOG_INFO, "CNR64POC", "PV7STARTUP thread %s", thread_state.c_str());
+                                }
+                            }
+#endif
                             env.ticks_left = kTicksPerSlice;
+                            // Worker quanta can queue POSIX signals for the Unity main thread.
+                            // Deliver them before resuming main guest code, just as the host
+                            // scheduler would on return to user mode. Without this, a main-thread
+                            // signal handler can be starved indefinitely while the main guest spins
+                            // in a trylock, which in turn can strand a worker waiting for that
+                            // handler's semaphore acknowledgement.
+                            env.DeliverPendingGuestSignal();
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
                             const auto main_run_begin = std::chrono::steady_clock::now();
                             const std::uint32_t main_run_pc_before = jit.Regs()[15];
 #endif
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+                            env.TraceEvent(pv7::trace::JitEnter, jit.Regs()[15], jit.Regs()[14],
+                                           static_cast<std::uint32_t>(followup_slices), jit.Regs()[0], jit.Regs()[13]);
+#endif
                             const auto halt_reason = jit.Run();
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+                            env.TraceEvent(pv7::trace::JitExit, jit.Regs()[15], jit.Regs()[14],
+                                           static_cast<std::uint32_t>(followup_slices),
+                                           static_cast<std::uint32_t>(halt_reason),
+                                           static_cast<std::uint32_t>(env.ticks_left));
+#endif
+#if defined(__ANDROID__) && defined(PROJECTV7_FAULT_CODE_SNAPSHOT) && PROJECTV7_FAULT_CODE_SNAPSHOT
+                            // Passive snapshot after each JIT slice. Does not replace any
+                            // fast-memory page or alter guest code, unlike a write trap.
+                            constexpr std::uint32_t kFaultWordAddress = 0x06bc3140u;
+                            std::uint32_t fault_word = 0u;
+                            if (Read32(memory, kFaultWordAddress, fault_word)) {
+                                if ((!env.fault_code_snapshot_initialized && fault_word != 0u) ||
+                                    (env.fault_code_snapshot_initialized &&
+                                     fault_word != env.fault_code_snapshot_last)) {
+                                    if (env.fault_code_snapshot_changes < 64u) {
+                                        __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                            "PV7CODESNAPSHOT change=%zu phase=%s slice=%d old=%08x new=%08x pc=%08x lr=%08x sp=%08x",
+                                                            env.fault_code_snapshot_changes, label, followup_slices,
+                                                            env.fault_code_snapshot_last, fault_word,
+                                                            jit.Regs()[15], jit.Regs()[14], jit.Regs()[13]);
+                                    }
+                                    ++env.fault_code_snapshot_changes;
+                                }
+#if defined(PROJECTV7_FAULT_CODE_NOP_TEST) && PROJECTV7_FAULT_CODE_NOP_TEST
+                                // One-off *diagnostic* bypass. The generated opcode is
+                                // invalid on real ARMv7 as well. Only touch the precise
+                                // observed code window; never enable in production.
+                                if (fault_word == 0xf5a00000u &&
+                                    std::strcmp(label, "nativeRenderLoop") == 0) {
+                                    std::uint32_t before0 = 0u, before1 = 0u, before2 = 0u;
+                                    std::uint32_t before3 = 0u, after0 = 0u;
+                                    const bool matches =
+                                        Read32(memory, kFaultWordAddress - 16u, before0) &&
+                                        Read32(memory, kFaultWordAddress - 12u, before1) &&
+                                        Read32(memory, kFaultWordAddress - 8u, before2) &&
+                                        Read32(memory, kFaultWordAddress - 4u, before3) &&
+                                        Read32(memory, kFaultWordAddress + 4u, after0) &&
+                                        before0 == 0xe1a0c00du && before1 == 0xe92d5ff0u &&
+                                        before2 == 0xe24dd070u && before3 == 0xe1a0b00du &&
+                                        after0 == 0xebffe3b9u;
+                                    if (matches && Write32(memory, kFaultWordAddress, 0xe1a00000u)) {
+                                        jit.InvalidateCacheRange(kFaultWordAddress, 4u);
+                                        fault_word = 0xe1a00000u;
+                                        __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                            "PV7DIAGNOP applied addr=%08x phase=%s slice=%d",
+                                                            kFaultWordAddress, label, followup_slices);
+                                    } else {
+                                        __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                            "PV7DIAGNOP skipped matches=%d before=%08x,%08x,%08x,%08x after=%08x",
+                                                            matches ? 1 : 0, before0, before1, before2,
+                                                            before3, after0);
+                                    }
+                                }
+#endif
+                                env.fault_code_snapshot_last = fault_word;
+                                env.fault_code_snapshot_initialized = true;
+                            }
+#endif
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                            if (is_render_call && std::strcmp(label, "nativeRenderFrame2") == 0) {
+                                // libunity.so at 0x002f34e8 obtains its queue object from
+                                // the relocated global pointer slot at ELF VA 0x00b8c95c.
+                                // Sample only after JIT slices. Do not intercept guest code.
+                                constexpr std::uint32_t kQueuePointerSlot = kUnityBase + 0x00b8c95cu;
+                                std::uint32_t object = 0, head = 0, tail = 0;
+                                if (!Read32(memory, kQueuePointerSlot, object) || object == 0 ||
+                                    !Read32(memory, object + 0xf4u, head) ||
+                                    !Read32(memory, object + 0xf8u, tail)) {
+                                    ++queue_probe_invalid;
+                                } else {
+                                    const bool nonempty = head != object + 0xf4u;
+                                    if (nonempty) ++queue_probe_nonempty;
+                                    else ++queue_probe_empty;
+                                    if (queue_probe_had_state && object == queue_probe_last_object) {
+                                        if (head != queue_probe_last_head) ++queue_probe_head_changes;
+                                        if (tail != queue_probe_last_tail) ++queue_probe_tail_changes;
+                                    }
+                                    if (nonempty) {
+                                        queue_probe_empty_streak = 0;
+                                    } else {
+                                        ++queue_probe_empty_streak;
+                                        queue_probe_max_empty_streak = std::max(
+                                            queue_probe_max_empty_streak, queue_probe_empty_streak);
+                                    }
+                                    if (!queue_probe_had_state ||
+                                        nonempty != queue_probe_previous_nonempty) {
+                                        const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            std::chrono::steady_clock::now() - queue_probe_started).count();
+                                        if (queue_probe_had_state) ++queue_probe_state_changes;
+                                        __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                            "PV7QUEUE transition slice=%d state=%s elapsed_ms=%lld gap_slices=%d pc=0x%08x lr=0x%08x head=0x%08x tail=0x%08x workers=%zu callbacks=%zu cache=%zu coop=%zu pending_callback=%d",
+                                                            followup_slices + 1, nonempty ? "nonempty" : "empty",
+                                                            static_cast<long long>(elapsed_ms),
+                                                            queue_probe_last_transition_slice < 0 ? -1 :
+                                                                followup_slices + 1 - queue_probe_last_transition_slice,
+                                                            jit.Regs()[15], jit.Regs()[14], head, tail,
+                                                            followup_worker_pumps, followup_guest_callbacks,
+                                                            followup_cache_restarts, followup_cooperative_yields,
+                                                            env.pending_guest_callback ? 1 : 0);
+                                        queue_probe_last_transition_slice = followup_slices + 1;
+                                    }
+                                    queue_probe_had_state = true;
+                                    queue_probe_previous_nonempty = nonempty;
+                                    queue_probe_last_object = object;
+                                    queue_probe_last_head = head;
+                                    queue_probe_last_tail = tail;
+                                }
+                            }
+#endif
 #if defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
                             const std::uint64_t main_run_elapsed_us = static_cast<std::uint64_t>(
                                 std::chrono::duration_cast<std::chrono::microseconds>(
@@ -6592,12 +10191,45 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
 #if defined(__ANDROID__)
                             if (main_run_elapsed_us >= 100000u) {
                                 const char* slow_last_call = env.call_trace.empty() ? "-" : env.call_trace.back().c_str();
+                                // Confirm slow-path guest code bytes at runtime. Ghidra's
+                                // ELF image base is 0x10000, so the correct Ghidra address
+                                // for guest 0x013deb88 is 0x003eeb88, which does decode to
+                                // the original word-scan LDR. Log the actual guest memory
+                                // once to detect unexpected runtime modifications before
+                                // optimizing the hot function or thread scheduling.
+                                static bool logged_unity_slow_code_fingerprint = false;
+                                if (!logged_unity_slow_code_fingerprint) {
+                                    logged_unity_slow_code_fingerprint = true;
+                                    std::uint32_t word_0dd0 = 0u;
+                                    std::uint32_t word_eb58 = 0u;
+                                    std::uint32_t word_eb88 = 0u;
+                                    const bool code_ok =
+                                        Read32(memory, kUnityBase + 0x003d0dd0u, word_0dd0) &&
+                                        Read32(memory, kUnityBase + 0x003deb58u, word_eb58) &&
+                                        Read32(memory, kUnityBase + 0x003deb88u, word_eb88);
+                                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                        "PV7PERF unity-code-fingerprint ok=%u base=0x%08x "
+                                                        "w_3d0dd0=0x%08x w_3deb58=0x%08x w_3deb88=0x%08x "
+                                                        "pc=0x%08x lr=0x%08x",
+                                                        code_ok ? 1u : 0u, kUnityBase,
+                                                        word_0dd0, word_eb58, word_eb88,
+                                                        jit.Regs()[15], jit.Regs()[14]);
+                                }
+                                std::uint32_t outer_caller_lr = 0u;
+                                const std::uint32_t current_pc = jit.Regs()[15];
+                                if (jit.Regs()[14] == 0x013d0dd4u &&
+                                    current_pc >= 0x013deb88u && current_pc < 0x013dec08u &&
+                                    jit.Regs()[13] <= memory.size() - 32u) {
+                                    Read32(memory, jit.Regs()[13] + 28u, outer_caller_lr);
+                                }
                                 __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
-                                                    "PV7PERF slow-main slice=%d elapsed_us=%llu ticks_left=%llu pc_before=0x%08x pc_after=0x%08x lr_after=0x%08x last=%s",
+                                                    "PV7PERF slow-main slice=%d elapsed_us=%llu ticks_left=%llu pc_before=0x%08x pc_after=0x%08x lr_after=0x%08x outer_lr=0x%08x r1=0x%08x r2=0x%08x r3=0x%08x r6=0x%08x last=%s",
                                                     followup_slices + 1,
                                                     static_cast<unsigned long long>(main_run_elapsed_us),
                                                     static_cast<unsigned long long>(env.ticks_left),
-                                                    main_run_pc_before, jit.Regs()[15], jit.Regs()[14], slow_last_call);
+                                                    main_run_pc_before, current_pc, jit.Regs()[14], outer_caller_lr,
+                                                    jit.Regs()[1], jit.Regs()[2], jit.Regs()[3],
+                                                    jit.Regs()[6], slow_last_call);
                             }
 #endif
 #endif
@@ -6615,6 +10247,7 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
 #endif
                             if (env.saw_return || env.premature_return || env.failed || !env.first_thunk.empty()) break;
                             if (env.pending_guest_callback) {
+                                ++followup_guest_callbacks;
                                 env.pending_guest_callback = false;
                                 jit.ClearHalt();
                                 continue;
@@ -6626,25 +10259,41 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                                 env.pending_cacheflush_start = 0;
                                 env.pending_cacheflush_size = 0;
                                 jit.ClearHalt();
-                                if (size != 0) jit.InvalidateCacheRange(start, size);
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+                                env.TraceEvent(pv7::trace::CacheInvalidate,
+                                               jit.Regs()[15],jit.Regs()[14],start,size);
+#endif
+                                if (size != 0) env.InvalidateTranslatedCodeRange(start, size);
                                 ++followup_cache_restarts;
+                                ++followup_pending_cache_restarts;
                                 followup_have_previous_state = false;
                                 followup_same_state_slices = 0;
                                 continue;
                             }
                             if (Dynarmic::Has(halt_reason, Dynarmic::HaltReason::CacheInvalidation)) {
                                 ++followup_cache_restarts;
+                                ++followup_dynarmic_cache_restarts;
                                 followup_have_previous_state = false;
                                 followup_same_state_slices = 0;
                                 continue;
                             }
                             if (env.ConsumeCooperativeYieldRequest()) {
+                                ++followup_cooperative_yields;
                                 if (!pump_render_workers()) break;
                                 continue;
                             }
-                            if (is_render_call && ((followup_slices + 1) % kUnityPeriodicWorkerPumpSlices) == 0) {
+                            if (needs_worker_pump && ((followup_slices + 1) % kUnityPeriodicWorkerPumpSlices) == 0) {
+                                ++followup_periodic_pumps;
                                 if (!pump_render_workers()) break;
                                 continue;
+                            }
+                            if (env.ticks_left == 0) {
+                                ++followup_tick_exhaustions;
+#if defined(PROJECTV7_STARTUP_HOTPAGE_TRACE) && PROJECTV7_STARTUP_HOTPAGE_TRACE && defined(__ANDROID__)
+                                if (is_render_call && std::strcmp(label, "nativeRenderFrame2") == 0) {
+                                    ++exhausted_guest_pc_pages[jit.Regs()[15] & ~0xfffu];
+                                }
+#endif
                             }
                             const std::array<std::uint32_t, 8> followup_state = {
                                 jit.Regs()[15], jit.Regs()[0], jit.Regs()[1], jit.Regs()[2],
@@ -6659,7 +10308,136 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                             if (followup_same_state_slices >= 8) break;
                         }
 
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                        if (is_render_call && std::strcmp(label, "nativeRenderFrame2") == 0) {
+                            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                "PV7QUEUE frame2 empty=%zu nonempty=%zu transitions=%zu invalid=%zu head_changes=%zu tail_changes=%zu max_empty_streak=%zu object=0x%08x head=0x%08x tail=0x%08x",
+                                                queue_probe_empty, queue_probe_nonempty,
+                                                queue_probe_state_changes, queue_probe_invalid,
+                                                queue_probe_head_changes, queue_probe_tail_changes,
+                                                queue_probe_max_empty_streak, queue_probe_last_object,
+                                                queue_probe_last_head, queue_probe_last_tail);
+                        }
+#endif
                         const std::uint32_t followup_result = env.saw_return ? jit.Regs()[0] : 0u;
+                        const bool followup_ok = env.saw_return && !env.failed && !env.premature_return &&
+                                                 env.first_thunk.empty();
+#if defined(__ANDROID__)
+                        if (is_render_call) {
+                            __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                "PV7STARTUP %s end slices=%d returned=%d ok=%d failed=%d premature=%d pc=0x%08x lr=0x%08x workers=%zu owner_wait_pumps=%zu cache=%zu pending_cache=%zu dyn_cache=%zu callbacks=%zu coop=%zu periodic=%zu tick_exhaust=%zu guest_cacheflush=%zu skipped_untranslated=%zu invalidated_translated=%zu exec_mprotect=%zu invalidate_us=%llu invalidate_calls=%zu thunk=%s return_sp=0x%08x return_r11=0x%08x premature_r0=0x%08x",
+                                                label, followup_slices, env.saw_return ? 1 : 0, followup_ok ? 1 : 0,
+                                                env.failed ? 1 : 0, env.premature_return ? 1 : 0,
+                                                jit.Regs()[15], jit.Regs()[14], followup_worker_pumps,
+                                                followup_preload_wait_pumps,
+                                                followup_cache_restarts, followup_pending_cache_restarts,
+                                                followup_dynarmic_cache_restarts,
+                                                followup_guest_callbacks, followup_cooperative_yields,
+                                                followup_periodic_pumps, followup_tick_exhaustions,
+                                                env.total_arm_cacheflush_calls - total_cacheflush_at_start,
+                                                env.total_cacheflush_skipped_untranslated - skipped_cacheflush_at_start,
+                                                env.total_cacheflush_invalidated_translated - invalidated_cacheflush_at_start,
+                                                env.total_executable_mprotect_calls - total_exec_mprotect_at_start,
+                                                static_cast<unsigned long long>(env.total_cache_invalidation_us - cache_invalidation_us_at_start),
+                                                env.total_cache_invalidation_calls - cache_invalidation_calls_at_start,
+                                                env.first_thunk.empty() ? "-" : env.first_thunk.c_str(),
+                                                env.return_sp, env.return_r11, env.premature_r0);
+#if defined(PROJECTV7_STARTUP_HOTPAGE_TRACE) && PROJECTV7_STARTUP_HOTPAGE_TRACE && defined(__ANDROID__)
+                            if (std::strcmp(label, "nativeRenderFrame2") == 0) {
+                                std::vector<std::pair<std::uint32_t, std::size_t>> hottest(
+                                    exhausted_guest_pc_pages.begin(), exhausted_guest_pc_pages.end());
+                                std::sort(hottest.begin(), hottest.end(),
+                                          [](const auto& a, const auto& b) { return a.second > b.second; });
+                                for (std::size_t i = 0; i < std::min<std::size_t>(hottest.size(), 18u); ++i) {
+                                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                        "PV7HOTPAGE page=%08x tick_exhaust=%zu rank=%zu",
+                                                        hottest[i].first, hottest[i].second, i + 1u);
+                                }
+                                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                    "PV7CLOCK frame2 realtime=%llu monotonic=%llu process=%llu thread=%llu monotonic_raw=%llu realtime_coarse=%llu monotonic_coarse=%llu boottime=%llu getres=%llu unknown=%llu",
+                                                    static_cast<unsigned long long>(env.guest_clock_id_counts[0] - clock_ids_at_start[0]),
+                                                    static_cast<unsigned long long>(env.guest_clock_id_counts[1] - clock_ids_at_start[1]),
+                                                    static_cast<unsigned long long>(env.guest_clock_id_counts[2] - clock_ids_at_start[2]),
+                                                    static_cast<unsigned long long>(env.guest_clock_id_counts[3] - clock_ids_at_start[3]),
+                                                    static_cast<unsigned long long>(env.guest_clock_id_counts[4] - clock_ids_at_start[4]),
+                                                    static_cast<unsigned long long>(env.guest_clock_id_counts[5] - clock_ids_at_start[5]),
+                                                    static_cast<unsigned long long>(env.guest_clock_id_counts[6] - clock_ids_at_start[6]),
+                                                    static_cast<unsigned long long>(env.guest_clock_id_counts[7] - clock_ids_at_start[7]),
+                                                    static_cast<unsigned long long>(env.guest_clock_getres_calls - clock_getres_at_start),
+                                                    static_cast<unsigned long long>(env.guest_clock_unknown_id_calls - clock_unknown_at_start));
+                            }
+#endif
+                            if (is_interactive_render && !followup_ok && env.premature_return) {
+                                const std::size_t frame_count = std::min<std::size_t>(env.premature_frames.size(), 6u);
+                                for (std::size_t i = 0; i < frame_count; ++i) {
+                                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                        "PV7PREMATURE frame[%zu] fp=0x%08x lr=0x%08x",
+                                                        i, env.premature_frames[i].first, env.premature_frames[i].second);
+                                }
+                            }
+                            if (is_interactive_render && !followup_ok && env.failed) {
+                                __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                    "PV7FAULT fault_pc=0x%08x exception=%d invalid_code=0x%08x fallback=%zu bad_write=0x%08x bad_write_size=%zu bad_write_pc=0x%08x bad_write_lr=0x%08x jni_slot=%u jni_null=%d code_reads=%08x,%08x,%08x,%08x",
+                                                    env.fault_pc, env.fault_exception, env.invalid_code_address,
+                                                    env.fallback_instruction_count, env.bad_write_address,
+                                                    env.bad_write_size, env.bad_write_pc, env.bad_write_lr,
+                                                    env.jni_unknown_slot, env.jni_null_code_seen ? 1 : 0,
+                                                    env.code_read_last, env.code_read_prev1,
+                                                    env.code_read_prev2, env.code_read_prev3);
+                                if (env.bad_write_address != 0u) {
+                                    // Fault-only: preserve source registers for bogus guest
+                                    // object pointers (e.g. Mono str [r3,#0x94]).
+                                    __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                        "PV7BADWRITE context addr=%08x pc=%08x lr=%08x r0=%08x r1=%08x r2=%08x r3=%08x fp=%08x sp=%08x cfg=%08x cfg_field14=%08x field88=%08x local144=%08x local84c=%08x cfg_field00=%08x bad_next_from=%08x hops=%u prev_word0=%08x prev_word8=%08x end_node=%08x end_next=%08x stop_reason=%u",
+                                                        env.bad_write_address, env.bad_write_pc,
+                                                        env.bad_write_lr, env.bad_write_r0,
+                                                        env.bad_write_r1, env.bad_write_r2,
+                                                        env.bad_write_r3, env.bad_write_fp,
+                                                        env.bad_write_sp, env.bad_write_mono_cfg,
+                                                        env.bad_write_mono_cfg_field14,
+                                                        env.bad_write_mono_field88,
+                                                        env.bad_write_mono_local144,
+                                                        env.bad_write_mono_local84c,
+                                                        env.bad_write_mono_cfg_field00,
+                                                        env.bad_write_list_bad_link_source,
+                                                        env.bad_write_list_bad_link_hops,
+                                                        env.bad_write_list_source_word0,
+                                                        env.bad_write_list_source_word8,
+                                                        env.bad_write_list_end_node,
+                                                        env.bad_write_list_end_next,
+                                                        env.bad_write_list_stop_reason);
+                                }
+                            }
+                        }
+#endif
+#if defined(__ANDROID__) && defined(PROJECTV7_DEV_DIAGNOSTICS) && PROJECTV7_DEV_DIAGNOSTICS
+                        if (is_render_call) env.LogGuestThreadPerf(label);
+#endif
+#if defined(PROJECTV7_TEST_BINARY_CALL_TRACE) && PROJECTV7_TEST_BINARY_CALL_TRACE && defined(__ANDROID__)
+                        env.TraceEvent(pv7::trace::Phase,jit.Regs()[15],jit.Regs()[14],
+                                       pv7_phase_hash, 0u,
+                                       static_cast<std::uint32_t>(followup_slices),
+                                       followup_ok ? 1u : 0u);
+                        env.FlushTrace();
+#endif
+                        if (!followup_ok)
+                            report << "    Native call failed label=" << label << " slices=" << followup_slices
+                                   << " returned=" << env.saw_return << " failed=" << env.failed
+                                   << " premature=" << env.premature_return
+                                   << " thunk=" << env.first_thunk << " workers=" << followup_worker_pumps << "\n";
+                        if (quiet) {
+#if defined(__ANDROID__)
+                            if (is_input_call) {
+                                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                    "PV7INPUT native returned=%d result=0x%08x failed=%d premature=%d thunk=%s slices=%d worker_pumps=%zu",
+                                                    env.saw_return ? 1 : 0, followup_result,
+                                                    env.failed ? 1 : 0, env.premature_return ? 1 : 0,
+                                                    env.first_thunk.empty() ? "-" : env.first_thunk.c_str(),
+                                                    followup_slices, followup_worker_pumps);
+                            }
+#endif
+                            return followup_ok;
+                        }
                         report << "    Shared-state Unity " << label << " execution: slices=" << followup_slices
                                << " cache_restarts=" << followup_cache_restarts
                                << " worker_pumps=" << followup_worker_pumps
@@ -6671,7 +10449,16 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                                    << " sp=0x" << jit.Regs()[13] << " r0=0x" << jit.Regs()[0]
                                    << " r1=0x" << jit.Regs()[1] << " r2=0x" << jit.Regs()[2]
                                    << " r3=0x" << jit.Regs()[3] << std::dec
-                                   << " same_state_slices=" << followup_same_state_slices << "\n";
+                                   << " same_state_slices=" << followup_same_state_slices;
+                            const std::string stopped_thunk = env.DebugThunkNameForPc(jit.Regs()[15]);
+                            if (!stopped_thunk.empty()) report << " thunk=" << stopped_thunk;
+                            report << "\n";
+                            const auto thread_states = env.DebugGuestThreadStates();
+                            if (!thread_states.empty()) {
+                                report << "    Shared-state Unity " << label << " complete guest thread table:\n";
+                                for (const auto& thread_line : thread_states)
+                                    report << "      " << thread_line << "\n";
+                            }
                         }
                         if (env.pthread_once_callbacks != 0) {
                             report << "    Shared-state Unity " << label << " pthread_once initializers executed: "
@@ -6773,8 +10560,10 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                             "nativeFile", unity_native_file, kJniFakeStringHandle, 0, 0, 0,
                             &package_code_path);
                         if (native_file_ok) {
+                            const std::uint32_t www_class_handle =
+                                env.GetOrCreateJniClassHandle("com/unity3d/player/WWW");
                             const bool init_www_ok = run_unity_registered_native(
-                                "nativeInitWWW", unity_native_init_www, kJniFakeClassHandle, 0, 0, 0);
+                                "nativeInitWWW", unity_native_init_www, www_class_handle, 0, 0, 0);
                             if (init_www_ok) {
                             const bool default_display_ok = run_unity_registered_native(
                                 "nativeSetDefaultDisplay", unity_native_set_default_display, 0, 0, 0, 0);
@@ -6793,6 +10582,8 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                                         if (height > 0) surface_height = static_cast<std::uint32_t>(height);
                                     }
 #endif
+                                    env.guest_display_width = surface_width;
+                                    env.guest_display_height = surface_height;
                                     report << "    Shared-state Unity host surface size: "
                                            << surface_width << "x" << surface_height << "\n";
                                     const bool resize_ok = run_unity_registered_native(
@@ -6802,6 +10593,10 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                                         const bool resume_ok = run_unity_registered_native(
                                             "nativeResume", unity_native_resume, 0, 0, 0, 0);
                                         if (resume_ok) {
+                                            const bool focus_ok = run_unity_registered_native(
+                                                "nativeFocusChanged", unity_native_focus_changed, 1u, 0, 0, 0);
+                                            if (!focus_ok)
+                                                report << "    Shared-state Unity focus acquisition failed\n";
                                             std::uint32_t unity_free_got_before_render = 0;
                                             Read32(memory, kUnityBase + 0x00a89000u, unity_free_got_before_render);
                                             report << "    Shared-state Unity free GOT before nativeRender: got=0x"
@@ -6814,17 +10609,286 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
                                             const bool first_render_ok = run_unity_registered_native(
                                                 "nativeRender", unity_native_render, 0, 0, 0, 0);
                                             if (first_render_ok) {
+                                                // nativeResize ignores dimensions before Unity initializes its renderer.
+                                                // Replay the resize after the first nativeRender has initialized it.
+                                                const bool late_resize_ok = run_unity_registered_native(
+                                                    "nativeResizeAfterInit", unity_native_resize,
+                                                    surface_width, surface_height, surface_width, surface_height);
+                                                report << "    Shared-state Unity post-init resize: "
+                                                       << (late_resize_ok ? "PASS" : "FAIL") << "\n";
                                                 const std::size_t pumped_threads =
                                                     env.PumpQueuedGuestThreads(32, 4);
                                                 report << "    Shared-state Unity queued worker threads pumped: "
                                                        << pumped_threads << "\n";
                                                 for (const auto& thread_line : env.guest_thread_pump_trace)
                                                     report << "      " << thread_line << "\n";
+#if !defined(PROJECTV7_DEV_DIAGNOSTICS) || !PROJECTV7_DEV_DIAGNOSTICS
+                                                // Frame-two cooperative pumps can execute thousands
+                                                // of times; production does not consume their traces.
+                                                env.record_pump_trace = false;
+#endif
                                                 const bool second_render_ok = run_unity_registered_native(
                                                     "nativeRenderFrame2", unity_native_render, 0, 0, 0, 0);
                                                 if (second_render_ok) {
-                                                    run_unity_registered_native(
+                                                    const bool third_render_ok = run_unity_registered_native(
                                                         "nativeRenderFrame3", unity_native_render, 0, 0, 0, 0);
+                                                    if (third_render_ok) {
+#if defined(__ANDROID__)
+                                                        AndroidAudioOutput audio_output;
+                                                        std::uint32_t fmod_audio_buffer = 0;
+                                                        std::uint32_t fmod_audio_bytes = 0;
+                                                        std::uint32_t fmod_sample_rate = 0;
+                                                        std::uint32_t fmod_block_frames = 0;
+                                                        bool fmod_audio_ready = false;
+                                                        bool fmod_logged_pcm = false;
+
+                                                        auto fmod_get_info = [&](std::uint32_t index,
+                                                                                 std::uint32_t& value) -> bool {
+                                                            if (unity_fmod_get_info == 0) return false;
+                                                            if (!run_unity_registered_native(
+                                                                    "fmodGetInfo", unity_fmod_get_info,
+                                                                    index, 0, 0, 0, nullptr, true)) {
+                                                                return false;
+                                                            }
+                                                            value = jit.Regs()[0];
+                                                            return true;
+                                                        };
+
+                                                        __android_log_print(
+                                                            ANDROID_LOG_INFO, "CNR64POC",
+                                                            "PV7AUDIO natives init=0x%08x info=0x%08x process=0x%08x block=0x%08x unblock=0x%08x",
+                                                            unity_fmod_init_jni, unity_fmod_get_info,
+                                                            unity_fmod_process, unity_fmod_block_streaming,
+                                                            unity_fmod_unblock_streaming);
+
+                                                        if (unity_fmod_init_jni != 0 && unity_fmod_get_info != 0 &&
+                                                            unity_fmod_process != 0) {
+                                                            const bool fmod_init_ok = run_unity_registered_native(
+                                                                "fmodInitJni", unity_fmod_init_jni,
+                                                                0, 0, 0, 0, nullptr, true);
+                                                            const bool fmod_unblock_ok =
+                                                                unity_fmod_unblock_streaming == 0 ||
+                                                                run_unity_registered_native(
+                                                                    "fmodUnblockStreaming",
+                                                                    unity_fmod_unblock_streaming,
+                                                                    0, 0, 0, 0, nullptr, true);
+                                                            std::uint32_t fmod_output_ready = 0;
+                                                            const bool info_ok =
+                                                                fmod_get_info(0, fmod_sample_rate) &&
+                                                                fmod_get_info(1, fmod_block_frames) &&
+                                                                fmod_get_info(3, fmod_output_ready);
+                                                            const std::uint64_t bytes64 =
+                                                                static_cast<std::uint64_t>(fmod_block_frames) * 4u;
+                                                            if (fmod_init_ok && fmod_unblock_ok && info_ok &&
+                                                                fmod_sample_rate >= 8000u &&
+                                                                fmod_sample_rate <= 192000u &&
+                                                                fmod_block_frames != 0u &&
+                                                                bytes64 <= 1024u * 1024u) {
+                                                                fmod_audio_bytes = static_cast<std::uint32_t>(bytes64);
+                                                                fmod_audio_buffer = env.AllocateGuestBuffer(
+                                                                    fmod_audio_bytes, 16u);
+                                                                if (fmod_audio_buffer != 0u) {
+                                                                    env.SetJniDirectBuffer(fmod_audio_buffer,
+                                                                                           fmod_audio_bytes);
+                                                                    fmod_audio_ready =
+                                                                        audio_output.Configure(fmod_sample_rate);
+                                                                }
+                                                            }
+                                                            __android_log_print(
+                                                                fmod_audio_ready ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+                                                                "CNR64POC",
+                                                                "PV7AUDIO configure init=%d unblock=%d info=%d rate=%u frames=%u bytes=%u outputReady=%u guest=0x%08x opensl=%d",
+                                                                fmod_init_ok ? 1 : 0,
+                                                                fmod_unblock_ok ? 1 : 0,
+                                                                info_ok ? 1 : 0,
+                                                                fmod_sample_rate, fmod_block_frames,
+                                                                fmod_audio_bytes, fmod_output_ready,
+                                                                fmod_audio_buffer,
+                                                                fmod_audio_ready ? 1 : 0);
+                                                        }
+
+                                                        auto pump_fmod_audio = [&]() {
+                                                            if (!fmod_audio_ready || fmod_audio_buffer == 0u ||
+                                                                fmod_audio_bytes == 0u) return;
+                                                            for (int block = 0;
+                                                                 block < 4 && audio_output.CanAccept(); ++block) {
+                                                                std::uint32_t output_ready = 0;
+                                                                if (!fmod_get_info(3, output_ready) || output_ready != 1u)
+                                                                    break;
+                                                                if (!run_unity_registered_native(
+                                                                        "fmodProcess", unity_fmod_process,
+                                                                        kJniFakeDirectBufferHandle,
+                                                                        0, 0, 0, nullptr, true)) {
+                                                                    __android_log_print(
+                                                                        ANDROID_LOG_WARN, "CNR64POC",
+                                                                        "PV7AUDIO fmodProcess failed");
+                                                                    fmod_audio_ready = false;
+                                                                    break;
+                                                                }
+                                                                const std::uint8_t* pcm = env.GuestBytes(
+                                                                    fmod_audio_buffer, fmod_audio_bytes);
+                                                                if (!pcm) {
+                                                                    fmod_audio_ready = false;
+                                                                    break;
+                                                                }
+                                                                if (!fmod_logged_pcm) {
+                                                                    std::uint32_t peak = 0;
+                                                                    for (std::uint32_t offset = 0;
+                                                                         offset + 1u < fmod_audio_bytes;
+                                                                         offset += 2u) {
+                                                                        std::int16_t sample = 0;
+                                                                        std::memcpy(&sample, pcm + offset,
+                                                                                    sizeof(sample));
+                                                                        const std::uint32_t magnitude =
+                                                                            sample == INT16_MIN
+                                                                                ? 32768u
+                                                                                : static_cast<std::uint32_t>(
+                                                                                      std::abs(static_cast<int>(sample)));
+                                                                        peak = std::max(peak, magnitude);
+                                                                    }
+                                                                    __android_log_print(
+                                                                        ANDROID_LOG_INFO, "CNR64POC",
+                                                                        "PV7AUDIO first PCM block peak=%u bytes=%u",
+                                                                        peak, fmod_audio_bytes);
+                                                                    fmod_logged_pcm = true;
+                                                                }
+                                                                if (!audio_output.Enqueue(pcm, fmod_audio_bytes))
+                                                                    break;
+                                                            }
+                                                        };
+                                                        pump_fmod_audio();
+#endif
+                                                        report << "    Shared-state Unity interactive game loop: STARTED"
+                                                               << " nativeInjectEvent=0x" << std::hex
+                                                               << unity_native_inject_event << std::dec << "\n";
+                                                        std::uint32_t unity_input_get_touch_count = 0u;
+                                                        const bool have_touch_count_address =
+                                                            pv7::compat::LookupGuestAddress(
+                                                                "UnityEngine.Input::get_touchCount",
+                                                                unity_input_get_touch_count);
+                                                        std::uint64_t frame_index = 3;
+                                                        unsigned slow_frame_reports = 0;
+                                                        while (IsGuestGameLoopRunning()) {
+                                                            bool had_touch_this_frame = false;
+                                                            int touch_action_this_frame = -1;
+                                                            HostTouchEvent touch;
+                                                            if (PopHostTouchEvent(touch)) {
+                                                                had_touch_this_frame = true;
+                                                                touch_action_this_frame = touch.action;
+                                                                env.MapNormalizedHostTouch(touch);
+                                                                env.active_touch_event = std::move(touch);
+                                                                env.active_touch_identity = env.next_touch_identity++;
+                                                                bool input_ok = unity_native_inject_event != 0;
+                                                                if (input_ok) {
+                                                                    input_ok = run_unity_registered_native(
+                                                                        "nativeInjectEvent", unity_native_inject_event,
+                                                                        kJniFakeMotionEventHandle, 0, 0, 0,
+                                                                        nullptr, true);
+                                                                }
+#if defined(__ANDROID__)
+                                                                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                                                    "PV7INPUT inject action=%d pointers=%zu x=%.1f y=%.1f ok=%d",
+                                                                                    env.active_touch_event->action,
+                                                                                    env.active_touch_event->points.size(),
+                                                                                    env.active_touch_event->points.empty() ? 0.0f : env.active_touch_event->points[0].x,
+                                                                                    env.active_touch_event->points.empty() ? 0.0f : env.active_touch_event->points[0].y,
+                                                                                    input_ok ? 1 : 0);
+#endif
+                                                                std::uint32_t touch_count_after_inject = 0u;
+                                                                if (input_ok && have_touch_count_address &&
+                                                                    run_unity_registered_native(
+                                                                        "debugTouchCountAfterInject", unity_input_get_touch_count,
+                                                                        0, 0, 0, 0, nullptr, true)) {
+                                                                    touch_count_after_inject = jit.Regs()[0];
+#if defined(__ANDROID__)
+                                                                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                                                        "PV7INPUT touchCount after inject action=%d count=%u",
+                                                                                        touch_action_this_frame, touch_count_after_inject);
+#endif
+                                                                }
+
+                                                                env.active_touch_event.reset();
+                                                                env.active_touch_identity = 0;
+                                                            }
+                                                            if(auto text=PopHostTextEvent()) {
+                                                                if(unity_input_string)run_unity_registered_native("nativeSetInputString",unity_input_string,env.NewHostInputString(text->text),0,0,0,nullptr,true);
+                                                                if(text->closed) {
+                                                                    if(unity_input_canceled)run_unity_registered_native("nativeSetInputCanceled",unity_input_canceled,text->canceled?1:0,0,0,0,nullptr,true);
+                                                                    if(unity_input_closed)run_unity_registered_native("nativeSoftInputClosed",unity_input_closed,0,0,0,0,nullptr,true);
+                                                                }
+                                                            }
+                                                            const auto render_begin=std::chrono::steady_clock::now();
+                                                            const bool render_ok=run_unity_registered_native(
+                                                                    "nativeRenderLoop", unity_native_render,
+                                                                    0, 0, 0, 0, nullptr, true);
+                                                            const auto render_ms=std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                                std::chrono::steady_clock::now()-render_begin).count();
+                                                            if (render_ms>250 && slow_frame_reports++<32)
+                                                                report << "    Slow frame=" << frame_index << " duration_ms=" << render_ms << "\n";
+                                                            if (!render_ok) {
+                                                                report << "    " << env.DescribeStoppedCall() << "\n";
+#if defined(__ANDROID__)
+                                                                __android_log_print(ANDROID_LOG_ERROR, "CNR64POC",
+                                                                                    "PV7GAME render loop stopped at frame=%llu",
+                                                                                    static_cast<unsigned long long>(frame_index));
+#endif
+                                                                break;
+                                                            }
+#if defined(__ANDROID__)
+                                                            // Keep translated background workers alive even when nativeRender
+                                                            // returns in its first slice. Without this per-frame quantum,
+                                                            // Unity 4.6's WWW worker can remain permanently in New state.
+                                                            env.PumpFrameBackgroundWork();
+                                                            pump_fmod_audio();
+#endif
+                                                            if (had_touch_this_frame && have_touch_count_address &&
+                                                                run_unity_registered_native(
+                                                                    "debugTouchCountAfterRender", unity_input_get_touch_count,
+                                                                    0, 0, 0, 0, nullptr, true)) {
+#if defined(__ANDROID__)
+                                                                __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                                                    "PV7INPUT touchCount after render action=%d count=%u frame=%llu",
+                                                                                    touch_action_this_frame, jit.Regs()[0],
+                                                                                    static_cast<unsigned long long>(frame_index));
+#endif
+                                                            }
+#if defined(__ANDROID__)
+                                                            if ((frame_index % 60u) == 0u &&
+                                                                g_thread_snapshot_count.fetch_add(1) < 8u) {
+                                                                for (const auto& state : env.DebugGuestThreadStates()) {
+                                                                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+                                                                                        "PV7THREAD state frame=%llu %s",
+                                                                                        static_cast<unsigned long long>(frame_index),
+                                                                                        state.c_str());
+                                                                }
+                                                            }
+#endif
+                                                            ++frame_index;
+                                                        }
+#if defined(__ANDROID__)
+                                                        if (unity_fmod_block_streaming != 0) {
+                                                            run_unity_registered_native(
+                                                                "audioBlockStreaming",
+                                                                unity_fmod_block_streaming,
+                                                                0, 0, 0, 0, nullptr, true);
+                                                        }
+                                                        audio_output.Shutdown();
+#endif
+                                                        env.active_touch_event.reset();
+                                                        if (unity_native_focus_changed != 0) {
+                                                            run_unity_registered_native(
+                                                                "nativeFocusChanged(false)", unity_native_focus_changed,
+                                                                0u, 0, 0, 0, nullptr, true);
+                                                        }
+                                                        if (unity_native_pause != 0) {
+                                                            run_unity_registered_native(
+                                                                "nativePause", unity_native_pause,
+                                                                0, 0, 0, 0, nullptr, true);
+                                                        }
+                                                        env.ShutdownHostGraphics();
+                                                        report << "    Shared-state Unity interactive game loop: STOPPED after frame="
+                                                               << frame_index << "\n";
+                                                    }
                                                 }
                                             }
                                         }
@@ -6845,15 +10909,51 @@ std::string RunMonoBootstrapTrapProbe(std::vector<std::uint8_t> memory,
 }
 } // namespace
 
+void QueueHostTextEvent(std::string text,bool closed,bool canceled) {
+    std::lock_guard<std::mutex> lock(g_host_text_mutex);
+    g_host_text_event=HostTextEvent{std::move(text),closed,canceled};
+}
+
+bool ConsumeGuestRestartRequest() { return g_guest_restart_requested.exchange(false); }
+
+void QueueHostTouchEvent(HostTouchEvent event) {
+    std::lock_guard<std::mutex> lock(g_host_touch_mutex);
+    const std::int32_t masked_action = event.action & 0xff;
+    if (masked_action == 2 && !g_host_touch_queue.empty() &&
+        ((g_host_touch_queue.back().action & 0xff) == 2)) {
+        g_host_touch_queue.back() = std::move(event);
+    } else {
+        if (g_host_touch_queue.size() >= 128) g_host_touch_queue.pop_front();
+        g_host_touch_queue.push_back(std::move(event));
+    }
+}
+
+void ClearHostTouchEvents() {
+    std::lock_guard<std::mutex> lock(g_host_touch_mutex);
+    g_host_touch_queue.clear();
+}
+
+void SetGuestGameLoopRunning(bool running) {
+    if (running) ClearHostTouchEvents();
+    g_guest_game_loop_running.store(running, std::memory_order_release);
+    if (!running) ClearHostTouchEvents();
+}
+
+bool IsGuestGameLoopRunning() {
+    return g_guest_game_loop_running.load(std::memory_order_acquire);
+}
+
 SharedGuestLinkResult RunSharedGuestLinkProbe(const std::string& libMainPath,
                                               const std::string& libUnityPath,
                                               const std::string& libMonoPath,
                                               const std::string& managedDirPath,
                                               const std::string& packageCodePath,
-                                              void* hostNativeWindow) {
+                                              void* hostNativeWindow,
+                                              void* hostJniEnv) {
     std::ostringstream report;
     report << "\nShared ARM32 guest linker probe:\n";
-    std::vector<std::uint8_t> memory(kGuestMemorySize, 0);
+    GuestMemory memory(kGuestMemorySize, 0);
+    DiscardGuestPages(memory, 0, memory.size());
 
     std::vector<GuestImage> images = {
         {"libmain.so", libMainPath, kMainBase},
@@ -6919,7 +11019,8 @@ SharedGuestLinkResult RunSharedGuestLinkProbe(const std::string& libMainPath,
     if (!shared_exec_ok && fault_pc) report << " fault_pc=0x" << std::hex << fault_pc << std::dec;
     report << "\n";
 
-    report << RunMonoBootstrapTrapProbe(memory, exports, unresolved, managedDirPath, packageCodePath, hostNativeWindow) << "\n";
+    report << RunMonoBootstrapTrapProbe(memory, exports, unresolved, managedDirPath, packageCodePath,
+                                         hostNativeWindow, hostJniEnv) << "\n";
 
     const bool cross_ok = total.cross > 0 && total.unity_to_mono > 0;
     const bool ok = cross_ok && shared_exec_ok;

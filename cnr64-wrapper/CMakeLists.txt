@@ -10,6 +10,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # fixes before baking them into the normal bridge/runtime implementation.
 option(PROJECTV7_DEV_HOTPATCH "Enable developer-only live compatibility hotpatching" OFF)
 option(PROJECTV7_DEV_DIAGNOSTICS "Enable verbose developer compatibility tracing" OFF)
+set(PROJECTV7_WORKER_QUANTUM_SLICES 4 CACHE STRING "Number of guest thread slices per pump")
+if(NOT PROJECTV7_WORKER_QUANTUM_SLICES MATCHES "^[0-9]+$" OR PROJECTV7_WORKER_QUANTUM_SLICES LESS 1 OR PROJECTV7_WORKER_QUANTUM_SLICES GREATER 16)
+    message(FATAL_ERROR "Invalid guest thread pump quantum")
+endif()
 set(PROJECTV7_COMPAT_MODULES "" CACHE STRING "Semicolon-separated embedded compatibility modules")
 
 set(DYNARMIC_FRONTENDS "A32" CACHE STRING "" FORCE)
@@ -39,11 +43,24 @@ set(PROJECTV7_CORE_SOURCES
 )
 
 set(PV7_COMPAT_MODULE_CNR 0)
+set(PV7_COMPAT_MODULE_COCOS2DX 0)
 foreach(PV7_COMPAT_MODULE IN LISTS PROJECTV7_COMPAT_MODULES)
     if(PV7_COMPAT_MODULE STREQUAL "cnr")
         set(PV7_COMPAT_MODULE_CNR 1)
         list(APPEND PROJECTV7_CORE_SOURCES
             compat_modules/cnr/cnr_compat_module.cpp
+        )
+    elseif(PV7_COMPAT_MODULE STREQUAL "cocos2dx")
+        set(PV7_COMPAT_MODULE_COCOS2DX 1)
+        list(APPEND PROJECTV7_CORE_SOURCES
+            compat_modules/cocos2dx/cocos2dx_compat_module.cpp
+            compat_modules/cocos2dx/cocos2dx_jni_marshaller.cpp
+            compat_modules/cocos2dx/cocos2dx_bitmap_pixels.cpp
+            compat_modules/cocos2dx/cocos2dx_guest_jni_arrays.cpp
+            compat_modules/cocos2dx/cocos2dx_jni_refs.cpp
+            compat_modules/cocos2dx/cocos2dx_guest_math.cpp
+            compat_modules/cocos2dx/elf/arm32_guest_image.cpp
+            compat_modules/cocos2dx/elf/arm32_guest_relocations.cpp
         )
     elseif(NOT PV7_COMPAT_MODULE STREQUAL "")
         message(FATAL_ERROR "Unknown ProjectV7 compatibility module: ${PV7_COMPAT_MODULE}")
@@ -64,6 +81,8 @@ target_compile_definitions(projectv7-core PRIVATE
     PROJECTV7_DEV_HOTPATCH=$<BOOL:${PROJECTV7_DEV_HOTPATCH}>
     PROJECTV7_DEV_DIAGNOSTICS=$<BOOL:${PROJECTV7_DEV_DIAGNOSTICS}>
     PV7_COMPAT_MODULE_CNR=${PV7_COMPAT_MODULE_CNR}
+    PROJECTV7_WORKER_QUANTUM_SLICES=${PROJECTV7_WORKER_QUANTUM_SLICES}
+    PV7_COMPAT_MODULE_COCOS2DX=${PV7_COMPAT_MODULE_COCOS2DX}
 )
 if(PROJECTV7_DEV_HOTPATCH)
     target_include_directories(projectv7-core PRIVATE devtools/hotpatch)
@@ -85,6 +104,32 @@ if(ANDROID)
     target_link_libraries(pv7host PRIVATE projectv7-core log android EGL GLESv2 OpenSLES z dl)
     set_target_properties(pv7host PROPERTIES OUTPUT_NAME "pv7host")
 
+    # Runs the original ARM32 Cocos ELF using Dynarmic on Android.
+    # This is a developer-only executable; it does not embed a game APK or
+    # alter the production wrapper and fails closed on unknown guest calls.
+    if(PV7_COMPAT_MODULE_COCOS2DX)
+        add_executable(pv7-cocos-firstcall-android EXCLUDE_FROM_ALL
+            devtools/cocos_probe/src/pv7_cocos_firstcall.cpp
+        )
+        target_include_directories(pv7-cocos-firstcall-android PRIVATE
+            devtools/cocos_probe
+            compat_modules/cocos2dx/elf
+        )
+        add_library(pv7cocosprobe SHARED EXCLUDE_FROM_ALL
+            devtools/cocos_probe/src/pv7_cocos_firstcall.cpp
+        )
+        target_compile_definitions(pv7cocosprobe PRIVATE PV7_COCOS_JNI_RUNNER=1)
+        target_include_directories(pv7cocosprobe PRIVATE
+            devtools/cocos_probe
+            compat_modules/cocos2dx/elf
+        )
+        target_link_libraries(pv7cocosprobe PRIVATE
+            projectv7-core log android EGL GLESv2 z dl
+        )
+        target_link_libraries(pv7-cocos-firstcall-android PRIVATE
+            projectv7-core log android EGL GLESv2 z dl
+        )
+    endif()
     # Transitional legacy target for the existing CNR wrapper while it is
     # migrated onto the generic app.projectv7.wrapper host template.
     add_library(cnr64poc SHARED

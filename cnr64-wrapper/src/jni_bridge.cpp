@@ -8,6 +8,7 @@
 
 #include "a32_test_core.h"
 #include "shared_guest_linker.h"
+#include "pv7_compat_module_registry.h"
 #include "unity_guest_probe.h"
 
 namespace {
@@ -17,6 +18,10 @@ std::string ToString(JNIEnv* env, jstring value) {
     const std::string result = chars ? chars : "";
     if (chars) env->ReleaseStringUTFChars(value, chars);
     return result;
+}
+
+void NativeConfigureCompat(JNIEnv* env, jclass, jstring configText) {
+    pv7::compat::ConfigureRuntimeModule(ToString(env, configText));
 }
 
 jstring NativeRunSelfTest(JNIEnv* env, jclass,
@@ -47,6 +52,8 @@ jstring NativeRunUnityJniStage(JNIEnv* env, jclass,
                                                                   static_cast<int>(eventLimit));
     return env->NewStringUTF(result.report.c_str());
 }
+
+jboolean NativeConsumeRestartRequest(JNIEnv*, jclass) { return ConsumeGuestRestartRequest() ? JNI_TRUE : JNI_FALSE; }
 
 void NativeSetGameLoopRunning(JNIEnv*, jclass, jboolean running) {
     SetGuestGameLoopRunning(running == JNI_TRUE);
@@ -110,7 +117,19 @@ void NativeQueueTouch(JNIEnv* env, jclass,
     QueueHostTouchEvent(std::move(event));
 }
 
+void NativeQueueText(JNIEnv* env,jclass,jstring text,jboolean closed,jboolean canceled) {
+    const char* utf=text?env->GetStringUTFChars(text,nullptr):nullptr;
+    QueueHostTextEvent(utf?utf:"",closed==JNI_TRUE,canceled==JNI_TRUE);
+    if(utf)env->ReleaseStringUTFChars(text,utf);
+}
+
 const JNINativeMethod kMainActivityMethods[] = {
+
+        {
+                const_cast<char*>("nativeConfigureCompat"),
+                const_cast<char*>("(Ljava/lang/String;)V"),
+                reinterpret_cast<void*>(NativeConfigureCompat),
+        },
         {
                 const_cast<char*>("nativeRunSelfTest"),
                 const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Landroid/view/Surface;I)Ljava/lang/String;"),
@@ -140,10 +159,27 @@ bool TryRegisterMainActivity(JNIEnv* env, const char* className) {
         return false;
     }
 
-    const jint result = env->RegisterNatives(
+    jint result = env->RegisterNatives(
             clazz,
             kMainActivityMethods,
             static_cast<jint>(sizeof(kMainActivityMethods) / sizeof(kMainActivityMethods[0])));
+    // Keep older generic host Java compatible with the extended native host.
+    if (result == JNI_OK) {
+        if (env->GetStaticMethodID(clazz, "nativeConsumeRestartRequest", "()Z")) {
+            const JNINativeMethod restartMethod{const_cast<char*>("nativeConsumeRestartRequest"),
+                const_cast<char*>("()Z"), reinterpret_cast<void*>(NativeConsumeRestartRequest)};
+            result = env->RegisterNatives(clazz, &restartMethod, 1);
+        } else if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+    }
+    if(result==JNI_OK) {
+        if(env->GetStaticMethodID(clazz,"nativeQueueText","(Ljava/lang/String;ZZ)V")) {
+            const JNINativeMethod textMethod{const_cast<char*>("nativeQueueText"),
+                const_cast<char*>("(Ljava/lang/String;ZZ)V"),reinterpret_cast<void*>(NativeQueueText)};
+            result=env->RegisterNatives(clazz,&textMethod,1);
+        } else if(env->ExceptionCheck())env->ExceptionClear();
+    }
     env->DeleteLocalRef(clazz);
     if (result != JNI_OK) {
         if (env->ExceptionCheck()) env->ExceptionClear();
