@@ -127,7 +127,7 @@ if (!$has_shipmentmw) {
         'name' => 'Shipment MW (CODM, Experimental)',
         'url' => 'https://play.jacqueb.me/economy/uploads/maps/shipmentmw.json',
         'thumbnail_url' => '',
-        'hash' => 'a0bbfa704ba6326140d0264ff669d2f1',
+        'hash' => '606c7edce7d5e1d5f688378726ebb1ec',
         'thumbnail_hash' => '',
     ];
 }

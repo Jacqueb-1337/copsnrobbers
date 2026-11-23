@@ -111,7 +111,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.110";
+        public  const string Version = "3.1.111";
 
         public static void Load()
         {
@@ -1453,14 +1453,19 @@ namespace CNRSettingsMod
                 using (AndroidJavaObject pi = pm.Call<AndroidJavaObject>("getPackageInfo", ac.Call<string>("getPackageName"), 0))
                 {
                     _apkVersionName = pi.Get<string>("versionName") ?? "";
-                    _apkNeedsUpdate = !_apkVersionName.Contains("-cnr");
+                    // Project V7's Unity 4.6 JNI bridge can expose an empty
+                    // PackageInfo.versionName even when Android's package
+                    // manager reports a patched -cnr1 APK. Unknown is not
+                    // evidence of an outdated APK.
+                    _apkNeedsUpdate = !string.IsNullOrEmpty(_apkVersionName) &&
+                                      !_apkVersionName.Contains("-cnr");
                     SettingsModEntry.Log("APK versionName=" + _apkVersionName + " needsUpdate=" + _apkNeedsUpdate);
                 }
             }
             catch (Exception ex)
             {
                 SettingsModEntry.Log("CheckApkVersion err: " + ex.Message);
-                _apkNeedsUpdate = true; // show banner anyway; better safe than silent
+                _apkNeedsUpdate = false; // unknown JNI state must not claim an outdated APK
             }
         }
 

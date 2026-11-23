@@ -311,7 +311,11 @@
       "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMod/CNRMod-4.2.56.dll",
       "latestOnly": true,
       "versions": [
-        {"version": "4.2.56", "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMod/CNRMod-4.2.56.dll", "changelog": "Add native triangle-mesh collision support for imported DLC maps including CODM Shipment MW. Improve DLC preparation memory usage and diagnostics, retain downloaded maps after activation errors, and refine download progress, room map labels and Android identity fallback."},
+        {
+          "version": "4.2.56",
+          "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMod/CNRMod-4.2.56.dll",
+          "changelog": "Add native triangle-mesh collision support for imported DLC maps including CODM Shipment MW. Improve DLC preparation memory usage and diagnostics, retain downloaded maps after activation errors, and refine download progress, room map labels and Android identity fallback."
+        },
         {
           "version": "4.2.53",
           "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMod/CNRMod-4.2.53.dll",
@@ -2224,11 +2228,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and username/password account login, preview, merge, and sync controls.",
-      "latestVersion": "3.1.110",
+      "latestVersion": "3.1.111",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.110.dll",
+      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.111.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.111",
+          "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.111.dll",
+          "changelog": "Fix false 'APK update required' banner on Project V7 when Unity's legacy JNI bridge returns an empty package version despite the installed game reporting 3.0.2-cnr1. Preserve the warning for explicitly unpatched versions."
+        },
         {
           "version": "3.1.109",
           "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.109.dll",
