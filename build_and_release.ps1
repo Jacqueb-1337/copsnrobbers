@@ -7,7 +7,7 @@
 #   .\build_and_release.ps1
 #   .\build_and_release.ps1 -ModName CNRMod
 #   .\build_and_release.ps1 -ModName CNRMod -Bump patch -Changelog "Fixed a bug"
-#   .\build_and_release.ps1 -ModName CNRMod -Bump minor -UpdateRepo -Changelog "New feature" -Deploy -Commit
+#   .\build_and_release.ps1 -ModName CNRMod -Bump minor -UpdateRepo -Changelog "New feature" -Deploy -Commit -Ftp
 #   .\build_and_release.ps1 -ModName CNRMod -NoBump -NoRepo -NoDeploy -NoCommit
 #
 # Flags:
@@ -22,7 +22,9 @@
 #   -Device <string>      adb device serial (e.g. 192.168.1.5:5555).
 #   -Commit               Auto-answer yes to "git commit+push?" prompt.
 #   -NoCommit             Auto-answer no  to "git commit+push?" prompt.
-#   -NoFtp                Skip direct FTP publish (FTP is enabled by default).
+#   -Ftp                  Upload via FTP/FTPS using .vscode/sftp.json; no prompt.
+#   -NoFtp                Skip FTP/FTPS publishing; no prompt.
+#                         With neither flag, ask before uploading [y/N].
 
 param(
     [string]$ModName    = "",
@@ -36,11 +38,16 @@ param(
     [string]$Device     = "",
     [switch]$Commit,
     [switch]$NoCommit,
+    [switch]$Ftp,
     [switch]$NoFtp
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Off
+
+if ($Ftp -and $NoFtp) {
+    throw "Choose either -Ftp or -NoFtp, not both."
+}
 
 # -- Paths --------------------------------------------------------------------
 $RootDir     = $PSScriptRoot
@@ -553,7 +560,17 @@ if ($doCommit) {
 # -- 10. Direct FTP publish ---------------------------------------------------
 Write-Step "Direct FTP publish"
 
+$doFtp = $false
 if ($NoFtp) {
+    $doFtp = $false
+} elseif ($Ftp) {
+    $doFtp = $true
+} else {
+    $answer = (Read-Host "  Upload release files to the website using FTP/FTPS (.vscode/sftp.json)? [y/N]").Trim().ToLowerInvariant()
+    $doFtp = ($answer -eq "y" -or $answer -eq "yes")
+}
+
+if (-not $doFtp) {
     Write-Warn "Skipping direct FTP publish."
 } else {
     try {
