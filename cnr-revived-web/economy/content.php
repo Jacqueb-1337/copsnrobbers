@@ -115,6 +115,23 @@ if (!$has_bussin) {
     ];
 }
 
+// Public EXPERIMENTAL CODM import, separate from the Minecraft Shipment recreation.
+// Existing database row takes precedence if an admin registers the same map.
+$has_shipmentmw = false;
+foreach ($dlc_maps as $item) {
+    if (($item['id'] ?? '') === 'shipmentmw') { $has_shipmentmw = true; break; }
+}
+if (!$has_shipmentmw) {
+    $dlc_maps[] = [
+        'id' => 'shipmentmw',
+        'name' => 'Shipment MW (CODM, Experimental)',
+        'url' => 'https://play.jacqueb.me/economy/uploads/maps/shipmentmw.json',
+        'thumbnail_url' => '',
+        'hash' => 'a0bbfa704ba6326140d0264ff669d2f1',
+        'thumbnail_hash' => '',
+    ];
+}
+
 // manifest_version is a hash of the public content so clients know when to re-sync.
 $version = substr(md5(json_encode([$rows, $maps, $dlc_maps, $guns])), 0, 12);
 

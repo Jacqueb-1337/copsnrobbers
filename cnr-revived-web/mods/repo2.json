@@ -311,6 +311,7 @@
       "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMod/CNRMod-4.2.53.dll",
       "latestOnly": true,
       "versions": [
+        {"version": "4.2.55", "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMod/CNRMod-4.2.55-ShipmentMW-experimental.dll", "changelog": "EXPERIMENTAL: Native CODM Shipment MW map collisionPacked support, not gameplay verified. Manual test build; stable auto-update unchanged."},
         {
           "version": "4.2.53",
           "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMod/CNRMod-4.2.53.dll",
