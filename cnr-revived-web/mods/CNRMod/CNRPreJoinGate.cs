@@ -286,6 +286,10 @@ namespace CNRMods
         private string _blockReason = "";
         private bool _blockCanOpenManager;
         private bool _preflightRunning;
+        private static CNRPreJoinGate _instance;
+        public static bool InputBlocked { get { return _instance != null && (_instance._preflightRunning || !string.IsNullOrEmpty(_instance._blockReason)); } }
+        void Awake() { _instance = this; }
+        void OnDestroy() { if (_instance == this) _instance = null; }
         private string _preflightStatus = "";
         private GUIStyle _box;
         private GUIStyle _button;
@@ -585,8 +589,10 @@ namespace CNRMods
                             else
                             {
                                 ModEntry.Log("PreJoin: host selected DLC activation failed: " + activateReason);
-                                try { File.Delete(cachePath); } catch { }
-                                cached = false;
+                                _preflightRunning = false;
+                                StopPreflightProgress(false);
+                                ShowBlocked("Map downloaded and kept. " + activateReason, false);
+                                yield break;
                             }
                         }
 
@@ -675,8 +681,8 @@ namespace CNRMods
                             else
                             {
                                 ModEntry.Log("PreJoin: cached DLC map could not be activated: " + activateReason);
-                                try { File.Delete(cachePath); } catch { }
-                                cached = false;
+                                ShowBlocked("Map downloaded and kept. " + activateReason, false);
+                                return;
                             }
                         }
 
@@ -872,8 +878,8 @@ namespace CNRMods
 
         void OnGUI()
         {
-            bool showingPreflight = false;
-            if (string.IsNullOrEmpty(_blockReason)) return;
+            bool showingPreflight = _preflightRunning;
+            if (!showingPreflight && string.IsNullOrEmpty(_blockReason)) return;
             GUI.depth = -200;
             if (_box == null)
             {

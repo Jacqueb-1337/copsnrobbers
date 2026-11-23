@@ -34,7 +34,7 @@ namespace CNRMods
         public static bool   DetailedLogging = false; // opt-in high-frequency diagnostics; normal/error logs remain enabled
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "4.2.53";
+        public const  string Version = "4.2.56";
 
         // -- Mod version registry ? every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -774,6 +774,7 @@ namespace CNRMods
                 go.AddComponent<MapLoader>();
                 go.AddComponent<ContentManager>();
                 go.AddComponent<EconomyHook>();
+                go.AddComponent<CNRDownloadProgressOverlay>();
                 go.AddComponent<PackHook>();
                 go.AddComponent<SpeedHook>();
                 go.AddComponent<RegenHook>();
@@ -3007,6 +3008,43 @@ namespace CNRMods
         string   _urlInput    = "";
         bool     _activeIsOfficial = false;  // true when selected map is an official server map
         Font     _gameFont    = null;
+        UILabel _mapNameLabel, _mapNoteLabel;
+
+        void LateUpdate()
+        {
+            var msd = MultiplayerSelectDirector.mInstance;
+            if (msd == null || msd.mRoomCreatePanel == null || msd.mMaxNumLabel == null) return;
+            string title = PlayerPrefs.GetString("CNRMod_CustomMapName", "");
+            bool visible = msd.mCurWWSubScene == MSD_SubSceneInWorldWide.RoomCreate && !string.IsNullOrEmpty(title);
+            // Native labels belong to the room panel: settings hide them together with
+            // the other room widgets, and compatibility dialogs render above them.
+            if (_mapNameLabel == null && visible && msd.mWWMapUITexture != null && msd.mWWMapUITexture.gameObject.activeInHierarchy)
+            {
+                _mapNameLabel = MakeMapLabel(msd, "CNRMap_Name", new Vector3(-0.19f, 0.13f, -2f), 0.72f);
+                _mapNoteLabel = MakeMapLabel(msd, "CNRMap_Note", new Vector3(-0.19f, 0.085f, -2f), 0.52f);
+            }
+            if (_mapNameLabel != null) { _mapNameLabel.enabled = visible; _mapNameLabel.text = title; _mapNameLabel.color = new Color(1f, 0.65f, 0.1f); }
+            if (_mapNoteLabel != null) { _mapNoteLabel.enabled = visible; _mapNoteLabel.text = _activeIsOfficial ? "Official server map" : "Requires mod on all clients"; _mapNoteLabel.color = new Color(0.4f, 0.9f, 0.4f); }
+        }
+
+        UILabel MakeMapLabel(MultiplayerSelectDirector msd, string name, Vector3 position, float scale)
+        {
+            var donor = msd.mMaxNumLabel;
+            var go = (GameObject)UnityEngine.Object.Instantiate(donor.gameObject);
+            go.name = name;
+            go.transform.parent = msd.mRoomCreatePanel.transform;
+            go.transform.localPosition = position;
+            go.transform.localRotation = donor.transform.localRotation;
+            go.transform.localScale = donor.transform.localScale * scale;
+            foreach (Collider collider in go.GetComponentsInChildren<Collider>()) UnityEngine.Object.Destroy(collider);
+            var label = go.GetComponent<UILabel>();
+            label.pivot = UIWidget.Pivot.Center;
+            label.lineWidth = 500;
+            label.maxLineCount = 1;
+            label.depth = donor.depth;
+            go.SetActive(true);
+            return label;
+        }
 
         // Find the game's NGUI dynamic font via any live UILabel.
         Font GetGameFont()
@@ -3373,6 +3411,7 @@ namespace CNRMods
             var msd = MultiplayerSelectDirector.mInstance;
             if (msd == null) return;
             if (msd.mCurWWSubScene != MSD_SubSceneInWorldWide.RoomCreate) return;
+            if (string.IsNullOrEmpty(_activeSlot)) return;
 
             string displayName = PlayerPrefs.GetString("CNRMod_CustomMapName", "");
             if (string.IsNullOrEmpty(displayName)) return;
@@ -3394,27 +3433,6 @@ namespace CNRMods
             nameStyle.alignment = TextAnchor.MiddleLeft;
             if (gf != null) nameStyle.font = gf;
             GUI.color = new Color(1f, 0.55f, 0.05f, 0.95f);
-            // Draw gold name with extra letter spacing
-            {
-                float cx = bx; float ch = bigFont + 6f;
-                for (int ci = 0; ci < displayName.Length; ci++)
-                {
-                    string gc = displayName[ci].ToString();
-                    Vector2 csz = nameStyle.CalcSize(new GUIContent(gc));
-                    GUI.Label(new Rect(cx, by, csz.x + 2f, ch), gc, nameStyle);
-                    cx += csz.x + 2f; // 2px extra per character
-                }
-            }
-
-            var noteStyle = new GUIStyle(GUI.skin.label);
-            noteStyle.fontSize  = subFont;
-            noteStyle.fontStyle = FontStyle.Normal;
-            noteStyle.alignment = TextAnchor.MiddleLeft;
-            if (gf != null) noteStyle.font = gf;
-            string subNote = _activeIsOfficial ? "Official server map" : "Requires mod on all clients";
-            GUI.color = _activeIsOfficial ? new Color(0.4f, 0.9f, 0.4f, 0.85f) : new Color(1f, 1f, 0.3f, 0.85f);
-            GUI.Label(new Rect(bx, by + bigFont + 6f, bw, subFont + 4f), subNote, noteStyle);
-
             if (!string.IsNullOrEmpty(_activeSlot))
             {
                 float uy = by + bigFont + 6f + subFont + 4f + 6f;
@@ -9000,6 +9018,17 @@ namespace CNRMods
     // --------------------------------------------------------------------------
     //  ECONOMY HOOK ? server-authoritative coins/gems sync
     // --------------------------------------------------------------------------
+    // A separate IMGUI component owns the progress layer. Changing depth inside
+    // EconomyHook does not reorder its earlier draw calls against its watermark.
+    public class CNRDownloadProgressOverlay : MonoBehaviour
+    {
+        void OnGUI()
+        {
+            GUI.depth = -1000000;
+            EconomyHook.DrawGlobalDownloadProgressTopmost();
+        }
+    }
+
     public class EconomyHook : MonoBehaviour
     {
         public static EconomyHook Instance = null;
@@ -13916,7 +13945,7 @@ namespace CNRMods
             // Keep NGUI cameras disabled while any IMGUI overlay is open.
             // UICamera reads Input.touches/GetMouseButtonDown() directly, so
             // Event.current.Use() alone cannot block NGUI button clicks.
-            SetNguiBlocking(_showEcoMail || _showEcoAccount || _showMpDialog || _showDownloads);
+            SetNguiBlocking(_showEcoMail || _showEcoAccount || _showMpDialog || _showDownloads || CNRPreJoinGate.InputBlocked);
 
             // Reconnect loop ? runs even while GUI overlay is open
             if (!Ready && !_reconnectRunning)
@@ -15624,9 +15653,14 @@ namespace CNRMods
             return text.Substring(0, lo) + suffix;
         }
 
+        public static bool DownloadProgressVisible
+        {
+            get { return _dlProgressActive || Time.realtimeSinceStartup < _dlProgressHoldUntil; }
+        }
+
         public static void DrawGlobalDownloadProgressTopmost()
         {
-            bool visible = _dlProgressActive || Time.realtimeSinceStartup < _dlProgressHoldUntil;
+            bool visible = DownloadProgressVisible;
             if (!visible) return;
 
             int prevDepth = GUI.depth;
@@ -15644,7 +15678,7 @@ namespace CNRMods
             float barW = Mathf.Max(120f, Screen.width - barX - sizeW - 26f);
             float sizeX = barX + barW + 8f;
 
-            GUI.color = new Color(0f, 0f, 0f, 0.78f);
+            GUI.color = new Color(0.025f, 0.025f, 0.035f, 1f);
             GUI.DrawTexture(new Rect(4f, 4f, Screen.width - 8f, h + 8f), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
@@ -15696,7 +15730,6 @@ namespace CNRMods
 
         private void OnGUI()
         {
-            DrawGlobalDownloadProgressTopmost();
 
             // Missing-map preflight can happen in MultiplayerSelect. The old code set
             // _showDownloads and blocked NGUI input, then returned here because this was
@@ -15705,7 +15738,6 @@ namespace CNRMods
             if (_showDownloads)
             {
                 EcoDrawDownloadsOverlayTopmost();
-                DrawGlobalDownloadProgressTopmost();
                 return;
             }
 
@@ -15716,7 +15748,7 @@ namespace CNRMods
                 var vs = new GUIStyle(GUI.skin.label);
                 vs.fontSize  = 22;
                 vs.fontStyle = FontStyle.Bold;
-                vs.normal.textColor = new Color(1f, 1f, 1f, 0.55f);
+                vs.normal.textColor = new Color(1f, 1f, 1f, DownloadProgressVisible ? 0.10f : 0.55f);
                 string verStr = "CNRMod v" + ModEntry.Version;
                 try
                 {
@@ -16000,6 +16032,14 @@ namespace CNRMods
             }
             GUILayout.EndHorizontal();
             GUILayout.Space(4f);
+            if (!string.IsNullOrEmpty(_dlLastError))
+            {
+                GUIStyle errorStyle = EcoHintSt();
+                errorStyle.wordWrap = true;
+                errorStyle.normal.textColor = new Color(1f, 0.7f, 0.3f);
+                GUILayout.Label(_dlLastError, errorStyle);
+            }
+
 
             // -- Scrollable type rows ------------------------------------------
             _dlScroll = GUILayout.BeginScrollView(_dlScroll, false, true,
@@ -16195,7 +16235,7 @@ namespace CNRMods
                 stSt.normal.textColor = highlighted
                     ? new Color(0.35f, 0.9f, 1f)
                     : new Color(0.4f, 0.8f, 0.4f);
-                GUILayout.Label(highlighted ? "ready" : "cached", stSt, GUILayout.Width(76f));
+                GUILayout.Label(highlighted ? "downloaded" : "cached", stSt, GUILayout.Width(76f));
             }
             GUILayout.EndHorizontal();
             GUILayout.Space(1f);
@@ -16204,6 +16244,7 @@ namespace CNRMods
         private IEnumerator DownloadSingleMap(OfficialMapEntry map)
         {
             if (map == null || _dlBatchRunning || string.IsNullOrEmpty(map.Url)) yield break;
+            _dlLastError = "";
             _dlBatchRunning = true;
             _dlBatchType = 0;
             _dlBatchDone = 0;
@@ -16230,8 +16271,9 @@ namespace CNRMods
                 else
                 {
                     ModEntry.Log("DlPanel: required DLC map activation failed after download: " + reason);
-                    try { File.Delete(path); } catch { }
-                    valid = false;
+                    _dlLastError = "Map downloaded and kept. " + reason;
+                    // Preparation is separate from download integrity. Keep the verified
+                    // package so a transient memory/build failure never forces a redownload.
                 }
             }
 
@@ -16947,9 +16989,36 @@ namespace CNRMods
                 var resolver  = activity.Call<AndroidJavaObject>("getContentResolver");
                 var secure    = new AndroidJavaClass("android.provider.Settings$Secure");
                 string id     = secure.CallStatic<string>("getString", resolver, "android_id");
-                return string.IsNullOrEmpty(id) ? null : id.ToLowerInvariant();
+                if (!string.IsNullOrEmpty(id)) return id.ToLowerInvariant();
             }
-            catch (Exception ex) { ModEntry.Log("GetAndroidId error: " + ex.Message); return null; }
+            catch (Exception ex) { ModEntry.Log("GetAndroidId Android bridge unavailable: " + ex.Message); }
+
+            // Unity's AndroidJavaClass route can fail under the PV7 ARMv7
+            // compatibility wrapper. Reuse an existing device identity when
+            // possible, otherwise persist a new locally generated ID.
+            string cached = PlayerPrefs.GetString(PREF_PLAYER_ID, "");
+            if (IsValidEconomyDeviceId(cached)) return cached.ToLowerInvariant();
+            const string fallbackKey = "CNR_Eco_FallbackDeviceId";
+            string fallback = PlayerPrefs.GetString(fallbackKey, "");
+            if (!IsValidEconomyDeviceId(fallback))
+            {
+                fallback = Guid.NewGuid().ToString("N");
+                PlayerPrefs.SetString(fallbackKey, fallback);
+                PlayerPrefs.Save();
+                ModEntry.Log("EcoHook: saved a stable fallback device ID (Unity Java bridge unavailable)");
+            }
+            return fallback;
+        }
+
+        private static bool IsValidEconomyDeviceId(string id)
+        {
+            if (string.IsNullOrEmpty(id) || id.Length > 64) return false;
+            foreach (char item in id)
+            {
+                char c = char.ToLowerInvariant(item);
+                if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f')) return false;
+            }
+            return true;
         }
     }
 

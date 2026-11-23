@@ -72,6 +72,9 @@ namespace CNRMods
         public CNRDLCTiledRenderGroup[] opaqueTiled = new CNRDLCTiledRenderGroup[0];
         public CNRDLCTiledRenderGroup[] cutoutTiled = new CNRDLCTiledRenderGroup[0];
         public CNRDLCTiledRenderGroup[] transparentTiled = new CNRDLCTiledRenderGroup[0];
+        // Optional native static collision meshes, for imported Unity map assets.
+        // Absent on existing Minecraft exports: no behavior change for those maps.
+        public CNRDLCPackedBlob[] collisionPacked = new CNRDLCPackedBlob[0];
         public CNRDLCPackedBlob collisionBoxesPacked;
         public CNRDLCPackedBlob bulletPassThroughBoxesPacked;
         public CNRDLCPackedBlob climbableBoxesPacked;
@@ -1503,6 +1506,7 @@ namespace CNRMods
         internal static bool PrepareFile(string path, out string reason)
         {
             reason = "";
+            string stage = "read package";
             try
             {
                 if (string.IsNullOrEmpty(path) || !File.Exists(path))
@@ -1522,6 +1526,7 @@ namespace CNRMods
                     return false;
                 }
 
+                stage = "deserialize package";
                 CNRDLCMapFile map = JsonReader.Deserialize<CNRDLCMapFile>(raw);
                 if (map == null || !string.Equals(map.format, Format, StringComparison.OrdinalIgnoreCase))
                 {
@@ -1545,6 +1550,7 @@ namespace CNRMods
                 }
                 if (map.blockScale <= 0f || map.blockScale > 100f) map.blockScale = 1f;
 
+                stage = "decode atlas";
                 byte[] atlas = Convert.FromBase64String(map.atlas.pngBase64);
                 if (atlas == null || atlas.Length == 0 || atlas.Length > MaxAtlasBytes)
                 {
@@ -1552,11 +1558,13 @@ namespace CNRMods
                     return false;
                 }
 
+                stage = "decode geometry";
                 if ((map.version == PackedLegacyFormatVersion || map.version == PackedAtlasFormatVersion) && !HydratePackedMap(map, out reason))
                     return false;
                 if (map.version == FormatVersion && !HydrateTiledMap(map, out reason))
                     return false;
 
+                stage = "transform geometry";
                 ApplyMinecraftCoordinateHandedness(map);
 
                 for (int c = 0; c < map.chunks.Length; c++)
@@ -1569,6 +1577,19 @@ namespace CNRMods
                     if (!ValidateCollisionParts(chunk.collision, out reason)) return false;
                 }
 
+                // Hydration has produced all runtime arrays. Release encoded duplicates;
+                // the verified file remains the source for any subsequent preparation.
+                map.atlas.pngBase64 = null;
+                foreach (CNRDLCMapChunk chunk in map.chunks)
+                {
+                    chunk.opaquePacked = null; chunk.cutoutPacked = null; chunk.transparentPacked = null;
+                    chunk.collisionPacked = null;
+                    chunk.collisionBoxesPacked = null; chunk.bulletPassThroughBoxesPacked = null;
+                    chunk.climbableBoxesPacked = null; chunk.waterBoxesPacked = null;
+                    CNRDLCTiledRenderGroup[][] layers = { chunk.opaqueTiled, chunk.cutoutTiled, chunk.transparentTiled };
+                    foreach (CNRDLCTiledRenderGroup[] layer in layers)
+                        if (layer != null) foreach (CNRDLCTiledRenderGroup group in layer) if (group != null) group.packed = null;
+                }
                 _prepared = map;
                 _waterAtlasUvRects = BuildWaterAtlasUvRects(map.atlas);
                 _preparedAtlasPng = atlas;
@@ -1578,7 +1599,8 @@ namespace CNRMods
             }
             catch (Exception ex)
             {
-                reason = "DLC map could not be prepared: " + ex.Message;
+                ModEntry.Log("DLCMap: preparation failed at " + stage + ": " + ex.ToString());
+                reason = "DLC map could not be prepared (" + stage + "): " + ex.Message;
                 return false;
             }
         }
@@ -1624,6 +1646,11 @@ namespace CNRMods
                 if (!HydrateTiledGroups(chunk.cutoutTiled, "cutout", out reason)) return false;
                 if (!HydrateTiledGroups(chunk.transparentTiled, "transparent", out reason)) return false;
 
+                // Native collision meshes can coexist with regular CNR packed boxes.
+                CNRDLCMeshData[] sourceCollision;
+                if (!DecodePackedMeshes(chunk.collisionPacked, "collision", out sourceCollision, out reason)) return false;
+                chunk.collision = sourceCollision;
+
                 float[][] decodedBoxes;
                 if (!DecodeCollisionBoxes(chunk.collisionBoxesPacked, out decodedBoxes, out reason)) return false;
                 chunk.decodedCollisionBoxes = decodedBoxes;
@@ -1637,7 +1664,7 @@ namespace CNRMods
                 chunk.opaque = new CNRDLCMeshData[0];
                 chunk.cutout = new CNRDLCMeshData[0];
                 chunk.transparent = new CNRDLCMeshData[0];
-                chunk.collision = new CNRDLCMeshData[0];
+                // Retain decoded static collision for BuildCollisionParts.
             }
             return true;
         }
@@ -2111,7 +2138,11 @@ namespace CNRMods
 
         private void Awake()
         {
-            if (IsActive && _prepared == null)
+            // Menu startup clears stale routing preferences after adding components.
+            // Do not decode a previous session's map before that cleanup can run.
+            string scene = Application.loadedLevelName;
+            bool gameplay = scene == BootstrapScene || scene == "FreeRun5_1" || scene == "FreeRun8_1";
+            if (gameplay && IsActive && _prepared == null)
             {
                 string path = PlayerPrefs.GetString(PrefPath, "");
                 string reason;
@@ -2185,12 +2216,50 @@ namespace CNRMods
             CharacterController cc = prejoin ? null : ConfigurePlayerForDlcMap();
             if (cc != null) cc.enabled = false;
 
+            IEnumerator steps = BuildSceneContents(prejoin);
             try
             {
+                while (true)
+                {
+                    bool more; object current = null;
+                    try { more = steps.MoveNext(); if (more) current = steps.Current; }
+                    catch (Exception ex) { ModEntry.Log("DLCMap scene build failed: " + ex); break; }
+                    if (!more) break;
+                    yield return current;
+                }
+            }
+            finally
+            {
+                IDisposable disposable = steps as IDisposable;
+                if (disposable != null) disposable.Dispose();
+                if (cc != null) cc.enabled = true;
+                _buildInProgress = false;
+            }
+
+            if (!prejoin)
+            {
+                // RoomMultiplayerMenu/spawn holders can appear just after OnLevelWasLoaded.
+                // Repeat the remap after the DLC is already visible so late-created vanilla
+                // spawn lists still point at the custom map without exposing donor geometry.
+                yield return null;
+                yield return null;
+                RemapVanillaSpawnPoints();
+            }
+        }
+
+        private static string _buildStatus = "Preparing map...";
+        private static float _buildProgress;
+
+        private IEnumerator BuildSceneContents(bool prejoin)
+        {
+                GC.Collect();
+                _buildStatus = "Building map materials...";
+                _buildProgress = 0.03f;
+                yield return null;
                 if (_mapRoot != null) Destroy(_mapRoot);
                 ReleaseRenderResources();
 
-                _atlasTexture = new Texture2D(2, 2, TextureFormat.ARGB32, false);
+                _atlasTexture = new Texture2D(2, 2, TextureFormat.ARGB32, true);
                 _atlasTexture.name = "CNRDLCMapAtlas";
                 if (!_atlasTexture.LoadImage(_preparedAtlasPng)) throw new Exception("atlas PNG could not be decoded");
                 ApplyDefaultMinecraftTintFallback(_atlasTexture, _prepared.atlas);
@@ -2242,13 +2311,17 @@ namespace CNRMods
 
                     if (chunk.decodedWaterBoxes != null && chunk.decodedWaterBoxes.Length > 0)
                         waterParts += BuildWaterBoxes(chunkRoot, chunk.decodedWaterBoxes);
+                    if ((i & 7) == 7) { _buildStatus = "Preparing map chunks..."; _buildProgress = 0.05f + 0.15f * (i + 1f) / _prepared.chunks.Length; yield return null; }
                 }
 
                 if (_prepared.version == FormatVersion)
                 {
-                    renderParts += BuildTiledRenderRegions(_mapRoot, _prepared.chunks, _opaqueMaterial, "Opaque", 0);
-                    renderParts += BuildTiledRenderRegions(_mapRoot, _prepared.chunks, _cutoutMaterial, "Cutout", 1);
-                    renderParts += BuildTiledRenderRegions(_mapRoot, _prepared.chunks, _transparentMaterial, "Transparent", 2);
+                    IEnumerator renderSteps0 = BuildTiledRenderRegions(_mapRoot, _prepared.chunks, _opaqueMaterial, "Opaque", 0, delegate(int count) { renderParts += count; });
+                    while (renderSteps0.MoveNext()) yield return renderSteps0.Current;
+                    IEnumerator renderSteps1 = BuildTiledRenderRegions(_mapRoot, _prepared.chunks, _cutoutMaterial, "Cutout", 1, delegate(int count) { renderParts += count; });
+                    while (renderSteps1.MoveNext()) yield return renderSteps1.Current;
+                    IEnumerator renderSteps2 = BuildTiledRenderRegions(_mapRoot, _prepared.chunks, _transparentMaterial, "Transparent", 2, delegate(int count) { renderParts += count; });
+                    while (renderSteps2.MoveNext()) yield return renderSteps2.Current;
                 }
 
                 for (int i = 0; i < _prepared.chunks.Length; i++)
@@ -2271,8 +2344,10 @@ namespace CNRMods
                     if (chunk.decodedClimbableBoxes != null && chunk.decodedClimbableBoxes.Length > 0)
                         climbableParts += BuildClimbableBoxes(chunkRoot, chunk.decodedClimbableBoxes);
 
-                    // Chunked meshes keep creation bounded; construction stays synchronous here
-                    // because this legacy C# compiler cannot yield inside a try/catch body.
+                    _buildStatus = "Building map collision: " + (i + 1) + "/" + _prepared.chunks.Length;
+                    _buildProgress = 0.70f + 0.29f * (i + 1f) / _prepared.chunks.Length;
+                    if ((i & 7) == 7) yield return null;
+                    if ((i & 63) == 63) ModEntry.Log("DLCMap build: collision chunks=" + (i + 1) + "/" + _prepared.chunks.Length);
                 }
 
                 if (prejoin)
@@ -2301,26 +2376,6 @@ namespace CNRMods
                     StripBootstrapGeometry();
                     ModEntry.Log("DLCMap built: chunks=" + _prepared.chunks.Length + " renderParts=" + renderParts + " tiledRegions=" + _tiledRenderRegions + " tiledDrawCalls=" + _tiledRenderDrawCalls + " collisionParts=" + collisionParts + " collisionMerge=" + _collisionBoxesBeforeMerge + "->" + _collisionBoxesAfterMerge + " bulletPassThrough=" + bulletPassThroughParts + " climbables=" + climbableParts + " waterVolumes=" + waterParts + " legacyWaterBiasQuads=" + _legacyWaterBiasedQuads);
                 }
-            }
-            catch (Exception ex)
-            {
-                ModEntry.Log("DLCMap scene build failed: " + ex.Message);
-            }
-            finally
-            {
-                if (cc != null) cc.enabled = true;
-                _buildInProgress = false;
-            }
-
-            if (!prejoin)
-            {
-                // RoomMultiplayerMenu/spawn holders can appear just after OnLevelWasLoaded.
-                // Repeat the remap after the DLC is already visible so late-created vanilla
-                // spawn lists still point at the custom map without exposing donor geometry.
-                yield return null;
-                yield return null;
-                RemapVanillaSpawnPoints();
-            }
         }
 
         internal static IEnumerator PrebuildActiveForJoin(Action<string, float> progress, Action<bool, string> completed)
@@ -2352,8 +2407,15 @@ namespace CNRMods
                 yield break;
             }
 
-            if (progress != null) progress("Building DLC map geometry...", 0.12f);
-            yield return loader.StartCoroutine(loader.BuildScene(true));
+            if (progress != null) progress("Reading and preparing DLC map...", 0f);
+            // Present preparation feedback before the synchronous package parser runs.
+            yield return null;
+            IEnumerator build = loader.BuildScene(true);
+            while (build.MoveNext())
+            {
+                if (progress != null) progress(_buildStatus, _buildProgress);
+                yield return build.Current;
+            }
             bool ok = _prebuiltForJoin && _mapRoot != null;
             if (progress != null) progress(ok ? "DLC map ready" : "DLC map build failed", ok ? 1f : 0f);
             if (completed != null) completed(ok, ok ? "" : "DLC map could not be prebuilt before joining.");
@@ -2556,7 +2618,7 @@ namespace CNRMods
 
             if (changed > 0)
             {
-                atlasTexture.Apply(false, false);
+                atlasTexture.Apply(true, false);
                 ModEntry.Log("DLCMap: applied default Minecraft tint fallback to " + changed + " atlas entries");
             }
         }
@@ -2632,9 +2694,9 @@ namespace CNRMods
             ModEntry.Log("DLCMap shaders: opaque=" + opaqueShader.name + " cutout=" + cutoutShader.name + " transparent=" + transparentShader.name);
         }
 
-        private static int BuildTiledRenderRegions(GameObject parent, CNRDLCMapChunk[] chunks, Material baseMaterial, string label, int layer)
+        private static IEnumerator BuildTiledRenderRegions(GameObject parent, CNRDLCMapChunk[] chunks, Material baseMaterial, string label, int layer, Action<int> completed)
         {
-            if (parent == null || chunks == null || baseMaterial == null) return 0;
+            if (parent == null || chunks == null || baseMaterial == null) { completed(0); yield break; }
 
             Dictionary<long, List<int>> regions = new Dictionary<long, List<int>>();
             for (int i = 0; i < chunks.Length; i++)
@@ -2657,9 +2719,16 @@ namespace CNRMods
             }
 
             int made = 0;
+            int done = 0;
             foreach (KeyValuePair<long, List<int>> pair in regions)
+            {
                 made += BuildTiledRenderRegion(parent, chunks, pair.Value, baseMaterial, label, layer, pair.Key);
-            return made;
+                done++;
+                _buildStatus = "Building map " + label.ToLower() + ": " + done + "/" + regions.Count;
+                _buildProgress = 0.20f + 0.50f * (layer + (float)done / Mathf.Max(1, regions.Count)) / 3f;
+                yield return null;
+            }
+            completed(made);
         }
 
         private static CNRDLCTiledRenderGroup[] GetTiledGroupsForLayer(CNRDLCMapChunk chunk, int layer)
@@ -2940,7 +3009,7 @@ namespace CNRMods
 
             int yBottom = _prepared.atlas.height - atlasEntry.y - atlasEntry.h;
             Color[] pixels = _atlasTexture.GetPixels(atlasEntry.x, yBottom, atlasEntry.w, atlasEntry.h);
-            Texture2D texture = new Texture2D(atlasEntry.w, atlasEntry.h, TextureFormat.ARGB32, false);
+            Texture2D texture = new Texture2D(atlasEntry.w, atlasEntry.h, TextureFormat.ARGB32, true);
             texture.name = "CNRDLCMapTile " + textureId;
             texture.SetPixels(pixels);
             texture.Apply();
