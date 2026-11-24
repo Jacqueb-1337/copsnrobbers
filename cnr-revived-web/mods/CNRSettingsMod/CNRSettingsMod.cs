@@ -111,7 +111,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.111";
+        public  const string Version = "3.1.112";
 
         public static void Load()
         {
@@ -1453,10 +1453,9 @@ namespace CNRSettingsMod
                 using (AndroidJavaObject pi = pm.Call<AndroidJavaObject>("getPackageInfo", ac.Call<string>("getPackageName"), 0))
                 {
                     _apkVersionName = pi.Get<string>("versionName") ?? "";
-                    // Project V7's Unity 4.6 JNI bridge can expose an empty
-                    // PackageInfo.versionName even when Android's package
-                    // manager reports a patched -cnr1 APK. Unknown is not
-                    // evidence of an outdated APK.
+                    // PV7's Unity 4.6 JNI bridge can return an empty PackageInfo
+                    // versionName while Android reports the real 3.0.2-cnr1.
+                    // Unknown is not evidence that the original APK patch is missing.
                     _apkNeedsUpdate = !string.IsNullOrEmpty(_apkVersionName) &&
                                       !_apkVersionName.Contains("-cnr");
                     SettingsModEntry.Log("APK versionName=" + _apkVersionName + " needsUpdate=" + _apkNeedsUpdate);
@@ -4290,6 +4289,14 @@ namespace CNRSettingsMod
 
                 // Same center content band used by Match Settings, between tabs and footer.
                 _winRect = new Rect(ox + 280f, oy + 220f, 1040f, 510f);
+                // The shell is authored at 1600x900; controls retain a 600-wide
+                // design. Match that density inside the unchanged content band.
+                const float contentScale = 1.75f;
+                Rect shellContentRect = _winRect;
+                GUIUtility.ScaleAroundPivot(new Vector2(contentScale, contentScale), Vector2.zero);
+                _winRect = new Rect(_winRect.x / contentScale, _winRect.y / contentScale,
+                                    _winRect.width / contentScale, _winRect.height / contentScale);
+
 
                 if (Event.current.type == EventType.MouseDown)
                 {
@@ -4308,6 +4315,8 @@ namespace CNRSettingsMod
                 GUILayout.BeginArea(_winRect);
                 DrawSettingsWindow(0);
                 GUILayout.EndArea();
+                GUIUtility.ScaleAroundPivot(new Vector2(1f / contentScale, 1f / contentScale), Vector2.zero);
+                _winRect = shellContentRect;
                 if (Event.current.type == EventType.MouseUp || Event.current.type == EventType.Used)
                     _swipeDragging = false;
             }
@@ -5074,13 +5083,13 @@ namespace CNRSettingsMod
             GUILayout.Label("This keeps your current guest progress and adds username/password login for other devices.", HintStyle());
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Username:", LabelStyle(), GUILayout.Width(92f));
-            _createLoginUser = GUILayout.TextField(_createLoginUser, 24, GUI.skin.textField, GUILayout.Width(pw - 102f));
+            GUILayout.Label("Username:", LabelStyle(), GUILayout.Width(120f));
+            _createLoginUser = GUILayout.TextField(_createLoginUser, 24, GUI.skin.textField, GUILayout.Width(pw - 130f));
             GUILayout.EndHorizontal();
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Password:", LabelStyle(), GUILayout.Width(92f));
-            _createLoginPassword = GUILayout.PasswordField(_createLoginPassword, '*', 32, GUI.skin.textField, GUILayout.Width(pw - 102f));
+            GUILayout.Label("Password:", LabelStyle(), GUILayout.Width(120f));
+            _createLoginPassword = GUILayout.PasswordField(_createLoginPassword, '*', 32, GUI.skin.textField, GUILayout.Width(pw - 130f));
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
             if (GUILayout.Button("Create Login", BtnStyle(18, new Color(0.4f, 0.8f, 1f))))
@@ -5104,13 +5113,13 @@ namespace CNRSettingsMod
             GUILayout.Label("Preview both accounts first. Nothing changes until you choose merge or use login only.", HintStyle());
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Username:", LabelStyle(), GUILayout.Width(92f));
-            _loginUser = GUILayout.TextField(_loginUser, 24, GUI.skin.textField, GUILayout.Width(pw - 102f));
+            GUILayout.Label("Username:", LabelStyle(), GUILayout.Width(120f));
+            _loginUser = GUILayout.TextField(_loginUser, 24, GUI.skin.textField, GUILayout.Width(pw - 130f));
             GUILayout.EndHorizontal();
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Password:", LabelStyle(), GUILayout.Width(92f));
-            _loginPassword = GUILayout.PasswordField(_loginPassword, '*', 32, GUI.skin.textField, GUILayout.Width(pw - 102f));
+            GUILayout.Label("Password:", LabelStyle(), GUILayout.Width(120f));
+            _loginPassword = GUILayout.PasswordField(_loginPassword, '*', 32, GUI.skin.textField, GUILayout.Width(pw - 130f));
             GUILayout.EndHorizontal();
             GUILayout.Space(6f);
             if (GUILayout.Button("Preview Login", BtnStyle(18, new Color(1f, 0.7f, 0.3f))))

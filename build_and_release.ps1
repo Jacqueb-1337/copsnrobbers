@@ -1,4 +1,4 @@
-# build_and_release.ps1 - interactive build + release pipeline for CNRMod DLLs.
+﻿# build_and_release.ps1 - interactive build + release pipeline for CNRMod DLLs.
 #
 # Interactive mode (no flags): prompts for mod selection, version bump, repo.json update, changelog.
 # One-command mode (flags):    provide -ModName and optional flags to skip all prompts.
@@ -174,72 +174,39 @@ function Send-FtpFile {
     }
 }
 function Update-RepoManifest {
-    param(
-        [string]$Path,
-        [string]$BaseUrl,
-        [string]$Label
-    )
-
-    if (-not (Test-Path $Path)) {
-        Write-Warn "$Label not found: $Path"
-        return $false
+    param([string]$Path,[string]$BaseUrl,[string]$Label)
+    if (-not (Test-Path -LiteralPath $Path)) { throw "$Label missing: $Path" }
+    $repo = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $matches = @($repo.mods | Where-Object { $_.id -ceq $ModBase })
+    if ($matches.Count -ne 1) { throw "Expected exactly one top-level mod ID $ModBase in $Label" }
+    $target = $matches[0]
+    $before = @{}
+    foreach ($mod in $repo.mods) {
+        if ($mod.id -cne $ModBase) { $before[$mod.id] = ($mod | ConvertTo-Json -Depth 100 -Compress) }
     }
-
-    $repoLines   = Get-Content $Path
-    $outLines    = [System.Collections.Generic.List[string]]::new()
-    $inTargetMod = $false
-    $vBumped     = $false
-    $vInserted   = $false
-
-    for ($li = 0; $li -lt $repoLines.Count; $li++) {
-        $line = $repoLines[$li]
-
-        if (-not $inTargetMod -and $line -match ('"id"\s*:\s*"' + [regex]::Escape($ModBase) + '"')) {
-            $inTargetMod = $true
-        }
-
-        if ($inTargetMod -and -not $vBumped -and $line -match '"latestVersion"\s*:\s*"[^"]*"') {
-            $line    = $line -replace '"latestVersion"\s*:\s*"[^"]*"', ('"latestVersion": "' + $newVer + '"')
-            $vBumped = $true
-        }
-
-        if ($inTargetMod -and $line -match '"latestUrl"\s*:\s*"[^"]*"') {
-            $newLatestUrl = $BaseUrl + '/' + $ModBase + '/' + $ModBase + '-' + $newVer + '.dll'
-            $line = $line -replace '"latestUrl"\s*:\s*"[^"]*"', ('"latestUrl": "' + $newLatestUrl + '"')
-        }
-
-        if ($inTargetMod -and -not $vInserted -and $line -match '"versions"\s*:\s*\[') {
-            $outLines.Add($line)
-            $cl   = $Changelog -replace '\\', '\\\\' -replace '"', '\\"'
-            $vUrl = $BaseUrl + '/' + $ModBase + '/' + $ModBase + '-' + $newVer + '.dll'
-            $outLines.Add('        {')
-            $outLines.Add('          "version": "' + $newVer + '",')
-            $outLines.Add('          "url": "' + $vUrl + '",')
-            $outLines.Add('          "changelog": "' + $cl + '"')
-            $outLines.Add('        },')
-            $vInserted = $true
-            continue
-        }
-
-        if ($inTargetMod -and $vBumped -and $vInserted -and $line -match '^\s*\{\s*$') {
-            $inTargetMod = $false
-        }
-
-        $outLines.Add($line)
+    $url = "$BaseUrl/$ModBase/$ModBase-$newVer.dll"
+    $target.latestVersion = $newVer
+    $target.latestUrl = $url
+    $entry = [pscustomobject]@{ version = $newVer; url = $url; changelog = $Changelog }
+    $target.versions = @($entry) + @($target.versions | Where-Object { $_.version -ne $newVer })
+    $serialized = $repo | ConvertTo-Json -Depth 100
+    $check = $serialized | ConvertFrom-Json
+    $found = @($check.mods | Where-Object { $_.id -ceq $ModBase })
+    if ($found.Count -ne 1 -or $found[0].latestVersion -ne $newVer -or $found[0].latestUrl -ne $url) {
+        throw "Release validation failed for $ModBase"
     }
-
-    if (-not $vBumped)   { Write-Warn "latestVersion not found in $Label for $ModBase" }
-    if (-not $vInserted) { Write-Warn "versions array not found in $Label for $ModBase" }
-
-    $writeAttempts = 5
-    for ($writeAttempt = 1; $writeAttempt -le $writeAttempts; $writeAttempt++) {
+    foreach ($mod in $check.mods) {
+        if ($mod.id -cne $ModBase -and ($mod | ConvertTo-Json -Depth 100 -Compress) -cne $before[$mod.id]) {
+            throw "Unexpected change to unrelated mod $($mod.id)"
+        }
+    }
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
         try {
-            Set-Content -Path $Path -Value $outLines
+            [IO.File]::WriteAllText($Path, $serialized + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
             break
         } catch {
-            if ($writeAttempt -ge $writeAttempts) { throw }
-            Write-Warn "$Label is temporarily locked; retrying manifest write ($writeAttempt/$writeAttempts)..."
-            Start-Sleep -Milliseconds (300 * $writeAttempt)
+            if ($attempt -eq 5) { throw }
+            Start-Sleep -Milliseconds (300 * $attempt)
         }
     }
     Write-Ok "$Label updated (id=$ModBase, version=$newVer)"
@@ -548,7 +515,9 @@ if ($doCommit) {
         $commitMsg = "$ModBase $newVer"
         if ($Changelog -ne "") { $commitMsg += " -- $Changelog" }
         git commit -m $commitMsg
+        if ($LASTEXITCODE -ne 0) { throw "Release commit failed" }
         git push
+        if ($LASTEXITCODE -ne 0) { throw "Release push failed; refusing FTP publication" }
         Write-Ok "Pushed: $commitMsg"
     } finally {
         Pop-Location
