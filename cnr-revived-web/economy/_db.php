@@ -19,6 +19,7 @@ function db(): PDO {
     // FK enforcement is intentionally OFF: the legacy tables (transactions,
     // wheel_spins, player_mail) carried FKs to the old 'players' table whose
     // player_id column now stores account UUIDs.  Application logic ensures integrity.
+    $pdo->exec("PRAGMA busy_timeout=5000");
     $pdo->exec("PRAGMA journal_mode=WAL");
     init_schema($pdo);
     maybe_migrate($pdo);
@@ -67,6 +68,7 @@ function init_schema(PDO $pdo): void {
             skin_unlocks    TEXT    NOT NULL DEFAULT '[]',
             armor_unlocks   TEXT    NOT NULL DEFAULT '[]',
             perk_unlocks    TEXT    NOT NULL DEFAULT '[]',
+            extra_progress  TEXT    NOT NULL DEFAULT '{}',
             equipped_slots  TEXT    NOT NULL DEFAULT '[]',
             equipped_perks  TEXT    NOT NULL DEFAULT '[]',
             current_skin    TEXT    NOT NULL DEFAULT 'Skin_1',
@@ -137,6 +139,58 @@ function init_schema(PDO $pdo): void {
     try { $pdo->exec("ALTER TABLE wheel_spins ADD COLUMN bonus_spins INTEGER NOT NULL DEFAULT 0"); } catch (Exception $e) {}
     try { $pdo->exec("ALTER TABLE account_progression ADD COLUMN perk_unlocks TEXT NOT NULL DEFAULT '[]'"); } catch (Exception $e) {}
     try { $pdo->exec("ALTER TABLE account_progression ADD COLUMN equipped_perks TEXT NOT NULL DEFAULT '[]'"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE account_progression ADD COLUMN extra_progress TEXT NOT NULL DEFAULT '{}'"); } catch (Exception $e) {}
+}
+
+// Only permanent progression keys verified against the original game.
+function cloud_progress_value(string $key, $raw): ?int {
+    if (!is_int($raw) && (!is_string($raw) || !preg_match('/^[0-9]{1,10}$/D', $raw))) return null;
+    $value = (int)$raw;
+    if ($value < 0 || $value > 2147483647) return null;
+    static $counters = ['MaxDeadOneRound', 'TotalTwoKill', 'TotalFourKill', 'TotalSixKill', 'TotalEightKill', 'TotalGoldLikeKill', 'TotalHeadshotKill', 'LocalMultiplayerKill', 'WorldwideMultiplayerKill', 'TotalStrongholdModeVictory', 'TotalKillingCompetitionModeVictory', 'KillModeSingleRoundKilling', 'KillModeTotalKilling', 'TeamModeSingleRoundKilling', 'TeamModeTotalKilling', 'SingleModeChapterOneHighScore'];
+    static $flags = ['SingleModePassEasy', 'SingleModePassNormal', 'HasBuyTheGiftPack'];
+    static $tiers = ['MaxDeadOneRound'=>1, 'TotalTwoKill'=>100, 'TotalFourKill'=>100, 'TotalSixKill'=>100, 'TotalEightKill'=>100, 'TotalGoldLikeKill'=>12, 'TotalHeadshotKill'=>12, 'LocalMultiplayerKill'=>16, 'WorldwideMultiplayerKill'=>16, 'TotalStrongholdModeVictory'=>11, 'TotalKillingCompetitionModeVictory'=>11, 'CharacterLevel'=>100];
+    if (in_array($key, $counters, true)) return $value;
+    if ($key === 'CurWeaponEquipLimitedNum') return $value >= 4 && $value <= 8 ? $value : null;
+    if (in_array($key, $flags, true) || preg_match('/^CNR_DLC_owned_[A-Za-z0-9_-]{1,128}$/D', $key))
+        return $value === 1 ? 1 : null;
+    if (preg_match('/^([A-Za-z0-9_]+)_Got_Lv_([1-9][0-9]{0,2})$/D', $key, $m) &&
+        isset($tiers[$m[1]]) && (int)$m[2] <= $tiers[$m[1]]) return $value === 1 ? 1 : null;
+    return null;
+}
+
+function merge_cloud_progress(array $a, array $b): array {
+    $out = [];
+    foreach ([$a, $b] as $map) foreach ($map as $key => $raw) {
+        if (!is_string($key)) continue;
+        $value = cloud_progress_value($key, $raw);
+        if ($value !== null && $value > 0) $out[$key] = max($out[$key] ?? 0, $value);
+    }
+    ksort($out);
+    return $out;
+}
+
+function cloud_progress_from_post(array $post): array {
+    $out = [];
+    foreach ($post as $key => $raw)
+        if (is_string($key) && strncmp($key, 'ap_', 3) === 0 && strncmp($key, 'ap_CNR_DLC_owned_', 17) !== 0)
+            $out[substr($key, 3)] = $raw;
+    $ids = $post['dlc_skin_ids'] ?? '';
+    if (is_string($ids) && strlen($ids) <= 65536)
+        foreach (explode(',', $ids) as $id)
+            if (preg_match('/^[A-Za-z0-9_-]{1,128}$/D', $id)) $out['CNR_DLC_owned_' . $id] = 1;
+    return merge_cloud_progress([], $out);
+}
+
+function cloud_progress_payload(array $map): array {
+    $out = [];
+    $ids = [];
+    foreach (merge_cloud_progress([], $map) as $key => $value) {
+        if (strncmp($key, 'CNR_DLC_owned_', 14) === 0) $ids[] = substr($key, 14);
+        else $out['ap_' . $key] = $value;
+    }
+    $out['dlc_skin_ids'] = implode(',', $ids);
+    return $out;
 }
 
 function account_stats(PDO $pdo, string $account_id): array {
@@ -160,6 +214,8 @@ function account_stats(PDO $pdo, string $account_id): array {
         $perks = json_decode(($prog['perk_unlocks'] ?? '') ?: '[]', true) ?: [];
         $weapons = json_decode($prog['weapon_levels'] ?: '{}', true) ?: [];
         $owned += count(array_unique(array_filter($skins, 'is_string')));
+        $extra = merge_cloud_progress([], json_decode($prog['extra_progress'] ?? '{}', true) ?: []);
+        foreach ($extra as $key => $value) if (strncmp($key, 'CNR_DLC_owned_', 14) === 0) $owned++;
         $owned += count(array_unique(array_filter($armors, 'is_string')));
         $owned += count(array_unique(array_filter($perks, 'is_string')));
         foreach ($weapons as $lvl) {
@@ -228,6 +284,7 @@ function merge_account_into(PDO $pdo, string $source, string $target): void {
             array_filter($source_perks, 'is_string')
         )));
 
+        $merged_extra = merge_cloud_progress(json_decode($target_prog['extra_progress'] ?? '{}', true) ?: [], json_decode($source_prog['extra_progress'] ?? '{}', true) ?: []);
         $target_updated = (int)$target_prog['updated_at'];
         $source_updated = (int)$source_prog['updated_at'];
         if ($source_updated > $target_updated) {
@@ -247,7 +304,7 @@ function merge_account_into(PDO $pdo, string $source, string $target): void {
         $pdo->prepare("
             UPDATE account_progression
                SET level=?, exp=?, weapon_levels=?, skin_unlocks=?, armor_unlocks=?,
-                   perk_unlocks=?, equipped_slots=?, equipped_perks=?,
+                   perk_unlocks=?, extra_progress=?, equipped_slots=?, equipped_perks=?,
                    current_skin=?, current_armor=?, updated_at=?
              WHERE account_id=?
         ")->execute([
@@ -257,6 +314,7 @@ function merge_account_into(PDO $pdo, string $source, string $target): void {
             json_encode($merged_skins),
             json_encode($merged_armors),
             json_encode($merged_perks),
+            json_encode((object)$merged_extra),
             $equipped,
             $equipped_perks,
             $skin,
@@ -305,6 +363,7 @@ function response_account_payload(PDO $pdo, array $account, string $token): arra
     $prog = $stmt->fetch();
     if (!$prog) return $resp;
 
+    $resp = array_merge($resp, cloud_progress_payload(json_decode($prog['extra_progress'] ?? '{}', true) ?: []));
     $resp['level'] = (int)$prog['level'];
     $resp['exp'] = (int)$prog['exp'];
     $resp['current_skin'] = $prog['current_skin'];

@@ -34,7 +34,7 @@ namespace CNRMods
         public static bool   DetailedLogging = false; // opt-in high-frequency diagnostics; normal/error logs remain enabled
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "4.2.56";
+        public const  string Version = "4.2.57";
 
         // -- Mod version registry ? every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -7337,7 +7337,9 @@ namespace CNRMods
                 }
                 UserDataController.AddCoins(-info.mPrice);
                 PlayerPrefs.SetInt("CNR_DLC_owned_" + sk.Id, 1);
+                EconomyHook.RememberCloudDlcSkinId(sk.Id);
                 PlayerPrefs.Save();
+                EconomyHook.RequestProgressionSync();
                 info.mIsEnabled = true;
                 _extInfo[cur] = info;
                 ModEntry.Log("CNR: purchased DLC skin \"" + info.mNameDisplay + "\"");
@@ -9361,7 +9363,8 @@ namespace CNRMods
                 foreach (string wk in _upgradeWeapons)
                     if (PlayerPrefs.GetInt(wk, 1) > 0) owned++;
                 foreach (string wk in _unlockWeapons)
-                    if (PlayerPrefs.GetInt(wk, 0) == 1) owned++;
+                    if (PlayerPrefs.GetInt(wk, 0) > 0) owned++;
+                owned += LocalCloudSkinIds().Count;
                 if (CNRDLCWeaponSystem.IsBussinOwned()) owned++;
                 for (int i = 1; i <= 33; i++)
                     if (PlayerPrefs.GetInt("Skin_" + i, 0) == 1) owned++;
@@ -9403,7 +9406,7 @@ namespace CNRMods
         private static string[] _unlockWeapons = new string[]
         {
             "GLOCK21","MP5KA5","UZI","G36K","AUG","M3","M134","G36K1",
-            "RAZER","FRF2","M1Carbine","MiniCannon","TeslaP1","MilkBomb",
+            "RAZER","FRF2","M1Carbine","MiniCannon","TeslaP1","MilkBomb","M249",
             "CandyRifle","ChristmasSniper","GingerbreadBomb","GingerbreadKnife","SantaGun"
         };
         private static string[] _armorKeys = new string[]
@@ -9433,11 +9436,115 @@ namespace CNRMods
             catch { return false; }
         }
 
+        // Account cloud progression: permanent stats, reward claims and DLC ownership.
+        private static readonly string[] CloudCounterKeys = { "MaxDeadOneRound", "TotalTwoKill", "TotalFourKill", "TotalSixKill", "TotalEightKill", "TotalGoldLikeKill", "TotalHeadshotKill", "LocalMultiplayerKill", "WorldwideMultiplayerKill", "TotalStrongholdModeVictory", "TotalKillingCompetitionModeVictory", "KillModeSingleRoundKilling", "KillModeTotalKilling", "TeamModeSingleRoundKilling", "TeamModeTotalKilling", "SingleModeChapterOneHighScore" };
+        private static readonly string[] CloudFlagKeys = { "SingleModePassEasy", "SingleModePassNormal", "HasBuyTheGiftPack" };
+        private static readonly string[] CloudRewardKeys = { "MaxDeadOneRound", "TotalTwoKill", "TotalFourKill", "TotalSixKill", "TotalEightKill", "TotalGoldLikeKill", "TotalHeadshotKill", "LocalMultiplayerKill", "WorldwideMultiplayerKill", "TotalStrongholdModeVictory", "TotalKillingCompetitionModeVictory", "CharacterLevel" };
+        private static readonly int[] CloudRewardTiers = { 1, 100, 100, 100, 100, 12, 12, 16, 16, 11, 11, 100 };
+        private const string CloudDlcIndex = "CNR_CloudOwnedSkinIds";
+
+        private static bool ValidCloudSkinId(string id)
+        {
+            return !string.IsNullOrEmpty(id) && System.Text.RegularExpressions.Regex.IsMatch(id, @"^[A-Za-z0-9_-]{1,128}$");
+        }
+
+        private static List<string> LocalCloudSkinIds()
+        {
+            var ids = new List<string>();
+            foreach (string id in PlayerPrefs.GetString(CloudDlcIndex, "").Split(','))
+                if (ValidCloudSkinId(id) && PlayerPrefs.GetInt("CNR_DLC_owned_" + id, 0) != 0 && !ids.Contains(id)) ids.Add(id);
+            foreach (var sk in ContentManager.OfficialSkins)
+                if (ValidCloudSkinId(sk.Id) && PlayerPrefs.GetInt("CNR_DLC_owned_" + sk.Id, 0) != 0 && !ids.Contains(sk.Id)) ids.Add(sk.Id);
+            // Recover ownership from cached skin names even if the catalog is not loaded.
+            try
+            {
+                if (Directory.Exists(ContentManager.SkinCacheDir))
+                    foreach (string file in Directory.GetFiles(ContentManager.SkinCacheDir, "*.png"))
+                    {
+                        string id = Path.GetFileNameWithoutExtension(file);
+                        if (ValidCloudSkinId(id) && PlayerPrefs.GetInt("CNR_DLC_owned_" + id, 0) != 0 && !ids.Contains(id)) ids.Add(id);
+                    }
+            }
+            catch { }
+            ids.Sort(StringComparer.Ordinal);
+            return ids;
+        }
+
+        public static void RememberCloudDlcSkinId(string id)
+        {
+            if (!ValidCloudSkinId(id)) return;
+            var ids = LocalCloudSkinIds();
+            if (!ids.Contains(id)) ids.Add(id);
+            PlayerPrefs.SetString(CloudDlcIndex, string.Join(",", ids.ToArray()));
+        }
+
+        private static void AppendCloudProgression(System.Text.StringBuilder sb)
+        {
+            foreach (string key in CloudCounterKeys)
+            {
+                int value = PlayerPrefs.GetInt(key, 0);
+                if (value > 0) sb.Append("&ap_").Append(key).Append("=").Append(value);
+            }
+            foreach (string key in CloudFlagKeys)
+                if (PlayerPrefs.GetInt(key, 0) != 0) sb.Append("&ap_").Append(key).Append("=1");
+            for (int i = 0; i < CloudRewardKeys.Length; i++)
+                for (int tier = 1; tier <= CloudRewardTiers[i]; tier++)
+                {
+                    string key = CloudRewardKeys[i] + "_Got_Lv_" + tier;
+                    if (PlayerPrefs.GetInt(key, 0) != 0) sb.Append("&ap_").Append(key).Append("=1");
+                }
+            string owned = string.Join(",", LocalCloudSkinIds().ToArray());
+            if (owned.Length > 0) sb.Append("&dlc_skin_ids=").Append(Uri.EscapeDataString(owned));
+        }
+
+        private static void ApplyCloudProgression(string json)
+        {
+            // Claim markers first: restoring a counter must not re-open old rewards.
+            for (int i = 0; i < CloudRewardKeys.Length; i++)
+                for (int tier = 1; tier <= CloudRewardTiers[i]; tier++)
+                {
+                    string key = CloudRewardKeys[i] + "_Got_Lv_" + tier;
+                    if (ModEntry.ParseJsonValue(json, "ap_" + key) == "1") PlayerPrefs.SetInt(key, 1);
+                }
+            foreach (string key in CloudFlagKeys)
+                if (ModEntry.ParseJsonValue(json, "ap_" + key) == "1") PlayerPrefs.SetInt(key, 1);
+            foreach (string key in CloudCounterKeys)
+            {
+                int value;
+                if (int.TryParse(ModEntry.ParseJsonValue(json, "ap_" + key), out value) && value > PlayerPrefs.GetInt(key, 0))
+                    PlayerPrefs.SetInt(key, value);
+            }
+            int slots;
+            if (int.TryParse(ModEntry.ParseJsonValue(json, "ap_CurWeaponEquipLimitedNum"), out slots) && slots > PlayerPrefs.GetInt("CurWeaponEquipLimitedNum", 4))
+                PlayerPrefs.SetInt("CurWeaponEquipLimitedNum", Mathf.Clamp(slots, 4, 8));
+            string remoteIds = ModEntry.ParseJsonStringValue(json, "dlc_skin_ids");
+            if (!string.IsNullOrEmpty(remoteIds))
+            {
+                var ids = LocalCloudSkinIds();
+                foreach (string id in remoteIds.Split(','))
+                    if (ValidCloudSkinId(id))
+                    {
+                        PlayerPrefs.SetInt("CNR_DLC_owned_" + id, 1);
+                        if (!ids.Contains(id)) ids.Add(id);
+                    }
+                ids.Sort(StringComparer.Ordinal);
+                PlayerPrefs.SetString(CloudDlcIndex, string.Join(",", ids.ToArray()));
+            }
+        }
+
+        private bool _cloudSyncRunning = false;
+        private float _cloudNextSync = 0f;
         private IEnumerator SyncProgression()
         {
             if (!Ready || string.IsNullOrEmpty(ModEntry.EconomyUrl)) yield break;
             if (string.IsNullOrEmpty(_playerId) || string.IsNullOrEmpty(_token)) yield break;
 
+            if (_cloudSyncRunning) yield break;
+            _cloudSyncRunning = true;
+            _cloudNextSync = Time.realtimeSinceStartup + 30f;
+            string requestToken = _token;
+            try
+            {
             long updatedAt = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
 
             var sb = new System.Text.StringBuilder();
@@ -9452,10 +9559,14 @@ namespace CNRMods
             // DLC weapon level 0 means unowned; 1-3 mirrors M87T progression.
             sb.Append("&wl_Bussin=").Append(CNRDLCWeaponSystem.GetBussinLevel());
 
-            // Weapon unlock flags (only send if unlocked; absence = still locked)
+            // Purchased weapon levels are both ownership and upgrades.
             foreach (var wk in _unlockWeapons)
-                if (PlayerPrefs.GetInt(wk, 0) == 1)
-                    sb.Append("&wl_").Append(wk).Append("=1");
+            {
+                int value = PlayerPrefs.GetInt(wk, 0);
+                if (value > 0) sb.Append("&wl_").Append(wk).Append("=").Append(value);
+            }
+            AppendCloudProgression(sb);
+            sb.Append("&ap_CurWeaponEquipLimitedNum=").Append(Mathf.Clamp(PlayerPrefs.GetInt("CurWeaponEquipLimitedNum", 4), 4, 8));
 
             // Skin unlocks
             for (int i = 1; i <= 33; i++)
@@ -9499,12 +9610,15 @@ namespace CNRMods
                 yield break;
             }
 
-            ApplyProgression(www.text);
+            if (requestToken == _token) ApplyProgression(www.text);
+            }
+            finally { _cloudSyncRunning = false; }
         }
 
         // Parse sync.php response and write authoritative values to PlayerPrefs.
         private void ApplyProgression(string json)
         {
+            ApplyCloudProgression(json);
             int level, exp;
             if (int.TryParse(ModEntry.ParseJsonValue(json, "level"), out level) && level > 0)
             {
@@ -9536,7 +9650,7 @@ namespace CNRMods
                 string val = ModEntry.ParseJsonValue(json, "wl_" + wk);
                 int sv;
                 if (!string.IsNullOrEmpty(val) && int.TryParse(val, out sv) && sv > 0)
-                    PlayerPrefs.SetInt(wk, 1);
+                    PlayerPrefs.SetInt(wk, Mathf.Max(PlayerPrefs.GetInt(wk, 0), sv));
             }
 
             // Skin unlocks ? union (server sends su_Skin_N=1 for each unlocked skin)
@@ -9560,13 +9674,7 @@ namespace CNRMods
                 string val = ModEntry.ParseJsonValue(json, "pu_" + perk.Id);
                 if (val == "1") CNRPerkSystem.SetOwned(perk.Id, true, false);
             }
-            for (int i = 0; i < CNRPerkSystem.MaxSlots; i++)
-            {
-                string id = ModEntry.ParseJsonStringValue(json, "perk_slot_" + (i + 1));
-                if (string.IsNullOrEmpty(id)) id = ModEntry.ParseJsonValue(json, "perk_slot_" + (i + 1));
-                if (string.IsNullOrEmpty(id) || CNRPerkSystem.Find(id) != null)
-                    CNRPerkSystem.SetSlot(i, id, false);
-            }
+            // Equipped perk slots, like the rest of the loadout, remain device-local.
 
             // Equipped slots / current skin / current armor are NOT written back from the
             // server.  Local PlayerPrefs are the authoritative source for the player's
@@ -13934,6 +14042,12 @@ namespace CNRMods
 
         private void Update()
         {
+            if (Ready && !_cloudSyncRunning && Time.realtimeSinceStartup >= _cloudNextSync && Application.loadedLevelName == "MainMenu")
+            {
+                _cloudNextSync = Time.realtimeSinceStartup + 30f;
+                StartCoroutine(SyncProgression());
+            }
+
             PollStripeCheckout();
             _stripeButtonScanTimer -= Time.deltaTime;
             if (_stripeButtonScanTimer <= 0f)

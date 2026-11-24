@@ -25,9 +25,9 @@ require __DIR__ . '/_db.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('POST only', 405);
 
-$player     = require_auth();
-$account_id = $player['id'];
-$pdo        = db();
+$pdo = db();
+$pdo->exec("PRAGMA busy_timeout=5000");
+$client_extra = cloud_progress_from_post($_POST);
 
 // ── Parse client progression ─────────────────────────────────────────────────
 $client_level      = max(1,  (int)($_POST['level'] ?? 1));
@@ -82,6 +82,10 @@ $client_c_skin  = trim($_POST['current_skin']  ?? '');
 $client_c_armor = trim($_POST['current_armor'] ?? '');
 
 // ── Load server progression ──────────────────────────────────────────────────
+$pdo->exec("BEGIN IMMEDIATE");
+try {
+$player = require_auth();
+$account_id = $player['id'];
 $stmt = $pdo->prepare("SELECT * FROM account_progression WHERE account_id=?");
 $stmt->execute([$account_id]);
 $srv = $stmt->fetch();
@@ -102,6 +106,7 @@ $srv_skins  = json_decode($srv['skin_unlocks']  ?: '[]', true) ?: [];
 $srv_armors = json_decode($srv['armor_unlocks'] ?: '[]', true) ?: [];
 $srv_perks  = json_decode(($srv['perk_unlocks'] ?? '') ?: '[]', true) ?: [];
 $srv_updated = (int)$srv['updated_at'];
+$merged_extra = merge_cloud_progress(json_decode($srv['extra_progress'] ?? '{}', true) ?: [], $client_extra);
 
 // ── Merge ────────────────────────────────────────────────────────────────────
 // Scalar progress: take-max
@@ -153,7 +158,7 @@ while (count($merged_equipped_perks) < 3) $merged_equipped_perks[] = '';
 $pdo->prepare("
     UPDATE account_progression
        SET level=?, exp=?, weapon_levels=?, skin_unlocks=?, armor_unlocks=?,
-           perk_unlocks=?, equipped_slots=?, equipped_perks=?,
+           perk_unlocks=?, extra_progress=?, equipped_slots=?, equipped_perks=?,
            current_skin=?, current_armor=?, updated_at=?
      WHERE account_id=?
 ")->execute([
@@ -162,6 +167,7 @@ $pdo->prepare("
     json_encode($merged_skins),
     json_encode($merged_armors),
     json_encode($merged_perks),
+    json_encode((object)$merged_extra),
     json_encode($merged_equipped),
     json_encode($merged_equipped_perks),
     $merged_c_skin, $merged_c_armor,
@@ -204,4 +210,9 @@ for ($i = 0; $i < 3; $i++) {
     $resp['perk_slot_' . ($i + 1)] = $merged_equipped_perks[$i] ?? '';
 }
 
-ok($resp);
+$pdo->exec("COMMIT");
+} catch (Throwable $e) {
+    $pdo->exec("ROLLBACK");
+    fail('progression sync failed', 500);
+}
+ok(array_merge($resp, cloud_progress_payload($merged_extra)));
