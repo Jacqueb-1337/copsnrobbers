@@ -1,7 +1,7 @@
 ﻿using UnityEngine;
 namespace CNRMovementMod {
 public static class MovementEntry {
- public const string Version = "0.1.0";
+ public const string Version = "0.1.1";
  public static void Load(){
   if(GameObject.Find("CNRMovementExperimentalRoot")!=null)return;
   Debug.Log("[CNRMovement] "+Version+" loaded; global opt-in");

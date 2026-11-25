@@ -5,34 +5,46 @@ namespace CNRMovementMod {
 public sealed class SneakHud {
  public const string Name="Image Button(Sneak)";
  GameObject button; UITexture widget; Texture2D texture; float nextTry;
- public void Tick(bool active, bool lowered, System.Action request, System.Action<GameObject> register){
+ public void Tick(bool active, bool lowered, System.Action request, System.Action<GameObject> register, System.Func<GameObject> resolveFire){
   if(!active){Remove();return;}
   if(button!=null){
    if(widget!=null)widget.color=lowered?new Color(.72f,.94f,1f,1f):Color.white;
+   if(register!=null)register(button);
    return;
   }
   if(Time.realtimeSinceStartup<nextTry)return;
   nextTry=Time.realtimeSinceStartup+.5f;
   GameObject panel=GameObject.Find("Panel(Control)");
-  if(panel==null)return;
-  Transform parent=panel.transform;
-  GameObject fire=null;
+  GameObject fire=resolveFire!=null?resolveFire():null;
+  if(fire==null&&panel==null)return;
+  Transform parent=panel!=null?panel.transform:fire.transform.parent;
   string[] fireNames={"FireButton","Image Button(Shoot)","Button(Shoot)","Image Button(Fire)","Button(Fire)"};
-  foreach(Transform child in panel.GetComponentsInChildren<Transform>(true)){
+  if(fire==null&&panel!=null)foreach(Transform child in panel.GetComponentsInChildren<Transform>(true)){
    if(child==parent)continue;
    foreach(string name in fireNames)if(child.name==name){fire=child.gameObject;break;}
    if(fire!=null)break;
   }
-  if(fire==null)return;
+  if(fire==null){foreach(string name in fireNames){fire=GameObject.Find(name);if(fire!=null)break;}}
+  if(fire==null||fire.transform.parent==null)return;
+  parent=fire.transform.parent;
   Bounds b=NGUIMath.CalculateRelativeWidgetBounds(parent,fire.transform);
-  float size=Mathf.Min(b.size.x,b.size.y)*.85f;
-  if(size<2)return;
+  float size=Mathf.Min(Mathf.Abs(b.size.x),Mathf.Abs(b.size.y))*.85f;
+  if(size<.0001f){
+   Vector3 scale=fire.transform.localScale;
+   size=Mathf.Min(Mathf.Abs(scale.x),Mathf.Abs(scale.y))*.85f;
+   b=new Bounds(fire.transform.localPosition,new Vector3(Mathf.Abs(scale.x),Mathf.Abs(scale.y),0));
+  }
+  if(size<.0001f)return;
   Shader shader=Shader.Find("Unlit/Transparent Colored");
-  if(shader==null)return;
+  if(shader==null)shader=Shader.Find("Unlit/Transparent");
+  if(shader==null){Debug.LogWarning("[CNRMovement] Sneak HUD: no transparent shader");return;}
   // Factory position: left edge of fire, with a small gap, same vertical center.
   Vector3 center=b.center+Vector3.left*(b.extents.x+size*.65f);
   GameObject existing=GameObject.Find(Name);if(existing!=null)return;
   widget=NGUITools.AddWidget<UITexture>(parent.gameObject);button=widget.gameObject;button.name=Name;
+  button.layer=fire.layer;
+  UIWidget reference=fire.GetComponentInChildren<UIWidget>();
+  if(reference!=null)widget.depth=reference.depth+1;
   button.transform.localPosition=center;button.transform.localScale=new Vector3(size,size,1);
   if(texture==null)texture=MakeIcon();
   widget.shader=shader;widget.mainTexture=texture;
@@ -40,6 +52,7 @@ public sealed class SneakHud {
   UIButton btn=button.AddComponent<UIButton>();btn.tweenTarget=button;btn.hover=Color.white;btn.pressed=new Color(.65f,.8f,1f,1f);
   UIEventListener.Get(button).onPress=delegate(GameObject go,bool down){if(down&&btn.enabled&&request!=null)request();};
   if(register!=null)register(button);
+  Debug.Log("[CNRMovement] Sneak HUD created beside "+fire.name+" size="+size+" parent="+parent.name);
  }
  static float Segment(float x,float y,float ax,float ay,float bx,float by){
   float dx=bx-ax,dy=by-ay,t=Mathf.Clamp01(((x-ax)*dx+(y-ay)*dy)/(dx*dx+dy*dy));

@@ -2233,11 +2233,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and username/password account login, preview, merge, and sync controls.",
-      "latestVersion": "3.1.113",
+      "latestVersion": "3.1.114",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.113.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.114.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.114",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.114.dll",
+          "changelog": "Send experimental jump input only on fresh touch presses; expose the actual Fire control to the movement HUD."
+        },
         {
           "version": "3.1.113",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.113.dll",
@@ -4140,10 +4145,15 @@
       "name": "CNR Movement (Experimental)",
       "description": "Optional CODM-inspired movement experiment. Sprint, Sneak/Slide, crouch, jump and camera posture. Disabled by default; no APK patch. Intended for supported local player controllers in single-player and multiplayer. Test build.",
       "filename": "CNRMovementMod.dll",
-      "latestVersion": "0.1.0",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMovementMod/CNRMovementMod-0.1.0.dll",
+      "latestVersion": "0.1.1",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMovementMod/CNRMovementMod-0.1.1.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "0.1.1",
+          "url": "https://play.jacqueb.me/mods/CNRMovementMod/CNRMovementMod-0.1.1.dll",
+          "changelog": "Fix repeated landing jumps and preserve explicit airborne jump buffering. Improve Sneak HUD placement and visibility."
+        },
         {
           "version": "0.1.0",
           "url": "https://play.jacqueb.me/mods/CNRMovementMod/CNRMovementMod-0.1.0.dll",
@@ -4155,7 +4165,7 @@
           "kind": "mod",
           "id": "CNRSettingsMod",
           "filename": "CNRSettingsMod.dll",
-          "minVersion": "3.1.113",
+          "minVersion": "3.1.114",
           "latestOnly": true
         },
         {

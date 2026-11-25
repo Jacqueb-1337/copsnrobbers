@@ -8,8 +8,8 @@ public sealed class LocalMovementBridge : MonoBehaviour {
  readonly EnvironmentPriority environment=new EnvironmentPriority(); readonly Motor motor=new Motor(); readonly PostureAdapter posture=new PostureAdapter(); readonly SneakHud hud=new SneakHud();
  CharacterController bound; JoyStickController owner; SingleModeLadderPlayer ladder; CRJoyStickController crOwner; CRLadderPlayer crLadder; FPScontroller fpsOwner; Camera inputCam; FieldInfo crSpeedField,crControllerField;
  FieldInfo moveField,jumpField,ladderField,stopField,ccField,camField,fireField,lastFallField,lastHeightField;
- FieldInfo[] hooks; Delegate[] handlers; MethodInfo registerHud,hudBlocked,sprintBlocked,fallMethod;
- System.Action fallTick; bool ready,ownsController,failed; float nextBind,nextFind,footTime,pendingImpulse; int acquiredFrame=-1,queuedFrame=-100,slideFrame=-100;
+ FieldInfo[] hooks; Delegate[] handlers; MethodInfo registerHud,hudBlocked,sprintBlocked,fallMethod,fireButton;
+ System.Action fallTick; bool ready,ownsController,failed; float nextBind,nextFind,footTime,pendingImpulse; int acquiredFrame=-1,slideFrame=-100; readonly JumpBuffer jumpBuffer=new JumpBuffer(); bool nativeJumpHeld;
  Quaternion previousYaw; bool hasYaw;
  const BindingFlags StaticPublic=BindingFlags.Public|BindingFlags.Static;
  const BindingFlags InstanceFields=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance;
@@ -20,16 +20,17 @@ public sealed class LocalMovementBridge : MonoBehaviour {
  bool FpsCanMove(){return ready&&!failed&&Enabled()&&fpsOwner!=null&&bound!=null&&bound.enabled&&fpsOwner.gameObject.activeInHierarchy&&fpsOwner.gameObject.name=="ExampleCharacter"&&fpsOwner.canControl&&!fpsOwner.onLadder&&fpsOwner.movement!=null&&fpsOwner.jumping!=null&&(PlayerLogic.mInstance==null||!PlayerLogic.mInstance.bDied)&&(SingleModePauseControl.mInstance==null||!SingleModePauseControl.mInstance.PauseState)&&(fpsOwner.movingPlatform==null||fpsOwner.movingPlatform.activePlatform==null);}
  bool CanMove(){if(bound!=null&&environment.Owns(bound))return false;if(fpsOwner!=null)return FpsCanMove();if(crOwner!=null)return CrCanMove();return ready&&!failed&&Enabled()&&owner!=null&&bound!=null&&owner.gameObject.activeInHierarchy&&LocalPlayer(owner.gameObject)&&bound.enabled&&ladder!=null&&!ladder.latchedToLadder&&!(bool)stopField.GetValue(owner)&&PlayerLogic.mInstance!=null&&!PlayerLogic.mInstance.bDied&&(SingleModePauseControl.mInstance==null||!SingleModePauseControl.mInstance.PauseState);}
  bool Owns(){return ownsController&&CanMove()&&(fpsOwner!=null?!fpsOwner.enabled:crOwner!=null?!crOwner.enabled:owner!=null&&!owner.enabled);}
- bool QueueJump(){if(!Owns())return false;if(!HudBlocked()&&bound.isGrounded)queuedFrame=Time.frameCount;return true;}
+ bool QueueJump(){if(!Owns())return false;if(!HudBlocked())jumpBuffer.Press(Time.frameCount);return true;}
  float Vertical(){return motor.Y+pendingImpulse;}
  void AddVertical(float v){if(Owns()&&!float.IsNaN(v)&&!float.IsInfinity(v))pendingImpulse+=v;}
  public void RequestSlide(){if(Owns()&&!HudBlocked())slideFrame=Time.frameCount;}
  bool HudBlocked(){return hudBlocked!=null&&(bool)hudBlocked.Invoke(null,null);}
+ GameObject FireButton(){return fireButton!=null?fireButton.Invoke(null,null) as GameObject:null;}
  void RegisterHud(GameObject go){if(registerHud!=null)registerHud.Invoke(null,new object[]{go});}
  void TryBind(){
   try{
    Type j=typeof(JoyStickController),s=Find("CNRSettingsMod.SettingsModHook");if(s==null)return;
-   registerHud=s.GetMethod("RegisterExperimentalMovementHud",StaticPublic);hudBlocked=s.GetMethod("ExperimentalMovementHudInputBlocked",StaticPublic);sprintBlocked=s.GetMethod("ExperimentalMovementSprintBlocked",StaticPublic);
+   fireButton=s.GetMethod("GetExperimentalMovementFireButton",StaticPublic);registerHud=s.GetMethod("RegisterExperimentalMovementHud",StaticPublic);hudBlocked=s.GetMethod("ExperimentalMovementHudInputBlocked",StaticPublic);sprintBlocked=s.GetMethod("ExperimentalMovementSprintBlocked",StaticPublic);
    crSpeedField=typeof(CRJoyStickController).GetField("moveSpeed",InstanceFields);crControllerField=typeof(CRJoyStickController).GetField("charactercontroller",InstanceFields);
    moveField=j.GetField("moveSpeed",InstanceFields);jumpField=j.GetField("isJumping",InstanceFields);ladderField=j.GetField("isonladder",InstanceFields);stopField=j.GetField("cannotMove",InstanceFields);
    ccField=j.GetField("charactercontroller",InstanceFields);camField=j.GetField("cam",InstanceFields);fireField=j.GetField("fireStatusHoldTimeCount",InstanceFields);lastFallField=j.GetField("lastFallTime",InstanceFields);lastHeightField=j.GetField("lastHeightPosition",InstanceFields);fallMethod=j.GetMethod("UpdateFallDamage",InstanceFields);
@@ -51,7 +52,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
    if(fpsOwner.jumping!=null)fpsOwner.jumping.jumping=!fpsOwner.grounded&&motor.Y>0;
    fpsOwner.Running=false;fpsOwner.Walking=false;fpsOwner.crouch=false;
   }finally{fpsOwner.enabled=true;}}
-  ownsController=false;posture.Restore();fpsOwner=null;crOwner=null;crLadder=null;owner=null;bound=null;ladder=null;inputCam=null;fallTick=null;motor.Reset();hasYaw=false;pendingImpulse=footTime=0;queuedFrame=slideFrame=-100;
+  ownsController=false;posture.Restore();fpsOwner=null;crOwner=null;crLadder=null;owner=null;bound=null;ladder=null;inputCam=null;fallTick=null;motor.Reset();hasYaw=false;pendingImpulse=footTime=0;jumpBuffer.Reset();nativeJumpHeld=false;slideFrame=-100;
  }
  void Fail(Exception e){failed=true;try{Release();}catch(Exception restore){Debug.LogWarning("[CNRMovement] restore: "+restore.Message);}Debug.LogWarning("[CNRMovement] disabled after error: "+e);}
  void Update(){try{
@@ -102,10 +103,10 @@ public sealed class LocalMovementBridge : MonoBehaviour {
  void LateUpdate(){try{
   if(!ownsController)Acquire();
   bool active=Owns();
-  hud.Tick(ready&&!failed&&Enabled()&&(owner!=null||crOwner!=null||fpsOwner!=null||PlayerLogic.mInstance!=null||CRPlayer.mInstance!=null),motor.State==Motor.Mode.Slide||motor.State==Motor.Mode.Crouch,RequestSlide,RegisterHud);
+  hud.Tick(ready&&!failed&&Enabled()&&(owner!=null||crOwner!=null||fpsOwner!=null||PlayerLogic.mInstance!=null||CRPlayer.mInstance!=null),motor.State==Motor.Mode.Slide||motor.State==Motor.Mode.Crouch,RequestSlide,RegisterHud,FireButton);
   if(!active&&ownsController){Release();return;}
   if(!active||acquiredFrame==Time.frameCount)return; // stock Update already ran on acquisition frame
-  if(!HudBlocked())Step();else{queuedFrame=slideFrame=-100;PlayerPrefs.SetInt("OnJump",0);}
+  if(!HudBlocked())Step();else{jumpBuffer.Reset();slideFrame=-100;PlayerPrefs.SetInt("OnJump",0);}
   posture.Present(motor.LandingDip);
  }catch(Exception e){Fail(e);}}
  void OnLevelWasLoaded(int level){Release();failed=false;nextFind=0;}
@@ -122,8 +123,13 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   if(hasYaw){Vector3 v=Quaternion.Inverse(yaw)*previousYaw*new Vector3(motor.X,0,motor.Z);motor.SetHorizontal(v.x,v.z);}
   previousYaw=yaw;hasYaw=true;motor.Mobility=speed/(Motor.ReferenceWalk*motor.UnitScale);
   bool grounded=bound.isGrounded;
-  bool jump=grounded&&(Time.frameCount-queuedFrame<=1||(!cr&&!fps&&(bool)jumpField.GetValue(owner))||PlayerPrefs.GetInt("OnJump",0)==1||(cr&&(Input.GetButton("Jump")||(CRInput.mInstance!=null&&CRInput.mInstance.m_bJump)))||(fps&&fpsOwner.inputJump));
-  if(jump){queuedFrame=-100;PlayerPrefs.SetInt("OnJump",0);}
+  // Settings owns touch/KBM/gamepad edges. Never replay the vanilla NGUI
+  // OnClick flag on release; it can be set after the original touch jump.
+  bool nativeHeld=(cr&&Input.GetButton("Jump"))||(fps&&fpsOwner.inputJump);
+  if(nativeHeld&&!nativeJumpHeld&&!HudBlocked())jumpBuffer.Press(Time.frameCount);
+  nativeJumpHeld=nativeHeld;
+  bool jump=jumpBuffer.Consume(grounded&&motor.Y<=0);
+  if(PlayerPrefs.GetInt("OnJump",0)!=0)PlayerPrefs.SetInt("OnJump",0);
   if(!cr&&!fps)jumpField.SetValue(owner,false);
   Vector3 input=fps?Quaternion.Inverse(yaw)*fpsOwner.inputMoveDirection:Vector3.zero;
   float x=stick!=null?stick.AxisX:input.x,z=stick!=null?stick.AxisY:input.z;

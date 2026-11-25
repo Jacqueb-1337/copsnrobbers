@@ -111,7 +111,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.113";
+        public  const string Version = "3.1.114";
 
         public static void Load()
         {
@@ -295,6 +295,13 @@ namespace CNRSettingsMod
                 UIButton button = widget.GetComponent<UIButton>();
                 if (button != null) button.enabled = false;
             }
+        }
+
+        public static GameObject GetExperimentalMovementFireButton()
+        {
+            GameObject root = GameObject.Find("CNRSettingsMod");
+            SettingsModHook settings = root != null ? root.GetComponent<SettingsModHook>() : null;
+            return settings != null ? settings._dragGOs[0] : null;
         }
 
         // Reuse actual aim and firing state; FpsOnFire is an edge/toggle, not a held flag.
@@ -3052,6 +3059,8 @@ namespace CNRSettingsMod
                     t.phase != TouchPhase.Moved) continue;
 
                 // For Stationary/Moved, only act if this finger began on the button.
+                bool experimental = ExperimentalMovementOwnsJump != null && ExperimentalMovementOwnsJump();
+                if (experimental && (t.phase != TouchPhase.Began || _jumpTouchIds.Contains(t.fingerId))) continue;
                 if (t.phase != TouchPhase.Began && !_jumpTouchIds.Contains(t.fingerId)) continue;
 
                 // Raycast from the NGUI camera through the touch position.
