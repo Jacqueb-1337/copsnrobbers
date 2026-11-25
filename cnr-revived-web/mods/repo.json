@@ -4152,7 +4152,6 @@
       "filename": "CNRMovementMod.dll",
       "latestVersion": "0.1.2",
       "latestUrl": "https://play.jacqueb.me/mods/CNRMovementMod/CNRMovementMod-0.1.2.dll",
-      "latestOnly": true,
       "versions": [
         {
           "version": "0.1.2",
@@ -4174,16 +4173,12 @@
         {
           "kind": "mod",
           "id": "CNRSettingsMod",
-          "filename": "CNRSettingsMod.dll",
-          "minVersion": "3.1.115",
-          "latestOnly": true
+          "filename": "CNRSettingsMod.dll"
         },
         {
           "kind": "mod",
           "id": "CNRMod",
-          "filename": "CNRMod.dll",
-          "minVersion": "4.2.58",
-          "latestOnly": true
+          "filename": "CNRMod.dll"
         }
       ]
     }
