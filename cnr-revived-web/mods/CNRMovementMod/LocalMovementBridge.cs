@@ -106,13 +106,15 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   bool active=Owns();
   hud.Tick(ready&&!failed&&Enabled()&&(owner!=null||crOwner!=null||fpsOwner!=null||PlayerLogic.mInstance!=null||CRPlayer.mInstance!=null),motor.State==Motor.Mode.Slide||motor.State==Motor.Mode.Crouch,RequestSlide,RegisterHud,FireButton);
   if(!active&&ownsController){Release();return;}
-  if(!active||acquiredFrame==Time.frameCount)return; // stock Update already ran on acquisition frame
-  if(!HudBlocked())Step();else{jumpBuffer.Reset();slideFrame=-100;PlayerPrefs.SetInt("OnJump",0);}
+  if(!active)return;
+  if(acquiredFrame==Time.frameCount){nativeJumpHeld=NativeJumpHeld();return;} // do not replay held input at takeover
+  if(!HudBlocked())Step();else{jumpBuffer.Reset();nativeJumpHeld=NativeJumpHeld();slideFrame=-100;PlayerPrefs.SetInt("OnJump",0);}
   posture.Present(motor.LandingDip);
  }catch(Exception e){Fail(e);}}
  void OnLevelWasLoaded(int level){Release();failed=false;nextFind=0;}
  void OnDisable(){Release();hud.Remove();}
  void OnDestroy(){Release();hud.Dispose();Unbind();}
+ bool NativeJumpHeld(){return (crOwner!=null&&Input.GetButton("Jump"))||(fpsOwner!=null&&fpsOwner.inputJump);}
  void Step(){
   float dt=Mathf.Min(Time.deltaTime,.05f);if(dt<=0)return;
   VCAnalogJoystickBase stick=VCAnalogJoystickBase.GetInstance("stick");if(stick==null&&fpsOwner==null){Release();return;}
@@ -126,8 +128,9 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   bool grounded=bound.isGrounded;
   // Settings owns touch/KBM/gamepad edges. Never replay the vanilla NGUI
   // OnClick flag on release; it can be set after the original touch jump.
-  bool nativeHeld=(cr&&Input.GetButton("Jump"))||(fps&&fpsOwner.inputJump);
-  if(nativeHeld&&!nativeJumpHeld&&!HudBlocked())jumpBuffer.Press(Time.frameCount);
+  bool nativeHeld=NativeJumpHeld();
+  // Settings owns touch events; native input must not replay a touch jump.
+  if(nativeHeld&&!nativeJumpHeld&&Input.touchCount==0)jumpBuffer.Press(Time.frameCount);
   nativeJumpHeld=nativeHeld;
   bool jump=jumpBuffer.Consume(grounded&&motor.Y<=0&&posture.CanStand());
   if(PlayerPrefs.GetInt("OnJump",0)!=0)PlayerPrefs.SetInt("OnJump",0);

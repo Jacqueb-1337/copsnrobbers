@@ -111,7 +111,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.116";
+        public  const string Version = "3.1.117";
 
         public static void Load()
         {
@@ -2993,9 +2993,11 @@ namespace CNRSettingsMod
                 for (int i = 0; i < Input.touchCount; i++)
                 {
                     Touch t = Input.GetTouch(i);
-                    if (t.phase != TouchPhase.Began || t.position.x < sw * 0.5f || t.position.y > sh * 0.72f) continue;
-                    // Jump/Sneak touches are buttons, not owners of the camera.
-                    if (CameraTouchHitsMovementButton(t.position)) continue;
+                    if (t.phase != TouchPhase.Began) continue;
+                    // A jump or sneak press is also a valid camera-drag origin.
+                    // NGUI button actions and camera tracking must be independent.
+                    bool inLookArea = t.position.x >= sw * 0.5f && t.position.y <= sh * 0.72f;
+                    if (!inLookArea && !CameraTouchHitsMovementButton(t.position)) continue;
                     _touchCamFingerId = t.fingerId;
                     _touchCamPrevX = t.position.x;
                     _touchCamPrevY = t.position.y;
@@ -3013,11 +3015,12 @@ namespace CNRSettingsMod
             float dy = tracked.position.y - _touchCamPrevY;
             _touchCamPrevX = tracked.position.x;
             _touchCamPrevY = tracked.position.y;
+            // Keep stock Sliderotate from stealing an owned touch on stationary frames.
+            if (_fiCannotRotate != null) _fiCannotRotate.SetValue(_sliderotate, true);
             if (dx != 0f || dy != 0f)
             {
                 float touchSens = _modAimed ? (_sensNormal * _adsMultiplier) : _sensNormal;
                 KbmInjectMouseLook(dx * 0.1f, dy * 0.1f, touchSens);
-                if (_fiCannotRotate != null) _fiCannotRotate.SetValue(_sliderotate, true);
             }
         }
 
@@ -3041,7 +3044,17 @@ namespace CNRSettingsMod
         {
             if (_dragGOs[1] == null || _nguiCam == null) return;
             if ((ExperimentalMovementOwnsJump == null || !ExperimentalMovementOwnsJump()) && ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied)) return;
-            if (Input.touchCount == 0) return;
+            if (Input.touchCount == 0) { _jumpTouchIds.Clear(); return; }
+            // Apply the opt-in press-only rule even during temporary controller handoffs.
+            bool experimental = ExperimentalMovementOwnsJump != null &&
+                PlayerPrefs.GetInt("CNRMovementExperimental", 0) == 1;
+            // Clear every released ID before considering presses, irrespective of ordering.
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch t = Input.GetTouch(i);
+                if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled || t.phase == TouchPhase.Began)
+                    _jumpTouchIds.Remove(t.fingerId);
+            }
 
             // Cache JoyStickController and its private fields.
             if ((object)_joyStickCtrl == null)
@@ -3063,20 +3076,14 @@ namespace CNRSettingsMod
             {
                 Touch t = Input.GetTouch(i);
 
-                // Remove ended/cancelled touches from the claimed set.
-                if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
-                {
-                    _jumpTouchIds.Remove(t.fingerId);
-                    continue;
-                }
+                if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled) continue;
 
                 if (t.phase != TouchPhase.Began &&
                     t.phase != TouchPhase.Stationary &&
                     t.phase != TouchPhase.Moved) continue;
 
                 // For Stationary/Moved, only act if this finger began on the button.
-                bool experimental = ExperimentalMovementOwnsJump != null && ExperimentalMovementOwnsJump();
-                if (experimental && (t.phase != TouchPhase.Began || _jumpTouchIds.Contains(t.fingerId))) continue;
+                if (experimental && t.phase != TouchPhase.Began) continue;
                 if (t.phase != TouchPhase.Began && !_jumpTouchIds.Contains(t.fingerId)) continue;
 
                 // Raycast from the NGUI camera through the touch position.
@@ -3099,7 +3106,8 @@ namespace CNRSettingsMod
                     _jumpTouchIds.Add(t.fingerId);
                 }
 
-                // Hand off to TriggerOwnJump which decides whether to start a new arc.
+                // Experimental: one request per Began, including a deliberate
+                // airborne tap. Legacy mode retains the hold-to-repeat behavior.
                 TriggerOwnJump();
                 break;
             }
