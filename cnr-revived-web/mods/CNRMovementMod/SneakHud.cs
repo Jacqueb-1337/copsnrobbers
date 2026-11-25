@@ -48,11 +48,31 @@ public sealed class SneakHud {
   button.transform.localPosition=center;button.transform.localScale=new Vector3(size,size,1);
   if(texture==null)texture=MakeIcon();
   widget.shader=shader;widget.mainTexture=texture;
+  // NGUI ancestors may scale X and Y differently. Equal local scale
+  // therefore does not guarantee a circular screen-space icon.
+  MakeScreenSquare(button.transform,fire.layer);
   NGUITools.AddWidgetCollider(button);
   UIButton btn=button.AddComponent<UIButton>();btn.tweenTarget=button;btn.hover=Color.white;btn.pressed=new Color(.65f,.8f,1f,1f);
   UIEventListener.Get(button).onPress=delegate(GameObject go,bool down){if(down&&btn.enabled&&request!=null)request();};
   if(register!=null)register(button);
   Debug.Log("[CNRMovement] Sneak HUD created beside "+fire.name+" size="+size+" parent="+parent.name);
+ }
+ static void MakeScreenSquare(Transform t,int layer){
+  Vector3 scale=t.localScale;
+  Vector3 origin=t.position;
+  Vector3 right=t.TransformPoint(Vector3.right),up=t.TransformPoint(Vector3.up);
+  UICamera ui=UICamera.FindCameraForLayer(layer);
+  Camera cam=ui!=null?ui.GetComponent<Camera>():null;
+  float w,h;
+  if(cam!=null){
+   Vector3 o=cam.WorldToScreenPoint(origin),r=cam.WorldToScreenPoint(right),u=cam.WorldToScreenPoint(up);
+   w=Vector2.Distance(new Vector2(o.x,o.y),new Vector2(r.x,r.y));
+   h=Vector2.Distance(new Vector2(o.x,o.y),new Vector2(u.x,u.y));
+  }else{w=(right-origin).magnitude;h=(up-origin).magnitude;}
+  if(w>.00001f&&h>.00001f&&!float.IsNaN(w/h)&&!float.IsInfinity(w/h)){
+   scale.y*=w/h;t.localScale=scale;
+   Debug.Log("[CNRMovement] Sneak square correction: "+w+" x "+h+" -> "+t.localScale);
+  }
  }
  static float Segment(float x,float y,float ax,float ay,float bx,float by){
   float dx=bx-ax,dy=by-ay,t=Mathf.Clamp01(((x-ax)*dx+(y-ay)*dy)/(dx*dx+dy*dy));
