@@ -8,6 +8,16 @@ class Tests {
  static void Main(){
  foreach(int fps in new[]{30,60,120}){
   float dt=1f/fps; Motor m=new Motor();
+  Advance(m,dt,.5f,0,1,false);
+  m.Tick(dt,0,1,true,true,true,false,true);
+  Check(m.State==Motor.Mode.Slide,"same-frame sprint slide "+fps);
+  m.Reset();m.Mobility=.5f;Advance(m,dt,.5f,0,1,true);
+  m.Tick(dt,0,1,true,true,true,false,true);
+  Check(m.State==Motor.Mode.Slide,"low mobility slide "+fps);
+  m.Reset();m.Mobility=1;Advance(m,dt,.5f,0,1,false);
+  m.Tick(dt,0,1,true,false,true,false,true);
+  Check(m.State==Motor.Mode.Crouch,"non-sprint stays crouch "+fps);
+  m.Reset();
   Advance(m,dt,1,0,1,false);Near(m.Speed,7,.03f,"forward "+fps);
   Advance(m,dt,1,1,0,false);Near(m.Speed,3.5f,.03f,"strafe "+fps);
   Advance(m,dt,1,0,-1,true);Near(m.Speed,7,.03f,"backward "+fps);Check(m.State!=Motor.Mode.Sprint,"no reverse sprint "+fps);

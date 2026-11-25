@@ -111,7 +111,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.118";
+        public  const string Version = "3.1.119";
 
         public static void Load()
         {
@@ -285,7 +285,8 @@ namespace CNRSettingsMod
             int i = SneakHudIndex;
             if (settings._dragGOs[i] == widget) return;
             settings._dragGOs[i] = widget;
-            settings._dragOrigPos[i] = widget.transform.position;
+            settings._dragOrigPos[i] = widget.transform.localPosition;
+            settings._dragBaselineOwner[i] = widget;
             settings._dragOrigScale[i] = widget.transform.localScale;
             settings._savedScales[i] = -1f;
             settings.LoadDragPos(i);
@@ -364,6 +365,7 @@ namespace CNRSettingsMod
             new System.Collections.Generic.Dictionary<string,string>();
         private GameObject[] _dragGOs      = new GameObject[DRAG_COUNT];
         private Vector3[]    _dragOrigPos  = new Vector3[DRAG_COUNT];
+        private GameObject[] _dragBaselineOwner = new GameObject[DRAG_COUNT];
         private Vector3[]    _dragOrigScale = new Vector3[DRAG_COUNT];
 
         // -- Scene state -------------------------------------------------------
@@ -3993,6 +3995,12 @@ namespace CNRSettingsMod
             ReCacheHUD();
             CacheNguiCam();
             _hudEditMode  = true;
+            _editorPointer = -2;
+            _editorAction = 0;
+            _editorSelected = -1;
+            _editorPage = 0;
+            _editorList = false;
+            _editorCollapsed = false;
             _showSettings = false;
             // Hide the pause panel so its NGUI buttons cannot be tapped
             if (_pausePanelRef != null) _pausePanelRef.SetActive(false);
@@ -4004,7 +4012,7 @@ namespace CNRSettingsMod
 
         private void ExitHudEditMode()
         {
-            for (int i = 0; i < DRAG_COUNT; i++) { SaveDragPos(i); SaveDragScale(i); }
+            FinishEditorGesture();
             HudCfgSave();
             _draggingIdx  = -1;
             _resizingIdx  = -1;
@@ -4058,12 +4066,12 @@ namespace CNRSettingsMod
                 _savedScales[i] = -1f;
                 if (_dragGOs[i] != null)
                 {
-                    if (_dragOrigPos[i] != Vector3.zero)
-                        _dragGOs[i].transform.position = _dragOrigPos[i];
+                    if (_dragBaselineOwner[i] != null)
+                        _dragGOs[i].transform.localPosition = _dragOrigPos[i];
                     _dragGOs[i].transform.localScale =
                         (_dragOrigScale[i] != Vector3.zero) ? _dragOrigScale[i] : Vector3.one;
                 }
-                _dragOrigScale[i] = Vector3.zero; // force fresh recapture on next scene load
+                // Preserve actual factory baseline until a new widget is found.
             }
             HudCfgSave();
             // Let NGUI process the repositioned transforms for one frame before re-enabling buttons
@@ -4086,139 +4094,202 @@ namespace CNRSettingsMod
         // =====================================================================
         // Drag / resize handling (called from Update while in edit mode)
         // =====================================================================
-        private void HandleHudDrag()
+        private int _editorSelected = -1, _editorPointer = -2, _editorAction, _editorPage;
+        private bool _editorCollapsed, _editorList;
+        private Vector2 _editorOrigin = new Vector2(218f, 8f), _editorOffset;
+        private float _editorPressTime, _editorNextRepeat;
+        private bool _editorDirty;
+        private const int EditorPageSize = 6;
+        private float EditorScale { get { return Mathf.Max(.01f, Screen.width / REF_W); } }
+        private Rect EditorWindow()
         {
-            Vector2 inputPos = Vector2.zero;
-            bool down = false, held = false, up = false;
-
-            if (Input.touchCount > 0)
+            float h = _editorCollapsed ? 23f : 148f;
+            _editorOrigin.x = Mathf.Clamp(_editorOrigin.x, 0f, REF_W - 172f);
+            _editorOrigin.y = Mathf.Clamp(_editorOrigin.y, 0f, Mathf.Max(0f, Screen.height / EditorScale - h));
+            return new Rect(_editorOrigin.x,_editorOrigin.y,172f,h);
+        }
+        private Rect EditorRect(float x,float y,float w,float h)
+        {
+            Rect r=EditorWindow();return new Rect(r.x+x,r.y+y,w,h);
+        }
+        private static bool IsHudGroup(int i) { return i==5||i==6||i==7||i==8; }
+        private Camera EditorCamera(int i)
+        {
+            if (_dragGOs[i] == null) return null;
+            UICamera ui=UICamera.FindCameraForLayer(_dragGOs[i].layer);
+            Camera c=ui!=null?ui.GetComponent<Camera>():null;
+            return c!=null?c:_nguiCam;
+        }
+        private static Vector2 RectCenter(Rect r)
+        { return new Vector2(r.x+r.width*.5f,r.y+r.height*.5f); }
+        private Rect GetHandleRect(int i)
+        {
+            GameObject go=_dragGOs[i]; Camera cam=EditorCamera(i);
+            if(go==null||cam==null)return new Rect(-9999,-9999,1,1);
+            Transform t=go.transform;
+            Bounds b=NGUIMath.CalculateRelativeWidgetBounds(t,t);
+            Vector3 min=b.min,max=b.max;
+            float x0=float.MaxValue,y0=float.MaxValue,x1=float.MinValue,y1=float.MinValue;
+            if(b.size.x>.000001f&&b.size.y>.000001f)
             {
-                Touch t = Input.GetTouch(0);
-                inputPos = t.position;
-                down = t.phase == TouchPhase.Began;
-                held = t.phase == TouchPhase.Moved || t.phase == TouchPhase.Stationary;
-                up   = t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled;
+                for(int k=0;k<4;k++)
+                {
+                    Vector3 sp=cam.WorldToScreenPoint(t.TransformPoint(new Vector3((k&1)==0?min.x:max.x,(k&2)==0?min.y:max.y,b.center.z)));
+                    x0=Mathf.Min(x0,sp.x);x1=Mathf.Max(x1,sp.x);
+                    float y=Screen.height-sp.y;y0=Mathf.Min(y0,y);y1=Mathf.Max(y1,y);
+                }
             }
             else
             {
-                inputPos = Input.mousePosition;
-                down = Input.GetMouseButtonDown(0);
-                held = Input.GetMouseButton(0);
-                up   = Input.GetMouseButtonUp(0);
+                Vector3 sp=cam.WorldToScreenPoint(t.position);
+                x0=x1=sp.x;y0=y1=Screen.height-sp.y;
             }
-
-            // Input Y=0 at bottom; GUI Y=0 at top
-            Vector2 guiPos = new Vector2(inputPos.x, Screen.height - inputPos.y);
-
-            if (down)
-            {
-                for (int i = 0; i < DRAG_COUNT; i++)
-                {
-                    if (_dragGOs[i] == null) continue;
-                    Rect full = GetHandleRect(i);
-                    if (!full.Contains(guiPos)) continue;
-
-                    // Double-tap on same handle toggles move / resize mode globally
-                    if (_lastTapIdx == i && (Time.time - _lastTapTime) < DOUBLE_TAP_THRESH)
-                    {
-                        _editResizeMode = !_editResizeMode;
-                        _lastTapIdx = -1;
-                    }
-                    else
-                    {
-                        _lastTapIdx  = i;
-                        _lastTapTime = Time.time;
-                    }
-
-                    if (_editResizeMode)
-                    {
-                        _resizingIdx      = i;
-                        _draggingIdx      = -1;
-                        _resizeTouchStart = guiPos;
-                        _resizeStartRatio = (_savedScales[i] >= 0f) ? _savedScales[i] : 1f;
-                    }
-                    else
-                    {
-                        _draggingIdx = i;
-                        _resizingIdx = -1;
-                        // Store offset from the item's CENTER so the item stays under the finger
-                        _dragOffset  = guiPos - RectCenter(full);
-                    }
-                    break;
-                }
-            }
-            else if (held)
-            {
-                if (_draggingIdx >= 0)
-                    MoveDragItem(_draggingIdx, guiPos - _dragOffset);
-                else if (_resizingIdx >= 0)
-                {
-                    // Update _savedScales directly; LateUpdate applies origScale*ratio.
-                    // This beats NGUI UIRoot which also runs in LateUpdate after us.
-                    float refDist = Mathf.Max(56f, Screen.width * 0.08f);
-                    float delta = (guiPos.x - _resizeTouchStart.x)
-                                - (guiPos.y - _resizeTouchStart.y); // guiPos Y flipped: up = negative, so subtract
-                    float dragRatio = 1f + delta / refDist;
-                    // clamp so button can't go below 15% of original
-                    dragRatio = Mathf.Max(dragRatio, 0.15f);
-                    _savedScales[_resizingIdx] = _resizeStartRatio * dragRatio;
-                }
-            }
-            else if (up)
-            {
-                if (_draggingIdx >= 0)
-                {
-                    if (!(_suppressSaveIdx && _suppressSaveFor == _draggingIdx))
-                        SaveDragPos(_draggingIdx);
-                    _draggingIdx = -1;
-                }
-                if (_resizingIdx >= 0)
-                {
-                    SaveDragScale(_resizingIdx);
-                    HudCfgSave();
-                    _resizingIdx  = -1;
-                }
-                _suppressSaveIdx = false;
-                _suppressSaveFor = -1;
-            }
+            float w=Mathf.Max(18f,x1-x0),h=Mathf.Max(18f,y1-y0);
+            return new Rect((x0+x1-w)*.5f,(y0+y1-h)*.5f,w,h);
         }
-
-        private static Rect ShrinkRect(Rect r, float borderFraction)
+        private bool IsTrackedDescendant(int child,int parent)
         {
-            float bx = r.width  * borderFraction;
-            float by = r.height * borderFraction;
-            return new Rect(r.x + bx, r.y + by, r.width - bx * 2f, r.height - by * 2f);
+            return child!=parent&&_dragGOs[child]!=null&&_dragGOs[parent]!=null&&_dragGOs[child].transform.IsChildOf(_dragGOs[parent].transform);
         }
-        private static Vector2 RectCenter(Rect r)
-        {
-            return new Vector2(r.x + r.width * 0.5f, r.y + r.height * 0.5f);
-        }
-
-        private Rect GetHandleRect(int i)
-        {
-            if (_dragGOs[i] == null) return new Rect(-9999, -9999, 1, 1);
-            float baseSz = Mathf.Max(56f, Screen.width * 0.08f);
-            // Scale the handle to reflect the current saved ratio so user sees live size feedback.
-            float ratio = (_savedScales[i] > 0f && DRAG_ITEMS[i].prefSZ != null) ? _savedScales[i] : 1f;
-            // Clamp so handle stays usable even if ratio is extreme
-            float sz = Mathf.Clamp(baseSz * ratio, 24f, Screen.width * 0.7f);
-            if (_nguiCam != null)
-            {
-                Vector3 sp = _nguiCam.WorldToScreenPoint(_dragGOs[i].transform.position);
-                return new Rect(sp.x - sz * 0.5f, (Screen.height - sp.y) - sz * 0.5f, sz, sz);
-            }
-            float x = (i % 2 == 0) ? 20f : Screen.width  - sz - 20f;
-            float y = (i < 2)      ? 20f : Screen.height - sz - 20f;
-            return new Rect(x, y, sz, sz);
-        }
-
         private void MoveDragItem(int i, Vector2 guiCenter)
         {
-            if (_dragGOs[i] == null || _nguiCam == null) return;
-            // guiCenter is the desired center in GUI coords (Y=0 at top)
-            float depth = _nguiCam.WorldToScreenPoint(_dragGOs[i].transform.position).z;
-            Vector3 world = _nguiCam.ScreenToWorldPoint(new Vector3(guiCenter.x, Screen.height - guiCenter.y, depth));
-            _dragGOs[i].transform.position = new Vector3(world.x, world.y, _dragGOs[i].transform.position.z);
+            Camera cam=EditorCamera(i);
+            if(_dragGOs[i]==null||cam==null)return;
+            Transform t=_dragGOs[i].transform;
+            // Move by the projected bounds-center delta, never snap a widget pivot to the finger.
+            Vector2 old=RectCenter(GetHandleRect(i));
+            Vector2 delta=guiCenter-old;
+            Vector3 pivot=cam.WorldToScreenPoint(t.position);
+            Vector3 next=cam.ScreenToWorldPoint(new Vector3(pivot.x+delta.x,pivot.y-delta.y,pivot.z));
+            var positions=new Dictionary<int,Vector3>();
+            for(int j=0;j<DRAG_COUNT;j++)if(IsTrackedDescendant(j,i))positions[j]=_dragGOs[j].transform.position;
+            t.position=next;
+            // Restore nested independently editable controls from outermost to innermost.
+            for(int depth=0;depth<DRAG_COUNT;depth++)
+                foreach(var kv in positions)
+                {
+                    int d=0;foreach(var other in positions)if(IsTrackedDescendant(kv.Key,other.Key))d++;
+                    if(d==depth){_dragGOs[kv.Key].transform.position=kv.Value;SaveDragPos(kv.Key);}
+                }
+            SaveDragPos(i);_editorDirty=true;
+        }
+        private void EditorResize(int i,float amount)
+        {
+            if(i<0||_dragGOs[i]==null||DRAG_ITEMS[i].prefSZ==null)return;
+            float r=_savedScales[i]>0f?_savedScales[i]:1f;
+            _savedScales[i]=Mathf.Clamp(r+amount,.15f,6f);
+            SaveDragScale(i);EnforceScales();_editorDirty=true;
+        }
+        private void EditorReset()
+        {
+            int i=_editorSelected;if(i<0||_dragGOs[i]==null)return;
+            var positions=new Dictionary<int,Vector3>();
+            for(int j=0;j<DRAG_COUNT;j++)if(IsTrackedDescendant(j,i))positions[j]=_dragGOs[j].transform.position;
+            _dragGOs[i].transform.localPosition=_dragOrigPos[i];
+            if(_dragOrigScale[i]!=Vector3.zero)_dragGOs[i].transform.localScale=_dragOrigScale[i];
+            _savedScales[i]=-1f;
+            HudCfgDelete(DRAG_ITEMS[i].prefPX);HudCfgDelete(DRAG_ITEMS[i].prefPY);
+            if(DRAG_ITEMS[i].prefSZ!=null)HudCfgDelete(DRAG_ITEMS[i].prefSZ);
+            for(int depth=0;depth<DRAG_COUNT;depth++)foreach(var kv in positions)
+            {
+                int d=0;foreach(var other in positions)if(IsTrackedDescendant(kv.Key,other.Key))d++;
+                if(d==depth){_dragGOs[kv.Key].transform.position=kv.Value;SaveDragPos(kv.Key);}
+            }
+            HudCfgSave();
+        }
+        private void FinishEditorGesture()
+        {
+            if(_editorDirty){HudCfgSave();_editorDirty=false;}
+            _editorPointer=-2;_editorAction=0;_draggingIdx=-1;_resizingIdx=-1;
+        }
+        private void EditorRepeat(int action)
+        {
+            int i=_editorSelected;if(i<0||_dragGOs[i]==null)return;
+            float elapsed=Time.realtimeSinceStartup-_editorPressTime;
+            float step=elapsed>1.1f?5f:elapsed>.45f?2f:1f;
+            if(action>=3&&action<=6)
+            {
+                Vector2 d=action==3?new Vector2(-1,0):action==4?new Vector2(1,0):action==5?new Vector2(0,-1):new Vector2(0,1);
+                MoveDragItem(i,RectCenter(GetHandleRect(i))+d*step*EditorScale);
+            }
+            if(action==7||action==8)EditorResize(i,(action==7?-.025f:.025f)*step);
+        }
+        private void HandleHudDrag()
+        {
+            Vector2 pos=Vector2.zero;bool down=false,held=false,up=false;int id=-1;
+            if(Input.touchCount>0)
+            {
+                bool found=false;
+                for(int i=0;i<Input.touchCount;i++)
+                {
+                    Touch t=Input.GetTouch(i);
+                    if((_editorPointer!=-2&&t.fingerId==_editorPointer)||(_editorPointer==-2&&t.phase==TouchPhase.Began))
+                    {
+                        id=t.fingerId;pos=t.position;down=t.phase==TouchPhase.Began;
+                        up=t.phase==TouchPhase.Ended||t.phase==TouchPhase.Canceled;
+                        held=t.phase==TouchPhase.Moved||t.phase==TouchPhase.Stationary;found=true;break;
+                    }
+                }
+                if(!found){if(_editorPointer!=-2)FinishEditorGesture();return;}
+            }
+            else
+            {
+                if(_editorPointer>=0){FinishEditorGesture();return;}
+                pos=Input.mousePosition;down=Input.GetMouseButtonDown(0);
+                held=Input.GetMouseButton(0);up=Input.GetMouseButtonUp(0);
+            }
+            Vector2 real=new Vector2(pos.x,Screen.height-pos.y),v=real/EditorScale;
+            if(down&&_editorPointer==-2)
+            {
+                _editorPointer=id;_editorPressTime=Time.realtimeSinceStartup;_editorNextRepeat=_editorPressTime+.3f;
+                if(EditorWindow().Contains(v))
+                {
+                    if(EditorRect(0,0,105,23).Contains(v)){_editorAction=1;_editorOffset=v-_editorOrigin;return;}
+                    if(EditorRect(106,0,25,23).Contains(v)){_editorCollapsed=!_editorCollapsed;return;}
+                    if(EditorRect(132,0,40,23).Contains(v)){ExitHudEditMode();return;}
+                    if(_editorCollapsed)return;
+                    if(EditorRect(4,25,80,21).Contains(v)){_editorList=false;return;}
+                    if(EditorRect(88,25,80,21).Contains(v)){_editorList=true;return;}
+                    if(_editorList)
+                    {
+                        if(EditorRect(4,123,35,21).Contains(v)){_editorPage=Mathf.Max(0,_editorPage-1);return;}
+                        if(EditorRect(133,123,35,21).Contains(v)){_editorPage=Mathf.Min((DRAG_COUNT-1)/EditorPageSize,_editorPage+1);return;}
+                        for(int k=0;k<EditorPageSize;k++)
+                        {
+                            int i=_editorPage*EditorPageSize+k;
+                            if(i<DRAG_COUNT&&EditorRect(4+(k%2)*84,48+(k/2)*24,80,22).Contains(v)&&_dragGOs[i]!=null)
+                            {_editorSelected=i;_editorList=false;return;}
+                        }
+                        return;
+                    }
+                    if(EditorRect(4,75,36,23).Contains(v))_editorAction=3;
+                    else if(EditorRect(80,75,36,23).Contains(v))_editorAction=4;
+                    else if(EditorRect(42,62,36,23).Contains(v))_editorAction=5;
+                    else if(EditorRect(42,88,36,23).Contains(v))_editorAction=6;
+                    else if(EditorRect(119,62,49,23).Contains(v))_editorAction=7;
+                    else if(EditorRect(119,88,49,23).Contains(v))_editorAction=8;
+                    else if(EditorRect(4,120,164,24).Contains(v))EditorReset();
+                    if(_editorAction>=3)EditorRepeat(_editorAction);
+                    return;
+                }
+                int pick=-1;float best=float.MaxValue;
+                // Prefer independent controls over containing panel groups.
+                for(int i=0;i<DRAG_COUNT;i++)
+                {
+                    if(_dragGOs[i]==null||IsHudGroup(i))continue;
+                    Rect r=GetHandleRect(i);float area=r.width*r.height;
+                    if(r.Contains(real)&&area<best){best=area;pick=i;}
+                }
+                if(pick>=0){_editorSelected=pick;_editorAction=2;_draggingIdx=pick;_editorOffset=real-RectCenter(GetHandleRect(pick));}
+            }
+            else if(held&&_editorPointer==id)
+            {
+                if(_editorAction==1){_editorOrigin=v-_editorOffset;EditorWindow();}
+                else if(_editorAction==2&&_editorSelected>=0)MoveDragItem(_editorSelected,real-_editorOffset);
+                else if(_editorAction>=3&&Time.realtimeSinceStartup>=_editorNextRepeat)
+                {EditorRepeat(_editorAction);_editorNextRepeat=Time.realtimeSinceStartup+.055f;}
+            }
+            else if(up&&_editorPointer==id)FinishEditorGesture();
         }
 
         private void SaveDragPos(int i)
@@ -4797,8 +4868,7 @@ namespace CNRSettingsMod
                         HudCfgDelete(DRAG_ITEMS[i].prefPY);
                         if (DRAG_ITEMS[i].prefSZ != null) HudCfgDelete(DRAG_ITEMS[i].prefSZ);
                         _savedScales[i]   = -1f;
-                        _dragOrigScale[i] = Vector3.zero;
-                    }
+                        }
                     HudCfgSave();
                 }
             }
@@ -6454,139 +6524,56 @@ namespace CNRSettingsMod
             }
         }
 
-        private void DrawHudEditOverlay(float vw, float vh)
+        private void DrawHudEditOverlay(float vw,float vh)
         {
-            // Top banner
-            GUI.color = new Color(0f, 0f, 0f, 0.75f);
-            GUI.DrawTexture(new Rect(0, 0, vw, 64f), Texture2D.whiteTexture);
-            GUI.color = Color.white;
-
-            GUIStyle banner = new GUIStyle(GUI.skin.label);
-            banner.fontSize  = 18;
-            banner.fontStyle = FontStyle.Bold;
-            banner.alignment = TextAnchor.MiddleLeft;
-            banner.normal.textColor = new Color(1f, 0.9f, 0.2f);
-            string modeLabel = _editResizeMode ? "[RESIZE]  double-tap handle to switch" : "[MOVE]  double-tap handle to switch";
-            GUI.Label(new Rect(12f, 8f, vw - 170f, 48f), "HUD Edit  --  " + modeLabel, banner);
-
-            // Finish button (top-right)
-            GUIStyle finBtn = new GUIStyle(GUI.skin.button);
-            finBtn.fontSize  = 20;
-            finBtn.fontStyle = FontStyle.Bold;
-            finBtn.normal.textColor = new Color(0.3f, 1f, 0.4f);
-            if (GUI.Button(new Rect(vw - 158f, 8f, 150f, 48f), "Finish", finBtn))
-                ExitHudEditMode();
-
-            // Per-item tint colours -- alpha kept low so actual buttons are visible
-            Color[] colours = new Color[]
+            float scale=EditorScale;
+            for(int i=0;i<DRAG_COUNT;i++)
             {
-                new Color(1f,   0.3f, 0.3f, 0.09f),   // 0  fire     red
-                new Color(0.3f, 0.85f,1f,   0.09f),   // 1  jump     cyan
-                new Color(1f,   0.70f,0.1f, 0.09f),   // 2  reload   orange
-                new Color(0.85f,0.3f, 1f,   0.09f),   // 3  record   purple
-                new Color(0.5f, 0.9f, 1f,   0.09f),   // 4  aim      sky
-                new Color(0.35f,1f,   0.35f,0.09f),   // 5  toolbar  green
-                new Color(1f,   0.5f, 0.9f, 0.09f),   // 6  chatbar  pink
-                new Color(1f,   1f,   0.3f, 0.09f),   // 7  healthbar yellow
-                new Color(0.3f, 0.6f, 1f,   0.09f),   // 8  team1    blue
-                new Color(1f,   0.4f, 0.4f, 0.09f),   // 9  team2    red2
-                new Color(0.8f, 0.8f, 0.8f, 0.09f),   // 10 pause    grey
-                new Color(0.4f, 1f,   0.8f, 0.09f),   // 11 plist    teal
-                new Color(0.6f, 1f,   0.4f, 0.09f),   // 12 hpack    lime
-                new Color(1f,   0.7f, 0.2f, 0.09f),   // 13 ammo     amber
-                new Color(0.9f, 0.5f, 1f,   0.09f),   // 14 hudhide  violet
-            };
-            // Bright border colours (opaque) matching tint hue
-            Color[] borders = new Color[]
-            {
-                new Color(1f,   0.3f, 0.3f, 0.90f),
-                new Color(0.3f, 0.85f,1f,   0.90f),
-                new Color(1f,   0.70f,0.1f, 0.90f),
-                new Color(0.85f,0.3f, 1f,   0.90f),
-                new Color(0.5f, 0.9f, 1f,   0.90f),
-                new Color(0.35f,1f,   0.35f,0.90f),
-                new Color(1f,   0.5f, 0.9f, 0.90f),
-                new Color(1f,   1f,   0.3f, 0.90f),
-                new Color(0.3f, 0.6f, 1f,   0.90f),
-                new Color(1f,   0.4f, 0.4f, 0.90f),
-                new Color(0.8f, 0.8f, 0.8f, 0.90f),
-                new Color(0.4f, 1f,   0.8f, 0.90f),
-                new Color(0.6f, 1f,   0.4f, 0.90f),
-                new Color(1f,   0.7f, 0.2f, 0.90f),
-                new Color(0.9f, 0.5f, 1f,   0.90f),
-            };
-
-            float scale = Screen.width / REF_W;
-
-            for (int i = 0; i < DRAG_COUNT; i++)
-            {
-                if (_dragGOs[i] == null) continue;
-
-                Rect real  = GetHandleRect(i);
-                Rect vRect = new Rect(real.x / scale, real.y / scale,
-                                      real.width / scale, real.height / scale);
-                float bw = 3f; // border width
-
-                bool isActive = (_draggingIdx == i || _resizingIdx == i);
-                Color fill   = isActive ? new Color(1f, 1f, 1f, 0.18f) : colours[i % colours.Length];
-                Color border = borders[i % borders.Length];
-
-                // Semi-transparent fill
-                GUI.color = fill;
-                GUI.DrawTexture(vRect, Texture2D.whiteTexture);
-
-                // Solid border rectangle
-                GUI.color = border;
-                GUI.DrawTexture(new Rect(vRect.x,              vRect.y,              vRect.width, bw),           Texture2D.whiteTexture);
-                GUI.DrawTexture(new Rect(vRect.x,              vRect.yMax - bw,      vRect.width, bw),           Texture2D.whiteTexture);
-                GUI.DrawTexture(new Rect(vRect.x,              vRect.y,              bw, vRect.height),          Texture2D.whiteTexture);
-                GUI.DrawTexture(new Rect(vRect.xMax - bw,      vRect.y,              bw, vRect.height),          Texture2D.whiteTexture);
-
-                // Resize mode: draw thicker inner guide line to indicate edge zone
-                if (_resizingIdx == i)
-                {
-                    float eb = vRect.width * 0.30f;
-                    GUI.color = new Color(1f, 1f, 0f, 0.70f);
-                    GUI.DrawTexture(new Rect(vRect.x + eb, vRect.y + eb, vRect.width - eb*2f, 1.5f), Texture2D.whiteTexture);
-                    GUI.DrawTexture(new Rect(vRect.x + eb, vRect.yMax - eb, vRect.width - eb*2f, 1.5f), Texture2D.whiteTexture);
-                }
-
-                GUI.color = Color.white;
-
-                // Label -- outlined dark shadow for readability
-                GUIStyle hs = new GUIStyle(GUI.skin.label);
-                hs.fontSize  = Mathf.Max(12, (int)(vRect.height * 0.22f));
-                hs.fontStyle = FontStyle.Bold;
-                hs.alignment = TextAnchor.MiddleCenter;
-                hs.normal.textColor = new Color(0f, 0f, 0f, 0.85f);
-                GUI.Label(new Rect(vRect.x + 1f, vRect.y + 1f, vRect.width, vRect.height - 24f), DRAG_ITEMS[i].displayName, hs);
-                hs.normal.textColor = Color.white;
-                GUI.Label(new Rect(vRect.x, vRect.y, vRect.width, vRect.height - 24f), DRAG_ITEMS[i].displayName, hs);
-
-                // Reset button -- bottom-right corner; suppresses drag-save on this frame
-                Rect rr = new Rect(vRect.xMax - 24f, vRect.yMax - 16f, 24f, 16f);
-                GUIStyle rs = new GUIStyle(GUI.skin.button);
-                rs.fontSize = 9;
-                rs.fontStyle = FontStyle.Bold;
-                rs.normal.textColor = new Color(1f, 0.3f, 0.3f);
-                if (GUI.Button(rr, "RST", rs))
-                {
-                    if (_dragGOs[i] != null)
-                    {
-                        _dragGOs[i].transform.position   = _dragOrigPos[i];
-                        _dragGOs[i].transform.localScale = (_dragOrigScale[i] != Vector3.zero) ? _dragOrigScale[i] : Vector3.one;
-                        _savedScales[i] = -1f;  // disable scale enforcement; let game auto-scaler own it
-                        HudCfgDelete(DRAG_ITEMS[i].prefPX);
-                        HudCfgDelete(DRAG_ITEMS[i].prefPY);
-                        if (DRAG_ITEMS[i].prefSZ != null) HudCfgDelete(DRAG_ITEMS[i].prefSZ);
-                        HudCfgSave();
-                        _suppressSaveIdx = true;
-                        _suppressSaveFor = i;
-                        _draggingIdx     = -1;
-                        _resizingIdx     = -1;
-                    }
-                }
+                if(_dragGOs[i]==null||(IsHudGroup(i)&&i!=_editorSelected))continue;
+                Rect real=GetHandleRect(i);
+                Rect r=new Rect(real.x/scale,real.y/scale,real.width/scale,real.height/scale);
+                bool selected=i==_editorSelected;
+                GUI.color=selected?new Color(1f,.78f,.25f,.95f):new Color(1f,1f,1f,.35f);
+                float b=selected?1.5f:.65f;
+                GUI.DrawTexture(new Rect(r.x,r.y,r.width,b),Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(r.x,r.yMax-b,r.width,b),Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(r.x,r.y,b,r.height),Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(r.xMax-b,r.y,b,r.height),Texture2D.whiteTexture);
             }
+            Rect win=EditorWindow();
+            GUI.color=new Color(.055f,.065f,.08f,.94f);GUI.DrawTexture(win,Texture2D.whiteTexture);
+            GUI.color=Color.white;
+            GUIStyle btn=new GUIStyle(GUI.skin.button);btn.fontSize=8;btn.padding=new RectOffset(1,1,1,1);
+            GUIStyle label=new GUIStyle(GUI.skin.label);label.fontSize=9;label.alignment=TextAnchor.MiddleCenter;label.normal.textColor=Color.white;
+            GUI.Label(EditorRect(0,0,105,23),"HUD  /  drag",label);
+            GUI.Box(EditorRect(106,0,25,23),_editorCollapsed?"+":"-",btn);
+            GUI.Box(EditorRect(132,0,40,23),"Done",btn);
+            if(_editorCollapsed)return;
+            GUI.color=_editorList?Color.white:new Color(1f,.82f,.4f);
+            GUI.Box(EditorRect(4,25,80,21),"Adjust",btn);
+            GUI.color=_editorList?new Color(1f,.82f,.4f):Color.white;
+            GUI.Box(EditorRect(88,25,80,21),"Buttons",btn);GUI.color=Color.white;
+            if(_editorList)
+            {
+                for(int k=0;k<EditorPageSize;k++)
+                {
+                    int i=_editorPage*EditorPageSize+k;if(i>=DRAG_COUNT)break;
+                    GUI.color=_dragGOs[i]==null?new Color(.6f,.6f,.6f,.55f):i==_editorSelected?new Color(1f,.82f,.4f):Color.white;
+                    GUI.Box(EditorRect(4+(k%2)*84,48+(k/2)*24,80,22),DRAG_ITEMS[i].displayName,btn);
+                }
+                GUI.color=Color.white;
+                GUI.Box(EditorRect(4,123,35,21),"<",btn);
+                GUI.Label(EditorRect(41,123,90,21),(_editorPage+1)+" / "+((DRAG_COUNT+EditorPageSize-1)/EditorPageSize),label);
+                GUI.Box(EditorRect(133,123,35,21),">",btn);return;
+            }
+            GUI.Label(EditorRect(4,47,164,15),_editorSelected<0?"Select a button":DRAG_ITEMS[_editorSelected].displayName,label);
+            GUI.Box(EditorRect(4,75,36,23),"<",btn);GUI.Box(EditorRect(80,75,36,23),">",btn);
+            GUI.Box(EditorRect(42,62,36,23),"^",btn);GUI.Box(EditorRect(42,88,36,23),"v",btn);
+            bool resize=_editorSelected>=0&&DRAG_ITEMS[_editorSelected].prefSZ!=null;
+            GUI.color=resize?Color.white:new Color(.5f,.5f,.5f,.65f);
+            GUI.Box(EditorRect(119,62,49,23),"- Size",btn);GUI.Box(EditorRect(119,88,49,23),"+ Size",btn);
+            GUI.color=Color.white;
+            GUI.Box(EditorRect(4,120,164,24),"Reset selected",btn);
         }
 
         // =====================================================================
@@ -6798,12 +6785,26 @@ namespace CNRSettingsMod
                     }
                 }
 
+                if (found == null && i == 10)
+                {
+                    foreach (UICamera uc in FindObjectsOfType(typeof(UICamera)))
+                    {
+                        if (uc == null) continue;
+                        foreach (Transform t in uc.transform.root.GetComponentsInChildren<Transform>(true))
+                            if (t.name == "Image Button(Pause)" || t.name == "Button(Pause)")
+                            { found = t.gameObject; break; }
+                        if (found != null) break;
+                    }
+                }
                 _dragGOs[i] = found;
                 if (found != null)
                 {
-                    if (_dragOrigPos[i]   == Vector3.zero) _dragOrigPos[i]   = found.transform.position;
-                    if (_dragOrigScale[i] == Vector3.zero)
+                    if (_dragBaselineOwner[i] != found)
+                    {
+                        _dragBaselineOwner[i] = found;
+                        _dragOrigPos[i] = found.transform.localPosition;
                         _dragOrigScale[i] = found.transform.localScale;
+                    }
                     LoadDragPos(i);
                     LoadDragScale(i);
                     SettingsModEntry.Log("DRAG[" + i + "] " + item.displayName + " -> " + found.name);
@@ -7625,7 +7626,7 @@ namespace CNRSettingsMod
                 {
                     h._savedScales[i] = -1f;
                     if (h._dragGOs[i] == null) continue;
-                    if (!h.HudCfgHasKey(DRAG_ITEMS[i].prefPX)) h._dragGOs[i].transform.position = h._dragOrigPos[i];
+                    if (!h.HudCfgHasKey(DRAG_ITEMS[i].prefPX)) h._dragGOs[i].transform.localPosition = h._dragOrigPos[i];
                     if (h._dragOrigScale[i] != Vector3.zero) h._dragGOs[i].transform.localScale = h._dragOrigScale[i];
                     h.LoadDragPos(i); h.LoadDragScale(i);
                 }
@@ -7841,4 +7842,5 @@ namespace CNRSettingsMod
     }
 
 }
+
 

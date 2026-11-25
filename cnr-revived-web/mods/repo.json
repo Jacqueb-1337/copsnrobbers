@@ -2238,11 +2238,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and username/password account login, preview, merge, and sync controls.",
-      "latestVersion": "3.1.118",
+      "latestVersion": "3.1.119",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.118.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.119.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.119",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.119.dll",
+          "changelog": "Floating collapsible HUD editor, independent controls, button selection list, accelerated nudge and size controls."
+        },
         {
           "version": "3.1.118",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.118.dll",
@@ -4170,9 +4175,14 @@
       "name": "CNR Movement (Experimental)",
       "description": "Optional CODM-inspired movement experiment. Sprint, Sneak/Slide, crouch, jump and camera posture. Disabled by default; no APK patch. Intended for supported local player controllers in single-player and multiplayer. Test build.",
       "filename": "CNRMovementMod.dll",
-      "latestVersion": "0.1.5",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMovementMod/CNRMovementMod-0.1.5.dll",
+      "latestVersion": "0.1.6",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMovementMod/CNRMovementMod-0.1.6.dll",
       "versions": [
+        {
+          "version": "0.1.6",
+          "url": "https://play.jacqueb.me/mods/CNRMovementMod/CNRMovementMod-0.1.6.dll",
+          "changelog": "Improve slide entry with current sprint intent, analog hysteresis and mobility-aware threshold."
+        },
         {
           "version": "0.1.5",
           "url": "https://play.jacqueb.me/mods/CNRMovementMod/CNRMovementMod-0.1.5.dll",

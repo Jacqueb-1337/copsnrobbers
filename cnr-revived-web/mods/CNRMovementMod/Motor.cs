@@ -54,7 +54,9 @@ public sealed class Motor {
   float mag=(float)Math.Sqrt(x*x+z*z);if(mag>1){x/=mag;z/=mag;mag=1;}if(mag<.05f){x=z=mag=0;}
   if(!grounded){slideRemaining=0;State=Mode.Air;wasAirborne=true;} else if(wasAirborne){wasAirborne=false;landingRemaining=.1f;ScaleSpeed(Speed*.7f);landingStrength=Clamp((-Y-2f)/12f,0,1)*.075f*UnitScale;landingFeedbackTime=.22f;LandingDip=0;}
   if(grounded&&crouchPress&&slideRemaining<=0){
-   if(State==Mode.Sprint&&sprint&&Speed>=SlideEntryMinimum*UnitScale){BeginSlide();}
+   // Judge the current sprint intent and actual forward movement, not a stale state.
+   float entrySpeed=SlideEntryMinimum*UnitScale*Math.Min(1f,Math.Max(.1f,Mobility));
+   if(sprint&&z>.7f&&Speed>=entrySpeed){BeginSlide();}
    else if(!crouched||headClear){crouched=!crouched;}
   }
   if(grounded&&jump&&headClear){BeginJump();return;}

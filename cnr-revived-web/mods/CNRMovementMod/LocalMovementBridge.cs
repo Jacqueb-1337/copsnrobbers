@@ -138,7 +138,9 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   Vector3 input=fps?Quaternion.Inverse(yaw)*fpsOwner.inputMoveDirection:Vector3.zero;
   float x=stick!=null?stick.AxisX:input.x,z=stick!=null?stick.AxisY:input.z;
   bool firing=cr?UpdateCRStatus(x,z):fps?false:UpdateStatus(dt,x,z);
-  bool sprint=(Input.GetKey(KeyCode.LeftShift)||(PlayerPrefs.GetInt("CNRMovementAutoSprint",1)==1&&z>.85f))&&!firing;
+  // A slightly lower release threshold prevents analog jitter from cancelling sprint.
+  float forwardThreshold=motor.State==Motor.Mode.Sprint?.72f:.85f;
+  bool sprint=(Input.GetKey(KeyCode.LeftShift)||(PlayerPrefs.GetInt("CNRMovementAutoSprint",1)==1&&z>forwardThreshold))&&!firing;
   if(sprint&&sprintBlocked!=null&&(bool)sprintBlocked.Invoke(null,null))sprint=false;
   bool slide=Input.GetKeyDown(KeyCode.LeftControl)||Time.frameCount-slideFrame<=1;if(slide)slideFrame=-100;
   float before=motor.Y;bool headClear=posture.CanStand();
