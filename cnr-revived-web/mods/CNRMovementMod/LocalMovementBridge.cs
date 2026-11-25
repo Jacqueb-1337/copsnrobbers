@@ -156,10 +156,19 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   if(mantle.Active){
    jumpBuffer.Reset();slideFrame=-100;
    posture.Apply(dt,Motor.Mode.Walk,headClear);
-   CollisionFlags traversalFlags=mantle.Tick(dt);
+   bool moving=x*x+z*z>.05f*.05f;
+   CollisionFlags traversalFlags=mantle.Tick(dt,moving);
    if(cr&&!firing)crOwner.actionState=playerActionState.jump;
    if(fps){fpsOwner.movement.velocity=bound.velocity;fpsOwner.movement.collisionFlags=traversalFlags;fpsOwner.grounded=bound.isGrounded;fpsOwner.jumping.jumping=mantle.Active;fpsOwner.Running=false;fpsOwner.Walking=false;fpsOwner.crouch=false;}
-   if(!mantle.Active)motor.FinishTraversal(bound.isGrounded);
+   if(!mantle.Active){
+    motor.FinishTraversal(bound.isGrounded);
+    if(mantle.Completed&&moving){
+     Vector3 exit=Quaternion.Inverse(yaw)*mantle.ExitHorizontal;
+     float cap=sprint?motor.Sprint:motor.Walk;
+     exit=Vector3.ClampMagnitude(exit,Mathf.Max(0,cap));
+     motor.SetHorizontal(exit.x,exit.z);
+    }
+   }
    return;
   }
   bool jump=jumpBuffer.Consume(grounded&&motor.Y<=0&&headClear);

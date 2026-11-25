@@ -101,6 +101,16 @@ class Tests {
   Near(MantleTiming.Duration(MantlePolicy.Kind.ClimbUp,.6f),.6f,.0001f,"low climb timing");
   Near(MantleTiming.Duration(MantlePolicy.Kind.ClimbUp,2.1f),1.4f,.0001f,"high climb timing");
   Near(MantleTiming.Duration(MantlePolicy.Kind.Vault,1f),.8f,.0001f,"ADV vault fallback timing");
+  Check(!MantleTiming.CanResumeClimb(.6f,.5f,true,true,true),"stop threshold strict");
+  Check(MantleTiming.CanResumeClimb(.6f,.51f,true,true,true),"low climb resume threshold");
+  Check(!MantleTiming.CanResumeClimb(2.1f,.79f,true,true,true),"high climb threshold");
+  Check(MantleTiming.CanResumeClimb(2.1f,.81f,true,true,true),"high climb resume threshold");
+  Check(!MantleTiming.CanResumeClimb(.6f,.9f,false,true,true),"resume requires movement");
+  Check(!MantleTiming.CanResumeClimb(.6f,.9f,true,false,true),"resume requires support");
+  Check(!MantleTiming.CanResumeClimb(.6f,.9f,true,true,false),"resume requires destination");
+  Near(MantleTiming.NextSample(.4f,.9f),.45f,.0001f,"split raise boundary");
+  Near(MantleTiming.NextSample(.45f,.9f),.82f,.0001f,"split traverse boundary");
+  Near(MantleTiming.NextSample(.82f,.9f),.9f,.0001f,"no unnecessary split");
   Console.WriteLine("TOTAL "+count);
  }
 }

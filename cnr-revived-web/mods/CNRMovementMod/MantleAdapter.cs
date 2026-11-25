@@ -5,10 +5,11 @@ namespace CNRMovementMod {
 public sealed class MantleAdapter {
  CharacterController cc;
  Vector3 start,raised,across,destination;
- float elapsed,duration,radius,height,nextProbe;
+ float elapsed,duration,radius,height,nextProbe,referenceHeight,worldScale;
+ Vector3 lastHorizontal; public Vector3 ExitHorizontal {get;private set;} public bool Completed {get;private set;}
  public bool Active {get;private set;}
  public MantlePolicy.Kind Kind {get;private set;}
- public void Cancel(){Active=false;Kind=MantlePolicy.Kind.None;}
+ public void Cancel(){Active=false;Kind=MantlePolicy.Kind.None;Completed=false;ExitHorizontal=Vector3.zero;lastHorizontal=Vector3.zero;}
  bool Solid(Collider c){
   return c!=null&&!c.isTrigger&&c!=cc&&!c.transform.IsChildOf(cc.transform)
     &&!cc.transform.IsChildOf(c.transform)&&!Physics.GetIgnoreLayerCollision(cc.gameObject.layer,c.gameObject.layer);
@@ -60,7 +61,7 @@ public sealed class MantleAdapter {
  public bool TryStart(CharacterController controller,Vector3 forward,float scale,float standingHeight){
   if(Active||Time.realtimeSinceStartup<nextProbe)return false;
   nextProbe=Time.realtimeSinceStartup+.10f;
-  cc=controller;if(cc==null||!cc.enabled||scale<=0)return false;
+  cc=controller;if(cc==null||!cc.enabled||scale<=0)return false;worldScale=scale;
   forward.y=0;if(forward.sqrMagnitude<.01f)return false;forward.Normalize();
   Vector3 right=Vector3.Cross(Vector3.up,forward);
   Vector3 lossy=cc.transform.lossyScale;
@@ -112,23 +113,64 @@ public sealed class MantleAdapter {
   Begin(MantlePolicy.Kind.ClimbUp,rise/scale);return true;
  }
  void Begin(MantlePolicy.Kind kind,float referenceHeight){
-  Kind=kind;Active=true;elapsed=0;
+  Kind=kind;Active=true;elapsed=0;this.referenceHeight=referenceHeight;Completed=false;ExitHorizontal=lastHorizontal=Vector3.zero;
   duration=MantleTiming.Duration(kind,referenceHeight);
   Debug.Log("[CNRMovement] "+kind+" height="+referenceHeight.ToString("F2"));
  }
- public CollisionFlags Tick(float dt){
-  if(!Active||cc==null||!cc.enabled){Cancel();return CollisionFlags.None;}
-  elapsed=Mathf.Min(duration,elapsed+dt);
-  float t=elapsed/duration;
-  Vector3 target=t<.45f?Vector3.Lerp(start,raised,Mathf.SmoothStep(0,1,t/.45f)):
+ Vector3 Sample(float t){
+  return t<.45f?Vector3.Lerp(start,raised,Mathf.SmoothStep(0,1,t/.45f)):
    t<.82f?Vector3.Lerp(raised,across,Mathf.SmoothStep(0,1,(t-.45f)/.37f)):
    Vector3.Lerp(across,destination,Mathf.SmoothStep(0,1,(t-.82f)/.18f));
-  Vector3 before=Foot(),delta=target-before;
-  // No direct transform writes: CharacterController remains the collision authority.
-  CollisionFlags flags=cc.Move(delta);
-  Vector3 actual=Foot();
-  if((actual-target).magnitude>Mathf.Max(.12f,radius*.3f)||(flags&CollisionFlags.Above)!=0){Cancel();return flags;}
-  if(elapsed>=duration){Cancel();flags|=cc.Move(Vector3.down*.10f);}
+ }
+ bool AtDestination(Vector3 feet){
+  Vector3 delta=feet-destination;
+  return delta.x*delta.x+delta.z*delta.z<=.035f*.035f
+   &&Mathf.Abs(delta.y)<=.20f*worldScale;
+ }
+ void Complete(bool moving){
+  Completed=true;Active=false;Kind=MantlePolicy.Kind.None;
+  ExitHorizontal=moving?lastHorizontal:Vector3.zero;
+ }
+ public CollisionFlags Tick(float dt,bool movementInput){
+  if(!Active||cc==null||!cc.enabled||duration<=0){Cancel();return CollisionFlags.None;}
+  float progress=elapsed/duration;
+  float end=Mathf.Min(1f,(elapsed+dt)/duration);
+  CollisionFlags flags=CollisionFlags.None;
+  // Integrate authored path deltas, rather than correcting toward an absolute point after a collision.
+  // Split at phase boundaries so low FPS cannot shortcut the collision-checked path.
+  while(progress<end){
+   float next=MantleTiming.NextSample(progress,end);
+   Vector3 delta=Sample(next)-Sample(progress);
+   Vector3 before=Foot();
+   CollisionFlags stepFlags=cc.Move(delta);flags|=stepFlags;
+   Vector3 actual=Foot(),moved=actual-before;
+   if((moved-delta).magnitude>Mathf.Max(.035f,radius*.12f)
+     ||(stepFlags&CollisionFlags.Above)!=0){Cancel();return flags;}
+   float slice=(next-progress)*duration;
+   Vector3 planar=new Vector3(moved.x,0,moved.z);
+   if(slice>.0001f&&planar.sqrMagnitude>.0001f)lastHorizontal=planar/slice;
+   progress=next;
+  }
+  elapsed=end*duration;
+  Vector3 foot=Foot();
+  if(Kind==MantlePolicy.Kind.ClimbUp&&movementInput&&AtDestination(foot)
+      &&end>.45f){
+   // Only hand off early once the destination is reached and actually supports the capsule.
+   float settle=Mathf.Max(0,foot.y-destination.y+.10f);
+   if(settle<=.20f*worldScale+.10f){
+    RaycastHit support;
+    if(Surface(foot,foot.y+.02f,foot.y-settle-.04f,out support)
+      &&MantleTiming.CanResumeClimb(referenceHeight,end,movementInput,true,true)){
+     flags|=cc.Move(Vector3.down*settle);
+     if(cc.isGrounded){Complete(true);return flags;}
+    }
+   }
+  }
+  if(end>=1f){
+   flags|=cc.Move(Vector3.down*.10f);
+   if(AtDestination(Foot())&&cc.isGrounded)Complete(movementInput);
+   else Cancel();
+  }
   return flags;
  }
 }

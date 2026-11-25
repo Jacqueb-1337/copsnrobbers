@@ -4175,9 +4175,14 @@
       "name": "CNR Movement (Experimental)",
       "description": "Optional CODM-inspired movement experiment. Sprint, Sneak/Slide, crouch, jump and camera posture. Disabled by default; no APK patch. Intended for supported local player controllers in single-player and multiplayer. Test build.",
       "filename": "CNRMovementMod.dll",
-      "latestVersion": "0.1.9",
-      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.9.dll",
+      "latestVersion": "0.1.10",
+      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.10.dll",
       "versions": [
+        {
+          "version": "0.1.10",
+          "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.10.dll",
+          "changelog": "Improve physical climb handoff using verified stop thresholds, collision-respecting path deltas and horizontal momentum recovery."
+        },
         {
           "version": "0.1.9",
           "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.9.dll",
