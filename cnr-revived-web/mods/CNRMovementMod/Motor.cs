@@ -8,15 +8,15 @@ public sealed class Motor {
  public float X {get;private set;} public float Z {get;private set;} public float Y {get;private set;}
  public const float ReferenceWalk=4f, ReferenceStrafe=2f, ReferenceJumpHeight=.74f, ReferenceJumpVelocity=4.6858f;
  public float UnitScale=1.75f; // provisional: 4 reference units maps to prior CNR walk of 7.
- public float SprintRatio=1.3f, CrouchRatio=.55f, AirAcceleration=5f, SlideDuration=.72f; // provisional.
+ public float SprintRatio=1.3f, CrouchRatio=.55f, AirAcceleration=5f, SlideDuration=.82f; // provisional.
  public float Acceleration=36f, Brake=50f, FallingGravity=8.4f;
  public float JumpLimitTime=1f, JumpDecreaseRate=.2f, MinimumJumpHeight=.3f;
- public float SlideMaximum=8f, SlideMinimum=2f, SlideEntryMinimum=3f, SlideDrag=7f, SlideTurnDegrees=15f;
+ public float SlideMaximum=8f, SlideMinimum=2f, SlideEntryMinimum=3f, SlideDrag=6f, SlideTurnDegrees=15f;
  public float SlideIdleTime=.5f;
  public float SlopeAcceleration=16f; // provisional gravity/terrain response, native law not fully resolved.
  public float LandingDip {get;private set;}
  float landingFeedbackTime,landingStrength;
- public float SlideBoost=1.13f; // provisional entry boost; not claimed as CODM default.
+ public float SlideBoost=1.28f; // provisional entry boost; not claimed as CODM default.
  public float Mobility=1f, SprintMobility=1f; // supplied by offline caller, no artificial upper cap.
  public float Walk {get{return ReferenceWalk*UnitScale*Mobility;}}
  public float Sprint {get{return Walk*SprintRatio*SprintMobility;}}
