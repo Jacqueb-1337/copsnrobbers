@@ -12,7 +12,7 @@ public sealed class Motor {
  public float Acceleration=36f, Brake=50f, FallingGravity=8.4f;
  public float JumpLimitTime=1f, JumpDecreaseRate=.2f, MinimumJumpHeight=.3f;
  public float SlideMaximum=8f, SlideMinimum=2f, SlideEntryMinimum=3f, SlideDrag=7f, SlideTurnDegrees=15f;
- public float SlideLimitTime=3f, SlideDecreaseRate=.1f, SlideLimitedMinimum=4f, SlideIdleTime=.5f, SlideIdleMinimum=.2f;
+ public float SlideIdleTime=.5f;
  public float SlopeAcceleration=16f; // provisional gravity/terrain response, native law not fully resolved.
  public float LandingDip {get;private set;}
  float landingFeedbackTime,landingStrength;
@@ -24,16 +24,15 @@ public sealed class Motor {
  public float CurrentJumpHeight {get;private set;} // native units
  public float CurrentSlideLimit {get;private set;} // native units
  public float CurrentSlideIdle {get;private set;}
- float clock,lastJump=-100,lastSlide=-100,slideRemaining,ascentGravity,landingRemaining; bool crouched,wasAirborne;
- public void Reset(){X=Z=Y=slideRemaining=clock=0;lastJump=lastSlide=-100;CurrentJumpHeight=0;CurrentSlideLimit=CurrentSlideIdle=0;ascentGravity=landingRemaining=landingFeedbackTime=landingStrength=LandingDip=0;State=Mode.Walk;crouched=wasAirborne=false;}
+ float clock,lastJump=-100,slideRemaining,ascentGravity,landingRemaining; bool crouched,wasAirborne;
+ public void Reset(){X=Z=Y=slideRemaining=clock=0;lastJump=-100;CurrentJumpHeight=0;CurrentSlideLimit=CurrentSlideIdle=0;ascentGravity=landingRemaining=landingFeedbackTime=landingStrength=LandingDip=0;State=Mode.Walk;crouched=wasAirborne=false;}
  static float Clamp(float v,float lo,float hi){return Math.Max(lo,Math.Min(hi,v));}
  void Approach(float x,float z,float rate,float dt){float dx=x-X,dz=z-Z;float len=(float)Math.Sqrt(dx*dx+dz*dz);float k=len>0?Math.Min(1,rate*dt/len):0;X+=dx*k;Z+=dz*k;}
  void ScaleSpeed(float speed){float s=Speed;if(s>0){X*=speed/s;Z*=speed/s;}}
  void BeginSlide(){
-  bool repeated=clock-lastSlide<SlideLimitTime;
-  CurrentSlideLimit=repeated?Clamp(CurrentSlideLimit*(1-SlideDecreaseRate),SlideLimitedMinimum,SlideMaximum):SlideMaximum;
-  CurrentSlideIdle=repeated?Clamp(CurrentSlideIdle*(1-SlideDecreaseRate),SlideIdleMinimum,SlideIdleTime):SlideIdleTime;
-  lastSlide=clock;
+  // Each slide starts at the normal cap; no rapid-repeat exhaustion.
+  CurrentSlideLimit=SlideMaximum;
+  CurrentSlideIdle=SlideIdleTime;
   ScaleSpeed(Math.Min(Speed*SlideBoost,CurrentSlideLimit*UnitScale));
   slideRemaining=SlideDuration; crouched=true;
  }

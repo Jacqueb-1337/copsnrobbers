@@ -2233,11 +2233,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and username/password account login, preview, merge, and sync controls.",
-      "latestVersion": "3.1.115",
+      "latestVersion": "3.1.116",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.115.dll",
+      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.116.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.116",
+          "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.116.dll",
+          "changelog": "Fix camera touch reacquisition when old finger release and new press occur in reverse order; exclude jump and sneak buttons from camera ownership."
+        },
         {
           "version": "3.1.115",
           "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.115.dll",
@@ -4150,9 +4155,14 @@
       "name": "CNR Movement (Experimental)",
       "description": "Optional CODM-inspired movement experiment. Sprint, Sneak/Slide, crouch, jump and camera posture. Disabled by default; no APK patch. Intended for supported local player controllers in single-player and multiplayer. Test build.",
       "filename": "CNRMovementMod.dll",
-      "latestVersion": "0.1.2",
-      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.2.dll",
+      "latestVersion": "0.1.3",
+      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.3.dll",
       "versions": [
+        {
+          "version": "0.1.3",
+          "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.3.dll",
+          "changelog": "Remove repeated-slide exhaustion while preserving ordinary slide friction and jump fatigue."
+        },
         {
           "version": "0.1.2",
           "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.2.dll",

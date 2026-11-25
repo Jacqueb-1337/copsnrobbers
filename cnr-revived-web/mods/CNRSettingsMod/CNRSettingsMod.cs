@@ -111,7 +111,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.115";
+        public  const string Version = "3.1.116";
 
         public static void Load()
         {
@@ -2975,50 +2975,66 @@ namespace CNRSettingsMod
             float sw = Screen.width;
             float sh = Screen.height;
 
-            bool trackedAlive = false;
+            // Resolve the previous owner before examining any new Began events.
+            // Android can return a new finger before the old finger's Ended event.
+            // It can also omit that event entirely after a canceled input stream.
+            int trackedIndex = -1;
             for (int i = 0; i < Input.touchCount; i++)
             {
                 Touch t = Input.GetTouch(i);
-                if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
+                if (t.fingerId == _touchCamFingerId &&
+                    t.phase != TouchPhase.Ended && t.phase != TouchPhase.Canceled &&
+                    t.phase != TouchPhase.Began)
+                { trackedIndex = i; break; }
+            }
+            if (trackedIndex < 0)
+            {
+                _touchCamFingerId = -1;
+                for (int i = 0; i < Input.touchCount; i++)
                 {
-                    if (t.fingerId == _touchCamFingerId) { _touchCamFingerId = -1; }
-                    continue;
+                    Touch t = Input.GetTouch(i);
+                    if (t.phase != TouchPhase.Began || t.position.x < sw * 0.5f || t.position.y > sh * 0.72f) continue;
+                    // Jump/Sneak touches are buttons, not owners of the camera.
+                    if (CameraTouchHitsMovementButton(t.position)) continue;
+                    _touchCamFingerId = t.fingerId;
+                    _touchCamPrevX = t.position.x;
+                    _touchCamPrevY = t.position.y;
+                    trackedIndex = i;
+                    break;
                 }
-
-                // Claim a new camera finger: right half of screen only (x >= 50%), upper 72%.
-                if (_touchCamFingerId == -1 && t.phase == TouchPhase.Began)
-                {
-                    if (t.position.x >= sw * 0.5f && t.position.y <= sh * 0.72f)
-                    {
-                        _touchCamFingerId = t.fingerId;
-                        _touchCamPrevX    = t.position.x;
-                        _touchCamPrevY    = t.position.y;
-                    }
-                }
-
-                if (t.fingerId != _touchCamFingerId) continue;
-                trackedAlive = true;
-
-                float dx = t.position.x - _touchCamPrevX;
-                float dy = t.position.y - _touchCamPrevY;
-                _touchCamPrevX = t.position.x;
-                _touchCamPrevY = t.position.y;
-
-                if (dx == 0f && dy == 0f) continue;
-
-                // Scale matches Sliderotate: raw pixel delta * 0.1, then * sensitivityX via KbmInjectMouseLook.
-                // Touch.position.y is bottom-left origin: positive Y = finger moves UP = camera looks UP.
-                // KbmInjectMouseLook: positive my ? rotY increases ? cam pitches up. Same sign, no inversion.
-            float touchSens = _modAimed ? (_sensNormal * _adsMultiplier) : _sensNormal;
+            }
+            if (trackedIndex < 0)
+            {
+                if (_fiCannotRotate != null) _fiCannotRotate.SetValue(_sliderotate, false);
+                return;
+            }
+            Touch tracked = Input.GetTouch(trackedIndex);
+            float dx = tracked.position.x - _touchCamPrevX;
+            float dy = tracked.position.y - _touchCamPrevY;
+            _touchCamPrevX = tracked.position.x;
+            _touchCamPrevY = tracked.position.y;
+            if (dx != 0f || dy != 0f)
+            {
+                float touchSens = _modAimed ? (_sensNormal * _adsMultiplier) : _sensNormal;
                 KbmInjectMouseLook(dx * 0.1f, dy * 0.1f, touchSens);
-
-                // Block Sliderotate from double-processing this touch this frame.
                 if (_fiCannotRotate != null) _fiCannotRotate.SetValue(_sliderotate, true);
             }
+        }
 
-            // Re-enable Sliderotate next frame if our finger lifted (or there never was one).
-            if (!trackedAlive && _touchCamFingerId == -1 && _fiCannotRotate != null)
-                _fiCannotRotate.SetValue(_sliderotate, false);
+        private bool CameraTouchHitsMovementButton(Vector2 pos)
+        {
+            if (_nguiCam == null) return false;
+            RaycastHit hit;
+            if (!Physics.Raycast(_nguiCam.ScreenPointToRay(pos), out hit, 100f)) return false;
+            Transform t = hit.collider.transform;
+            while (t != null)
+            {
+                if ((_dragGOs[1] != null && t == _dragGOs[1].transform) ||
+                    (_dragGOs[17] != null && t == _dragGOs[17].transform) ||
+                    t.name == "Image Button(Sneak)" || t.name == "Image Button(Jump)" || t.name == "Button(Jump)") return true;
+                t = t.parent;
+            }
+            return false;
         }
 
         private void TouchJumpDetect()
