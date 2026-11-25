@@ -74,6 +74,24 @@ class Tests {
   c.CeilingClear=true;c.PathClear=false;Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.None,"blocked path");
   c.PathClear=true;c.Height=5;Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.None,"too high");
   c.Height=2;c.Width=.1f;Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.None,"too narrow");
+  c.Height=2;c.Width=1;c.PathClear=true;c.TopClear=true;c.DestinationClear=true;c.CeilingClear=true;c.ApproachClear=true;c.LandingClear=true;c.VaultEligible=true;c.ForwardOffset=3;
+  Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.ClimbUp,"vault out of reach falls back to climb");
+  c.Width=.75f;c.ForwardOffset=1;
+  Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.Vault,"narrow supported vault");
+  c.LandingClear=false;
+  Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.None,"narrow ledge without landing rejected");
+  c.Width=1;c.DestinationClear=false;
+  Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.None,"blocked destination rejected");
+  c.DestinationClear=true;c.ApproachClear=false;
+  Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.None,"blocked approach rejected");
+  c.ApproachClear=true;c.TopClear=false;
+  Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.None,"blocked top rejected");
+  var buffer=new JumpBuffer();buffer.Press(123);
+  Check(buffer.Pending&&!buffer.Consume(false)&&buffer.Pending,"airborne intent remains buffered");
+  Check(buffer.Consume(true)&&!buffer.Pending&&!buffer.Consume(true),"mantle consumes exactly one press");
+  var traversal=new Motor();traversal.SetHorizontal(9,8);traversal.AddVertical(10);traversal.FinishTraversal(false);
+  Check(traversal.State==Motor.Mode.Air&&traversal.Speed==0&&traversal.Y==0,"cancel traversal resumes air physics");
+  traversal.FinishTraversal(true);Check(traversal.State==Motor.Mode.Walk&&traversal.Y==-2,"finish traversal resumes ground physics");
   Console.WriteLine("TOTAL "+count);
  }
 }

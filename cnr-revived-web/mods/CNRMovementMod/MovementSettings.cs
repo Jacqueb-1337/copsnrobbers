@@ -36,6 +36,8 @@ public sealed class MovementSettings {
   space.Invoke(null,new object[]{10f});
   Toggle("Forward auto-sprint","CNRMovementAutoSprint",1);
   hint.Invoke(null,new object[]{"Push the joystick forward to sprint. Tap Sneak / Slide to crouch or slide."});
+  Toggle("Vaulting and mantling","CNRMovementMantle",1);
+  hint.Invoke(null,new object[]{"Move toward a reachable obstacle and press Jump to vault or climb. Slide jumps remain normal."});
  }
 }
 }

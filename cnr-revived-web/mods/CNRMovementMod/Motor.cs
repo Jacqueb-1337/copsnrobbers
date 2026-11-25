@@ -92,6 +92,7 @@ public sealed class Motor {
   if(State==Mode.Crouch){forward*=CrouchRatio;lateral*=CrouchRatio;}
   Approach(x*lateral,z*forward,(mag==0?Brake:Acceleration)*UnitScale,dt);
  }
+ public void FinishTraversal(bool grounded){X=Z=0;Y=grounded?-2f:0;slideRemaining=landingRemaining=0;crouched=wasAirborne=false;State=grounded?Mode.Walk:Mode.Air;}
  public void HitCeiling(){if(Y>0)Y=0;}
  public void HitWall(){X=Z=slideRemaining=0;}
 }

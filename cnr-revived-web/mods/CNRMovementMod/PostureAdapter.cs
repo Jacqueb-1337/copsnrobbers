@@ -17,6 +17,7 @@ public sealed class PostureAdapter {
   }
   return true;
  }
+ public float StandingHeight {get{return height;}}
  public bool CanStand(){
   if(cc==null)return true;
   float remaining=height-cc.height;if(remaining<=.001f)return true;

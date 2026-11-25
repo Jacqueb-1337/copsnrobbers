@@ -5,7 +5,7 @@ namespace CNRMovementMod {
 // DLL-only controller. Never replaces or patches the game's assemblies.
 // Owns only the verified local PlayerLogic controller while opted in.
 public sealed class LocalMovementBridge : MonoBehaviour {
- readonly MovementSettings settings=new MovementSettings(); readonly EnvironmentPriority environment=new EnvironmentPriority(); readonly Motor motor=new Motor(); readonly PostureAdapter posture=new PostureAdapter(); readonly SneakHud hud=new SneakHud();
+ readonly MovementSettings settings=new MovementSettings(); readonly EnvironmentPriority environment=new EnvironmentPriority(); readonly Motor motor=new Motor(); readonly PostureAdapter posture=new PostureAdapter(); readonly SneakHud hud=new SneakHud(); readonly MantleAdapter mantle=new MantleAdapter();
  CharacterController bound; JoyStickController owner; SingleModeLadderPlayer ladder; CRJoyStickController crOwner; CRLadderPlayer crLadder; FPScontroller fpsOwner; Camera inputCam; FieldInfo crSpeedField,crControllerField;
  FieldInfo moveField,jumpField,ladderField,stopField,ccField,camField,fireField,lastFallField,lastHeightField;
  FieldInfo[] hooks; Delegate[] handlers; MethodInfo registerHud,hudBlocked,sprintBlocked,fallMethod,fireButton;
@@ -52,7 +52,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
    if(fpsOwner.jumping!=null)fpsOwner.jumping.jumping=!fpsOwner.grounded&&motor.Y>0;
    fpsOwner.Running=false;fpsOwner.Walking=false;fpsOwner.crouch=false;
   }finally{fpsOwner.enabled=true;}}
-  ownsController=false;posture.Restore();fpsOwner=null;crOwner=null;crLadder=null;owner=null;bound=null;ladder=null;inputCam=null;fallTick=null;motor.Reset();hasYaw=false;pendingImpulse=footTime=0;jumpBuffer.Reset();nativeJumpHeld=false;slideFrame=-100;
+  mantle.Cancel();ownsController=false;posture.Restore();fpsOwner=null;crOwner=null;crLadder=null;owner=null;bound=null;ladder=null;inputCam=null;fallTick=null;motor.Reset();hasYaw=false;pendingImpulse=footTime=0;jumpBuffer.Reset();nativeJumpHeld=false;slideFrame=-100;
  }
  void Fail(Exception e){failed=true;try{Release();}catch(Exception restore){Debug.LogWarning("[CNRMovement] restore: "+restore.Message);}Debug.LogWarning("[CNRMovement] disabled after error: "+e);}
  void Update(){try{
@@ -108,7 +108,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   if(!active&&ownsController){Release();return;}
   if(!active)return;
   if(acquiredFrame==Time.frameCount){nativeJumpHeld=NativeJumpHeld();return;} // do not replay held input at takeover
-  if(!HudBlocked())Step();else{jumpBuffer.Reset();nativeJumpHeld=NativeJumpHeld();slideFrame=-100;PlayerPrefs.SetInt("OnJump",0);}
+  if(!HudBlocked())Step();else{if(mantle.Active){mantle.Cancel();motor.FinishTraversal(bound.isGrounded);}jumpBuffer.Reset();nativeJumpHeld=NativeJumpHeld();slideFrame=-100;PlayerPrefs.SetInt("OnJump",0);}
   posture.Present(motor.LandingDip);
  }catch(Exception e){Fail(e);}}
  void OnLevelWasLoaded(int level){Release();failed=false;nextFind=0;}
@@ -132,7 +132,6 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   // Settings owns touch events; native input must not replay a touch jump.
   if(nativeHeld&&!nativeJumpHeld&&Input.touchCount==0)jumpBuffer.Press(Time.frameCount);
   nativeJumpHeld=nativeHeld;
-  bool jump=jumpBuffer.Consume(grounded&&motor.Y<=0&&posture.CanStand());
   if(PlayerPrefs.GetInt("OnJump",0)!=0)PlayerPrefs.SetInt("OnJump",0);
   if(!cr&&!fps)jumpField.SetValue(owner,false);
   Vector3 input=fps?Quaternion.Inverse(yaw)*fpsOwner.inputMoveDirection:Vector3.zero;
@@ -143,7 +142,28 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   bool sprint=(Input.GetKey(KeyCode.LeftShift)||(PlayerPrefs.GetInt("CNRMovementAutoSprint",1)==1&&z>forwardThreshold))&&!firing;
   if(sprint&&sprintBlocked!=null&&(bool)sprintBlocked.Invoke(null,null))sprint=false;
   bool slide=Input.GetKeyDown(KeyCode.LeftControl)||Time.frameCount-slideFrame<=1;if(slide)slideFrame=-100;
-  float before=motor.Y;bool headClear=posture.CanStand();
+  bool headClear=posture.CanStand();
+  bool mantleEnabled=PlayerPrefs.GetInt("CNRMovementMantle",1)==1;
+  if(mantle.Active&&(!mantleEnabled||pendingImpulse!=0)){
+   mantle.Cancel();motor.FinishTraversal(grounded);
+  }
+  // Preserve ordinary slide jumps and recoil, never auto-climb without a jump press.
+  if(!mantle.Active&&mantleEnabled&&jumpBuffer.Pending&&z>.55f&&headClear&&!firing&&pendingImpulse==0
+     &&motor.State!=Motor.Mode.Slide&&motor.State!=Motor.Mode.Crouch
+     &&mantle.TryStart(bound,yaw*Vector3.forward,motor.UnitScale,posture.StandingHeight)){
+   jumpBuffer.Consume(true);motor.FinishTraversal(false);
+  }
+  if(mantle.Active){
+   jumpBuffer.Reset();slideFrame=-100;
+   posture.Apply(dt,Motor.Mode.Walk,headClear);
+   CollisionFlags traversalFlags=mantle.Tick(dt);
+   if(cr&&!firing)crOwner.actionState=playerActionState.jump;
+   if(fps){fpsOwner.movement.velocity=bound.velocity;fpsOwner.movement.collisionFlags=traversalFlags;fpsOwner.grounded=bound.isGrounded;fpsOwner.jumping.jumping=mantle.Active;fpsOwner.Running=false;fpsOwner.Walking=false;fpsOwner.crouch=false;}
+   if(!mantle.Active)motor.FinishTraversal(bound.isGrounded);
+   return;
+  }
+  bool jump=jumpBuffer.Consume(grounded&&motor.Y<=0&&headClear);
+  float before=motor.Y;
   float slope=grounded&&(motor.State==Motor.Mode.Slide||slide)?posture.Downhill(yaw*new Vector3(motor.X,0,motor.Z)):0;
   motor.Tick(dt,x,z,grounded,sprint,slide,jump,headClear,slope);
   posture.Apply(dt,motor.State,headClear);
