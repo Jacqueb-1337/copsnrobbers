@@ -34,7 +34,7 @@ namespace CNRMods
         public static bool   DetailedLogging = false; // opt-in high-frequency diagnostics; normal/error logs remain enabled
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "4.2.58";
+        public const  string Version = "4.2.59";
 
         // -- Mod version registry ? every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.
@@ -9532,6 +9532,78 @@ namespace CNRMods
             }
         }
 
+        // HUD layout snapshots use revision-based replacement, not progression max/union.
+        private string _layoutAccount = "", _layoutBase = "";
+        private int _layoutRevision = -1;
+        private static MethodInfo LayoutMethod(string name)
+        {
+            foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type t = a.GetType("CNRSettingsMod.SettingsModHook");
+                if (t != null) return t.GetMethod(name, BindingFlags.Public | BindingFlags.Static);
+            }
+            return null;
+        }
+        private string CaptureLayout()
+        {
+            try
+            {
+                MethodInfo m = LayoutMethod("ExportHudSnapshot");
+                return m == null ? null : m.Invoke(null, null) as string;
+            }
+            catch { return null; }
+        }
+        private void PrepareLayoutAccount()
+        {
+            string account = _playerId + "|" + (LoginUsername ?? "");
+            if (_layoutAccount == account) return;
+            _layoutAccount = account;
+            bool known = PlayerPrefs.GetString("CNRHudCloudAccount", "") == account;
+            _layoutRevision = known ? PlayerPrefs.GetInt("CNRHudCloudRevision", -1) : -1;
+            _layoutBase = known ? PlayerPrefs.GetString("CNRHudCloudBase", "") : "";
+        }
+        private void AppendLayoutSnapshot(System.Text.StringBuilder sb, string local)
+        {
+            if (local == null) return;
+            PrepareLayoutAccount();
+            sb.Append("&hud_sync=1");
+            // First contact never writes: an uninitialized install must read first.
+            if (_layoutRevision >= 0 && local != _layoutBase)
+                sb.Append("&hud_revision=").Append(_layoutRevision)
+                  .Append("&hud_layout=").Append(Uri.EscapeDataString(local));
+        }
+        private void AcceptLayoutSnapshot(string json, string sentLocal, string account)
+        {
+            if (sentLocal == null || account != _layoutAccount) return;
+            int revision;
+            if (!int.TryParse(ModEntry.ParseJsonValue(json, "hud_revision"), out revision) || revision < 0) return;
+            string remote = ModEntry.ParseJsonValue(json, "hud_layout");
+            string current = CaptureLayout();
+            if (current == null) return;
+            if (revision > 0 && current == sentLocal && remote != current)
+            {
+                try
+                {
+                    MethodInfo m = LayoutMethod("RestoreHudSnapshot");
+                    if (m == null || !(bool)m.Invoke(null, new object[] { remote })) return;
+                }
+                catch { return; }
+            }
+            _layoutRevision = revision;
+            _layoutBase = revision == 0 ? "djEK" : remote;
+            PlayerPrefs.SetString("CNRHudCloudAccount", account);
+            PlayerPrefs.SetInt("CNRHudCloudRevision", revision);
+            PlayerPrefs.SetString("CNRHudCloudBase", _layoutBase);
+            PlayerPrefs.Save();
+        }
+
+        private bool LayoutSyncNeeded()
+        {
+            string local = CaptureLayout();
+            if (local == null) return false;
+            PrepareLayoutAccount();
+            return _layoutRevision < 0 || local != _layoutBase;
+        }
         private bool _cloudSyncRunning = false;
         private float _cloudNextSync = 0f;
         private IEnumerator SyncProgression()
@@ -9566,6 +9638,9 @@ namespace CNRMods
                 if (value > 0) sb.Append("&wl_").Append(wk).Append("=").Append(value);
             }
             AppendCloudProgression(sb);
+            string sentLayout = CaptureLayout();
+            AppendLayoutSnapshot(sb, sentLayout);
+            string layoutAccountAtRequest = _layoutAccount;
             sb.Append("&ap_CurWeaponEquipLimitedNum=").Append(Mathf.Clamp(PlayerPrefs.GetInt("CurWeaponEquipLimitedNum", 4), 4, 8));
 
             // Skin unlocks
@@ -9610,7 +9685,11 @@ namespace CNRMods
                 yield break;
             }
 
-            if (requestToken == _token) ApplyProgression(www.text);
+            if (requestToken == _token)
+            {
+                ApplyProgression(www.text);
+                AcceptLayoutSnapshot(www.text, sentLayout, layoutAccountAtRequest);
+            }
             }
             finally { _cloudSyncRunning = false; }
         }
@@ -14042,7 +14121,8 @@ namespace CNRMods
 
         private void Update()
         {
-            if (Ready && !_cloudSyncRunning && Time.realtimeSinceStartup >= _cloudNextSync && Application.loadedLevelName == "MainMenu")
+            if (Ready && !_cloudSyncRunning && Time.realtimeSinceStartup >= _cloudNextSync &&
+                (Application.loadedLevelName == "MainMenu" || LayoutSyncNeeded()))
             {
                 _cloudNextSync = Time.realtimeSinceStartup + 30f;
                 StartCoroutine(SyncProgression());

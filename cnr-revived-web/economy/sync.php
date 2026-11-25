@@ -22,6 +22,7 @@
 //   client_updated_at         — unix timestamp when client state last changed
 
 require __DIR__ . '/_db.php';
+require __DIR__ . '/_hud_layout.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('POST only', 405);
 
@@ -210,9 +211,10 @@ for ($i = 0; $i < 3; $i++) {
     $resp['perk_slot_' . ($i + 1)] = $merged_equipped_perks[$i] ?? '';
 }
 
+$hud_response = merge_hud_snapshot($pdo, (string)$account_id, $_POST);
 $pdo->exec("COMMIT");
 } catch (Throwable $e) {
     $pdo->exec("ROLLBACK");
     fail('progression sync failed', 500);
 }
-ok(array_merge($resp, cloud_progress_payload($merged_extra)));
+ok(array_merge($resp, cloud_progress_payload($merged_extra), $hud_response));

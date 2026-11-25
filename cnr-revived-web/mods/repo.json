@@ -306,11 +306,16 @@
       "id": "CNRMod",
       "name": "CNR Mod (Core)",
       "description": "The core mod for Cops N Robbers. Redirects the game to the community LAN server, adds custom map loading, an in-game economy system, and a DLL mod loader that scans /sdcard/CNRMods/ on launch.",
-      "latestVersion": "4.2.58",
+      "latestVersion": "4.2.59",
       "filename": "CNRMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.58.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.59.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "4.2.59",
+          "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.59.dll",
+          "changelog": "Synchronize account HUD snapshots with revision conflict protection."
+        },
         {
           "version": "4.2.58",
           "url": "https://play.jacqueb.me/mods/CNRMod/CNRMod-4.2.58.dll",
@@ -2233,11 +2238,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and username/password account login, preview, merge, and sync controls.",
-      "latestVersion": "3.1.117",
+      "latestVersion": "3.1.118",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.117.dll",
+      "latestUrl": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.118.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.118",
+          "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.118.dll",
+          "changelog": "Export and restore validated HUD layout snapshots with local backup."
+        },
         {
           "version": "3.1.117",
           "url": "https://play.jacqueb.me/mods/CNRSettingsMod/CNRSettingsMod-3.1.117.dll",

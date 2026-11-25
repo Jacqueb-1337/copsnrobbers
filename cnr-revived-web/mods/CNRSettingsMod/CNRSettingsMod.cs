@@ -111,7 +111,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.117";
+        public  const string Version = "3.1.118";
 
         public static void Load()
         {
@@ -7565,6 +7565,81 @@ namespace CNRSettingsMod
         // =====================================================================
         // HUD config file helpers (/sdcard/CNRMods/hud.cfg)
         // =====================================================================
+        // Account sync only exports layout fields, never arbitrary preferences.
+        private static SettingsModHook LayoutOwner()
+        {
+            GameObject root = GameObject.Find("CNRSettingsMod");
+            return root == null ? null : root.GetComponent<SettingsModHook>();
+        }
+        private static bool IsCloudLayoutKey(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return false;
+            foreach (HudDragItem d in DRAG_ITEMS)
+                if (key == d.prefPX || key == d.prefPY || key == d.prefSZ) return true;
+            foreach (HudVisItem v in VIS_ITEMS) if (key == v.prefKey) return true;
+            return false;
+        }
+        public static string ExportHudSnapshot()
+        {
+            SettingsModHook h = LayoutOwner();
+            if (h == null || h._hudEditMode) return null;
+            var keys = new System.Collections.Generic.List<string>();
+            foreach (string k in h._hudCfg.Keys) if (IsCloudLayoutKey(k)) keys.Add(k);
+            keys.Sort(StringComparer.Ordinal);
+            var sb = new System.Text.StringBuilder("v1\n");
+            foreach (string k in keys) sb.Append(k).Append('=').Append(h._hudCfg[k]).Append('\n');
+            return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
+        }
+        public static bool RestoreHudSnapshot(string payload)
+        {
+            SettingsModHook h = LayoutOwner();
+            if (h == null || h._hudEditMode || string.IsNullOrEmpty(payload) || payload.Length > 8192) return false;
+            try
+            {
+                string raw = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(payload));
+                string[] lines = raw.Split('\n');
+                if (lines.Length == 0 || lines[0] != "v1") return false;
+                var incoming = new System.Collections.Generic.Dictionary<string,string>();
+                for (int j = 1; j < lines.Length; j++)
+                {
+                    if (lines[j].Length == 0) continue;
+                    int eq = lines[j].IndexOf('=');
+                    if (eq <= 0) return false;
+                    string k = lines[j].Substring(0, eq), v = lines[j].Substring(eq + 1);
+                    float f;
+                    if (!IsCloudLayoutKey(k) || incoming.ContainsKey(k) ||
+                        !float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out f) ||
+                        float.IsNaN(f) || float.IsInfinity(f) || Mathf.Abs(f) > 100000f) return false;
+                    if (k.StartsWith("CNRMod_SZ_") && (f <= 0f || f > 100f)) return false;
+                    if (k.StartsWith("CNRMod_HUD_") && v != "0" && v != "1") return false;
+                    incoming.Add(k, v);
+                }
+                if (ExportHudSnapshot() == payload) return true;
+                if (File.Exists(HUD_CFG_PATH)) File.Copy(HUD_CFG_PATH, HUD_CFG_PATH + ".cloud-backup", true);
+                var remove = new System.Collections.Generic.List<string>();
+                foreach (string k in h._hudCfg.Keys) if (IsCloudLayoutKey(k)) remove.Add(k);
+                foreach (string k in remove) h._hudCfg.Remove(k);
+                foreach (var kv in incoming) h._hudCfg[kv.Key] = kv.Value;
+                h.HudCfgSave();
+                for (int i = 0; i < DRAG_COUNT; i++)
+                {
+                    h._savedScales[i] = -1f;
+                    if (h._dragGOs[i] == null) continue;
+                    if (!h.HudCfgHasKey(DRAG_ITEMS[i].prefPX)) h._dragGOs[i].transform.position = h._dragOrigPos[i];
+                    if (h._dragOrigScale[i] != Vector3.zero) h._dragGOs[i].transform.localScale = h._dragOrigScale[i];
+                    h.LoadDragPos(i); h.LoadDragScale(i);
+                }
+                for (int i = 0; i < VIS_ITEMS.Length; i++)
+                {
+                    h._visOn[i] = h.HudCfgGetInt(VIS_ITEMS[i].prefKey, 1) == 1;
+                    if (h._visGOs[i] != null) h._visGOs[i].SetActive(h._visOn[i]);
+                }
+                SettingsModEntry.Log("HUD snapshot restored");
+                return true;
+            }
+            catch (Exception ex) { SettingsModEntry.Log("HUD snapshot restore: " + ex.Message); return false; }
+        }
+
         private void HudCfgLoad()
         {
             _hudCfg.Clear();
