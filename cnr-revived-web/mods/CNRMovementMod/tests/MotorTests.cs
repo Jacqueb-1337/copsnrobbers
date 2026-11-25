@@ -92,6 +92,15 @@ class Tests {
   var traversal=new Motor();traversal.SetHorizontal(9,8);traversal.AddVertical(10);traversal.FinishTraversal(false);
   Check(traversal.State==Motor.Mode.Air&&traversal.Speed==0&&traversal.Y==0,"cancel traversal resumes air physics");
   traversal.FinishTraversal(true);Check(traversal.State==Motor.Mode.Walk&&traversal.Y==-2,"finish traversal resumes ground physics");
+  Check(MantleTiming.HeightIndex(.75f)==0&&MantleTiming.HeightIndex(.76f)==1,"first height band");
+  Check(MantleTiming.HeightIndex(1.05f)==1&&MantleTiming.HeightIndex(1.06f)==2,"second height band");
+  Check(MantleTiming.HeightIndex(1.55f)==2&&MantleTiming.HeightIndex(1.56f)==3,"third height band");
+  Check(MantleTiming.HeightIndex(1.8f)==3&&MantleTiming.HeightIndex(2.3f)==4,"upper height bands");
+  Check(MantleTiming.HeightIndex(2.31f)==-1&&MantleTiming.HeightIndex(float.NaN)==-1,"invalid height");
+  Check(MantleTiming.VaultHeight(.8f)&&!MantleTiming.VaultHeight(1.1f),"vault height category");
+  Near(MantleTiming.Duration(MantlePolicy.Kind.ClimbUp,.6f),.6f,.0001f,"low climb timing");
+  Near(MantleTiming.Duration(MantlePolicy.Kind.ClimbUp,2.1f),1.4f,.0001f,"high climb timing");
+  Near(MantleTiming.Duration(MantlePolicy.Kind.Vault,1f),.8f,.0001f,"ADV vault fallback timing");
   Console.WriteLine("TOTAL "+count);
  }
 }

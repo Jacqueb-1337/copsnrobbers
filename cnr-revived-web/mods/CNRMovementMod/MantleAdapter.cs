@@ -92,7 +92,7 @@ public sealed class MantleAdapter {
   }
   // A low obstacle with a clear, supported far-side landing is a vault.
   float offset=depth+radius+.15f*scale;
-  if(rise<=1.1f*scale&&offset<=1.2f*scale){
+  if(MantleTiming.VaultHeight(rise/scale)&&offset<=1.2f*scale){
    Vector3 far=edge+forward*offset;RaycastHit landing;
    if(Surface(far,top.point.y-.16f*scale,foot.y-.55f*scale,out landing)&&Support(far,right,landing.point.y,scale)
       &&MakePath(foot,landing.point,top.point.y,scale)){
@@ -113,8 +113,7 @@ public sealed class MantleAdapter {
  }
  void Begin(MantlePolicy.Kind kind,float referenceHeight){
   Kind=kind;Active=true;elapsed=0;
-  duration=kind==MantlePolicy.Kind.Vault?Mathf.Lerp(.30f,.46f,Mathf.Clamp01(referenceHeight/1.1f)):
-     Mathf.Lerp(.38f,.85f,Mathf.Clamp01(referenceHeight/2.3f));
+  duration=MantleTiming.Duration(kind,referenceHeight);
   Debug.Log("[CNRMovement] "+kind+" height="+referenceHeight.ToString("F2"));
  }
  public CollisionFlags Tick(float dt){
