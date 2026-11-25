@@ -5,7 +5,7 @@ namespace CNRMovementMod {
 // DLL-only controller. Never replaces or patches the game's assemblies.
 // Owns only the verified local PlayerLogic controller while opted in.
 public sealed class LocalMovementBridge : MonoBehaviour {
- readonly EnvironmentPriority environment=new EnvironmentPriority(); readonly Motor motor=new Motor(); readonly PostureAdapter posture=new PostureAdapter(); readonly SneakHud hud=new SneakHud();
+ readonly MovementSettings settings=new MovementSettings(); readonly EnvironmentPriority environment=new EnvironmentPriority(); readonly Motor motor=new Motor(); readonly PostureAdapter posture=new PostureAdapter(); readonly SneakHud hud=new SneakHud();
  CharacterController bound; JoyStickController owner; SingleModeLadderPlayer ladder; CRJoyStickController crOwner; CRLadderPlayer crLadder; FPScontroller fpsOwner; Camera inputCam; FieldInfo crSpeedField,crControllerField;
  FieldInfo moveField,jumpField,ladderField,stopField,ccField,camField,fireField,lastFallField,lastHeightField;
  FieldInfo[] hooks; Delegate[] handlers; MethodInfo registerHud,hudBlocked,sprintBlocked,fallMethod,fireButton;
@@ -56,6 +56,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
  }
  void Fail(Exception e){failed=true;try{Release();}catch(Exception restore){Debug.LogWarning("[CNRMovement] restore: "+restore.Message);}Debug.LogWarning("[CNRMovement] disabled after error: "+e);}
  void Update(){try{
+  settings.Tick();
   if(!ready&&Time.realtimeSinceStartup>=nextBind){nextBind=Time.realtimeSinceStartup+1;TryBind();}
   if(ownsController&&(!CanMove()||(fpsOwner!=null?fpsOwner.enabled:crOwner!=null?crOwner.enabled:owner!=null&&owner.enabled)))Release();
   if(!ownsController)posture.Restore();
@@ -128,7 +129,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   bool nativeHeld=(cr&&Input.GetButton("Jump"))||(fps&&fpsOwner.inputJump);
   if(nativeHeld&&!nativeJumpHeld&&!HudBlocked())jumpBuffer.Press(Time.frameCount);
   nativeJumpHeld=nativeHeld;
-  bool jump=jumpBuffer.Consume(grounded&&motor.Y<=0);
+  bool jump=jumpBuffer.Consume(grounded&&motor.Y<=0&&posture.CanStand());
   if(PlayerPrefs.GetInt("OnJump",0)!=0)PlayerPrefs.SetInt("OnJump",0);
   if(!cr&&!fps)jumpField.SetValue(owner,false);
   Vector3 input=fps?Quaternion.Inverse(yaw)*fpsOwner.inputMoveDirection:Vector3.zero;

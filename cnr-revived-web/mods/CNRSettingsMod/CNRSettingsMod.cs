@@ -111,7 +111,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.114";
+        public  const string Version = "3.1.115";
 
         public static void Load()
         {
@@ -4737,17 +4737,6 @@ namespace CNRSettingsMod
                 }
             }
             GUILayout.Space(10f);
-
-            // Optional DLL-only global movement preference, off by default.
-            if (GameObject.Find("CNRMovementExperimentalRoot") != null)
-            {
-                SectionHeader("Experimental Movement");
-                bool old = PlayerPrefs.GetInt("CNRMovementExperimental", 0) == 1;
-                bool next = UIToggle("CODM-inspired movement", old);
-                if (next != old) { PlayerPrefs.SetInt("CNRMovementExperimental", next ? 1 : 0); PlayerPrefs.Save(); }
-                GUILayout.Label("  Forward auto-sprint, Sneak / Slide, and camera posture. Experimental.", HintStyle());
-                GUILayout.Space(10f);
-            }
 
             // ---- HUD Layout -------------------------------------------------
             SectionHeader("HUD Layout");
