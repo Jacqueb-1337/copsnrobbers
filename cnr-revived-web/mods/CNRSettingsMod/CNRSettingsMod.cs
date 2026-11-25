@@ -1,4 +1,4 @@
-﻿// CNRSettingsMod.cs -- In-game settings/HUD mod for Cops N Robbers
+// CNRSettingsMod.cs -- In-game settings/HUD mod for Cops N Robbers
 // Entry point: CNRSettingsMod.SettingsModEntry.Load() -- called by CNRMod DLL scanner
 
 using System;
@@ -111,7 +111,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.119";
+        public  const string Version = "3.1.120";
 
         public static void Load()
         {
@@ -2746,6 +2746,13 @@ namespace CNRSettingsMod
             for (int i = 0; i < Input.touchCount; i++)
             {
                 Touch t = Input.GetTouch(i);
+                VCAnalogJoystickBase moveStick = VCAnalogJoystickBase.GetInstance("stick");
+                if (moveStick != null && moveStick.TouchWrapper != null &&
+                    moveStick.TouchWrapper.Active && moveStick.TouchWrapper.fingerId == t.fingerId)
+                {
+                    _fireTouchIds.Remove(t.fingerId);
+                    continue;
+                }
                 if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
                 {
                     _fireTouchIds.Remove(t.fingerId);
@@ -2822,6 +2829,13 @@ namespace CNRSettingsMod
             for (int i = 0; i < Input.touchCount; i++)
             {
                 Touch t = Input.GetTouch(i);
+                VCAnalogJoystickBase moveStick = VCAnalogJoystickBase.GetInstance("stick");
+                if (moveStick != null && moveStick.TouchWrapper != null &&
+                    moveStick.TouchWrapper.Active && moveStick.TouchWrapper.fingerId == t.fingerId)
+                {
+                    _fireTouchIds.Remove(t.fingerId);
+                    continue;
+                }
                 if (t.phase != TouchPhase.Began &&
                     t.phase != TouchPhase.Stationary &&
                     t.phase != TouchPhase.Moved) continue;

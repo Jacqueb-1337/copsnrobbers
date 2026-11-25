@@ -9,8 +9,11 @@ public static class MantlePolicy {
   public bool ApproachClear, TopClear, CeilingClear, DestinationClear, LandingClear, PathClear;
   public bool VaultEligible; // caller must classify height band; reference bins unresolved.
  }
+ public const float MaximumReferenceHeight=2.0f, MaximumReferenceGap=.45f;
+ public static float MaximumRise(float unitScale,float standingHeight){return Math.Min(MaximumReferenceHeight*unitScale,standingHeight*1.35f);}
+ public static bool WithinReach(float gap,float rise,float unitScale,float standingHeight){return unitScale>0&&standingHeight>0&&gap>=0&&gap<=MaximumReferenceGap*unitScale&&rise>0&&rise<=MaximumRise(unitScale,standingHeight);}
  public static Kind Choose(Candidate c,float unitScale){
-  if(unitScale<=0||c.Height<=0||c.Height>2.3f*unitScale||c.Width<.4f*unitScale||
+  if(unitScale<=0||c.Height<=0||c.Height>MaximumReferenceHeight*unitScale||c.Width<.4f*unitScale||
      !c.ApproachClear||!c.TopClear||!c.CeilingClear||!c.DestinationClear||!c.PathClear)return Kind.None;
   if(c.VaultEligible&&c.LandingClear&&c.ForwardOffset>=0&&c.ForwardOffset<=1.2f*unitScale)return Kind.Vault;
   return c.Width>=.5f*unitScale?Kind.ClimbUp:Kind.None;

@@ -111,6 +111,11 @@ class Tests {
   Near(MantleTiming.NextSample(.4f,.9f),.45f,.0001f,"split raise boundary");
   Near(MantleTiming.NextSample(.45f,.9f),.82f,.0001f,"split traverse boundary");
   Near(MantleTiming.NextSample(.82f,.9f),.9f,.0001f,"no unnecessary split");
+  Check(MantlePolicy.WithinReach(.2f,2f,1.75f,2f),"near reachable mantle");
+  Check(!MantlePolicy.WithinReach(.9f,2f,1.75f,2f),"remote wall rejected");
+  Check(!MantlePolicy.WithinReach(.2f,3f,1.75f,2f),"above body reach rejected");
+  Check(!MantlePolicy.WithinReach(.2f,3.6f,1.75f,4f),"reference height cap");
+  Check(MantlePolicy.WithinReach(.75f,2.6f,1.75f,2f),"moderate reach accepted");
   Console.WriteLine("TOTAL "+count);
  }
 }

@@ -11,6 +11,48 @@ public sealed class LocalMovementBridge : MonoBehaviour {
  FieldInfo[] hooks; Delegate[] handlers; MethodInfo registerHud,hudBlocked,sprintBlocked,fallMethod,fireButton;
  System.Action fallTick; bool ready,ownsController,failed; float nextBind,nextFind,footTime,pendingImpulse; int acquiredFrame=-1,slideFrame=-100; readonly JumpBuffer jumpBuffer=new JumpBuffer(); bool nativeJumpHeld;
  Quaternion previousYaw; bool hasYaw;
+ // Capture belongs to the original joystick. Its own UpdateDelta clamps the
+ // thumb position to the radius; leaving that radius must not drop movement.
+ VCAnalogJoystickBase retainedStick; bool originalStopOnExit;
+ int moveFinger=-1; Vector2 moveOrigin;
+ static readonly FieldInfo touchOriginField=typeof(VCAnalogJoystickBase).GetField("_touchOriginScreen",InstanceFields);
+ static readonly FieldInfo dragMaxField=typeof(VCAnalogJoystickBase).GetField("dragDeltaMagnitudeMaxPixels",InstanceFields);
+ public static bool IsMovementFinger(int id){
+  VCAnalogJoystickBase stick=VCAnalogJoystickBase.GetInstance("stick");
+  return stick!=null&&stick.TouchWrapper!=null&&stick.TouchWrapper.Active&&stick.TouchWrapper.fingerId==id;
+ }
+ void ReadMovementTouch(VCAnalogJoystickBase stick,ref float x,ref float z){
+  if(stick==null||touchOriginField==null||dragMaxField==null||Input.touchCount==0){moveFinger=-1;return;}
+  VCTouchWrapper touch=stick.TouchWrapper;
+  if(touch!=null&&touch.Active&&moveFinger!=touch.fingerId){
+   moveFinger=touch.fingerId;moveOrigin=(Vector2)touchOriginField.GetValue(stick);
+  }
+  if(moveFinger<0)return;
+  for(int i=0;i<Input.touchCount;i++){
+   Touch t=Input.GetTouch(i);if(t.fingerId!=moveFinger)continue;
+   if(t.phase==TouchPhase.Ended||t.phase==TouchPhase.Canceled){moveFinger=-1;x=z=0;return;}
+   float max=(float)dragMaxField.GetValue(stick);
+   if(max<=0)return;
+   Vector2 d=Vector2.Scale(t.position-moveOrigin,stick.dragScaleFactor)/max;
+   if(d.sqrMagnitude>1)d.Normalize();
+   x=d.x;z=d.y;return;
+  }
+  moveFinger=-1;
+ }
+ void RestoreStickCapture(){
+  if(retainedStick!=null)retainedStick.stopDraggingOnMoveOut=originalStopOnExit;
+  retainedStick=null;moveFinger=-1;
+ }
+ void KeepStickCapture(){
+  VCAnalogJoystickBase stick=VCAnalogJoystickBase.GetInstance("stick");
+  if(stick!=retainedStick){
+   RestoreStickCapture();
+   if(stick==null)return;
+   retainedStick=stick;originalStopOnExit=stick.stopDraggingOnMoveOut;
+   Debug.Log("[CNRMovement] joystick stopDraggingOnMoveOut originally "+originalStopOnExit+"; retaining captured touch");
+  }
+  if(retainedStick!=null)retainedStick.stopDraggingOnMoveOut=false;
+ }
  const BindingFlags StaticPublic=BindingFlags.Public|BindingFlags.Static;
  const BindingFlags InstanceFields=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance;
  static Type Find(string name){foreach(Assembly a in AppDomain.CurrentDomain.GetAssemblies()){Type t=a.GetType(name);if(t!=null)return t;}return null;}
@@ -44,6 +86,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
  }
  void Unbind(){ready=false;if(hooks!=null&&handlers!=null)for(int i=0;i<hooks.Length;i++)if(hooks[i]!=null&&handlers[i]!=null&&object.Equals(hooks[i].GetValue(null),handlers[i]))hooks[i].SetValue(null,null);}
  void Release(){
+  RestoreStickCapture();
   if(ownsController&&owner!=null){try{jumpField.SetValue(owner,false);ladderField.SetValue(owner,ladder!=null&&ladder.latchedToLadder);lastFallField.SetValue(owner,Time.time);lastHeightField.SetValue(owner,owner.transform.position.y);}finally{owner.enabled=true;}}
   if(ownsController&&crOwner!=null){crOwner.actionState=crLadder!=null&&crLadder.latchedToLadder?playerActionState.onladder:playerActionState.idle;crOwner.enabled=true;}
   if(ownsController&&fpsOwner!=null){try{
@@ -60,6 +103,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   if(!ready&&Time.realtimeSinceStartup>=nextBind){nextBind=Time.realtimeSinceStartup+1;TryBind();}
   if(ownsController&&(!CanMove()||(fpsOwner!=null?fpsOwner.enabled:crOwner!=null?crOwner.enabled:owner!=null&&owner.enabled)))Release();
   if(!ownsController)posture.Restore();
+  else KeepStickCapture();
  }catch(Exception e){Fail(e);}}
  bool Acquire(){
   if(!ready||failed||!Enabled()||Time.realtimeSinceStartup<nextFind||HudBlocked())return false;
@@ -107,6 +151,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   hud.Tick(ready&&!failed&&Enabled()&&(owner!=null||crOwner!=null||fpsOwner!=null||PlayerLogic.mInstance!=null||CRPlayer.mInstance!=null),motor.State==Motor.Mode.Slide||motor.State==Motor.Mode.Crouch,RequestSlide,RegisterHud,FireButton);
   if(!active&&ownsController){Release();return;}
   if(!active)return;
+  KeepStickCapture();
   if(acquiredFrame==Time.frameCount){nativeJumpHeld=NativeJumpHeld();return;} // do not replay held input at takeover
   if(!HudBlocked())Step();else{if(mantle.Active){mantle.Cancel();motor.FinishTraversal(bound.isGrounded);}jumpBuffer.Reset();nativeJumpHeld=NativeJumpHeld();slideFrame=-100;PlayerPrefs.SetInt("OnJump",0);}
   posture.Present(motor.LandingDip);
@@ -126,6 +171,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   if(hasYaw){Vector3 v=Quaternion.Inverse(yaw)*previousYaw*new Vector3(motor.X,0,motor.Z);motor.SetHorizontal(v.x,v.z);}
   previousYaw=yaw;hasYaw=true;motor.Mobility=speed/(Motor.ReferenceWalk*motor.UnitScale);
   bool grounded=bound.isGrounded;
+  posture.LimitStep(grounded&&!mantle.Active);
   // Settings owns touch/KBM/gamepad edges. Never replay the vanilla NGUI
   // OnClick flag on release; it can be set after the original touch jump.
   bool nativeHeld=NativeJumpHeld();
@@ -136,12 +182,14 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   if(!cr&&!fps)jumpField.SetValue(owner,false);
   Vector3 input=fps?Quaternion.Inverse(yaw)*fpsOwner.inputMoveDirection:Vector3.zero;
   float x=stick!=null?stick.AxisX:input.x,z=stick!=null?stick.AxisY:input.z;
+  ReadMovementTouch(stick,ref x,ref z);
   bool firing=cr?UpdateCRStatus(x,z):fps?false:UpdateStatus(dt,x,z);
   // A slightly lower release threshold prevents analog jitter from cancelling sprint.
   float forwardThreshold=motor.State==Motor.Mode.Sprint?.72f:.85f;
   bool sprint=(Input.GetKey(KeyCode.LeftShift)||(PlayerPrefs.GetInt("CNRMovementAutoSprint",1)==1&&z>forwardThreshold))&&!firing;
   if(sprint&&sprintBlocked!=null&&(bool)sprintBlocked.Invoke(null,null))sprint=false;
   bool slide=Input.GetKeyDown(KeyCode.LeftControl)||Time.frameCount-slideFrame<=1;if(slide)slideFrame=-100;
+  if(slide)Debug.Log("[CNRMovement] slide request z="+z.ToString("F2")+" speed="+motor.Speed.ToString("F2")+" sprint="+sprint+" fire="+firing+" ground="+grounded+" finger="+moveFinger);
   bool headClear=posture.CanStand();
   bool mantleEnabled=PlayerPrefs.GetInt("CNRMovementMantle",1)==1;
   if(mantle.Active&&(!mantleEnabled||pendingImpulse!=0)){
@@ -155,6 +203,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   }
   if(mantle.Active){
    jumpBuffer.Reset();slideFrame=-100;
+   posture.LimitStep(false);
    posture.Apply(dt,Motor.Mode.Walk,headClear);
    bool moving=x*x+z*z>.05f*.05f;
    CollisionFlags traversalFlags=mantle.Tick(dt,moving);
@@ -179,6 +228,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   float dy=(!grounded&&!jump)?(before+motor.Y)*.5f:motor.Y;
   if(pendingImpulse!=0){motor.AddVertical(pendingImpulse);dy+=pendingImpulse;pendingImpulse=0;}
   Vector3 delta=yaw*new Vector3(motor.X,0,motor.Z)*dt;delta.y=dy*dt;
+  posture.LimitStep(grounded&&!jump&&motor.State!=Motor.Mode.Air);
   CollisionFlags flags=bound.Move(delta);
   if((flags&CollisionFlags.Above)!=0)motor.HitCeiling();
   if(cr&&motor.State==Motor.Mode.Air&&!firing)crOwner.actionState=playerActionState.jump;
@@ -196,7 +246,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   if(walking){footTime+=dt;if(footTime>=.4f){owner.playFootStepAudio();footTime=0;}}else footTime=0;
   float hold=Mathf.Max(0,(float)fireField.GetValue(owner)-dt);bool fire=false;
   if(inputCam!=null&&NGUI.mInstance!=null&&!NGUI.mInstance.noClips)
-   for(int i=0;i<Input.touchCount;i++){Touch t=Input.GetTouch(i);if(t.phase==TouchPhase.Ended||t.phase==TouchPhase.Canceled)continue;
+   for(int i=0;i<Input.touchCount;i++){Touch t=Input.GetTouch(i);if(t.phase==TouchPhase.Ended||t.phase==TouchPhase.Canceled||t.fingerId==moveFinger||IsMovementFinger(t.fingerId))continue;
     RaycastHit hit;if(Physics.Raycast(inputCam.ScreenPointToRay(t.position),out hit,18f)&&hit.collider.gameObject.name=="FireButton"){fire=true;hold=.235f;break;}}
   if(fire){WeaponType w=PlayerLogic.mInstance.mWeaponType;PlayerLogic.mInstance.mStatus=(w==WeaponType.BallisticKnife||w==WeaponType.GingerbreadKnife)?PlayerStatus.knifeFire:PlayerStatus.fire;}
   else if(hold<=0)PlayerLogic.mInstance.mStatus=walking?PlayerStatus.walk:PlayerStatus.idle;

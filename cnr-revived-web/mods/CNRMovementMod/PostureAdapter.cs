@@ -1,14 +1,14 @@
-﻿using UnityEngine;
+using UnityEngine;
 namespace CNRMovementMod {
 // Offline candidate only. Camera is selected strictly from the local player's descendants.
 // FOV is deliberately not owned here; CNRSettingsMod owns scope/aim FOV.
 public sealed class PostureAdapter {
  readonly Posture posture=new Posture();
  CharacterController cc; Transform view;
- float height; Vector3 center, lastCameraPosition, appliedCameraOffset;
+ float height, originalStep; Vector3 center, lastCameraPosition, appliedCameraOffset;
  bool cameraApplied;
  public bool Bind(CharacterController controller){
-  if(cc==controller)return true; if(!Restore())return false; cc=controller; height=cc.height; center=cc.center;
+  if(cc==controller)return true; if(!Restore())return false; cc=controller; height=cc.height; center=cc.center;originalStep=cc.stepOffset;
   Camera main=Camera.main;
   if(main!=null&&main.transform.IsChildOf(cc.transform))view=main.transform;
   if(view==null){
@@ -16,6 +16,12 @@ public sealed class PostureAdapter {
    foreach(Camera cam in cams)if(cam.enabled&&!cam.orthographic){if(view!=null){view=null;break;}view=cam.transform;}
   }
   return true;
+ }
+ public void LimitStep(bool grounded){
+  if(cc==null)return;
+  float sy=Mathf.Max(.001f,Mathf.Abs(cc.transform.lossyScale.y));
+  float target=Mathf.Min(originalStep,.65f/sy);
+  if(Mathf.Abs(cc.stepOffset-target)>.001f)cc.stepOffset=target;
  }
  public float StandingHeight {get{return height;}}
  public bool CanStand(){
@@ -70,7 +76,7 @@ public sealed class PostureAdapter {
  public bool Restore(){
   if(cc!=null&&!CanStand())return false;
   RemoveCameraOffset();
-  if(cc!=null){cc.height=height;cc.center=center;}
+  if(cc!=null){cc.height=height;cc.center=center;cc.stepOffset=originalStep;}
   cc=null;view=null;posture.Reset();return true;
  }
 }

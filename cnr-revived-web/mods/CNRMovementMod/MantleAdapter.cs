@@ -67,13 +67,13 @@ public sealed class MantleAdapter {
   Vector3 lossy=cc.transform.lossyScale;
   radius=cc.radius*Mathf.Max(Mathf.Abs(lossy.x),Mathf.Abs(lossy.z));
   height=Mathf.Max(standingHeight*Mathf.Abs(lossy.y),radius*2);
-  Vector3 foot=Foot();float maximum=2.3f*scale;
+  Vector3 foot=Foot();float maximum=MantlePolicy.MaximumRise(scale,height);
   RaycastHit face=new RaycastHit();
   bool found=false;float nearest=float.MaxValue;
   // Two height samples catch low barriers and taller ledges.
   foreach(float probe in new[]{Mathf.Max(.25f*scale,cc.stepOffset+.05f),Mathf.Min(height*.65f,1.15f*scale)}){
    RaycastHit h;
-   if(Ray(foot+Vector3.up*probe,forward,radius+1f*scale,out h)&&StaticSurface(h.collider)
+   if(Ray(foot+Vector3.up*probe,forward,radius+MantlePolicy.MaximumReferenceGap*scale,out h)&&StaticSurface(h.collider)
        &&h.normal.y<.45f&&Vector3.Dot(h.normal,forward)<-.4f&&h.distance<nearest){
     face=h;nearest=h.distance;found=true;
    }
@@ -83,7 +83,7 @@ public sealed class MantleAdapter {
   RaycastHit top;
   if(!Surface(edge+forward*.10f*scale,foot.y+maximum+.06f,foot.y+.15f*scale,out top))return false;
   float rise=top.point.y-foot.y;
-  if(rise<Mathf.Max(cc.stepOffset+.06f,.20f*scale)||rise>maximum)return false;
+  if(rise<Mathf.Max(cc.stepOffset+.06f,.20f*scale)||!MantlePolicy.WithinReach(Mathf.Max(0,nearest-radius),rise,scale,height))return false;
   // Measure the top's continuous depth, rejecting gaps and steep/nonstatic surfaces.
   float depth=.10f*scale,increment=.10f*scale,limit=Mathf.Max(1.2f*scale+radius,2*radius+.25f*scale);
   for(float d=depth+increment;d<=limit;d+=increment){

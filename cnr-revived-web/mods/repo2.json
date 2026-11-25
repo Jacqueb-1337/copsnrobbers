@@ -2238,11 +2238,16 @@
       "id": "CNRSettingsMod",
       "name": "CNR Settings",
       "description": "Adds a settings panel accessible from the main menu and in-game. Features draggable HUD element repositioning, ADS sensitivity slider, wide camera angle toggle, full keyboard and mouse binding support, and username/password account login, preview, merge, and sync controls.",
-      "latestVersion": "3.1.119",
+      "latestVersion": "3.1.120",
       "filename": "CNRSettingsMod.dll",
-      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.119.dll",
+      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.120.dll",
       "latestOnly": true,
       "versions": [
+        {
+          "version": "3.1.120",
+          "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.120.dll",
+          "changelog": "Exclude captured movement touches from supplemental fire detection."
+        },
         {
           "version": "3.1.119",
           "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRSettingsMod/CNRSettingsMod-3.1.119.dll",
@@ -4175,9 +4180,14 @@
       "name": "CNR Movement (Experimental)",
       "description": "Optional CODM-inspired movement experiment. Sprint, Sneak/Slide, crouch, jump and camera posture. Disabled by default; no APK patch. Intended for supported local player controllers in single-player and multiplayer. Test build.",
       "filename": "CNRMovementMod.dll",
-      "latestVersion": "0.1.10",
-      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.10.dll",
+      "latestVersion": "0.1.11",
+      "latestUrl": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.11.dll",
       "versions": [
+        {
+          "version": "0.1.11",
+          "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.11.dll",
+          "changelog": "Retain captured joystick displacement beyond its radius, avoid movement-finger fire detection, tune mantle reach, and cap automatic step height consistently on ground and in air."
+        },
         {
           "version": "0.1.10",
           "url": "https://raw.githubusercontent.com/Jacqueb-1337/copsnrobbers/master/cnr-revived-web/mods/CNRMovementMod/CNRMovementMod-0.1.10.dll",
