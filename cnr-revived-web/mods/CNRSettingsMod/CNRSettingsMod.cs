@@ -1,4 +1,4 @@
-// CNRSettingsMod.cs -- In-game settings/HUD mod for Cops N Robbers
+﻿// CNRSettingsMod.cs -- In-game settings/HUD mod for Cops N Robbers
 // Entry point: CNRSettingsMod.SettingsModEntry.Load() -- called by CNRMod DLL scanner
 
 using System;
@@ -111,7 +111,7 @@ namespace CNRSettingsMod
     public static class SettingsModEntry
     {
         private const string LogPath = "/storage/emulated/0/CNRMods/settings.log";
-        public  const string Version = "3.1.112";
+        public  const string Version = "3.1.113";
 
         public static void Load()
         {
@@ -264,8 +264,60 @@ namespace CNRSettingsMod
                 parentName     = "Panel(RightMenu)",
                 nameCandidates = new string[]{ "Bullets" },
                 prefPX = "CNRMod_PX_WpSel", prefPY = "CNRMod_PY_WpSel", prefSZ = "CNRMod_SZ_WpSel" },
+            // 17 -- dynamically created sneak/slide control; preserve existing indices.
+            new HudDragItem {
+                displayName = "Sneak / Slide",
+                parentName = "Panel(Control)",
+                nameCandidates = new string[]{ "Image Button(Sneak)" },
+                prefPX = "CNRMod_PX_Sneak", prefPY = "CNRMod_PY_Sneak", prefSZ = "CNRMod_SZ_Sneak" },
         };
-        private const int DRAG_COUNT = 17;
+        private const int DRAG_COUNT = 18;
+        private const int SneakHudIndex = 17;
+
+        // The movement mod creates this widget dynamically after the HUD is loaded.
+        // Register it once, capturing its factory position before loading saved overrides.
+        public static void RegisterExperimentalMovementHud(GameObject widget)
+        {
+            if (widget == null || widget.name != "Image Button(Sneak)") return;
+            GameObject root = GameObject.Find("CNRSettingsMod");
+            SettingsModHook settings = root != null ? root.GetComponent<SettingsModHook>() : null;
+            if (settings == null) return;
+            int i = SneakHudIndex;
+            if (settings._dragGOs[i] == widget) return;
+            settings._dragGOs[i] = widget;
+            settings._dragOrigPos[i] = widget.transform.position;
+            settings._dragOrigScale[i] = widget.transform.localScale;
+            settings._savedScales[i] = -1f;
+            settings.LoadDragPos(i);
+            settings.LoadDragScale(i);
+            if (settings._hudEditMode)
+            {
+                UIButton button = widget.GetComponent<UIButton>();
+                if (button != null) button.enabled = false;
+            }
+        }
+
+        // Reuse actual aim and firing state; FpsOnFire is an edge/toggle, not a held flag.
+        public static bool ExperimentalMovementSprintBlocked()
+        {
+            GameObject root = GameObject.Find("CNRSettingsMod");
+            SettingsModHook settings = root != null ? root.GetComponent<SettingsModHook>() : null;
+            if (settings == null) return false;
+            if (settings.IsLikelyScopedNow() || settings.IsScopeFirePulseActive()) return true;
+            if (PlayerLogic.mInstance != null)
+            {
+                PlayerStatus status = PlayerLogic.mInstance.mStatus;
+                if (status == PlayerStatus.fire || status == PlayerStatus.knifeFire) return true;
+            }
+            return false;
+        }
+
+        public static bool ExperimentalMovementHudInputBlocked()
+        {
+            GameObject root = GameObject.Find("CNRSettingsMod");
+            SettingsModHook settings = root != null ? root.GetComponent<SettingsModHook>() : null;
+            return settings != null && (settings._hudEditMode || settings._showSettings);
+        }
         private const string HUD_CFG_PATH = "/storage/emulated/0/CNRMods/hud.cfg";
 
         // -- KBM keybinds ----------------------------------------------------
@@ -2878,7 +2930,7 @@ namespace CNRSettingsMod
         private void KbmJumpDetect()
         {
             if (!_kbmEnabled || !_cursorLocked || !_kbmJumpPending) return;
-            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
+            if ((ExperimentalMovementOwnsJump == null || !ExperimentalMovementOwnsJump()) && ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied)) return;
 
             // Cache JoyStickController and its reflection fields (same as TouchJumpDetect).
             if ((object)_joyStickCtrl == null)
@@ -2965,7 +3017,7 @@ namespace CNRSettingsMod
         private void TouchJumpDetect()
         {
             if (_dragGOs[1] == null || _nguiCam == null) return;
-            if ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied) return;
+            if ((ExperimentalMovementOwnsJump == null || !ExperimentalMovementOwnsJump()) && ((object)PlayerLogic.mInstance == null || PlayerLogic.mInstance.bDied)) return;
             if (Input.touchCount == 0) return;
 
             // Cache JoyStickController and its private fields.
@@ -3033,8 +3085,10 @@ namespace CNRSettingsMod
         // While in the air (_ownJumpActive=true) this is a no-op; when the player
         // lands and the finger is still held, TouchJumpDetect calls this again and
         // it re-triggers automatically (auto-re-jump on landing).
+        public static Func<bool> ExperimentalMovementQueueJump; public static Func<bool> ExperimentalMovementOwnsJump; public static Func<float> ExperimentalMovementGetVertical; public static Action<float> ExperimentalMovementAddVertical;
         private void TriggerOwnJump()
         {
+            if (ExperimentalMovementQueueJump != null && ExperimentalMovementQueueJump()) { _ownJumpActive = false; _ownJumpVelY = 0f; return; }
             if (_ownJumpActive) return;
             if ((object)_joyStickCtrl == null || _fiJumpCharCtrl == null) return;
             CharacterController cc = (CharacterController)_fiJumpCharCtrl.GetValue(_joyStickCtrl);
@@ -3058,6 +3112,7 @@ namespace CNRSettingsMod
         // JumpDescendGrav (-56 m/s�) for a snap-fast landing (~0.3 s fall).
         private void OwnJumpPhysics()
         {
+            if (ExperimentalMovementOwnsJump != null && ExperimentalMovementOwnsJump()) { _ownJumpActive = false; _ownJumpVelY = 0f; return; }
             if (!_ownJumpActive) return;
             if ((object)_joyStickCtrl == null || _fiJumpCharCtrl == null)
             {
@@ -4673,6 +4728,17 @@ namespace CNRSettingsMod
                 }
             }
             GUILayout.Space(10f);
+
+            // Optional DLL-only global movement preference, off by default.
+            if (GameObject.Find("CNRMovementExperimentalRoot") != null)
+            {
+                SectionHeader("Experimental Movement");
+                bool old = PlayerPrefs.GetInt("CNRMovementExperimental", 0) == 1;
+                bool next = UIToggle("CODM-inspired movement", old);
+                if (next != old) { PlayerPrefs.SetInt("CNRMovementExperimental", next ? 1 : 0); PlayerPrefs.Save(); }
+                GUILayout.Label("  Forward auto-sprint, Sneak / Slide, and camera posture. Experimental.", HintStyle());
+                GUILayout.Space(10f);
+            }
 
             // ---- HUD Layout -------------------------------------------------
             SectionHeader("HUD Layout");

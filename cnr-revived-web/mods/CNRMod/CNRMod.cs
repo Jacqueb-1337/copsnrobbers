@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -34,7 +34,7 @@ namespace CNRMods
         public static bool   DetailedLogging = false; // opt-in high-frequency diagnostics; normal/error logs remain enabled
 
         // -- CNRMod binary version (hardcoded; separate from the kick-threshold in server.cfg) -----
-        public const  string Version = "4.2.57";
+        public const  string Version = "4.2.58";
 
         // -- Mod version registry ? every loaded DLL registers itself here --------------------------
         // External mods call RegisterMod(name, version) via reflection on ModEntry.

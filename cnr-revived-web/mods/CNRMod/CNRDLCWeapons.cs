@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -2381,6 +2381,19 @@ namespace CNRMods
                 }
 
                 if (_settingsJumpHook == null || _settingsOwnJumpVelY == null || _settingsOwnJumpActive == null) return false;
+
+                Type settingsType = _settingsJumpHook.GetType();
+                FieldInfo ownsField = settingsType.GetField("ExperimentalMovementOwnsJump", BindingFlags.Public | BindingFlags.Static);
+                Func<bool> owns = ownsField != null ? ownsField.GetValue(null) as Func<bool> : null;
+                if (owns != null && owns())
+                {
+                    Func<float> read = settingsType.GetField("ExperimentalMovementGetVertical").GetValue(null) as Func<float>;
+                    Action<float> apply = settingsType.GetField("ExperimentalMovementAddVertical").GetValue(null) as Action<float>;
+                    if (read == null || apply == null) return false;
+                    appliedImpulseY = ComputeBussinVerticalImpulse(impulseY, read());
+                    apply(appliedImpulseY);
+                    return true;
+                }
 
                 bool active = Convert.ToBoolean(_settingsOwnJumpActive.GetValue(_settingsJumpHook));
                 float current = Convert.ToSingle(_settingsOwnJumpVelY.GetValue(_settingsJumpHook));
