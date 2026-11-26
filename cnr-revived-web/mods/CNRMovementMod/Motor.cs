@@ -24,8 +24,8 @@ public sealed class Motor {
  public float CurrentJumpHeight {get;private set;} // native units
  public float CurrentSlideLimit {get;private set;} // native units
  public float CurrentSlideIdle {get;private set;}
- float clock,lastJump=-100,slideRemaining,ascentGravity,landingRemaining; bool crouched,wasAirborne;
- public void Reset(){X=Z=Y=slideRemaining=clock=0;lastJump=-100;CurrentJumpHeight=0;CurrentSlideLimit=CurrentSlideIdle=0;ascentGravity=landingRemaining=landingFeedbackTime=landingStrength=LandingDip=0;State=Mode.Walk;crouched=wasAirborne=false;}
+ float clock,lastJump=-100,slideRemaining,ascentGravity,landingRemaining; bool crouched,wasAirborne,slideEdgeAir;
+ public void Reset(){X=Z=Y=slideRemaining=clock=0;lastJump=-100;CurrentJumpHeight=0;CurrentSlideLimit=CurrentSlideIdle=0;ascentGravity=landingRemaining=landingFeedbackTime=landingStrength=LandingDip=0;State=Mode.Walk;crouched=wasAirborne=slideEdgeAir=false;}
  static float Clamp(float v,float lo,float hi){return Math.Max(lo,Math.Min(hi,v));}
  void Approach(float x,float z,float rate,float dt){float dx=x-X,dz=z-Z;float len=(float)Math.Sqrt(dx*dx+dz*dz);float k=len>0?Math.Min(1,rate*dt/len):0;X+=dx*k;Z+=dz*k;}
  void ScaleSpeed(float speed){float s=Speed;if(s>0){X*=speed/s;Z*=speed/s;}}
@@ -42,7 +42,7 @@ public sealed class Motor {
   // Height-controlled ballistic approximation, NOT the reference ascent curve.
   ascentGravity=ReferenceJumpVelocity*ReferenceJumpVelocity/(2*ReferenceJumpHeight)*UnitScale;
   Y=(float)Math.Sqrt(2*ascentGravity*CurrentJumpHeight*UnitScale);
-  slideRemaining=0;crouched=false;State=Mode.Air;
+  slideRemaining=0;crouched=false;slideEdgeAir=false;State=Mode.Air;
  }
  public void SetHorizontal(float x,float z){X=x;Z=z;}
  public void AddVertical(float impulse){Y+=impulse;if(Y>0)State=Mode.Air;}
@@ -52,7 +52,7 @@ public sealed class Motor {
   landingFeedbackTime=Math.Max(0,landingFeedbackTime-dt);
   LandingDip=landingStrength*(float)Math.Sin(Math.PI*landingFeedbackTime/.22f);
   float mag=(float)Math.Sqrt(x*x+z*z);if(mag>1){x/=mag;z/=mag;mag=1;}if(mag<.05f){x=z=mag=0;}
-  if(!grounded){slideRemaining=0;State=Mode.Air;wasAirborne=true;} else if(wasAirborne){wasAirborne=false;landingRemaining=.1f;ScaleSpeed(Speed*.7f);landingStrength=Clamp((-Y-2f)/12f,0,1)*.075f*UnitScale;landingFeedbackTime=.22f;LandingDip=0;}
+  if(!grounded){slideRemaining=0;State=Mode.Air;wasAirborne=true;} else if(wasAirborne){wasAirborne=false;slideEdgeAir=false;landingRemaining=.1f;ScaleSpeed(Speed*.7f);landingStrength=Clamp((-Y-2f)/12f,0,1)*.075f*UnitScale;landingFeedbackTime=.22f;LandingDip=0;}
   if(grounded&&crouchPress&&slideRemaining<=0){
    // Judge the current sprint intent and actual forward movement, not a stale state.
    float entrySpeed=SlideEntryMinimum*UnitScale*Math.Min(1f,Math.Max(.1f,Mobility));
@@ -61,7 +61,13 @@ public sealed class Motor {
   }
   if(grounded&&jump&&headClear){BeginJump();return;}
   if(!grounded){
-   if(mag>0)Approach(x*Walk,z*Walk,AirAcceleration*UnitScale*mag,dt);
+   if(mag>0){
+    // On a ledge exit, aligned input must not brake inherited slide speed.
+    // Retain existing air-control rate and permit intentional reversals.
+    float target=slideEdgeAir?Math.Max(Walk,Speed):Walk;
+    float scale=slideEdgeAir?target/mag:target;
+    Approach(x*scale,z*scale,AirAcceleration*UnitScale*mag,dt);
+   }
    float up=ascentGravity>0?ascentGravity:FallingGravity*UnitScale, down=FallingGravity*UnitScale;
    if(Y>0&&Y<up*dt){float remaining=dt-Y/up;Y=-down*remaining;}
    else Y-=(Y>0?up:down)*dt;
@@ -96,12 +102,12 @@ public sealed class Motor {
  public const float ReferenceSlideExitHeight=2f;
  public bool TryBeginSlideFall(bool groundBelow,bool nearbySupport){
   if(State!=Mode.Slide||groundBelow||nearbySupport||Y>0)return false;
-  Y=0;slideRemaining=0;ascentGravity=0;crouched=false;wasAirborne=true;State=Mode.Air;
+  Y=0;slideRemaining=0;ascentGravity=0;crouched=false;wasAirborne=true;slideEdgeAir=true;State=Mode.Air;
   return true;
  }
- public void FinishTraversal(bool grounded){X=Z=0;Y=grounded?-2f:0;slideRemaining=landingRemaining=0;crouched=wasAirborne=false;State=grounded?Mode.Walk:Mode.Air;}
+ public void FinishTraversal(bool grounded){X=Z=0;Y=grounded?-2f:0;slideRemaining=landingRemaining=0;crouched=wasAirborne=slideEdgeAir=false;State=grounded?Mode.Walk:Mode.Air;}
  public void HitCeiling(){if(Y>0)Y=0;}
- public void HitWall(){X=Z=slideRemaining=0;}
+ public void HitWall(){X=Z=slideRemaining=0;slideEdgeAir=false;}
 }
 }
 

@@ -21,6 +21,15 @@ class Tests {
   m.Tick(dt,0,0,false,false,false,false,true);
   Near(m.Y,-m.FallingGravity*m.UnitScale*dt,.001f,"edge resumes normal gravity "+fps);
   Near(m.Speed,edgeSpeed,.0001f,"edge no-input air momentum "+fps);
+  for(int i=0;i<fps/2;i++)m.Tick(dt,0,1,false,true,false,false,true);
+  Near(m.Speed,edgeSpeed,.001f,"edge full forward retains momentum "+fps);
+  m.Tick(dt,0,-1,false,false,false,false,true);
+  Check(m.Speed<edgeSpeed,"edge intentional reversal brakes "+fps);
+  m.Tick(dt,0,1,true,true,false,false,true);
+  Check(m.Speed<edgeSpeed,"edge landing slows "+fps);
+  m.Reset();Advance(m,dt,.5f,0,1,true);
+  float ordinarySpeed=m.Speed;m.Tick(dt,0,1,false,true,false,false,true);
+  Check(m.Speed<ordinarySpeed,"ordinary fall unchanged "+fps);
   m.Reset();Check(!m.TryBeginSlideFall(false,false),"walking cannot edge launch "+fps);
   m.Reset();m.Mobility=.5f;Advance(m,dt,.5f,0,1,true);
   m.Tick(dt,0,1,true,true,true,false,true);
