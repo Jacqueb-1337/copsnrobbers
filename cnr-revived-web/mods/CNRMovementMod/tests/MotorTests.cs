@@ -11,6 +11,17 @@ class Tests {
   Advance(m,dt,.5f,0,1,false);
   m.Tick(dt,0,1,true,true,true,false,true);
   Check(m.State==Motor.Mode.Slide,"same-frame sprint slide "+fps);
+  float edgeSpeed=m.Speed;
+  Check(!m.TryBeginSlideFall(true,false)&&m.State==Motor.Mode.Slide,"grounded slide not edge "+fps);
+  Check(!m.TryBeginSlideFall(false,true)&&m.State==Motor.Mode.Slide,"near support not edge "+fps);
+  Check(m.TryBeginSlideFall(false,false)&&m.State==Motor.Mode.Air,"slide edge handoff "+fps);
+  Near(m.Speed,edgeSpeed,.0001f,"edge retains horizontal speed "+fps);
+  Near(m.Y,0,.0001f,"edge resets vertical speed "+fps);
+  Check(!m.TryBeginSlideFall(false,false),"edge handoff once "+fps);
+  m.Tick(dt,0,0,false,false,false,false,true);
+  Near(m.Y,-m.FallingGravity*m.UnitScale*dt,.001f,"edge resumes normal gravity "+fps);
+  Near(m.Speed,edgeSpeed,.0001f,"edge no-input air momentum "+fps);
+  m.Reset();Check(!m.TryBeginSlideFall(false,false),"walking cannot edge launch "+fps);
   m.Reset();m.Mobility=.5f;Advance(m,dt,.5f,0,1,true);
   m.Tick(dt,0,1,true,true,true,false,true);
   Check(m.State==Motor.Mode.Slide,"low mobility slide "+fps);

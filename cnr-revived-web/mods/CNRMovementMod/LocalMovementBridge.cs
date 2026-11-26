@@ -229,7 +229,14 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   if(pendingImpulse!=0){motor.AddVertical(pendingImpulse);dy+=pendingImpulse;pendingImpulse=0;}
   Vector3 delta=yaw*new Vector3(motor.X,0,motor.Z)*dt;delta.y=dy*dt;
   posture.LimitStep(grounded&&!jump&&motor.State!=Motor.Mode.Air);
-  CollisionFlags flags=bound.Move(delta);
+  bool slideExitCandidate=grounded&&!jump&&motor.State==Motor.Mode.Slide&&dy<=0;
+   float preMoveY=bound.transform.position.y;
+   CollisionFlags flags=bound.Move(delta);
+   if(slideExitCandidate&&(flags&CollisionFlags.Below)==0
+      &&motor.TryBeginSlideFall(false,posture.HasSlideExitSupport(Motor.ReferenceSlideExitHeight*motor.UnitScale))){
+    float correction=preMoveY-bound.transform.position.y;
+    if(correction>0)flags|=bound.Move(Vector3.up*correction);
+   }
   if(!grounded&&!jump&&headClear&&motor.Y<=0&&(flags&CollisionFlags.Below)!=0)jumpBuffer.MarkLanding(Time.frameCount,Time.realtimeSinceStartup);
   if((flags&CollisionFlags.Above)!=0)motor.HitCeiling();
   if(cr&&motor.State==Motor.Mode.Air&&!firing)crOwner.actionState=playerActionState.jump;

@@ -38,6 +38,19 @@ public sealed class PostureAdapter {
   }
   return true;
  }
+ // Approximate the slide-specific support predicate from the archived game.
+ public bool HasSlideExitSupport(float distance){
+  if(cc==null)return true;
+  float half=cc.height*.5f*Mathf.Abs(cc.transform.lossyScale.y);
+  Vector3 origin=cc.transform.TransformPoint(cc.center);
+  foreach(RaycastHit hit in Physics.RaycastAll(origin,Vector3.down,half+distance)){
+   Collider col=hit.collider;
+   if(col==null||col.isTrigger||col==cc||col.transform.IsChildOf(cc.transform)
+      ||cc.transform.IsChildOf(col.transform)||Physics.GetIgnoreLayerCollision(cc.gameObject.layer,col.gameObject.layer))continue;
+   if(hit.normal.y>=.35f)return true;
+  }
+  return false;
+ }
  public float Downhill(Vector3 direction){
   if(cc==null||direction.sqrMagnitude<.001f)return 0;
   Vector3 centerWorld=cc.transform.TransformPoint(cc.center);
