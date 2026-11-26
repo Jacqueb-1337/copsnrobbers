@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using CNRMovementMod;
 class Tests {
  static int count;
@@ -86,9 +86,24 @@ class Tests {
   Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.None,"blocked approach rejected");
   c.ApproachClear=true;c.TopClear=false;
   Check(MantlePolicy.Choose(c,1.75f)==MantlePolicy.Kind.None,"blocked top rejected");
-  var buffer=new JumpBuffer();buffer.Press(123);
-  Check(buffer.Pending&&!buffer.Consume(false)&&buffer.Pending,"airborne intent remains buffered");
-  Check(buffer.Consume(true)&&!buffer.Pending&&!buffer.Consume(true),"mantle consumes exactly one press");
+  var buffer=new JumpBuffer();
+  foreach(int fps in new[]{30,60,120}){
+   buffer.Reset();buffer.Press(123,0f);
+   Check(buffer.Fresh(.05f)&&!buffer.Consume(false,124,.05f),"airborne intent "+fps);
+   Check(buffer.Consume(true,125,.19f)&&!buffer.Consume(true,126,.19f),"buffer once "+fps);
+   buffer.Press(127,0f);Check(!buffer.Consume(true,127+fps,.5f),"early double tap expires "+fps);
+   buffer.Press(200,0f);buffer.MarkLanding(201,.199f);
+   Check(buffer.Consume(true,202,.199f+1f/fps),"landing within window "+fps);
+   buffer.Press(203,0f);buffer.MarkLanding(204,.201f);
+   Check(!buffer.Consume(true,205,.201f+1f/fps),"late landing rejected "+fps);
+   buffer.Press(206,0f);buffer.Press(206,.15f);
+   Check(!buffer.Fresh(.21f),"same frame cannot extend "+fps);
+   buffer.Press(207,0f);buffer.Clear();
+   Check(!buffer.Consume(true,208,.1f),"mantle consumes intent "+fps);
+  }
+  Check(MantlePolicy.WithinReach(.2f,3f,1.75f,2f,true),"higher airborne reach");
+  Check(!MantlePolicy.WithinReach(.2f,3.4f,1.75f,2f,true),"airborne body cap");
+  Check(!MantlePolicy.WithinReach(.2f,4.1f,1.75f,4f,true),"airborne reference cap");
   var traversal=new Motor();traversal.SetHorizontal(9,8);traversal.AddVertical(10);traversal.FinishTraversal(false);
   Check(traversal.State==Motor.Mode.Air&&traversal.Speed==0&&traversal.Y==0,"cancel traversal resumes air physics");
   traversal.FinishTraversal(true);Check(traversal.State==Motor.Mode.Walk&&traversal.Y==-2,"finish traversal resumes ground physics");

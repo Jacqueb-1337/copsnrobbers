@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Reflection;
 using UnityEngine;
 namespace CNRMovementMod {
@@ -62,7 +62,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
  bool FpsCanMove(){return ready&&!failed&&Enabled()&&fpsOwner!=null&&bound!=null&&bound.enabled&&fpsOwner.gameObject.activeInHierarchy&&fpsOwner.gameObject.name=="ExampleCharacter"&&fpsOwner.canControl&&!fpsOwner.onLadder&&fpsOwner.movement!=null&&fpsOwner.jumping!=null&&(PlayerLogic.mInstance==null||!PlayerLogic.mInstance.bDied)&&(SingleModePauseControl.mInstance==null||!SingleModePauseControl.mInstance.PauseState)&&(fpsOwner.movingPlatform==null||fpsOwner.movingPlatform.activePlatform==null);}
  bool CanMove(){if(bound!=null&&environment.Owns(bound))return false;if(fpsOwner!=null)return FpsCanMove();if(crOwner!=null)return CrCanMove();return ready&&!failed&&Enabled()&&owner!=null&&bound!=null&&owner.gameObject.activeInHierarchy&&LocalPlayer(owner.gameObject)&&bound.enabled&&ladder!=null&&!ladder.latchedToLadder&&!(bool)stopField.GetValue(owner)&&PlayerLogic.mInstance!=null&&!PlayerLogic.mInstance.bDied&&(SingleModePauseControl.mInstance==null||!SingleModePauseControl.mInstance.PauseState);}
  bool Owns(){return ownsController&&CanMove()&&(fpsOwner!=null?!fpsOwner.enabled:crOwner!=null?!crOwner.enabled:owner!=null&&!owner.enabled);}
- bool QueueJump(){if(!Owns())return false;if(!HudBlocked())jumpBuffer.Press(Time.frameCount);return true;}
+ bool QueueJump(){if(!Owns())return false;if(!HudBlocked())jumpBuffer.Press(Time.frameCount,Time.realtimeSinceStartup);return true;}
  float Vertical(){return motor.Y+pendingImpulse;}
  void AddVertical(float v){if(Owns()&&!float.IsNaN(v)&&!float.IsInfinity(v))pendingImpulse+=v;}
  public void RequestSlide(){if(Owns()&&!HudBlocked())slideFrame=Time.frameCount;}
@@ -176,7 +176,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   // OnClick flag on release; it can be set after the original touch jump.
   bool nativeHeld=NativeJumpHeld();
   // Settings owns touch events; native input must not replay a touch jump.
-  if(nativeHeld&&!nativeJumpHeld&&Input.touchCount==0)jumpBuffer.Press(Time.frameCount);
+  if(nativeHeld&&!nativeJumpHeld&&Input.touchCount==0)jumpBuffer.Press(Time.frameCount,Time.realtimeSinceStartup);
   nativeJumpHeld=nativeHeld;
   if(PlayerPrefs.GetInt("OnJump",0)!=0)PlayerPrefs.SetInt("OnJump",0);
   if(!cr&&!fps)jumpField.SetValue(owner,false);
@@ -196,10 +196,10 @@ public sealed class LocalMovementBridge : MonoBehaviour {
    mantle.Cancel();motor.FinishTraversal(grounded);
   }
   // Preserve ordinary slide jumps and recoil, never auto-climb without a jump press.
-  if(!mantle.Active&&mantleEnabled&&jumpBuffer.Pending&&z>.55f&&headClear&&!firing&&pendingImpulse==0
+  if(!mantle.Active&&mantleEnabled&&jumpBuffer.Fresh(Time.realtimeSinceStartup)&&(!grounded||z>.55f)&&headClear&&!firing&&pendingImpulse==0
      &&motor.State!=Motor.Mode.Slide&&motor.State!=Motor.Mode.Crouch
-     &&mantle.TryStart(bound,yaw*Vector3.forward,motor.UnitScale,posture.StandingHeight)){
-   jumpBuffer.Consume(true);motor.FinishTraversal(false);
+     &&mantle.TryStart(bound,yaw*Vector3.forward,motor.UnitScale,posture.StandingHeight,!grounded)){
+   jumpBuffer.Clear();motor.FinishTraversal(false);
   }
   if(mantle.Active){
    jumpBuffer.Reset();slideFrame=-100;
@@ -220,7 +220,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
    }
    return;
   }
-  bool jump=jumpBuffer.Consume(grounded&&motor.Y<=0&&headClear);
+  bool jump=jumpBuffer.Consume(grounded&&motor.Y<=0&&headClear,Time.frameCount,Time.realtimeSinceStartup);
   float before=motor.Y;
   float slope=grounded&&(motor.State==Motor.Mode.Slide||slide)?posture.Downhill(yaw*new Vector3(motor.X,0,motor.Z)):0;
   motor.Tick(dt,x,z,grounded,sprint,slide,jump,headClear,slope);
@@ -230,6 +230,7 @@ public sealed class LocalMovementBridge : MonoBehaviour {
   Vector3 delta=yaw*new Vector3(motor.X,0,motor.Z)*dt;delta.y=dy*dt;
   posture.LimitStep(grounded&&!jump&&motor.State!=Motor.Mode.Air);
   CollisionFlags flags=bound.Move(delta);
+  if(!grounded&&!jump&&headClear&&motor.Y<=0&&(flags&CollisionFlags.Below)!=0)jumpBuffer.MarkLanding(Time.frameCount,Time.realtimeSinceStartup);
   if((flags&CollisionFlags.Above)!=0)motor.HitCeiling();
   if(cr&&motor.State==Motor.Mode.Air&&!firing)crOwner.actionState=playerActionState.jump;
   if(fps){fpsOwner.movement.velocity=bound.velocity;fpsOwner.movement.collisionFlags=flags;fpsOwner.grounded=(flags&CollisionFlags.Below)!=0;fpsOwner.jumping.jumping=!fpsOwner.grounded&&motor.Y>0;fpsOwner.Walking=motor.Speed>.05f;fpsOwner.Running=motor.State==Motor.Mode.Sprint;fpsOwner.crouch=motor.State==Motor.Mode.Crouch||motor.State==Motor.Mode.Slide;}
