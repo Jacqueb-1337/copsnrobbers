@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.6.7";
+        public  const string Version        = "1.6.8";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -447,6 +447,7 @@ namespace CNRModManager
         private void Update()
         {
             SetNguiBlocking(_showWindow);
+            ScanOneConfigPerFrame();
             if (_scene == "MainMenu" && _patched && !_showWindow && _goMpBtn == null
                 && Time.realtimeSinceStartup >= _nextMpIntercept)
             {
@@ -564,13 +565,73 @@ namespace CNRModManager
         // ─────────────────────────────────────────────────────────────────────
         // INSTALLED TAB
         // ─────────────────────────────────────────────────────────────────────
+        private sealed class DiskModMetadata
+        {
+            public long length, writeTicks;
+            public Assembly assembly;
+            public bool assemblyChecked, versionChecked;
+            public string version;
+        }
+        private readonly Dictionary<string, DiskModMetadata> _diskMetadata =
+            new Dictionary<string, DiskModMetadata>(StringComparer.OrdinalIgnoreCase);
+        private DiskModMetadata GetDiskMetadata(string filename)
+        {
+            try
+            {
+                FileInfo info = new FileInfo(Path.Combine(ModManagerEntry.ModsDir, filename));
+                if (!info.Exists)
+                {
+                    _diskMetadata.Remove(filename);
+                    _configTypeCache.Remove(filename); _configTypeChecked.Remove(filename);
+                    return null;
+                }
+                DiskModMetadata meta;
+                if (_diskMetadata.TryGetValue(filename, out meta) &&
+                    meta.length == info.Length && meta.writeTicks == info.LastWriteTimeUtc.Ticks)
+                    return meta;
+                meta = new DiskModMetadata();
+                meta.length = info.Length; meta.writeTicks = info.LastWriteTimeUtc.Ticks;
+                _diskMetadata[filename] = meta;
+                _configTypeCache.Remove(filename); _configTypeChecked.Remove(filename);
+                return meta;
+            }
+            catch { return null; }
+        }
+
+        private Assembly GetDiskAssembly(string filename, DiskModMetadata meta)
+        {
+            if (meta == null) return null;
+            if (!meta.assemblyChecked)
+            {
+                try
+                {
+                    meta.assembly = Assembly.Load(File.ReadAllBytes(Path.Combine(ModManagerEntry.ModsDir, filename)));
+                    meta.assemblyChecked = true;
+                }
+                catch { return null; } // transient IO errors are retried
+            }
+            return meta.assembly;
+        }
+
+        private int _configScanCursor;
+        private void ScanOneConfigPerFrame()
+        {
+            if (!_showWindow || _tab != 0) return;
+            while (_configScanCursor < _installedMods.Count)
+            {
+                string filename = _installedMods[_configScanCursor++].filename;
+                if (_configTypeChecked.Contains(filename)) continue;
+                GetCachedConfigType(filename);
+                break;
+            }
+        }
+
         private void RefreshInstalledMods()
         {
             _installedMods.Clear();
             _uiVersions.Clear();
             _uiAutoUpdate.Clear();
-            _configTypeCache.Clear();
-            _configTypeChecked.Clear();
+            _configScanCursor = 0;
             _configModIdx = -1;
             try
             {
@@ -579,10 +640,10 @@ namespace CNRModManager
                 {
                     string fn  = Path.GetFileName(path);
                     string dn  = Path.GetFileNameWithoutExtension(fn);
+                    GetDiskMetadata(fn); // invalidate only if this file changed
                     string ver = GetInstalledVersion(fn);
                     _uiVersions[fn] = ver;
                     _uiAutoUpdate[fn] = GetAutoUpdate(fn);
-                    if (_showWindow) GetCachedConfigType(fn);
                     if (string.IsNullOrEmpty(ver)) ver = "?";
                     InstalledMod im;
                     im.filename    = fn;
@@ -693,249 +754,174 @@ namespace CNRModManager
 
         // Try repositories in user-configured order. A second source is a real
         // availability fallback, not merely a manually selectable list entry.
+        // Only plain managed data crosses this boundary. No Unity or PlayerPrefs APIs on the worker.
+        private sealed class CatalogParseJob
+        {
+            public string json, status;
+            public List<RepoMod> mods;
+            public volatile bool done;
+            public void Run(object ignored)
+            {
+                try { mods = ParseRepoJson(json, out status); }
+                catch (Exception ex) { status = "Parse error: " + ex.Message; }
+                finally { json = null; done = true; }
+            }
+        }
+
+        private bool SameRepoOrder(string[] order)
+        {
+            if (order.Length != _repos.Count) return false;
+            for (int i = 0; i < order.Length; i++)
+                if (order[i] != _repos[i]) return false;
+            return true;
+        }
+
         private IEnumerator FetchBrowseWithFallback()
         {
             _browseStatus = "Fetching...";
-            _browseMods.Clear();
             string lastError = "";
-            for (int i = 0; i < _repos.Count; i++)
+            string[] order = _repos.ToArray();
+            for (int i = 0; i < order.Length; i++)
             {
-                string url = _repos[i];
+                string url = order[i];
                 _browseStatus = i == 0 ? "Fetching..." : "Trying backup repository...";
                 ModManagerEntry.Log("FetchBrowse attempt " + (i + 1) + ": " + url);
                 WWW www = new WWW(url);
                 yield return www;
+                if (!SameRepoOrder(order))
+                {
+                    www.Dispose(); _browseFetching = false; StartFetchBrowse(); yield break;
+                }
                 if (!string.IsNullOrEmpty(www.error))
                 {
                     lastError = www.error;
+                    www.Dispose();
                     ModManagerEntry.Log("FetchBrowse err: " + lastError);
                     continue;
                 }
-                _browseMods.Clear();
-                ParseRepoJson(www.text);
-                if (_browseMods.Count > 0)
+                CatalogParseJob job = new CatalogParseJob();
+                job.json = www.text;
+                www.Dispose();
+                _browseStatus = "Processing mod list...";
+                bool queued = false;
+                try { queued = System.Threading.ThreadPool.QueueUserWorkItem(job.Run); }
+                catch (Exception ex) { lastError = ex.Message; }
+                if (!queued)
                 {
+                    lastError = "Unable to queue catalog worker: " + lastError;
+                    continue;
+                }
+                // Never Join/Wait on the main thread, including on the cooperative PV7 scheduler.
+                while (!job.done) yield return null;
+                if (!SameRepoOrder(order))
+                {
+                    _browseFetching = false; StartFetchBrowse(); yield break;
+                }
+                if (job.mods != null && job.mods.Count > 0)
+                {
+                    _browseMods = job.mods;
+                    _detailModIdx = -1;
+                    _browseStatus = "";
+                    CheckForUpdates();
                     ModManagerEntry.Log("Fetched " + _browseMods.Count + " mods from " + url);
                     _browseFetching = false;
                     if (_statusMsg == "Refreshing installed mods and update info...") _statusMsg = "";
                     yield break;
                 }
-                lastError = _browseStatus;
+                lastError = job.status;
                 ModManagerEntry.Log("FetchBrowse invalid catalog: " + lastError);
             }
             _browseFetching = false;
             _browseStatus = "All mod repositories unavailable: " + lastError;
+            if (_statusMsg == "Refreshing installed mods and update info...") _statusMsg = "";
         }
 
-        private void ParseRepoJson(string json)
+        private static string JsonString(IDictionary obj, string key)
         {
+            return obj[key] as string ?? "";
+        }
+
+        private static bool JsonBool(IDictionary obj, string key)
+        {
+            object value = obj[key];
+            return value is bool && (bool)value;
+        }
+
+        private static List<RepoMod> ParseRepoJson(string json, out string status)
+        {
+            var result = new List<RepoMod>();
+            status = "";
             try
             {
-                int modsIdx = json.IndexOf("\"mods\"");
-                if (modsIdx < 0) { _browseStatus = "Invalid repo: no 'mods' key"; return; }
-                int arrStart = json.IndexOf('[', modsIdx);
-                int arrEnd   = json.LastIndexOf(']');
-                if (arrStart < 0 || arrEnd <= arrStart) { _browseStatus = "Invalid repo format"; return; }
-                string arr = json.Substring(arrStart + 1, arrEnd - arrStart - 1);
-                var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                for (int existing = 0; existing < _browseMods.Count; existing++)
+                // JsonFx is already included in the original game. It correctly handles
+                // quotes, escapes, nested arrays, and braces inside changelog strings.
+                IDictionary root = Pathfinding.Serialization.JsonFx.JsonReader.Deserialize(json) as IDictionary;
+                IList mods = root == null ? null : root["mods"] as IList;
+                if (mods == null) { status = "Invalid repo: no 'mods' array"; return result; }
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (object item in mods)
                 {
-                    if (!string.IsNullOrEmpty(_browseMods[existing].filename))
-                        seenFiles.Add(_browseMods[existing].filename);
-                }
-
-                int depth = 0, objStart = -1;
-                for (int i = 0; i < arr.Length; i++)
-                {
-                    if (arr[i] == '{')
+                    IDictionary obj = item as IDictionary;
+                    if (obj == null) continue;
+                    RepoMod mod;
+                    mod.id = JsonString(obj, "id");
+                    mod.name = JsonString(obj, "name");
+                    mod.description = JsonString(obj, "description");
+                    mod.filename = JsonString(obj, "filename");
+                    if (string.IsNullOrEmpty(mod.filename) || !seen.Add(mod.filename)) continue;
+                    mod.latestVersion = JsonString(obj, "latestVersion");
+                    if (string.IsNullOrEmpty(mod.latestVersion)) mod.latestVersion = JsonString(obj, "version");
+                    mod.latestUrl = JsonString(obj, "latestUrl");
+                    if (string.IsNullOrEmpty(mod.latestUrl)) mod.latestUrl = JsonString(obj, "url");
+                    mod.minVersion = JsonString(obj, "minVersion");
+                    mod.latestOnly = JsonBool(obj, "latestOnly");
+                    mod.dependencies = new List<ModDependency>();
+                    IList dependencies = obj["dependencies"] as IList;
+                    if (dependencies != null) foreach (object dependency in dependencies)
                     {
-                        if (depth == 0) objStart = i;
-                        depth++;
+                        IDictionary d = dependency as IDictionary;
+                        if (d == null) continue;
+                        ModDependency dep;
+                        dep.kind = JsonString(d, "kind");
+                        if (string.IsNullOrEmpty(dep.kind)) dep.kind = "mod";
+                        dep.id = JsonString(d, "id");
+                        dep.filename = JsonString(d, "filename");
+                        dep.url = JsonString(d, "url");
+                        dep.minVersion = JsonString(d, "minVersion");
+                        dep.latestOnly = JsonBool(d, "latestOnly");
+                        if (!string.IsNullOrEmpty(dep.id) || !string.IsNullOrEmpty(dep.filename) || !string.IsNullOrEmpty(dep.url))
+                            mod.dependencies.Add(dep);
                     }
-                    else if (arr[i] == '}')
+                    mod.versions = new List<ModVersion>();
+                    IList versions = obj["versions"] as IList;
+                    if (versions != null) foreach (object version in versions)
                     {
-                        depth--;
-                        if (depth == 0 && objStart >= 0)
-                        {
-                            string obj = arr.Substring(objStart, i - objStart + 1);
-                            RepoMod mod;
-                            mod.id            = ParseJsonStr(obj, "id");
-                            mod.name          = ParseJsonStr(obj, "name");
-                            mod.description   = ParseJsonStr(obj, "description");
-                            string latVer     = ParseJsonStr(obj, "latestVersion");
-                            mod.latestVersion = !string.IsNullOrEmpty(latVer) ? latVer : ParseJsonStr(obj, "version");
-                            mod.minVersion    = ParseJsonStr(obj, "minVersion");
-                            mod.filename      = ParseJsonStr(obj, "filename");
-                            string latUrl     = ParseJsonStr(obj, "latestUrl");
-                            mod.latestUrl     = !string.IsNullOrEmpty(latUrl) ? latUrl : ParseJsonStr(obj, "url");
-                            mod.latestOnly    = ParseJsonBool(obj, "latestOnly");
-                            mod.dependencies  = ParseModDependencies(obj);
-                            mod.versions      = ParseModVersions(obj);
-                            if (mod.versions.Count == 0 && !string.IsNullOrEmpty(mod.latestVersion))
-                            {
-                                ModVersion fallback;
-                                fallback.version   = mod.latestVersion;
-                                fallback.url       = mod.latestUrl;
-                                fallback.changelog = "";
-                                mod.versions.Add(fallback);
-                            }
-                            if (!string.IsNullOrEmpty(mod.filename) && seenFiles.Add(mod.filename))
-                                _browseMods.Add(mod);
-                            objStart = -1;
-                        }
+                        IDictionary v = version as IDictionary;
+                        if (v == null) continue;
+                        ModVersion mv;
+                        mv.version = JsonString(v, "version");
+                        mv.url = JsonString(v, "url");
+                        mv.changelog = JsonString(v, "changelog");
+                        if (!string.IsNullOrEmpty(mv.version)) mod.versions.Add(mv);
                     }
+                    if (mod.versions.Count == 0 && !string.IsNullOrEmpty(mod.latestVersion))
+                    {
+                        ModVersion fallback;
+                        fallback.version = mod.latestVersion;
+                        fallback.url = mod.latestUrl;
+                        fallback.changelog = "";
+                        mod.versions.Add(fallback);
+                    }
+                    result.Add(mod);
                 }
-                _browseStatus = _browseMods.Count > 0 ? "" : "No mods found in repo";
-                ModManagerEntry.Log("ParseRepo: " + _browseMods.Count + " mods");
-                CheckForUpdates();
+                if (result.Count == 0) status = "No mods found in repo";
             }
             catch (Exception ex)
             {
-                _browseStatus = "Parse error";
-                ModManagerEntry.Log("ParseRepo err: " + ex.Message);
+                status = "Parse error: " + ex.Message;
+                result.Clear();
             }
-        }
-
-        // Find a property directly on the supplied JSON object, never inside
-        // nested dependencies or version entries. The previous IndexOf-based
-        // parser confused a dependency's minVersion with its parent's minimum.
-        private static int FindDirectJsonKey(string json, string key)
-        {
-            int depth = 0;
-            bool inString = false, escaped = false;
-            for (int i = 0; i < json.Length; i++)
-            {
-                char c = json[i];
-                if (inString)
-                {
-                    if (escaped) escaped = false;
-                    else if (c == '\\') escaped = true;
-                    else if (c == '"') inString = false;
-                    continue;
-                }
-                if (c == '{') { depth++; continue; }
-                if (c == '}') { depth--; continue; }
-                if (c != '"') continue;
-                if (depth == 1 && i + key.Length + 1 < json.Length
-                    && string.CompareOrdinal(json, i + 1, key, 0, key.Length) == 0
-                    && json[i + key.Length + 1] == '"')
-                {
-                    int after = i + key.Length + 2;
-                    while (after < json.Length && char.IsWhiteSpace(json[after])) after++;
-                    if (after < json.Length && json[after] == ':') return i;
-                }
-                inString = true;
-            }
-            return -1;
-        }
-
-        private static string ParseJsonStr(string json, string key)
-        {
-            string k = "\"" + key + "\"";
-            int ki = FindDirectJsonKey(json, key);
-            if (ki < 0) return "";
-            int colon = json.IndexOf(':', ki + k.Length);
-            if (colon < 0) return "";
-            int vi = json.IndexOf('"', colon + 1);
-            if (vi < 0) return "";
-            int ei = json.IndexOf('"', vi + 1);
-            if (ei < 0) return "";
-            return json.Substring(vi + 1, ei - vi - 1).Replace("\\/", "/");
-        }
-
-        private static bool ParseJsonBool(string json, string key)
-        {
-            string k = "\"" + key + "\"";
-            int ki = FindDirectJsonKey(json, key);
-            if (ki < 0) return false;
-            int colon = json.IndexOf(':', ki + k.Length);
-            if (colon < 0) return false;
-            int vi = colon + 1;
-            while (vi < json.Length && (json[vi] == ' ' || json[vi] == '\r' || json[vi] == '\n')) vi++;
-            return vi < json.Length && json[vi] == 't';
-        }
-
-        private static List<ModVersion> ParseModVersions(string json)
-        {
-            var list = new List<ModVersion>();
-            int idx = json.IndexOf("\"versions\"");
-            if (idx < 0) return list;
-            int arrStart = json.IndexOf('[', idx);
-            int arrEnd   = FindArrayEnd(json, arrStart);
-            if (arrStart < 0 || arrEnd <= arrStart) return list;
-            string arr   = json.Substring(arrStart + 1, arrEnd - arrStart - 1);
-            int depth = 0, objStart = -1;
-            for (int i = 0; i < arr.Length; i++)
-            {
-                if (arr[i] == '{')      { if (depth == 0) objStart = i; depth++; }
-                else if (arr[i] == '}')
-                {
-                    depth--;
-                    if (depth == 0 && objStart >= 0)
-                    {
-                        string o = arr.Substring(objStart, i - objStart + 1);
-                        ModVersion mv;
-                        mv.version   = ParseJsonStr(o, "version");
-                        mv.url       = ParseJsonStr(o, "url");
-                        mv.changelog = ParseJsonStr(o, "changelog");
-                        if (!string.IsNullOrEmpty(mv.version)) list.Add(mv);
-                        objStart = -1;
-                    }
-                }
-            }
-            return list;
-        }
-
-        private static List<ModDependency> ParseModDependencies(string json)
-        {
-            var list = new List<ModDependency>();
-            int idx = json.IndexOf("\"dependencies\"");
-            if (idx < 0) return list;
-            int arrStart = json.IndexOf('[', idx);
-            int arrEnd = FindArrayEnd(json, arrStart);
-            if (arrStart < 0 || arrEnd <= arrStart) return list;
-            string arr = json.Substring(arrStart + 1, arrEnd - arrStart - 1);
-            int depth = 0, objStart = -1;
-            for (int i = 0; i < arr.Length; i++)
-            {
-                if (arr[i] == '{')
-                {
-                    if (depth == 0) objStart = i;
-                    depth++;
-                }
-                else if (arr[i] == '}')
-                {
-                    depth--;
-                    if (depth == 0 && objStart >= 0)
-                    {
-                        string o = arr.Substring(objStart, i - objStart + 1);
-                        ModDependency dep;
-                        dep.kind = ParseJsonStr(o, "kind");
-                        if (string.IsNullOrEmpty(dep.kind)) dep.kind = "mod";
-                        dep.id = ParseJsonStr(o, "id");
-                        dep.filename = ParseJsonStr(o, "filename");
-                        dep.url = ParseJsonStr(o, "url");
-                        dep.minVersion = ParseJsonStr(o, "minVersion");
-                        dep.latestOnly = ParseJsonBool(o, "latestOnly");
-                        if (!string.IsNullOrEmpty(dep.id) || !string.IsNullOrEmpty(dep.filename) || !string.IsNullOrEmpty(dep.url))
-                            list.Add(dep);
-                        objStart = -1;
-                    }
-                }
-            }
-            return list;
-        }
-
-        private static int FindArrayEnd(string s, int start)
-        {
-            if (start < 0 || start >= s.Length || s[start] != '[') return -1;
-            int depth = 0;
-            for (int i = start; i < s.Length; i++)
-            {
-                if (s[i] == '[') depth++;
-                else if (s[i] == ']') { depth--; if (depth == 0) return i; }
-            }
-            return -1;
+            return result;
         }
 
         private sealed class DownloadResult
@@ -1357,34 +1343,43 @@ namespace CNRModManager
                 return reg;
             }
 
-            // 2. Scan the DLL assembly itself for a public static/const Version string.
-            // Manual file replacement does not update PlayerPrefs, so the DLL must beat
-            // the cached "last installed by Mod Manager" version.
-            try
+            // File stamps invalidate cached metadata after a manual or managed replacement.
+            DiskModMetadata meta = GetDiskMetadata(filename);
+            if (meta != null && !meta.versionChecked)
             {
-                string dllPath = Path.Combine(ModManagerEntry.ModsDir, filename);
-                if (File.Exists(dllPath))
+                Assembly asm = GetDiskAssembly(filename, meta);
+                if (asm != null)
                 {
-                    Assembly asm = Assembly.Load(File.ReadAllBytes(dllPath));
-                    foreach (Type t in asm.GetTypes())
+                    try
                     {
-                        // const string Version = "x.y.z"  (IsLiteral = true for const)
-                        FieldInfo fi = t.GetField("Version",
-                            BindingFlags.Public | BindingFlags.Static);
-                        if (fi != null && fi.FieldType == typeof(string))
+                        Type[] types;
+                        try { types = asm.GetTypes(); }
+                        catch (ReflectionTypeLoadException ex) { types = ex.Types; }
+                        if (types != null)
                         {
-                            object v = fi.GetValue(null);
-                            if (v != null && !string.IsNullOrEmpty(v.ToString()))
+                            foreach (Type t in types)
                             {
-                                string dllVersion = v.ToString();
-                                PlayerPrefs.SetString(PREF_IV_PREFIX + filename, dllVersion);
-                                return dllVersion;
+                                if (t == null) continue;
+                                FieldInfo fi = t.GetField("Version", BindingFlags.Public | BindingFlags.Static);
+                                if (fi == null || fi.FieldType != typeof(string)) continue;
+                                object v = fi.IsLiteral ? fi.GetRawConstantValue() : fi.GetValue(null);
+                                if (v != null && !string.IsNullOrEmpty(v.ToString()))
+                                {
+                                    meta.version = v.ToString();
+                                    break;
+                                }
                             }
                         }
+                        meta.versionChecked = true;
                     }
+                    catch { }
                 }
             }
-            catch { }
+            if (meta != null && !string.IsNullOrEmpty(meta.version))
+            {
+                PlayerPrefs.SetString(PREF_IV_PREFIX + filename, meta.version);
+                return meta.version;
+            }
 
             // 3. PlayerPrefs is only a last-resort fallback for older mods that do not
             // expose a Version field and have not registered with CNRMod yet.
@@ -1694,7 +1689,6 @@ namespace CNRModManager
                 RefreshInstalledMods();
                 if (!_browseFetching)
                 {
-                    _browseMods.Clear();
                     _browseStatus = "";
                     _statusMsg = "Refreshing installed mods and update info...";
                     StartFetchBrowse();
@@ -1824,7 +1818,6 @@ namespace CNRModManager
             if (GUILayout.Button("Refresh", MakeBtnStyle(12, new Color(0.5f, 0.8f, 0.5f)),
                 GUILayout.Height(24f), GUILayout.Width(70f)))
             {
-                _browseMods.Clear();
                 _browseStatus = "";
                 StartFetchBrowse();
             }
@@ -1835,13 +1828,13 @@ namespace CNRModManager
 
             if (_browseFetching)
             {
-                GUILayout.Label("Fetching mod list...", MakeLabelStyle(13, new Color(0.7f, 0.9f, 1f)));
-                return;
+                GUILayout.Label(_browseStatus, MakeLabelStyle(13, new Color(0.7f, 0.9f, 1f)));
+                if (_browseMods.Count == 0) return;
             }
-            if (!string.IsNullOrEmpty(_browseStatus))
+            if (!_browseFetching && !string.IsNullOrEmpty(_browseStatus))
             {
                 GUILayout.Label(_browseStatus, MakeLabelStyle(13, new Color(1f, 0.6f, 0.4f)));
-                return;
+                if (_browseMods.Count == 0) return;
             }
             if (_browseMods.Count == 0)
             {
@@ -2223,7 +2216,8 @@ namespace CNRModManager
             {
                 string path = Path.Combine(ModManagerEntry.ModsDir, filename);
                 if (!File.Exists(path)) return null;
-                Assembly asm2 = Assembly.Load(File.ReadAllBytes(path));
+                Assembly asm2 = GetDiskAssembly(filename, GetDiskMetadata(filename));
+                if (asm2 == null) return null;
                 Type[] types2 = null;
                 try { types2 = asm2.GetTypes(); }
                 catch (System.Reflection.ReflectionTypeLoadException rtle) { types2 = rtle.Types; }
@@ -2250,8 +2244,9 @@ namespace CNRModManager
         {
             if (!_configTypeChecked.Contains(filename))
             {
+                Type found = FindConfigType(filename);
+                _configTypeCache[filename] = found;
                 _configTypeChecked.Add(filename);
-                _configTypeCache[filename] = FindConfigType(filename);
             }
             Type t2;
             _configTypeCache.TryGetValue(filename, out t2);
