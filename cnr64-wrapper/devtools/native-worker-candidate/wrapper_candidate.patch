@@ -1,0 +1,214 @@
+--- a/src/shared_guest_linker.cpp
++++ b/src/shared_guest_linker.cpp
+@@ -3,6 +3,7 @@
+ #include "pv7_unity_simd.h"
+ #include "pv7_compat_module_registry.h"
+ #include "pv7_binary_trace.hpp"
++#include "pv7_host_jobs.hpp"
+ #include "dynarmic/backend/arm64/pv7_perf.h"
+ 
+ #if defined(PROJECTV7_DEV_HOTPATCH) && PROJECTV7_DEV_HOTPATCH
+@@ -181,6 +182,7 @@
+         if (rc != SL_RESULT_SUCCESS) { Shutdown(); return false; }
+ 
+         queued_.store(0, std::memory_order_release);
++        queue_drains_.store(0, std::memory_order_relaxed);
+         write_index_ = 0;
+         sample_rate_ = sample_rate;
+         configured_ = true;
+@@ -195,10 +197,15 @@
+         if (!data || size == 0 || !CanAccept()) return false;
+         auto& buffer = buffers_[write_index_];
+         buffer.assign(data, data + size);
++        // Reserve the slot before publishing to OpenSL: its completion callback
++        // can run before Enqueue returns. Roll back the reservation on failure.
++        queued_.fetch_add(1u, std::memory_order_acq_rel);
+         const SLresult rc = (*queue_)->Enqueue(queue_, buffer.data(), static_cast<SLuint32>(buffer.size()));
+-        if (rc != SL_RESULT_SUCCESS) return false;
++        if (rc != SL_RESULT_SUCCESS) {
++            queued_.fetch_sub(1u, std::memory_order_acq_rel);
++            return false;
++        }
+         write_index_ = (write_index_ + 1u) % buffers_.size();
+-        queued_.fetch_add(1u, std::memory_order_acq_rel);
+         return true;
+     }
+ 
+@@ -223,6 +230,7 @@
+ 
+     std::uint32_t sample_rate() const { return sample_rate_; }
+     std::size_t queued() const { return queued_.load(std::memory_order_acquire); }
++    std::uint64_t queue_drains() const { return queue_drains_.load(std::memory_order_relaxed); }
+ 
+ private:
+     static void BufferQueueCallback(SLAndroidSimpleBufferQueueItf, void* context) {
+@@ -233,6 +241,9 @@
+                !self->queued_.compare_exchange_weak(current, current - 1u,
+                                                      std::memory_order_acq_rel,
+                                                      std::memory_order_acquire)) {}
++        // A completed final block is a queue-drain indicator, not a hardware
++        // underrun measurement. The callback does not log, allocate or block.
++        if (current == 1u) self->queue_drains_.fetch_add(1u, std::memory_order_relaxed);
+     }
+ 
+     SLObjectItf engine_object_ = nullptr;
+@@ -243,6 +254,7 @@
+     SLAndroidSimpleBufferQueueItf queue_ = nullptr;
+     std::array<std::vector<std::uint8_t>, 4> buffers_{};
+     std::atomic<std::size_t> queued_{0};
++    std::atomic<std::uint64_t> queue_drains_{0};
+     std::size_t write_index_ = 0;
+     std::uint32_t sample_rate_ = 0;
+     bool configured_ = false;
+@@ -1380,7 +1392,10 @@
+         "glRenderbufferStorageMultisampleEXT", "glFramebufferTexture2DMultisampleEXT",
+         "glRenderbufferStorageMultisampleAPPLE", "glResolveMultisampleFramebufferAPPLE",
+         "glGetProgramBinaryOES", "glProgramBinaryOES",
+-        "glPushGroupMarkerEXT", "glPopGroupMarkerEXT"
++        "glPushGroupMarkerEXT", "glPopGroupMarkerEXT",
++        // Explicit async work API. These are ARM guest SVC stubs, never host pointers.
++        "pv7_host_jobs_version", "pv7_host_jobs_submit", "pv7_host_jobs_poll",
++        "pv7_host_jobs_copy", "pv7_host_jobs_release"
+     };
+     for (const char* symbol : dynamic_gles_symbols) {
+         if (out.name_to_stub.find(symbol) != out.name_to_stub.end()) continue;
+@@ -7084,6 +7099,32 @@
+             return true;
+         }
+         if (fast_name == "__pthread_cleanup_push" || fast_name == "__pthread_cleanup_pop") { Ret(0); return true; }
++        if (fast_name == "pv7_host_jobs_version") {
++            Ret(pv7::host::kHostJobsVersion); return true;
++        }
++        if (fast_name == "pv7_host_jobs_submit") {
++            const auto op = Arg(0), address = Arg(1), size = Arg(2), aux = Arg(3);
++            if (size > pv7::host::kMaxJobBytes || (size && (!address || !Fits(address, size)))) {
++                Ret(0); return true;
++            }
++            const std::uint8_t* input = size ? memory_.data() + address : nullptr;
++            Ret(host_jobs_.Submit(op, input, size, aux)); return true;
++        }
++        if (fast_name == "pv7_host_jobs_poll") {
++            Ret(static_cast<std::uint32_t>(host_jobs_.Poll(Arg(0)))); return true;
++        }
++        if (fast_name == "pv7_host_jobs_copy") {
++            const auto id = Arg(0), address = Arg(1), capacity = Arg(2);
++            if (capacity > pv7::host::kMaxJobBytes ||
++                (capacity && (!address || !Fits(address, capacity)))) {
++                Ret(static_cast<std::uint32_t>(-3)); return true;
++            }
++            std::uint8_t* output = capacity ? memory_.data() + address : nullptr;
++            Ret(static_cast<std::uint32_t>(host_jobs_.Copy(id, output, capacity))); return true;
++        }
++        if (fast_name == "pv7_host_jobs_release") {
++            Ret(host_jobs_.Release(Arg(0)) ? 1u : 0u); return true;
++        }
+         if (fast_name == "dlopen") { Ret(1); return true; }
+         if (fast_name == "dlclose") { Ret(0); return true; }
+         if (fast_name == "dlerror") { Ret(0); return true; }
+@@ -8944,6 +8985,7 @@
+         bool uses_siginfo = false;
+     };
+ 
++    pv7::host::HostJobs host_jobs_;
+     const std::unordered_map<std::uint32_t, std::string>& thunks_;
+     const std::unordered_map<std::string, std::uint32_t>& name_to_stub_;
+     const std::unordered_map<std::string, ExportSymbol>& exports_;
+@@ -11528,6 +11570,13 @@
+                                                             }
+                                                         };
+                                                         pump_fmod_audio();
++                                                        auto audio_last_pump = std::chrono::steady_clock::now();
++                                                        auto audio_last_report = audio_last_pump;
++                                                        std::uint64_t audio_last_drains = audio_output.queue_drains();
++                                                        long long audio_max_gap_us = 0, audio_max_render_us = 0;
++                                                        long long audio_max_worker_us = 0, audio_max_mix_us = 0;
++                                                        std::size_t audio_min_queue = audio_output.queued();
++                                                        unsigned audio_zero_queue_frames = 0;
+ #endif
+                                                         report << "    Shared-state Unity interactive game loop: STARTED"
+                                                                << " nativeInjectEvent=0x" << std::hex
+@@ -11550,6 +11599,13 @@
+                                                                 } while (IsGuestGameLoopRunning() && g_guest_backgrounded.load(std::memory_order_acquire));
+                                                                 if (!IsGuestGameLoopRunning()) break;
+                                                                 ClearHostTouchEvents();
++#if defined(__ANDROID__)
++                                                                audio_last_pump = audio_last_report = std::chrono::steady_clock::now();
++                                                                audio_last_drains = audio_output.queue_drains();
++                                                                audio_max_gap_us = audio_max_render_us = audio_max_worker_us = audio_max_mix_us = 0;
++                                                                audio_zero_queue_frames = 0;
++                                                                audio_min_queue = audio_output.queued();
++#endif
+                                                             }
+ 
+ #if defined(__ANDROID__)
+@@ -11606,6 +11662,9 @@
+ #if PROJECTV7_TEST_FRAME_CPU_TRACE && defined(__ANDROID__)
+                                                             const auto render_cpu_begin = thread_cpu_us();
+ #endif
++#if defined(__ANDROID__)
++                                                            const auto audio_depth_before_render = audio_output.queued();
++#endif
+                                                             const auto render_begin=std::chrono::steady_clock::now();
+                                                             const bool render_ok=run_unity_registered_native(
+                                                                     "nativeRenderLoop", unity_native_render,
+@@ -11631,8 +11690,41 @@
+                                                             // Keep translated background workers alive even when nativeRender
+                                                             // returns in its first slice. Without this per-frame quantum,
+                                                             // Unity 4.6's WWW worker can remain permanently in New state.
++                                                            const auto audio_before_workers = std::chrono::steady_clock::now();
++                                                            const auto audio_depth_after_render = audio_output.queued();
+                                                             env.PumpFrameBackgroundWork();
++                                                            const auto audio_before_mix = std::chrono::steady_clock::now();
++                                                            const auto audio_depth_before_mix = audio_output.queued();
+                                                             pump_fmod_audio();
++                                                            const auto audio_after_mix = std::chrono::steady_clock::now();
++                                                            if (fmod_audio_ready) {
++                                                                auto us = [](auto d) -> long long {
++                                                                    return std::chrono::duration_cast<std::chrono::microseconds>(d).count();
++                                                                };
++                                                                audio_max_gap_us = std::max(audio_max_gap_us, us(audio_before_mix - audio_last_pump));
++                                                                audio_max_render_us = std::max(audio_max_render_us, us(audio_before_workers - render_begin));
++                                                                audio_max_worker_us = std::max(audio_max_worker_us, us(audio_before_mix - audio_before_workers));
++                                                                audio_max_mix_us = std::max(audio_max_mix_us, us(audio_after_mix - audio_before_mix));
++                                                                audio_min_queue = std::min(audio_min_queue, std::min(audio_depth_before_render,
++                                                                    std::min(audio_depth_after_render, audio_depth_before_mix)));
++                                                                if (audio_depth_before_mix == 0u) ++audio_zero_queue_frames;
++                                                                audio_last_pump = audio_after_mix;
++                                                                if (audio_after_mix - audio_last_report >= std::chrono::seconds(2)) {
++                                                                    const auto drains = audio_output.queue_drains();
++                                                                    __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
++                                                                        "PV7AUDIOPROFILE frame=%llu drains=%llu zero_queue_frames=%u min_depth=%zu block_frames=%u rate=%u max_gap_us=%lld max_render_us=%lld max_workers_us=%lld max_mix_us=%lld",
++                                                                        static_cast<unsigned long long>(frame_index),
++                                                                        static_cast<unsigned long long>(drains - audio_last_drains),
++                                                                        audio_zero_queue_frames, audio_min_queue,
++                                                                        fmod_block_frames, fmod_sample_rate,
++                                                                        audio_max_gap_us, audio_max_render_us, audio_max_worker_us, audio_max_mix_us);
++                                                                    audio_last_drains = drains;
++                                                                    audio_last_report = audio_after_mix;
++                                                                    audio_max_gap_us = audio_max_render_us = audio_max_worker_us = audio_max_mix_us = 0;
++                                                                    audio_zero_queue_frames = 0;
++                                                                    audio_min_queue = audio_output.queued();
++                                                                }
++                                                            }
+ #if PROJECTV7_TEST_FRAME_CPU_TRACE
+                                                             const auto background_cpu_end = thread_cpu_us();
+                                                             __android_log_print(ANDROID_LOG_INFO, "CNR64POC",
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -66,6 +66,7 @@
+     src/elf_guest_probe.cpp
+     src/unity_guest_probe.cpp
+     src/shared_guest_linker.cpp
++    src/pv7_host_jobs.cpp
+     src/pv7_compat_module_registry.cpp
+ )
+ 
+@@ -98,6 +99,8 @@
+ target_link_libraries(projectv7-core PUBLIC dynarmic)
+ target_compile_definitions(projectv7-core PRIVATE PROJECTV7_TEST_ARM64_FASTMEM=$<BOOL:${PROJECTV7_TEST_ARM64_FASTMEM}>)
+ target_include_directories(projectv7-core PUBLIC src)
++target_include_directories(projectv7-core PRIVATE "${BOOST_ROOT}")
++target_compile_definitions(projectv7-core PRIVATE BOOST_ALL_NO_LIB)
+ target_compile_definitions(projectv7-core PRIVATE
+     PROJECTV7_DEV_HOTPATCH=$<BOOL:${PROJECTV7_DEV_HOTPATCH}>
+     PROJECTV7_DEV_DIAGNOSTICS=$<BOOL:${PROJECTV7_DEV_DIAGNOSTICS}>
