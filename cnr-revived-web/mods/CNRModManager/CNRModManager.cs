@@ -61,7 +61,7 @@ namespace CNRModManager
     // ─────────────────────────────────────────────────────────────────────────
     public static class ModManagerEntry
     {
-        public  const string Version        = "1.6.6";
+        public  const string Version        = "1.6.7";
         private const string LogPath        = "/storage/emulated/0/CNRMods/modmanager.log";
         public  const string ModsDir        = "/storage/emulated/0/CNRMods";
         public  const string DefaultRepoUrl = "https://play.jacqueb.me/mods/repo.json";
@@ -258,6 +258,7 @@ namespace CNRModManager
 
         // Multiplayer button intercept
         private GameObject _goMpBtn = null;
+        private float _nextMpIntercept;
 
         // ── Installed tab data ────────────────────────────────────────────────
         private struct InstalledMod
@@ -267,6 +268,13 @@ namespace CNRModManager
             public string version;
         }
         private List<InstalledMod> _installedMods = new List<InstalledMod>();
+        // Snapshot refreshed at action boundaries, never during repaint.
+        private readonly Dictionary<string,string> _uiVersions = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string,bool> _uiAutoUpdate = new Dictionary<string,bool>(StringComparer.OrdinalIgnoreCase);
+        private bool IsUiInstalled(string filename) { return _uiVersions.ContainsKey(filename); }
+        private string GetUiVersion(string filename) { string v; return _uiVersions.TryGetValue(filename,out v) ? v : ""; }
+        private bool GetUiAutoUpdate(string filename) { bool v; return !_uiAutoUpdate.TryGetValue(filename,out v) || v; }
+        private Type GetUiConfigType(string filename) { Type t; _configTypeCache.TryGetValue(filename,out t); return t; }
 
         // ── Browse tab data ───────────────────────────────────────────────────
         private struct ModVersion
@@ -368,6 +376,7 @@ namespace CNRModManager
             _nguiBlocked = false;
             _showWindow  = false;
             _goMpBtn     = null;
+            _nextMpIntercept = 0f;
             ModManagerEntry.IsOpen = false;
             ModManagerEntry.SetEcoHookOpen(false);
             if (_scene == "MainMenu") PatchMenu();
@@ -438,8 +447,12 @@ namespace CNRModManager
         private void Update()
         {
             SetNguiBlocking(_showWindow);
-            if (_scene == "MainMenu" && _patched && _goMpBtn == null)
+            if (_scene == "MainMenu" && _patched && !_showWindow && _goMpBtn == null
+                && Time.realtimeSinceStartup >= _nextMpIntercept)
+            {
+                _nextMpIntercept = Time.realtimeSinceStartup + .5f;
                 TryInterceptMpButton();
+            }
 
             // Swipe-to-scroll: track drag in screen space, convert to GUI units
             if (_showWindow)
@@ -494,6 +507,7 @@ namespace CNRModManager
         private void OnGUI()
         {
             if (_scene != "MainMenu" || !_patched) return;
+            EnsureStyleCache();
 
             float sc = Screen.width / REF_W;
             GUIUtility.ScaleAroundPivot(new Vector2(sc, sc), Vector2.zero);
@@ -553,6 +567,8 @@ namespace CNRModManager
         private void RefreshInstalledMods()
         {
             _installedMods.Clear();
+            _uiVersions.Clear();
+            _uiAutoUpdate.Clear();
             _configTypeCache.Clear();
             _configTypeChecked.Clear();
             _configModIdx = -1;
@@ -564,6 +580,9 @@ namespace CNRModManager
                     string fn  = Path.GetFileName(path);
                     string dn  = Path.GetFileNameWithoutExtension(fn);
                     string ver = GetInstalledVersion(fn);
+                    _uiVersions[fn] = ver;
+                    _uiAutoUpdate[fn] = GetAutoUpdate(fn);
+                    if (_showWindow) GetCachedConfigType(fn);
                     if (string.IsNullOrEmpty(ver)) ver = "?";
                     InstalledMod im;
                     im.filename    = fn;
@@ -1322,6 +1341,7 @@ namespace CNRModManager
         private void SetAutoUpdate(string filename, bool val)
         {
             PlayerPrefs.SetInt(PREF_AU_PREFIX + filename, val ? 1 : 0);
+            _uiAutoUpdate[filename] = val;
             PlayerPrefs.Save();
         }
 
@@ -1441,17 +1461,27 @@ namespace CNRModManager
         }
 
         // Returns -1 / 0 / +1  (a < b / a == b / a > b)  for semver strings.
+        private static readonly Dictionary<string,int[]> _versionParts = new Dictionary<string,int[]>(StringComparer.Ordinal);
+        private static int[] VersionParts(string version)
+        {
+            int[] parts;
+            if (_versionParts.TryGetValue(version, out parts)) return parts;
+            string[] fields = version.TrimStart('v').Split('.');
+            parts = new int[fields.Length];
+            for (int i = 0; i < fields.Length; i++) int.TryParse(fields[i], out parts[i]);
+            if (_versionParts.Count >= 2048) _versionParts.Clear();
+            _versionParts.Add(version, parts);
+            return parts;
+        }
         private static int CompareVersions(string a, string b)
         {
             if (a == b) return 0;
-            string[] pa = a.TrimStart('v').Split('.');
-            string[] pb = b.TrimStart('v').Split('.');
+            int[] pa = VersionParts(a ?? ""), pb = VersionParts(b ?? "");
             int len = Math.Max(pa.Length, pb.Length);
             for (int i = 0; i < len; i++)
             {
-                int na, nb;
-                na = i < pa.Length && int.TryParse(pa[i], out na) ? na : 0;
-                nb = i < pb.Length && int.TryParse(pb[i], out nb) ? nb : 0;
+                int na = i < pa.Length ? pa[i] : 0;
+                int nb = i < pb.Length ? pb[i] : 0;
                 if (na != nb) return na < nb ? -1 : 1;
             }
             return 0;
@@ -1497,9 +1527,7 @@ namespace CNRModManager
             GUI.color = new Color(0.06f, 0.38f, 0.14f, alpha * 0.95f);
             GUI.DrawTexture(new Rect(tx, ty, tw, th), Texture2D.whiteTexture);
             GUI.color = new Color(1f, 1f, 1f, alpha);
-            GUIStyle tst = MakeLabelStyle(13, Color.white);
-            tst.alignment = TextAnchor.MiddleCenter;
-            tst.wordWrap  = false;
+            GUIStyle tst = MakeLabelStyle(13, Color.white, 4);
             GUI.Label(new Rect(tx, ty, tw, th), _toastMsg, tst);
             GUI.color = prev;
         }
@@ -1525,8 +1553,7 @@ namespace CNRModManager
             GUI.color = Color.white;
 
             // Title
-            GUIStyle titleSt = MakeLabelStyle(16, Color.white);
-            titleSt.fontStyle = FontStyle.Bold;
+            GUIStyle titleSt = MakeLabelStyle(16, Color.white, 1);
             GUI.Label(new Rect(winX + 10f, winY + 5f, winW - 80f, 26f),
                 "Mod Manager  v" + ModManagerEntry.Version, titleSt);
 
@@ -1550,8 +1577,7 @@ namespace CNRModManager
             {
                 bool active = _tab == i;
                 GUIStyle tabSt = MakeBtnStyle(13,
-                    active ? new Color(0.4f, 0.8f, 1f) : new Color(0.55f, 0.55f, 0.55f));
-                if (active) tabSt.fontStyle = FontStyle.Bold;
+                    active ? new Color(0.4f, 0.8f, 1f) : new Color(0.55f, 0.55f, 0.55f), active);
                 if (GUI.Button(new Rect(winX + tabW * i, tabY, tabW, tabH), tabNames[i], tabSt))
                 {
                     if (_tab != i) { _tab = i; _scroll = Vector2.zero; _statusMsg = ""; _detailModIdx = -1; }
@@ -1591,8 +1617,8 @@ namespace CNRModManager
                 int optCount  = 0;
                 foreach (RepoMod pu in _pendingUpdates)
                 {
-                    bool notInstalled = !File.Exists(Path.Combine(ModManagerEntry.ModsDir, pu.filename));
-                    string iv2 = GetInstalledVersion(pu.filename);
+                    bool notInstalled = !IsUiInstalled(pu.filename);
+                    string iv2 = GetUiVersion(pu.filename);
                     string effectiveMin2 = !string.IsNullOrEmpty(pu.minVersion) ? pu.minVersion
                                          : (pu.latestOnly ? pu.latestVersion ?? "" : "");
                     bool belowMin2 = !string.IsNullOrEmpty(effectiveMin2)
@@ -1608,8 +1634,7 @@ namespace CNRModManager
 
                 GUILayout.BeginVertical(GUI.skin.box);
                 GUILayout.BeginHorizontal();
-                GUIStyle bannerSt = MakeLabelStyle(13, reqCount > 0 ? new Color(1f, 0.35f, 0.35f) : new Color(1f, 0.85f, 0.3f));
-                bannerSt.fontStyle = FontStyle.Bold;
+                GUIStyle bannerSt = MakeLabelStyle(13, reqCount > 0 ? new Color(1f, 0.35f, 0.35f) : new Color(1f, 0.85f, 0.3f), 1);
                 GUILayout.Label(bannerText, bannerSt);
                 GUILayout.FlexibleSpace();
                 if (GUILayout.Button("Install All", MakeBtnStyle(13, new Color(0.3f, 0.9f, 0.5f)),
@@ -1624,7 +1649,7 @@ namespace CNRModManager
                 GUILayout.EndHorizontal();
                 foreach (RepoMod pu in _pendingUpdates)
                 {
-                    bool notInstalled2 = !File.Exists(Path.Combine(ModManagerEntry.ModsDir, pu.filename));
+                    bool notInstalled2 = !IsUiInstalled(pu.filename);
                     string rowLabel = (notInstalled2 ? "  + " : "  \u2191 ") + pu.name + "  \u2192  v" + pu.latestVersion;
                     GUILayout.Label(rowLabel, MakeLabelStyle(11, new Color(0.7f, 0.7f, 0.75f)));
                 }
@@ -1695,7 +1720,7 @@ namespace CNRModManager
                     InstalledMod m = _installedMods[imIdx];
                     string latestVer  = GetLatestVersionFromRepo(m.filename);
                     string minVer     = GetMinVersionFromRepo(m.filename);
-                    string instdVer   = GetInstalledVersion(m.filename);
+                    string instdVer   = GetUiVersion(m.filename);
                     bool belowMin     = !string.IsNullOrEmpty(minVer)
                                        && !string.IsNullOrEmpty(instdVer)
                                        && CompareVersions(instdVer, minVer) < 0;
@@ -1708,8 +1733,7 @@ namespace CNRModManager
 
                     // Row 1: name, version, update badge, action
                     GUILayout.BeginHorizontal();
-                    GUIStyle ns = MakeLabelStyle(13, Color.white);
-                    ns.fontStyle = FontStyle.Bold;
+                    GUIStyle ns = MakeLabelStyle(13, Color.white, 1);
                     GUILayout.Label(m.displayName, ns, GUILayout.Width(160f));
                     GUILayout.Label("v" + m.version,
                         MakeLabelStyle(12, new Color(0.7f, 0.9f, 0.7f)), GUILayout.Width(60f));
@@ -1745,14 +1769,14 @@ namespace CNRModManager
                     // Row 2: auto-update checkbox (non-core only)
                     if (!core)
                     {
-                        bool au    = GetAutoUpdate(m.filename);
+                        bool au    = GetUiAutoUpdate(m.filename);
                         bool newAu = GUILayout.Toggle(au, " Auto-update",
                             MakeToggleStyle(11, new Color(0.6f, 0.6f, 0.65f)));
                         if (newAu != au) { SetAutoUpdate(m.filename, newAu); CheckForUpdates(); }
                     }
 
                     // Row 3: settings button (shown if mod exposes GetModConfig)
-                    Type cfgType = GetCachedConfigType(m.filename);
+                    Type cfgType = GetUiConfigType(m.filename);
                     if (cfgType != null)
                     {
                         GUILayout.BeginHorizontal();
@@ -1832,8 +1856,7 @@ namespace CNRModManager
                 GUILayout.BeginVertical(GUI.skin.box);
 
                 GUILayout.BeginHorizontal();
-                GUIStyle ns = MakeLabelStyle(14, Color.white);
-                ns.fontStyle = FontStyle.Bold;
+                GUIStyle ns = MakeLabelStyle(14, Color.white, 1);
                 GUILayout.Label(mod.name, ns);
                 GUILayout.FlexibleSpace();
                 GUILayout.Label("v" + mod.latestVersion, MakeLabelStyle(12, new Color(0.7f, 0.9f, 0.7f)));
@@ -1847,15 +1870,15 @@ namespace CNRModManager
                     GUILayout.Label(brief, MakeLabelStyle(12, new Color(0.8f, 0.8f, 0.8f)));
                 }
 
-                bool installed    = File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename));
-                string installedVer = installed ? GetInstalledVersion(mod.filename) : "";
+                bool installed    = IsUiInstalled(mod.filename);
+                string installedVer = installed ? GetUiVersion(mod.filename) : "";
                 bool isUpToDate   = installed && !string.IsNullOrEmpty(installedVer)
                                     && CompareVersions(installedVer, mod.latestVersion) >= 0;
 
                 // Auto-update toggle row (only when installed)
                 if (installed)
                 {
-                    bool au = GetAutoUpdate(mod.filename);
+                    bool au = GetUiAutoUpdate(mod.filename);
                     GUILayout.BeginHorizontal();
                     bool newAu = GUILayout.Toggle(au, " Auto-update",
                         MakeToggleStyle(11, new Color(0.65f, 0.65f, 0.7f)));
@@ -1926,11 +1949,11 @@ namespace CNRModManager
 
             // Title + installed badge
             GUILayout.BeginHorizontal();
-            GUIStyle titleSt = MakeLabelStyle(16, Color.white);
-            titleSt.fontStyle = FontStyle.Bold;
+            GUIStyle titleSt = MakeLabelStyle(16, Color.white, 1);
             GUILayout.Label(mod.name, titleSt);
             GUILayout.FlexibleSpace();
-            bool installedMod = File.Exists(Path.Combine(ModManagerEntry.ModsDir, mod.filename));
+            bool installedMod = IsUiInstalled(mod.filename);
+            string detInstalledVer = GetUiVersion(mod.filename);
             if (installedMod)
                 GUILayout.Label("Installed", MakeLabelStyle(13, new Color(0.4f, 1f, 0.5f)),
                     GUILayout.Width(72f));
@@ -1939,7 +1962,7 @@ namespace CNRModManager
             // Auto-update toggle
             if (installedMod)
             {
-                bool au = GetAutoUpdate(mod.filename);
+                bool au = GetUiAutoUpdate(mod.filename);
                 bool newAu = GUILayout.Toggle(au, " Auto-update when updates are available",
                     MakeToggleStyle(12, new Color(0.65f, 0.65f, 0.7f)));
                 if (newAu != au) { SetAutoUpdate(mod.filename, newAu); CheckForUpdates(); }
@@ -1949,15 +1972,13 @@ namespace CNRModManager
             // Full description
             if (!string.IsNullOrEmpty(mod.description))
             {
-                GUIStyle descSt = MakeLabelStyle(13, new Color(0.85f, 0.85f, 0.85f));
-                descSt.wordWrap = true;
+                GUIStyle descSt = MakeLabelStyle(13, new Color(0.85f, 0.85f, 0.85f), 2);
                 GUILayout.Label(mod.description, descSt);
                 GUILayout.Space(12f);
             }
 
             // Version history
-            GUIStyle secHdr = MakeLabelStyle(13, new Color(0.45f, 0.75f, 1f));
-            secHdr.fontStyle = FontStyle.Bold;
+            GUIStyle secHdr = MakeLabelStyle(13, new Color(0.45f, 0.75f, 1f), 1);
             GUILayout.Label("Version History", secHdr);
             GUILayout.Space(4f);
 
@@ -1977,8 +1998,7 @@ namespace CNRModManager
                     GUILayout.BeginHorizontal();
 
                     Color verCol = isLatest ? new Color(0.4f, 1f, 0.5f) : new Color(0.8f, 0.8f, 0.8f);
-                    GUIStyle verSt = MakeLabelStyle(13, verCol);
-                    if (isLatest) verSt.fontStyle = FontStyle.Bold;
+                    GUIStyle verSt = MakeLabelStyle(13, verCol, isLatest ? 1 : 0);
                     GUILayout.Label("v" + ver.version + (isLatest ? "  (latest)" : ""), verSt);
                     GUILayout.FlexibleSpace();
 
@@ -1997,7 +2017,6 @@ namespace CNRModManager
                     }
                     else
                     {
-                        string detInstalledVer = GetInstalledVersion(mod.filename);
                         bool isThisVerInstalled = isLatest && installedMod
                             && !string.IsNullOrEmpty(detInstalledVer)
                             && CompareVersions(detInstalledVer, mod.latestVersion) >= 0;
@@ -2026,8 +2045,7 @@ namespace CNRModManager
 
                     if (!string.IsNullOrEmpty(ver.changelog))
                     {
-                        GUIStyle clSt = MakeLabelStyle(11, new Color(0.7f, 0.7f, 0.72f));
-                        clSt.wordWrap = true;
+                        GUIStyle clSt = MakeLabelStyle(11, new Color(0.7f, 0.7f, 0.72f), 2);
                         GUILayout.Label(ver.changelog, clSt);
                     }
                     GUILayout.EndVertical();
@@ -2087,9 +2105,7 @@ namespace CNRModManager
             GUILayout.Space(10f);
             GUILayout.Label("Add repo URL:", MakeLabelStyle(12, new Color(0.6f, 0.6f, 0.7f)));
             GUILayout.BeginHorizontal();
-            GUIStyle inputSt = new GUIStyle(GUI.skin.textField);
-            if (_font != null) inputSt.font = _font;
-            inputSt.fontSize = 12;
+            GUIStyle inputSt = MakeInputStyle();
             _newRepoInput = GUILayout.TextField(_newRepoInput, inputSt, GUILayout.Height(26f));
             if (GUILayout.Button("Add", MakeBtnStyle(12, new Color(0.3f, 0.9f, 0.5f)),
                 GUILayout.Height(26f), GUILayout.Width(50f)))
@@ -2127,35 +2143,46 @@ namespace CNRModManager
             catch { Application.Quit(); }
         }
 
-        private GUIStyle MakeBtnStyle(int size, Color col)
+        private struct StyleKey : IEquatable<StyleKey>
         {
-            GUIStyle s = new GUIStyle(GUI.skin.button);
-            if (_font != null) s.font = _font;
-            s.fontSize = size;
-            s.normal.textColor = col;
-            s.hover.textColor  = Color.white;
-            s.active.textColor = Color.white;
-            return s;
+            public int kind, size, variant;
+            public Color color;
+            public bool Equals(StyleKey o) { return kind == o.kind && size == o.size && variant == o.variant && color.Equals(o.color); }
+            public override bool Equals(object o) { return o is StyleKey && Equals((StyleKey)o); }
+            public override int GetHashCode() { unchecked { return (((kind * 397) ^ size) * 397 ^ variant) * 397 ^ color.GetHashCode(); } }
         }
-
-        private GUIStyle MakeLabelStyle(int size, Color col)
+        private readonly Dictionary<StyleKey,GUIStyle> _styles = new Dictionary<StyleKey,GUIStyle>();
+        private GUISkin _styleSkin;
+        private Font _styleFont;
+        private void EnsureStyleCache()
         {
-            GUIStyle s = new GUIStyle(GUI.skin.label);
-            if (_font != null) s.font = _font;
-            s.fontSize = size;
-            s.normal.textColor = col;
-            return s;
+            GUISkin skin = GUI.skin;
+            if (_styleSkin != skin || _styleFont != _font)
+            { _styles.Clear(); _styleSkin = skin; _styleFont = _font; }
         }
-
-        private GUIStyle MakeToggleStyle(int size, Color col)
+        private GUIStyle CachedStyle(int kind, int size, Color col, int variant)
         {
-            GUIStyle s = new GUIStyle(GUI.skin.toggle);
-            if (_font != null) s.font = _font;
-            s.fontSize = size;
-            s.normal.textColor   = col;
-            s.onNormal.textColor = col;
-            return s;
+            StyleKey key = new StyleKey { kind = kind, size = size, color = col, variant = variant };
+            GUIStyle style;
+            if (_styles.TryGetValue(key, out style)) return style;
+            GUIStyle basis = kind == 0 ? _styleSkin.button : kind == 1 ? _styleSkin.label :
+                             kind == 2 ? _styleSkin.toggle : _styleSkin.textField;
+            style = new GUIStyle(basis);
+            if (_styleFont != null) style.font = _styleFont;
+            style.fontSize = size;
+            if (kind != 3) style.normal.textColor = col;
+            if (kind == 0) { style.hover.textColor = Color.white; style.active.textColor = Color.white; }
+            if (kind == 2) style.onNormal.textColor = col;
+            if ((variant & 1) != 0) style.fontStyle = FontStyle.Bold;
+            if ((variant & 2) != 0) style.wordWrap = true;
+            if ((variant & 4) != 0) { style.alignment = TextAnchor.MiddleCenter; style.wordWrap = false; }
+            _styles.Add(key, style);
+            return style;
         }
+        private GUIStyle MakeBtnStyle(int size, Color col, bool bold = false) { return CachedStyle(0,size,col,bold ? 1 : 0); }
+        private GUIStyle MakeLabelStyle(int size, Color col, int variant = 0) { return CachedStyle(1,size,col,variant); }
+        private GUIStyle MakeToggleStyle(int size, Color col) { return CachedStyle(2,size,col,0); }
+        private GUIStyle MakeInputStyle() { return CachedStyle(3,12,Color.white,0); }
 
         // ─────────────────────────────────────────────────────────────────────
         // MOD CONFIG PANEL
@@ -2288,14 +2315,11 @@ namespace CNRModManager
 
             string modName = (_configModIdx >= 0 && _configModIdx < _installedMods.Count)
                 ? _installedMods[_configModIdx].displayName : "Mod";
-            GUIStyle titleSt = MakeLabelStyle(15, Color.white);
-            titleSt.fontStyle = FontStyle.Bold;
+            GUIStyle titleSt = MakeLabelStyle(15, Color.white, 1);
             GUILayout.Label("Settings \u2014 " + modName, titleSt);
             GUILayout.Space(10f);
 
-            GUIStyle inputSt = new GUIStyle(GUI.skin.textField);
-            if (_font != null) inputSt.font = _font;
-            inputSt.fontSize = 12;
+            GUIStyle inputSt = MakeInputStyle();
 
             foreach (string[] entry in _configEntries)
             {
@@ -2304,8 +2328,7 @@ namespace CNRModManager
                 GUILayout.Label(entry[1], MakeLabelStyle(13, new Color(0.85f, 0.9f, 1f)));
                 if (!string.IsNullOrEmpty(entry[4]))
                 {
-                    GUIStyle descSt = MakeLabelStyle(11, new Color(0.55f, 0.55f, 0.62f));
-                    descSt.wordWrap = true;
+                    GUIStyle descSt = MakeLabelStyle(11, new Color(0.55f, 0.55f, 0.62f), 2);
                     GUILayout.Label(entry[4], descSt);
                 }
                 if (type == "bool")
@@ -2327,8 +2350,7 @@ namespace CNRModManager
             GUILayout.Space(8f);
             if (_configNeedsRestart)
             {
-                GUIStyle restSt = MakeLabelStyle(13, new Color(1f, 0.85f, 0.3f));
-                restSt.fontStyle = FontStyle.Bold;
+                GUIStyle restSt = MakeLabelStyle(13, new Color(1f, 0.85f, 0.3f), 1);
                 GUILayout.Label("Changes saved \u2014 restart game to apply!", restSt);
                 GUILayout.Space(4f);
                 GUILayout.BeginHorizontal();
