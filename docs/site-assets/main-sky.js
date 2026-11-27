@@ -1,0 +1,1 @@
+(()=>{const sections=document.querySelectorAll('.game-bg,.screen');const size=()=>sections.forEach(el=>el.style.setProperty('--cnr-sky-span',Math.round(el.getBoundingClientRect().height*4)+'px'));size();if('ResizeObserver' in window){const observer=new ResizeObserver(size);sections.forEach(el=>observer.observe(el))}else window.addEventListener('resize',size,{passive:true});})();
