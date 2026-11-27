@@ -124,11 +124,20 @@
       .game-button{min-height:58px;font-size:21px}
       .panel{padding:18px}
     }
-  </style>
+  @font-face{font-family:'CNR Menu';src:url('site-assets/mutter-lvs.ttf') format('truetype');font-weight:400;font-display:swap}
+.game-button,.small-button,.section-title,.panel h2,.panel h3,.hudline{font-family:'CNR Menu','Courier New',monospace;font-weight:400;letter-spacing:normal}
+.game-button{font-size:clamp(16px,3.5vw,25px)}
+.small-button{font-size:15px}
+.section-title{font-size:clamp(25px,5vw,42px);line-height:1.3}
+.panel h2{font-size:22px;line-height:1.4}
+.panel h3{font-size:16px;line-height:1.4}
+@media(max-width:720px){.game-button{font-size:17px}.hudline{font-size:10px}}
+.topbar{position:absolute;z-index:4;top:12px;left:50%;transform:translateX(-50%);max-width:calc(100% - 20px);width:max-content;padding:9px 12px;background:#26376f;border:2px solid #17234d;color:white;font:400 11px 'CNR Menu',monospace;text-align:center}.status-dot{display:inline-block;width:10px;height:10px;margin-right:8px;background:#a5a5a5}.topbar[data-state="online"] .status-dot{background:#40eb42}.topbar[data-state="offline"] .status-dot{background:#ff4444}.topbar strong{font-weight:400}.rights-notice{margin-top:10px}
+</style>
 </head>
 <body>
   <section class="game-bg" id="top">
-    <div class="hudline">CNR REVIVAL • MULTIPLAYER RESTORED</div>
+    <div class="topbar" id="network-status" data-state="checking" role="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span>CNR NETWORK: <strong id="network-status-text">CHECKING...</strong></div>
     <div class="hero">
       <img class="logo" src="site-assets/cnr-logo.png" alt="Cops N Robbers Mine Mini Game">
       <nav class="menu" aria-label="CNR Revival menu">
@@ -190,8 +199,37 @@
 
       <footer>
         Cops N Robbers Revival is a community preservation project. It does not claim ownership of the original game or its assets. Original rights remain with their respective owners.
-      </footer>
+      <p class="rights-notice">The original game assets and Mutter LVS font are used for preservation. If you are a rights holder and would like any material removed, please <a href="https://github.com/Jacqueb-1337/copsnrobbers/issues">contact me on GitHub</a>.</p></footer>
     </div>
   </main>
+<script>
+    // The remote PHP probe checks the CNR master server's TCP port.
+    // GitHub Pages is static; errors (including CORS) do not prove downtime.
+    (function () {
+      const card = document.getElementById('network-status');
+      const label = document.getElementById('network-status-text');
+      async function refresh() {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5500);
+        try {
+          const response = await fetch('https://jacqueb.me/cnr-status.php?t=' + Date.now(), {
+            cache: 'no-store', mode: 'cors', signal: controller.signal
+          });
+          if (!response.ok) throw new Error('Status HTTP ' + response.status);
+          const data = await response.json();
+          if (typeof data.online !== 'boolean') throw new Error('Invalid status payload');
+          card.dataset.state = data.online ? 'online' : 'offline';
+          label.textContent = data.online ? 'ONLINE' : 'OFFLINE';
+          card.title = data.checked_at ? 'Last checked ' + data.checked_at : 'CNR master server TCP check';
+        } catch (_) {
+          card.dataset.state = 'unknown';
+          label.textContent = 'STATUS UNAVAILABLE';
+          card.title = 'Status could not be checked. Multiplayer may still be online.';
+        } finally { clearTimeout(timer); }
+      }
+      refresh();
+      setInterval(refresh, 60000);
+    }());
+  </script>
 </body>
 </html>
